@@ -5,6 +5,10 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 并且本项目遵循 [语义化版本 2.0.0](https://semver.org/zh-cn/v2.0.0.html) 规范。
 
+## [v0.0.3] - 2026-06-05
+
+- feat: 重构应用架构，搭建前后端分层体系与完整布局系统
+
 ## [v0.0.2] - 2026-06-05
 
 - feat: 在首页展示应用当前版本号
