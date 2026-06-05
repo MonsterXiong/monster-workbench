@@ -1,8 +1,19 @@
 <script setup lang="ts">
+import { ref, onMounted } from "vue";
 import { RefreshCcw, ShieldCheck } from "lucide-vue-next";
+import { getVersion } from "@tauri-apps/api/app";
 import { useUpdateStore } from "./stores/update";
 
 const updateStore = useUpdateStore();
+const version = ref("...");
+
+onMounted(async () => {
+  try {
+    version.value = await getVersion();
+  } catch (e) {
+    version.value = "开发版";
+  }
+});
 </script>
 
 <template>
@@ -17,6 +28,9 @@ const updateStore = useUpdateStore();
             <p class="text-sm text-base-content/60">
               Tauri v2 + Vue 3 整体更新客户端
             </p>
+            <div class="badge badge-outline badge-md mt-1 font-semibold opacity-70">
+              v{{ version }}
+            </div>
           </div>
 
           <div class="divider">应用更新</div>
