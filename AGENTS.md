@@ -64,3 +64,13 @@
 
 *   **中文化内部推理**：AI 助手在处理用户需求时，内部思考过程（Thought Process）与最终回复**必须完全使用简体中文**。
 *   **代码规范**：所有新增的文件与代码，应当遵循 TypeScript/Vue 3 的最佳实践，保持函数及逻辑块的简洁，确保不引入无用导入，且每次修改完必须运行 `npm run typecheck` 进行校验。
+
+---
+
+## 6. 前后端开发与分层架构规约 (DEV_STANDARDS.md)
+
+*   **读取并遵循规范**：AI 编码助手在进行任何业务开发、功能设计、模块重构或接口调用时，**必须首先读取并遵循**项目根目录下的 [DEV_STANDARDS.md](file:///c:/Users/刘雄成/Desktop/monster-workbench/DEV_STANDARDS.md) 规约文件。
+*   **架构分层硬性约束**：必须严守 `Vue Component -> Pinia Store -> Frontend Service -> callTauri -> Rust Command -> Rust Service -> DB/Repo` 的分层流向，严禁在页面组件中直调原始底座 API。
+*   **接口映射规范**：双端通信接口的命名（前端驼峰 vs 后端蛇形）和类型映射必须与规约完全一致。
+*   **标准样式规范**：严格使用标准 DaisyUI 5.x 基础类（例如 `card`、`divider`、`input` 等）替代 ad-hoc 手写样式，保持 Windows WebView2 下系统渲染中文字体（微软雅黑等）的次像素 ClearType 清晰度和硬件图层加速特性。
+
