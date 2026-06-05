@@ -345,6 +345,168 @@ impl SystemService {
 
         Ok(())
     }
+
+    // 上传文件：将 src_path 文件复制到 .monster-tools/uploads/{file_type}s/YYYY/MM/{uuid_name}.{ext}
+    pub fn upload_file(
+        &self,
+        src_path: &str,
+        file_type: &str,
+        year_month: &str,
+        uuid_name: &str,
+    ) -> Result<String, String> {
+        let src_file_path = std::path::Path::new(src_path);
+        if !src_file_path.exists() {
+            return Err("源文件不存在".to_string());
+        }
+        if !src_file_path.is_file() {
+            return Err("源路径不是一个有效的文件".to_string());
+        }
+
+        // 获取根目录
+        let app_dir = self.get_app_local_data_dir()?;
+        let app_dir_path = std::path::Path::new(&app_dir);
+
+        // 提取原文件的扩展名
+        let ext = src_file_path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("");
+
+        // 构造目标文件名
+        let file_name = if ext.is_empty() {
+            uuid_name.to_string()
+        } else {
+            format!("{}.{}", uuid_name, ext)
+        };
+
+        // 构造子目录：images 还是 files
+        let sub_folder = match file_type {
+            "image" => "images",
+            _ => "files",
+        };
+
+        // 清理一下 year_month 中可能存在的反斜杠或多余的 /，避免路径穿透安全隐患
+        let clean_ym = year_month.replace('\\', "/").replace("..", "");
+        let clean_ym = clean_ym.trim_matches('/');
+
+        // 构造相对路径
+        let relative_path = format!("uploads/{}/{}/{}", sub_folder, clean_ym, file_name);
+        let absolute_path = app_dir_path.join(&relative_path);
+
+        // 创建上传目录
+        if let Some(parent) = absolute_path.parent() {
+            fs::create_dir_all(parent)
+                .map_err(|e| format!("创建上传目录失败: {}", e))?;
+        }
+
+        // 拷贝文件
+        fs::copy(src_file_path, &absolute_path)
+            .map_err(|e| format!("文件拷贝失败: {}", e))?;
+
+        Ok(relative_path)
+    }
+
+    /// 列出已上传的文件元数据
+    pub fn list_uploaded_files(&self, file_type: Option<&str>) -> Result<String, String> {
+        let app_dir = self.get_app_local_data_dir()?;
+        let base_dir = std::path::Path::new(&app_dir).join("uploads");
+
+        let mut results: Vec<serde_json::Value> = Vec::new();
+
+        // 根据 file_type 决定扫描哪些子目录
+        let scan_targets: Vec<(&str, &str)> = match file_type {
+            Some("image") => vec![("images", "image")],
+            Some("file") => vec![("files", "file")],
+            _ => vec![("images", "image"), ("files", "file")],
+        };
+
+        for (sub_dir, type_label) in &scan_targets {
+            let dir_path = base_dir.join(sub_dir);
+            if dir_path.exists() && dir_path.is_dir() {
+                self.collect_files_recursive(&dir_path, &base_dir, type_label, &mut results)?;
+            }
+        }
+
+        serde_json::to_string(&results).map_err(|e| format!("序列化文件列表失败: {}", e))
+    }
+
+    /// 递归遍历目录，收集文件信息
+    fn collect_files_recursive(
+        &self,
+        dir: &std::path::Path,
+        uploads_dir: &std::path::Path,
+        type_label: &str,
+        results: &mut Vec<serde_json::Value>,
+    ) -> Result<(), String> {
+        let entries = fs::read_dir(dir)
+            .map_err(|e| format!("读取目录失败 ({}): {}", dir.display(), e))?;
+
+        for entry in entries {
+            let entry = entry.map_err(|e| format!("读取目录条目失败: {}", e))?;
+            let path = entry.path();
+
+            if path.is_dir() {
+                self.collect_files_recursive(&path, uploads_dir, type_label, results)?;
+            } else if path.is_file() {
+                let rel_path = path
+                    .strip_prefix(uploads_dir.parent().unwrap_or(uploads_dir))
+                    .map(|p| p.to_string_lossy().replace('\\', "/"))
+                    .unwrap_or_default();
+
+                let file_name = path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+
+                let metadata = fs::metadata(&path)
+                    .map_err(|e| format!("读取文件元数据失败 ({}): {}", path.display(), e))?;
+
+                let file_size = metadata.len();
+
+                let modified = metadata
+                    .modified()
+                    .ok()
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+
+                results.push(serde_json::json!({
+                    "rel_path": rel_path,
+                    "file_name": file_name,
+                    "file_size": file_size,
+                    "file_type": type_label,
+                    "modified": modified,
+                }));
+            }
+        }
+        Ok(())
+    }
+
+    /// 删除一个已上传的文件
+    pub fn delete_uploaded_file(&self, rel_path: &str) -> Result<(), String> {
+        // 安全检查：rel_path 必须以 "uploads/" 开头，不能包含 ".."
+        if !rel_path.starts_with("uploads/") {
+            return Err("非法路径：必须以 uploads/ 开头".to_string());
+        }
+        if rel_path.contains("..") {
+            return Err("非法路径：不允许包含 ..".to_string());
+        }
+
+        let app_dir = self.get_app_local_data_dir()?;
+        let absolute_path = std::path::Path::new(&app_dir).join(rel_path);
+
+        if !absolute_path.exists() {
+            return Err("文件不存在".to_string());
+        }
+        if !absolute_path.is_file() {
+            return Err("指定路径不是一个文件".to_string());
+        }
+
+        fs::remove_file(&absolute_path)
+            .map_err(|e| format!("删除文件失败: {}", e))?;
+
+        Ok(())
+    }
 }
 
 #[derive(serde::Deserialize)]

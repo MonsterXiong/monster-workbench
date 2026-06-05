@@ -169,8 +169,8 @@ async function runWindowAction(action: "minimize" | "maximize" | "hide", label: 
 </script>
 
 <template>
-  <div class="space-y-6">
-    <div class="grid grid-cols-1 lg:grid-cols-3" :class="contentGapClass">
+  <div class="flex flex-col h-full space-y-5 min-h-0 overflow-y-auto pr-1 no-scrollbar">
+    <div class="grid grid-cols-1 lg:grid-cols-3 shrink-0" :class="contentGapClass">
       <!-- 文件读写卡片 -->
       <section class="workbench-card p-5">
         <div class="flex flex-col gap-4.5">
@@ -324,7 +324,7 @@ async function runWindowAction(action: "minimize" | "maximize" | "hide", label: 
                 >
                   <span class="text-emerald-600 select-none font-bold">sqlite&gt;</span>
                   <div class="flex-1 min-w-0">
-                    <div class="text-emerald-650 font-bold flex items-center justify-between">
+                    <div class="text-emerald-600 font-bold flex items-center justify-between">
                       <span class="text-emerald-600 font-extrabold">#{{ item.id }} {{ item.action }}</span>
                       <span class="text-[9px] text-slate-400 font-semibold">{{ item.created_at || 'just now' }}</span>
                     </div>
@@ -368,14 +368,14 @@ async function runWindowAction(action: "minimize" | "maximize" | "hide", label: 
                   <CheckCircle2 class="h-4 w-4 shrink-0" />
                   <span>{{ apiStatusText }}</span>
                 </div>
-                <div class="space-y-1 text-slate-650">
+                <div class="space-y-1 text-slate-600">
                   <div class="flex"><span class="text-sky-600 select-none mr-2 font-extrabold">$</span><span class="text-emerald-600 font-bold">response.json()</span></div>
                   <div class="grid grid-cols-1 gap-1 text-[11px] leading-4 text-slate-600 bg-slate-100/60 p-2.5 rounded-xl border border-slate-200">
                     <div>{</div>
                     <div class="pl-4">"repo": <span class="text-amber-600">"{{ apiResponse.name }}"</span>,</div>
-                    <div class="pl-4">"stars": <span class="text-indigo-650 font-bold">{{ apiResponse.stars }}</span>,</div>
-                    <div class="pl-4">"forks": <span class="text-indigo-650 font-bold">{{ apiResponse.forks }}</span>,</div>
-                    <div class="pl-4">"watchers": <span class="text-indigo-650 font-bold">{{ apiResponse.subscribers }}</span></div>
+                    <div class="pl-4">"stars": <span class="text-indigo-600 font-bold">{{ apiResponse.stars }}</span>,</div>
+                    <div class="pl-4">"forks": <span class="text-indigo-600 font-bold">{{ apiResponse.forks }}</span>,</div>
+                    <div class="pl-4">"watchers": <span class="text-indigo-600 font-bold">{{ apiResponse.subscribers }}</span></div>
                     <div>}</div>
                   </div>
                 </div>

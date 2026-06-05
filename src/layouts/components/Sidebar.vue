@@ -4,21 +4,21 @@ import {
   ChevronLeft,
   ChevronRight,
   Cog,
-  Bell,
   TerminalSquare,
-  Plus,
-  Wrench
+  Wrench,
+  Compass,
+  FolderOpen
 } from "lucide-vue-next";
 
 defineProps<{
-  activeTab: "workspace" | "system" | "tools" | "settings";
+  activeTab: "workspace" | "system" | "tools" | "navigation" | "settings" | "file-manager";
   collapsed: boolean;
   version: string;
   hasUpdate?: boolean;
 }>();
 
 const emit = defineEmits<{
-  (e: "changeTab", tab: "workspace" | "system" | "tools" | "settings"): void;
+  (e: "changeTab", tab: "workspace" | "system" | "tools" | "navigation" | "settings" | "file-manager"): void;
   (e: "toggleCollapse"): void;
   (e: "checkUpdateManual"): void;
 }>();
@@ -30,19 +30,14 @@ const items = [
     icon: LayoutDashboard,
   },
   {
-    key: "system",
-    title: "系统能力",
-    icon: TerminalSquare,
+    key: "navigation",
+    title: "导航菜单",
+    icon: Compass,
   },
   {
     key: "tools",
     title: "工具箱",
     icon: Wrench,
-  },
-  {
-    key: "settings",
-    title: "设置中心",
-    icon: Cog,
   },
 ] as const;
 </script>
@@ -121,42 +116,82 @@ const items = [
       <!-- 展开状态：左边两个，右边一个 -->
       <div v-if="!collapsed" class="flex items-center justify-between px-1">
         <div class="flex items-center gap-3">
-          <!-- 拼图/添加按钮 (高保真带细框小方块) -->
+          <!-- 系统能力按钮 -->
           <button
-            class="flex h-7.5 w-7.5 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 hover:text-slate-700 hover:border-slate-350 transition duration-150 cursor-pointer shadow-sm"
-            title="添加组件"
+            class="flex h-7.5 w-7.5 items-center justify-center rounded-lg border border-slate-200 bg-white hover:text-slate-700 hover:border-slate-350 transition duration-150 cursor-pointer shadow-sm group/btn hover:scale-105 active:scale-95"
+            :class="activeTab === 'system' ? 'text-blue-600 border-blue-300 bg-blue-50/50' : 'text-slate-500'"
+            title="系统能力"
             @click="emit('changeTab', 'system')"
           >
-            <Plus class="h-4 w-4" />
+            <TerminalSquare class="h-4 w-4 transition-transform duration-300 group-hover/btn:-translate-y-0.5" />
           </button>
-          <!-- 通知按钮 (高保真扁平无框) -->
+          <!-- 设置中心按钮 -->
           <button
-            class="relative flex h-7.5 w-7.5 items-center justify-center rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-50 transition duration-150 cursor-pointer"
-            title="通知"
+            class="flex h-7.5 w-7.5 items-center justify-center rounded-lg border border-slate-200 bg-white hover:text-slate-700 hover:border-slate-350 transition duration-150 cursor-pointer shadow-sm group/btn hover:scale-105 active:scale-95"
+            :class="activeTab === 'settings' ? 'text-blue-600 border-blue-300 bg-blue-50/50' : 'text-slate-500'"
+            title="设置中心"
+            @click="emit('changeTab', 'settings')"
           >
-            <Bell class="h-[18px] w-[18px]" />
-            <span class="absolute right-1 top-1 flex h-1.5 w-1.5 rounded-full bg-error ring-1 ring-white"></span>
+            <Cog class="h-4 w-4 transition-transform duration-500 group-hover/btn:rotate-180" />
           </button>
         </div>
-        
-        <!-- 折叠收起按钮 (高保真扁平无框) -->
-        <button
-          class="flex h-7.5 w-7.5 items-center justify-center rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-50 transition duration-150 cursor-pointer"
-          title="折叠侧边栏"
-          @click="emit('toggleCollapse')"
-        >
-          <ChevronLeft class="h-[18px] w-[18px]" />
-        </button>
+        <div class="flex items-center gap-3">
+          <!-- 文件管理按钮 -->
+          <button
+            class="flex h-7.5 w-7.5 items-center justify-center rounded-lg border border-slate-200 bg-white hover:text-slate-700 hover:border-slate-350 transition duration-150 cursor-pointer shadow-sm group/btn hover:scale-105 active:scale-95"
+            :class="activeTab === 'file-manager' ? 'text-blue-600 border-blue-300 bg-blue-50/50' : 'text-slate-500'"
+            title="文件管理"
+            @click="emit('changeTab', 'file-manager')"
+          >
+            <FolderOpen class="h-4 w-4 transition-transform duration-300 group-hover/btn:scale-110" />
+          </button>
+          <!-- 折叠收起按钮 -->
+          <button
+            class="flex h-7.5 w-7.5 items-center justify-center rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-50 transition duration-150 cursor-pointer group/btn"
+            title="折叠侧边栏"
+            @click="emit('toggleCollapse')"
+          >
+            <ChevronLeft class="h-[18px] w-[18px] transition-transform duration-200 group-hover/btn:-translate-x-0.5" />
+          </button>
+        </div>
       </div>
 
-      <!-- 收缩状态：仅显示展开箭头，居中对齐 -->
-      <div v-else class="flex justify-center">
+      <!-- 收缩状态：垂直排列图标 -->
+      <div v-else class="flex flex-col items-center gap-3">
+        <!-- 系统能力按钮 -->
         <button
-          class="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-400 hover:text-slate-700 hover:border-slate-300 transition duration-150 cursor-pointer shadow-sm"
+          class="flex h-7.5 w-7.5 items-center justify-center rounded-lg border border-slate-200 bg-white hover:text-slate-700 hover:border-slate-350 transition duration-150 cursor-pointer shadow-sm group/btn hover:scale-105 active:scale-95"
+          :class="activeTab === 'system' ? 'text-blue-600 border-blue-300 bg-blue-50/50' : 'text-slate-500'"
+          title="系统能力"
+          @click="emit('changeTab', 'system')"
+        >
+          <TerminalSquare class="h-4 w-4 transition-transform duration-300 group-hover/btn:-translate-y-0.5" />
+        </button>
+        <!-- 设置中心按钮 -->
+        <button
+          class="flex h-7.5 w-7.5 items-center justify-center rounded-lg border border-slate-200 bg-white hover:text-slate-700 hover:border-slate-350 transition duration-150 cursor-pointer shadow-sm group/btn hover:scale-105 active:scale-95"
+          :class="activeTab === 'settings' ? 'text-blue-600 border-blue-300 bg-blue-50/50' : 'text-slate-500'"
+          title="设置中心"
+          @click="emit('changeTab', 'settings')"
+        >
+          <Cog class="h-4 w-4 transition-transform duration-500 group-hover/btn:rotate-180" />
+        </button>
+        <!-- 文件管理按钮 -->
+        <button
+          class="flex h-7.5 w-7.5 items-center justify-center rounded-lg border border-slate-200 bg-white hover:text-slate-700 hover:border-slate-350 transition duration-150 cursor-pointer shadow-sm group/btn hover:scale-105 active:scale-95"
+          :class="activeTab === 'file-manager' ? 'text-blue-600 border-blue-300 bg-blue-50/50' : 'text-slate-500'"
+          title="文件管理"
+          @click="emit('changeTab', 'file-manager')"
+        >
+          <FolderOpen class="h-4 w-4 transition-transform duration-300 group-hover/btn:scale-110" />
+        </button>
+        <!-- 展开按钮 -->
+        <button
+          class="flex h-7.5 w-7.5 items-center justify-center rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-50 transition duration-150 cursor-pointer group/btn mt-1"
           title="展开侧边栏"
           @click="emit('toggleCollapse')"
         >
-          <ChevronRight class="h-4.5 w-4.5" />
+          <ChevronRight class="h-[18px] w-[18px] transition-transform duration-200 group-hover/btn:translate-x-0.5" />
         </button>
       </div>
     </div>

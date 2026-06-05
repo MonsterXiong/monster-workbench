@@ -116,7 +116,7 @@ async function handleGenerateStructure() {
 </script>
 
 <template>
-  <div class="flex flex-col h-[520px] min-h-0">
+  <div class="flex flex-col h-full min-h-0">
     <!-- 头部栏 -->
     <div class="flex flex-col md:flex-row md:items-center justify-between border-b border-slate-100 pb-3 gap-2 shrink-0">
       <div class="tool-section-title">
@@ -135,7 +135,7 @@ async function handleGenerateStructure() {
             v-model="rootPath"
             type="text"
             placeholder="请选择或输入根文件夹物理路径，或留空"
-            class="workbench-input visual-input h-10 flex-1 text-xs"
+            class="workbench-input h-10 flex-1 text-xs"
           />
           <button
             class="workbench-btn border border-slate-200 bg-base-100 hover:bg-slate-50 text-slate-700 h-10 px-4 text-xs font-bold"
@@ -179,7 +179,7 @@ async function handleGenerateStructure() {
         <textarea
           v-model="treeInput"
           placeholder="请粘贴您的树形结构文本，有后缀自动创建文件，无后缀创建文件夹"
-          class="workbench-textarea visual-textarea flex-1 p-3 text-xs leading-5 resize-none overflow-y-auto"
+          class="workbench-textarea flex-1 p-3 text-xs leading-5 resize-none overflow-y-auto"
         ></textarea>
       </div>
 
@@ -201,29 +201,5 @@ async function handleGenerateStructure() {
 <style scoped>
 .tool-section-title {
   @apply text-sm font-extrabold text-slate-800 flex items-center gap-2;
-}
-.visual-input {
-  border: 1px solid #cbd5e1 !important;
-  background-color: #f8fafc !important;
-  box-shadow: inset 0 2px 4px 0 rgba(0, 0, 0, 0.03) !important;
-  transition: all 0.2s ease !important;
-}
-.visual-input:focus {
-  border-color: #2563eb !important;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15) !important;
-  background-color: #ffffff !important;
-  outline: none !important;
-}
-.visual-textarea {
-  border: 1px solid #cbd5e1 !important;
-  background-color: #f8fafc !important;
-  box-shadow: inset 0 2px 4px 0 rgba(0, 0, 0, 0.03) !important;
-  transition: all 0.2s ease !important;
-}
-.visual-textarea:focus {
-  border-color: #2563eb !important;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15) !important;
-  background-color: #ffffff !important;
-  outline: none !important;
 }
 </style>

@@ -5,6 +5,8 @@ import {
   type AppUpdateProgress,
 } from "../services/app-updater";
 
+let autoCheckInitialized = false;
+
 export const useUpdateStore = defineStore("update", {
   state: () => ({
     checking: false,
@@ -101,6 +103,9 @@ export const useUpdateStore = defineStore("update", {
      * 初始化自动更新轮询
      */
     initAutoCheck() {
+      if (autoCheckInitialized) return;
+      autoCheckInitialized = true;
+
       // 1. 首次加载时进行一次静默检查
       this.checkUpdate(true);
 

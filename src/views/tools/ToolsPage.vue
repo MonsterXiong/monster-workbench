@@ -10,6 +10,8 @@ import {
   CheckCircle2
 } from "lucide-vue-next";
 
+import { useToast } from "../../composables/useToast";
+
 // 引入 6 个独立的工具子组件
 import DirGenerator from "./components/DirGenerator.vue";
 import PortCleaner from "./components/PortCleaner.vue";
@@ -21,16 +23,10 @@ import DirReader from "./components/DirReader.vue";
 // 10 个 Tab 状态控制 (1~10)
 const activeTab = ref(1);
 
-// 全局 Toast 提示状态
-const toastMessage = ref("");
-const showToast = ref(false);
+const { triggerToast } = useToast();
 
-function triggerToast(msg: string) {
-  toastMessage.value = msg;
-  showToast.value = true;
-  setTimeout(() => {
-    showToast.value = false;
-  }, 2500);
+function handleToast(msg: string, type?: "error" | "success") {
+  triggerToast(msg);
 }
 
 function handleCopy(text: string) {
@@ -51,9 +47,9 @@ function handleCopy(text: string) {
 </script>
 
 <template>
-  <div class="space-y-6">
+  <div class="flex flex-col h-full space-y-4 min-h-0">
     <!-- 顶部 10 个 Tab 切换组，支持横向无缝滑动 -->
-    <div class="tool-tab-scroll-wrapper no-scrollbar">
+    <div class="tool-tab-scroll-wrapper no-scrollbar shrink-0">
       <div class="flex gap-2">
         <button
           class="tool-tab-btn"
@@ -108,32 +104,18 @@ function handleCopy(text: string) {
       </div>
     </div>
 
-    <!-- 全局 Toast 提示 -->
-    <transition
-      enter-active-class="transition duration-200 ease-out"
-      enter-from-class="transform translate-y-2 opacity-0"
-      enter-to-class="transform translate-y-0 opacity-100"
-      leave-active-class="transition duration-150 ease-in"
-      leave-from-class="transform translate-y-0 opacity-100"
-      leave-to-class="transform translate-y-2 opacity-0"
-    >
-      <div v-if="showToast" class="fixed bottom-16 right-8 z-50 flex items-center gap-2 rounded-2xl bg-emerald-600 px-4 py-2.5 text-xs font-bold text-white shadow-lg shadow-emerald-600/10">
-        <CheckCircle2 class="h-4 w-4" />
-        {{ toastMessage }}
-      </div>
-    </transition>
-
     <!-- 工具卡片面板 -->
-    <div class="grid grid-cols-1">
-      <section class="workbench-card tool-card-container">
+    <div class="grid grid-cols-1 flex-1 min-h-0">
+      <section class="workbench-card tool-card-container h-full overflow-hidden flex flex-col min-h-0">
         <!-- Tab 1: 目录结构 (左右1:1分割) -->
-        <div v-if="activeTab === 1" class="grid grid-cols-1 lg:grid-cols-2 gap-8 lg:divide-x lg:divide-slate-200">
+        <div v-if="activeTab === 1" class="grid grid-cols-1 lg:grid-cols-2 gap-8 lg:divide-x lg:divide-slate-200 h-full min-h-0">
           <DirGenerator
-            @toast="triggerToast"
+            class="h-full min-h-0"
+            @toast="handleToast"
           />
           <DirReader
-            class="lg:pl-8"
-            @toast="triggerToast"
+            class="lg:pl-8 h-full min-h-0"
+            @toast="handleToast"
             @copy="handleCopy"
           />
         </div>
@@ -141,32 +123,32 @@ function handleCopy(text: string) {
         <!-- Tab 2: 端口诊断清理 -->
         <PortCleaner
           v-else-if="activeTab === 2"
-          @toast="triggerToast"
+          @toast="handleToast"
         />
 
         <!-- Tab 3: JSON 美化/压缩 -->
         <JsonFormatter
           v-else-if="activeTab === 3"
           @copy="handleCopy"
-          @toast="triggerToast"
+          @toast="handleToast"
         />
 
         <!-- Tab 4: Base64 编解码 -->
         <Base64Converter
           v-else-if="activeTab === 4"
           @copy="handleCopy"
-          @toast="triggerToast"
+          @toast="handleToast"
         />
 
         <!-- Tab 5: 时间戳转换 -->
         <TimestampConverter
           v-else-if="activeTab === 5"
           @copy="handleCopy"
-          @toast="triggerToast"
+          @toast="handleToast"
         />
 
         <!-- Tab 6 ~ 10. 敬请期待面板 -->
-        <div v-else class="flex flex-col h-[520px] justify-between min-h-0">
+        <div v-else class="flex flex-col h-full justify-between min-h-0">
           <div class="flex items-center justify-between border-b border-slate-100 pb-3 shrink-0">
             <div class="tool-section-title">
               <Sparkles class="h-4.5 w-4.5 text-blue-500 animate-pulse" />

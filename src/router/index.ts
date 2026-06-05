@@ -21,9 +21,19 @@ export const router = createRouter({
       component: () => import("../views/tools/ToolsPage.vue"),
     },
     {
+      path: "/navigation",
+      name: "navigation",
+      component: () => import("../views/navigation/NavigationPage.vue"),
+    },
+    {
       path: "/settings",
       name: "settings",
       component: () => import("../views/settings/SettingsPage.vue"),
+    },
+    {
+      path: "/file-manager",
+      name: "file-manager",
+      component: () => import("../views/file-manager/FileManagerPage.vue"),
     },
   ],
 });

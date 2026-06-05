@@ -45,7 +45,7 @@ function handleClearBase64() {
 </script>
 
 <template>
-  <div class="flex flex-col h-[520px] min-h-0">
+  <div class="flex flex-col h-full min-h-0">
     <!-- 头部栏 -->
     <div class="flex flex-col md:flex-row md:items-center justify-between border-b border-slate-100 pb-3 gap-2 shrink-0">
       <div class="tool-section-title">
@@ -67,7 +67,7 @@ function handleClearBase64() {
         <textarea
           v-model="base64Input"
           placeholder="请输入您要进行 Base64 编码或解码的文本..."
-          class="workbench-textarea visual-textarea flex-1 p-3 leading-5 resize-none overflow-y-auto"
+          class="workbench-textarea flex-1 p-3 leading-5 resize-none overflow-y-auto"
         ></textarea>
       </div>
 
@@ -109,20 +109,6 @@ function handleClearBase64() {
 <style scoped>
 .tool-section-title {
   @apply text-sm font-extrabold text-slate-800 flex items-center gap-2;
-}
-.visual-textarea {
-  border: 1px solid #cbd5e1 !important;
-  background-color: #f8fafc !important;
-  box-shadow: inset 0 2px 4px 0 rgba(0, 0, 0, 0.03) !important;
-  transition: all 0.2s ease !important;
-  font-family: monospace !important;
-  font-size: 0.75rem !important;
-}
-.visual-textarea:focus {
-  border-color: #2563eb !important;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15) !important;
-  background-color: #ffffff !important;
-  outline: none !important;
 }
 .visual-result-panel {
   @apply rounded-2xl border border-slate-300 bg-slate-50/20 text-slate-600 font-mono text-xs relative shadow-inner;

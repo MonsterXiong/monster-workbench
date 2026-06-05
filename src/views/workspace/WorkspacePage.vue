@@ -50,9 +50,9 @@ const files = ref([
 </script>
 
 <template>
-  <div class="space-y-6">
+  <div class="flex flex-col h-full space-y-5 min-h-0 overflow-y-auto pr-1 no-scrollbar">
     <!-- 2. 四列指标卡片 -->
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5 shrink-0">
       <!-- 指标 1 -->
       <div class="workbench-card indicator-card group/card hover:shadow-blue-500/5">
         <div class="flex items-center gap-3.5">

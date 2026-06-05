@@ -31,6 +31,12 @@ fn main() {
             create_main_window(&handle)?;
 
             // 1. 初始化系统业务服务
+            if let Ok(home_dir) = handle.path().home_dir() {
+                let tools_dir = home_dir.join(".monster-tools");
+                if !tools_dir.exists() {
+                    let _ = std::fs::create_dir_all(&tools_dir);
+                }
+            }
 
             let system_service = services::system_service::SystemService::new(handle.clone());
             app.manage(std::sync::Mutex::new(system_service));
@@ -94,6 +100,9 @@ fn main() {
             commands::system::find_port_process,
             commands::system::kill_process_by_pid,
             commands::system::read_directory_tree,
+            commands::system::upload_file,
+            commands::system::list_uploaded_files,
+            commands::system::delete_uploaded_file,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

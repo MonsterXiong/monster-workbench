@@ -85,3 +85,33 @@ pub fn read_directory_tree(dir_path: String, skip_dirs: Vec<String>, max_depth: 
     service.read_directory_tree(&dir_path, skip_dirs, max_depth)
 }
 
+#[tauri::command]
+pub fn upload_file(
+    src_path: String,
+    file_type: String,
+    year_month: String,
+    uuid_name: String,
+    state: SystemState<'_>
+) -> Result<String, String> {
+    let service = state.lock().unwrap();
+    service.upload_file(&src_path, &file_type, &year_month, &uuid_name)
+}
+
+#[tauri::command]
+pub fn list_uploaded_files(
+    file_type: Option<String>,
+    state: SystemState<'_>
+) -> Result<String, String> {
+    let service = state.lock().unwrap();
+    service.list_uploaded_files(file_type.as_deref())
+}
+
+#[tauri::command]
+pub fn delete_uploaded_file(
+    rel_path: String,
+    state: SystemState<'_>
+) -> Result<(), String> {
+    let service = state.lock().unwrap();
+    service.delete_uploaded_file(&rel_path)
+}
+

@@ -5,11 +5,13 @@ import Sidebar from "./components/Sidebar.vue";
 import AppHeader from "./components/AppHeader.vue";
 import AppContent from "./components/AppContent.vue";
 import UpdateModal from "./components/UpdateModal.vue";
+import GlobalToast from "../components/common/GlobalToast.vue";
+import ConfirmModal from "../components/common/ConfirmModal.vue";
 import { routeLoading } from "../router/state";
 import { useAppStore } from "../stores/app";
 import { useUpdateStore } from "../stores/update";
 
-type RouteTab = "workspace" | "system" | "tools" | "settings";
+type RouteTab = "workspace" | "system" | "tools" | "navigation" | "settings" | "file-manager";
 
 const router = useRouter();
 const route = useRoute();
@@ -18,8 +20,8 @@ const updateStore = useUpdateStore();
 
 const currentTab = computed<RouteTab>(() => {
   const name = String(route.name ?? "workspace");
-  if (name === "system" || name === "tools" || name === "settings") {
-    return name;
+  if (name === "system" || name === "tools" || name === "navigation" || name === "settings" || name === "file-manager") {
+    return name as RouteTab;
   }
   return "workspace";
 });
@@ -38,7 +40,9 @@ function handleChangeTab(tab: RouteTab) {
     workspace: "/workspace",
     system: "/system",
     tools: "/tools",
+    navigation: "/navigation",
     settings: "/settings",
+    "file-manager": "/file-manager",
   };
 
   router.push(routeMap[tab]);
@@ -98,5 +102,11 @@ function handleChangeTab(tab: RouteTab) {
 
     <!-- 全局系统更新弹窗 -->
     <UpdateModal />
+
+    <!-- 全局 Toast 提示 -->
+    <GlobalToast />
+
+    <!-- 全局确认弹窗 -->
+    <ConfirmModal />
   </div>
 </template>

@@ -33,8 +33,8 @@ async function handleSelectDataDir() {
 </script>
 
 <template>
-  <div class="space-y-6">
-    <div class="grid gap-6 grid-cols-1">
+  <div class="flex flex-col h-full space-y-5 min-h-0 overflow-y-auto pr-1 no-scrollbar">
+    <div class="grid gap-6 grid-cols-1 shrink-0">
       <!-- 偏好设置卡片 -->
       <section class="workbench-card p-6">
         <div class="flex flex-col gap-6">
@@ -124,7 +124,6 @@ async function handleSelectDataDir() {
             <div class="flex flex-col gap-2 p-3.5 rounded-2xl bg-slate-50/20 border border-slate-100">
               <div class="flex flex-col gap-1">
                 <div class="text-xs font-bold text-slate-700">物理数据目录</div>
-                <div class="text-[10px] text-slate-400 font-semibold leading-relaxed">指定应用保存本地物理文件和解析树形拓扑结构时所用到的缺省根工作空间。</div>
               </div>
               
               <div class="flex gap-2.5 items-center mt-1">

@@ -107,6 +107,25 @@ export const systemService = {
     }
     return callTauri<string>("read_directory_tree", { dirPath, skipDirs, maxDepth });
   },
+
+  async uploadFile(srcPath: string, fileType: "image" | "file"): Promise<string> {
+    if (!isTauriRuntime()) {
+      return `mock-uploads/${fileType === "image" ? "images" : "files"}/2026/06/mock-uuid.png`;
+    }
+
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, "0");
+    const yearMonth = `${year}/${month}`;
+    const uuidName = crypto.randomUUID();
+
+    return callTauri<string>("upload_file", {
+      srcPath,
+      fileType,
+      yearMonth,
+      uuidName
+    });
+  },
 };
 
 export interface PathItem {
