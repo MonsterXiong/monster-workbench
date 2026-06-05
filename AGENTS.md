@@ -9,7 +9,7 @@
 *   **仅限单体整体更新**：本项目已重构为纯粹的单体桌面应用。所有的应用更新必须依赖 Tauri 原生更新机制（`@tauri-apps/plugin-updater`），禁止开发、引入或还原任何基于 `web-assets.zip`、解压以及将 WebView 重定向到本地外部目录的自定义“Vue 资源热更新”逻辑。
 *   **启动路径限制**：`src-tauri/src/main.rs` 启动窗口时，必须直接加载内置编译的前端静态资源 `WebviewUrl::App("index.html".into())`。
 *   **严控 Rust 依赖体积**：
-    *   为了确保 Cargo 编译速度和二进制包体积，除非有明确的重构方案，禁止在 `src-tauri/Cargo.toml` 中引入与基础功能无关的外部依赖库（已剔除的 `reqwest`、`zip`、`sha2`、`hex` 等严禁加回）。
+    *   为了确保 Cargo 编译速度和二进制包体积，除非有明确的重构方案，禁止在 `src-tauri/Cargo.toml` 中引入与基础功能无关 of 外部依赖库（已剔除的 `reqwest`、`zip`、`sha2`、`hex` 等严禁加回）。
     *   保证 `serde` 和 `serde_json` 仅作为基础宏编译与序列化所需的库。
 
 ---
@@ -27,14 +27,40 @@
 
 ---
 
-## 3. Git 提交与注释规范
+## 3. 本地开发与启动规范命令
+
+为保证项目环境的一致性与代码稳定性，在开发和构建时**必须统一使用以下标准命令**：
+
+*   **本地开发与调试**：
+    ```bash
+    npm run tauri:dev
+    ```
+    此命令会同时运行前端打包编译服务与 Rust 窗口调试容器，禁止仅使用 `npm run dev` 运行前端，因为这样会遗漏原生的 Tauri 接口调用调试。
+*   **TypeScript 类型校验**：
+    ```bash
+    npm run typecheck
+    ```
+    在任何代码变更提交（Commit）或编译前，**必须执行此命令进行校验**，确保前端无类型报错。
+*   **本地完整编译测试**（检查编译配置）：
+    ```bash
+    npx tauri build --no-bundle
+    ```
+    如果在调试过程中修改了 Rust 侧或 capabilities 权限，必须运行此命令验证编译器是否能成功生成发布级二进制文件。
+*   **手动本地发布包打包**：
+    ```bash
+    npm run tauri
+    ```
+
+---
+
+## 4. Git 提交与注释规范
 
 *   **Commit 概要中文化**：向 Git 仓库提交任何代码修改时，Commit 消息的概要描述**必须首选使用中文（简体）**（例如 `feat: 新增...`，`fix: 修复...`）。
 *   **CI/CD 触发契机**：GitHub Actions 在监测到符合 `v*` 或者是 `app-v*` 格式的 Tag 推送时，会触发全平台编译打包并创建 Release。请确保不要随意修改 `.github/workflows/release.yml` 的触发逻辑。
 
 ---
 
-## 4. AI 助手交互准则
+## 5. AI 助手交互准则
 
 *   **中文化内部推理**：AI 助手在处理用户需求时，内部思考过程（Thought Process）与最终回复**必须完全使用简体中文**。
 *   **代码规范**：所有新增的文件与代码，应当遵循 TypeScript/Vue 3 的最佳实践，保持函数及逻辑块的简洁，确保不引入无用导入，且每次修改完必须运行 `npm run typecheck` 进行校验。
