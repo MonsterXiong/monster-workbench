@@ -2,15 +2,23 @@ import { isTauriRuntime } from "./runtime";
 import { callTauri, convertFileSrc } from "./tauri";
 import { systemService } from "./system.service";
 import {
+  buildUrlWithQuery,
+  filterByOptionalValues,
+  firstOf,
+  getCurrentIsoString,
   getNextNumberBy,
+  findByValue,
+  findIndexByValue,
   keySetBy,
   matchesSearchTextFields,
   normalizeStringKey,
   paginateArray,
+  removeByValue,
+  removeByValues,
   safeJsonStringifyPretty,
   sortByMany,
   tryJsonParse,
-  uniqueArray,
+  uniqueMappedValues,
 } from "../utils";
 
 export interface NavigationItem {
@@ -164,7 +172,7 @@ async function readNavigationBackupFile(
     });
     if (!selected) return null;
 
-    const filePath = Array.isArray(selected) ? selected[0] : selected;
+    const filePath = firstOf(selected);
     jsonContent = await systemService.readTextFile(filePath);
   } else {
     jsonContent = await readBrowserTextFile(".json", readFailedMessage);
@@ -176,7 +184,7 @@ async function readNavigationBackupFile(
 function buildNavigationImageUrl(appDataPath: string, relPath: string): string {
   if (!relPath) return "";
   if (!isTauriRuntime()) {
-    return "https://api.dicebear.com/7.x/identicon/svg?seed=" + encodeURIComponent(relPath);
+    return buildUrlWithQuery("https://api.dicebear.com/7.x/identicon/svg", { params: { seed: relPath } });
   }
   return convertFileSrc(`${appDataPath}/${relPath}`);
 }
@@ -231,15 +239,11 @@ export const navigationService = {
           (navigation) => navigation.url,
         ]));
       }
-      if (category) {
-        filtered = filtered.filter(item => item.category === category);
-      }
-      if (isFeatured !== undefined) {
-        filtered = filtered.filter(item => item.is_featured === isFeatured);
-      }
-      if (isHot !== undefined) {
-        filtered = filtered.filter(item => item.is_hot === isHot);
-      }
+      filtered = filterByOptionalValues(filtered, [
+        { getValue: (item) => item.category, value: category },
+        { getValue: (item) => item.is_featured, value: isFeatured, isActive: (value) => value !== undefined },
+        { getValue: (item) => item.is_hot, value: isHot, isActive: (value) => value !== undefined },
+      ]);
 
       // 默认排序：优先按 sort_order 升序，而后点击量降序
       filtered = sortByMany(filtered, [
@@ -278,7 +282,7 @@ export const navigationService = {
         ...item,
         id: nextId,
         clicks: 0,
-        created_at: new Date().toISOString()
+        created_at: getCurrentIsoString()
       };
       mockDb.push(newItem);
       return;
@@ -301,7 +305,7 @@ export const navigationService = {
    */
   async updateNavigation(appDataPath: string, item: NavigationItem): Promise<void> {
     if (!isTauriRuntime()) {
-      const index = mockDb.findIndex(i => i.id === item.id);
+      const index = findIndexByValue(mockDb, (navigation) => navigation.id, item.id);
       if (index !== -1) {
         mockDb[index] = { ...mockDb[index], ...item };
       }
@@ -319,7 +323,7 @@ export const navigationService = {
    */
   async deleteNavigation(appDataPath: string, id: number): Promise<void> {
     if (!isTauriRuntime()) {
-      mockDb = mockDb.filter(i => i.id !== id);
+      mockDb = removeByValue(mockDb, (item) => item.id, id);
       return;
     }
 
@@ -336,7 +340,7 @@ export const navigationService = {
     if (ids.length === 0) return;
 
     if (!isTauriRuntime()) {
-      mockDb = mockDb.filter(i => !ids.includes(i.id || 0));
+      mockDb = removeByValues(mockDb, (item) => item.id || 0, ids);
       return;
     }
 
@@ -351,7 +355,7 @@ export const navigationService = {
    */
   async incrementClicks(appDataPath: string, id: number): Promise<void> {
     if (!isTauriRuntime()) {
-      const item = mockDb.find(i => i.id === id);
+      const item = findByValue(mockDb, (navigation) => navigation.id, id);
       if (item) {
         item.clicks += 1;
       }
@@ -369,8 +373,7 @@ export const navigationService = {
    */
   async getCategories(appDataPath: string): Promise<string[]> {
     if (!isTauriRuntime()) {
-      const cats = mockDb.map(i => i.category);
-      return uniqueArray(cats);
+      return uniqueMappedValues(mockDb, (item) => item.category);
     }
 
     return callTauri<string[]>("get_navigation_categories", {
@@ -423,7 +426,7 @@ export const navigationService = {
   async saveSortOrder(appDataPath: string, orders: { id: number; sort_order: number }[]): Promise<void> {
     if (!isTauriRuntime()) {
       orders.forEach(o => {
-        const item = mockDb.find(i => i.id === o.id);
+        const item = findByValue(mockDb, (navigation) => navigation.id, o.id);
         if (item) {
           item.sort_order = o.sort_order;
         }
@@ -481,7 +484,7 @@ export const navigationService = {
             logo_path: item.logo_path || undefined,
             bg_path: item.bg_path || undefined,
             sort_order: maxSortOrder,
-            created_at: new Date().toISOString()
+            created_at: getCurrentIsoString()
           });
           importedCount += 1;
         }

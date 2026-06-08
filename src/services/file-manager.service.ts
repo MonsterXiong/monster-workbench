@@ -8,7 +8,7 @@ import { ref } from "vue";
 import { systemService } from "./system.service";
 import { navigationService } from "./navigation.service";
 import { convertFileSrc, getCurrentWebviewWindow } from "./tauri";
-import { getCurrentUnixTimestamp, getUploadFileType, safeJsonParse } from "../utils";
+import { buildUrlWithQuery, filterByValue, getCurrentUnixTimestamp, getUploadFileType, removeByValue, safeJsonParse } from "../utils";
 
 /** 文件元数据类型 */
 export interface UploadedFileInfo {
@@ -34,7 +34,7 @@ export async function listUploadedFiles(
 ): Promise<UploadedFileInfo[]> {
   if (!isTauriRuntime()) {
     if (!fileType) return mockFiles.value;
-    return mockFiles.value.filter(f => f.file_type === fileType);
+    return filterByValue(mockFiles.value, (file) => file.file_type, fileType);
   }
   const json = await callTauri<string>("list_uploaded_files", {
     fileType: fileType || null,
@@ -48,7 +48,7 @@ export async function listUploadedFiles(
  */
 export async function deleteUploadedFile(relPath: string): Promise<void> {
   if (!isTauriRuntime()) {
-    mockFiles.value = mockFiles.value.filter(f => f.rel_path !== relPath);
+    mockFiles.value = removeByValue(mockFiles.value, (file) => file.rel_path, relPath);
     return;
   }
   await callTauri<void>("delete_uploaded_file", { relPath });
@@ -104,7 +104,7 @@ async function selectAndUploadImage(): Promise<string | null> {
 function buildPreviewUrl(appDataPath: string, relPath: string): string {
   if (!relPath) return "";
   if (!isTauriRuntime()) {
-    return "https://api.dicebear.com/7.x/identicon/svg?seed=" + encodeURIComponent(relPath);
+    return buildUrlWithQuery("https://api.dicebear.com/7.x/identicon/svg", { params: { seed: relPath } });
   }
 
   return convertFileSrc(`${appDataPath}/${relPath}`);

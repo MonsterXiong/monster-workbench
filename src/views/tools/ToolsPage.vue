@@ -5,7 +5,7 @@ import { Sparkles } from "lucide-vue-next";
 import { useToast } from "../../composables/useToast";
 import { useClipboard } from "../../composables/useClipboard";
 import { useI18n } from "../../composables/useI18n";
-import { formatTemplate } from "../../utils";
+import { formatTemplate, range } from "../../utils";
 
 // 引入 6 个独立的工具子组件
 import DirGenerator from "./components/DirGenerator.vue";
@@ -28,11 +28,11 @@ const toolTabs = computed(() => [
   { key: 3, title: t("tools.tabs.jsonFormat"), icon: "Code" },
   { key: 4, title: t("tools.tabs.base64"), icon: "Binary" },
   { key: 5, title: t("tools.tabs.timestamp"), icon: "Clock" },
-  { key: 6, title: formatTemplate(t("tools.tabs.upcoming"), { num: 1 }), icon: "Sparkles" },
-  { key: 7, title: formatTemplate(t("tools.tabs.upcoming"), { num: 2 }), icon: "Sparkles" },
-  { key: 8, title: formatTemplate(t("tools.tabs.upcoming"), { num: 3 }), icon: "Sparkles" },
-  { key: 9, title: formatTemplate(t("tools.tabs.upcoming"), { num: 4 }), icon: "Sparkles" },
-  { key: 10, title: formatTemplate(t("tools.tabs.upcoming"), { num: 5 }), icon: "Sparkles" },
+  ...range(1, 6).map((num) => ({
+    key: num + 5,
+    title: formatTemplate(t("tools.tabs.upcoming"), { num }),
+    icon: "Sparkles",
+  })),
 ]);
 
 function handleToast(msg: string, type?: "error" | "success") {

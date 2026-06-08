@@ -2,6 +2,10 @@ export function isNil(value: unknown): value is null | undefined {
   return value === null || value === undefined;
 }
 
+export function isNonNullable<T>(value: T): value is NonNullable<T> {
+  return value !== null && value !== undefined;
+}
+
 export function withDefault<T>(value: T | null | undefined, fallback: T): T {
   return isNil(value) ? fallback : value;
 }
@@ -42,4 +46,8 @@ export function isOneOf<T extends string | number>(value: unknown, options: read
 
 export function coerceEmptyToNull(value: unknown): unknown {
   return typeof value === "string" && value.trim() === "" ? null : value;
+}
+
+export function coerceEmptyToUndefined(value: unknown): unknown {
+  return typeof value === "string" && value.trim() === "" ? undefined : value;
 }

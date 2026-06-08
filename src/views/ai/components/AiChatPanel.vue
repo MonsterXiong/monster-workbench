@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { AlertTriangle, Bot, MessageSquareText, Plus, Send, UserRound } from "lucide-vue-next";
 import { useAiStore } from "../../../stores/ai";
 import { useI18n } from "../../../composables/useI18n";
+import { joinBy } from "../../../utils";
 import type { ActionMenuItem } from "../../../components/common/BaseActionMenu.vue";
 import type { AiConversationSession } from "../../../types/ai";
 
@@ -22,7 +23,7 @@ const emit = defineEmits<{
 const session = computed(() => aiStore.activeChatSession);
 const messages = computed(() => session.value?.messages || []);
 const isBusy = computed(() => Boolean(aiStore.getActionQueueStatus("chat")) || aiStore.activeAction === "chat");
-const scrollAnchor = computed(() => messages.value.map((message) => `${message.id}:${message.status}`).join("|"));
+const scrollAnchor = computed(() => joinBy(messages.value, (message) => `${message.id}:${message.status}`, "|"));
 const sessionActions = computed<ActionMenuItem[]>(() => [
   { key: "rename", label: t("aiPage.sessions.rename"), icon: "Pencil" },
   { key: "duplicate", label: t("aiPage.sessions.duplicate"), icon: "Copy" },

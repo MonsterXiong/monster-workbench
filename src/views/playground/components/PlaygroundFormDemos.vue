@@ -24,6 +24,8 @@ const switchValue = ref(true);
 const disabledSwitchValue = ref(false);
 const tagValues = ref(["组件", "沙箱", "高频"]);
 const dateRangeValue = ref({ start: "2026-06-01", end: "2026-06-08" });
+const compactDateRangeValue = ref({ start: "2026-06-06", end: "2026-06-12" });
+const plainDateRangeValue = ref({ start: "", end: "" });
 const sliderValue = ref(36);
 const volumeValue = ref(64);
 const pathFolderValue = ref("C:\\Users\\demo\\workspace");
@@ -82,7 +84,7 @@ const handleReset = () => {
           <BaseInput v-model="textValue" clearable prefix-icon="Search" placeholder="请输入应用名" />
         </BaseFormItem>
         <BaseFormItem label="数字输入" description="适合阈值、并发数、重试次数。" success="范围有效">
-          <BaseNumberInput v-model="numberValue" :min="1" :max="100" :step="5" unit="个" />
+          <BaseNumberInput v-model="numberValue" block :min="1" :max="100" :step="5" unit="个" />
         </BaseFormItem>
         <BaseFormItem label="错误态" error="编码已被占用，请换一个更具体的名称。">
           <BaseInput v-model="codeValue" error placeholder="请输入编码" />
@@ -102,6 +104,33 @@ const handleReset = () => {
             show-word-limit
             placeholder="输入后远程校验"
           />
+        </BaseFormItem>
+        <BaseFormItem label="前后缀组合" description="覆盖插槽前后缀、密码显隐和紧凑尺寸。" :span="2">
+          <div class="field-stack">
+            <BaseInput v-model="codeValue" block placeholder="输入访问域名" aria-label="访问域名">
+              <template #prepend>https://</template>
+              <template #append>.monster.dev</template>
+            </BaseInput>
+            <div class="input-demo-row">
+              <BaseInput
+                v-model="codeValue"
+                block
+                type="password"
+                show-password
+                prefix-icon="KeyRound"
+                placeholder="访问密钥"
+                aria-label="访问密钥"
+              />
+              <BaseInput
+                v-model="codeValue"
+                block
+                size="sm"
+                suffix-icon="Hash"
+                placeholder="紧凑编码"
+                aria-label="紧凑编码"
+              />
+            </div>
+          </div>
         </BaseFormItem>
         <BaseFormItem label="长文本" description="适合备注、Prompt、JSON 片段和长文本配置。" :span="2">
           <BaseTextarea v-model="textareaValue" :rows="4" :maxlength="120" />
@@ -130,6 +159,7 @@ const handleReset = () => {
           <div class="field-stack">
             <BaseNumberInput
               v-model="numberValue"
+              block
               :min="0"
               :max="10000"
               :step="100"
@@ -137,8 +167,15 @@ const handleReset = () => {
               unit="ms"
               aria-label="请求超时时间"
             />
-            <BaseNumberInput v-model="numberValue" readonly unit="%" />
-            <BaseNumberInput v-model="numberValue" error :min="1" :max="10" />
+            <div class="number-demo-row">
+              <BaseNumberInput v-model="numberValue" readonly unit="%" aria-label="只读百分比" />
+              <BaseNumberInput v-model="numberValue" error :min="1" :max="10" aria-label="错误数值" />
+            </div>
+            <div class="number-demo-row">
+              <BaseNumberInput :model-value="1" :min="1" :max="100" size="sm" aria-label="最小边界" />
+              <BaseNumberInput :model-value="100" :min="1" :max="100" size="sm" aria-label="最大边界" />
+              <BaseNumberInput :model-value="48" disabled size="sm" aria-label="禁用数值" />
+            </div>
           </div>
         </BaseFormItem>
       </BaseForm>
@@ -235,7 +272,7 @@ const handleReset = () => {
           <BaseSelect v-model="selectValue" :options="selectOptions" />
         </BaseFormItem>
         <BaseFormItem label="阈值">
-          <BaseNumberInput v-model="numberValue" :min="1" :max="100" />
+          <BaseNumberInput v-model="numberValue" block :min="1" :max="100" />
         </BaseFormItem>
         <BaseFormItem label="标签">
           <BaseTagInput
@@ -268,7 +305,7 @@ const handleReset = () => {
           <BaseSegmented v-model="segmentedValue" :options="segmentedOptions" size="sm" />
         </BaseFormItem>
         <BaseFormItem label="并发" compact>
-          <BaseNumberInput v-model="numberValue" size="sm" :min="1" :max="100" />
+          <BaseNumberInput v-model="numberValue" block size="sm" :min="1" :max="100" />
         </BaseFormItem>
         <BaseFormItem label="开关" compact>
           <BaseSwitch v-model="switchValue" size="sm" compact label="自动保存" />
@@ -381,7 +418,17 @@ const handleReset = () => {
           :presets="datePresets"
           min="2026-06-01"
           max="2026-06-30"
+          size="lg"
           @preset="triggerToast(`已选择：${$event.label}`, 'info')"
+        />
+        <BaseDateRange
+          v-model="compactDateRangeValue"
+          label="紧凑范围"
+          :presets="datePresets.slice(0, 2)"
+          min="2026-06-01"
+          max="2026-06-30"
+          compact
+          surface="muted"
         />
         <BaseDateRange
           :model-value="{ start: '', end: '' }"
@@ -398,6 +445,21 @@ const handleReset = () => {
         />
         <BaseDateRange :model-value="dateRangeValue" label="只读态" readonly />
         <BaseDateRange :model-value="dateRangeValue" label="禁用态" disabled />
+        <BaseDateRange
+          v-model="plainDateRangeValue"
+          label="Plain 嵌入"
+          surface="plain"
+          :presets="datePresets"
+          min="2026-06-01"
+          max="2026-06-30"
+        />
+        <BaseDateRange
+          :model-value="{ start: '2026-06-10', end: '2026-06-20' }"
+          label="手输模式"
+          :show-calendar="false"
+          surface="muted"
+          compact
+        />
       </div>
     </PlaygroundDemoSection>
   </section>
@@ -428,7 +490,7 @@ const handleReset = () => {
               :max="100"
               :format-value="(value) => `${formatNumber(value)} 个`"
             />
-            <BaseNumberInput v-model="numberValue" :min="1" :max="100" />
+            <BaseNumberInput v-model="numberValue" block :min="1" :max="100" />
           </div>
         </BasePanel>
         <BasePanel title="音量调节" subtitle="适合偏好设置、图像参数和资源阈值。">
@@ -478,5 +540,13 @@ const handleReset = () => {
 
 .field-stack {
   @apply flex min-w-0 flex-col gap-3;
+}
+
+.input-demo-row {
+  @apply grid min-w-0 gap-3 md:grid-cols-2;
+}
+
+.number-demo-row {
+  @apply grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-3;
 }
 </style>

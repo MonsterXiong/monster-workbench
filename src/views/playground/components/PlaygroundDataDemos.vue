@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref } from "vue";
 import { useToast } from "../../../composables/useToast";
+import { removeByValue } from "../../../utils";
 import PlaygroundDemoSection from "./PlaygroundDemoSection.vue";
 
 defineProps<{
@@ -42,7 +43,7 @@ const detailItems = [
 ];
 
 const handleFilterRemove = (filter: { key: string }) => {
-  activeFilters.value = activeFilters.value.filter((item) => item.key !== filter.key);
+  activeFilters.value = removeByValue(activeFilters.value, (item) => item.key, filter.key);
 };
 
 const handleFilterClear = () => {

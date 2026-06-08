@@ -1,4 +1,8 @@
 <script setup lang="ts">
+import { computed, nextTick, ref } from "vue";
+import type { ComponentPublicInstance } from "vue";
+import { filterByFalsyValue, findIndexByValue, getNextClampedIndex } from "../../utils";
+
 type ListVariant = "card" | "plain" | "row";
 type ListSize = "xs" | "sm" | "md" | "lg";
 type ListSurface = "default" | "muted" | "transparent";
@@ -21,6 +25,15 @@ interface Props {
   clickable?: boolean;
   bordered?: boolean;
   divided?: boolean;
+  simple?: boolean;
+  showIcon?: boolean;
+  showBadge?: boolean;
+  showMeta?: boolean;
+  showDescription?: boolean;
+  wrapLabel?: boolean;
+  disabled?: boolean;
+  loading?: boolean;
+  loadingText?: string;
   emptyText?: string;
   ariaLabel?: string;
 }
@@ -41,13 +54,32 @@ const props = withDefaults(defineProps<Props>(), {
   clickable: false,
   bordered: true,
   divided: false,
+  simple: false,
+  showIcon: true,
+  showBadge: true,
+  showMeta: true,
+  showDescription: true,
+  wrapLabel: false,
+  disabled: false,
+  loading: false,
+  loadingText: "加载中",
   emptyText: "暂无数据",
   ariaLabel: "",
 });
 
 const emit = defineEmits<{
   (e: "item-click", item: any, index: number): void;
+  (e: "select", item: any, index: number): void;
 }>();
+
+defineSlots<{
+  default?: (props: { item: any; index: number; active: boolean; disabled: boolean }) => any;
+  actions?: (props: { item: any; index: number; active: boolean; disabled: boolean }) => any;
+  loading?: () => any;
+  empty?: () => any;
+}>();
+
+const itemRefs = ref(new Map<string | number, HTMLElement>());
 
 const getItemKey = (item: any, index: number) => item?.[props.itemKey] ?? item?.key ?? item?.id ?? index;
 const getItemLabel = (item: any) => item?.[props.labelKey] ?? item?.title ?? item?.label ?? item?.name ?? "";
@@ -56,12 +88,71 @@ const getItemIcon = (item: any) => item?.[props.iconKey] ?? item?.icon ?? "";
 const getItemBadge = (item: any) => item?.[props.badgeKey] ?? item?.badge ?? item?.status ?? "";
 const getItemBadgeType = (item: any): BadgeType => item?.[props.badgeTypeKey] ?? item?.badgeType ?? item?.type ?? "neutral";
 const getItemMeta = (item: any) => item?.[props.metaKey] ?? item?.meta ?? "";
-const isDisabled = (item: any) => Boolean(item?.[props.disabledKey] ?? item?.disabled);
+const isDisabled = (item: any) => Boolean(props.disabled || item?.[props.disabledKey] || item?.disabled);
 const isActive = (item: any, index: number) => props.activeKey !== null && getItemKey(item, index) === props.activeKey;
+const isInteractive = computed(() => props.clickable && !props.disabled && !props.loading);
+const enabledEntries = computed(() =>
+  filterByFalsyValue(
+    props.items.map((item, index) => ({ item, index, key: getItemKey(item, index) })),
+    ({ item }) => isDisabled(item)
+  ),
+);
+
+const setItemRef = (key: string | number, element: Element | ComponentPublicInstance | null) => {
+  if (!element) {
+    itemRefs.value.delete(key);
+    return;
+  }
+
+  if (element instanceof HTMLElement) {
+    itemRefs.value.set(key, element);
+  }
+};
 
 const handleItemClick = (item: any, index: number) => {
-  if (!props.clickable || isDisabled(item)) return;
+  if (!isInteractive.value || isDisabled(item)) return;
   emit("item-click", item, index);
+  emit("select", item, index);
+};
+
+const focusItem = (key: string | number) => {
+  void nextTick(() => {
+    itemRefs.value.get(key)?.focus({ preventScroll: true });
+  });
+};
+
+const moveFocus = (item: any, index: number, offset: 1 | -1) => {
+  if (!isInteractive.value || !enabledEntries.value.length) return;
+  const currentKey = getItemKey(item, index);
+  const currentIndex = findIndexByValue(enabledEntries.value, (entry) => entry.key, currentKey);
+  const nextIndex = getNextClampedIndex(enabledEntries.value.length, currentIndex, offset);
+  focusItem(enabledEntries.value[nextIndex].key);
+};
+
+const handleItemKeydown = (event: KeyboardEvent, item: any, index: number) => {
+  if (!isInteractive.value || isDisabled(item)) return;
+
+  if (event.key === "ArrowDown" || event.key === "ArrowRight") {
+    event.preventDefault();
+    moveFocus(item, index, 1);
+  }
+
+  if (event.key === "ArrowUp" || event.key === "ArrowLeft") {
+    event.preventDefault();
+    moveFocus(item, index, -1);
+  }
+
+  if (event.key === "Home") {
+    event.preventDefault();
+    const firstEntry = enabledEntries.value[0];
+    if (firstEntry) focusItem(firstEntry.key);
+  }
+
+  if (event.key === "End") {
+    event.preventDefault();
+    const lastEntry = enabledEntries.value[enabledEntries.value.length - 1];
+    if (lastEntry) focusItem(lastEntry.key);
+  }
 };
 </script>
 
@@ -78,55 +169,82 @@ const handleItemClick = (item: any, index: number) => {
         'base-list--clickable': clickable,
         'base-list--bordered': bordered,
         'base-list--divided': divided,
-        'is-empty': !items.length,
+        'base-list--simple': simple,
+        'base-list--wrap-label': wrapLabel,
+        'is-empty': !items.length && !loading,
+        'is-disabled': disabled,
+        'is-loading': loading,
       },
     ]"
     :aria-label="ariaLabel || undefined"
+    :aria-disabled="disabled ? 'true' : undefined"
+    :aria-busy="loading ? 'true' : undefined"
   >
     <li
-      v-if="!items.length"
+      v-if="loading"
+      key="__loading"
+      class="base-list__loading"
+      role="status"
+      aria-live="polite"
+    >
+      <slot name="loading">
+        <BaseIcon name="LoaderCircle" size="15" class="base-list__loading-icon" aria-hidden="true" />
+        <span>{{ loadingText }}</span>
+      </slot>
+    </li>
+    <li
+      v-else-if="!items.length"
       key="__empty"
       class="base-list__empty"
       role="status"
     >
-      {{ emptyText }}
+      <slot name="empty">{{ emptyText }}</slot>
     </li>
-    <li
-      v-for="(item, idx) in items"
-      :key="getItemKey(item, idx)"
-      class="base-list__item"
-      :class="{ 'is-active': isActive(item, idx), 'is-disabled': isDisabled(item) }"
-      :role="clickable ? 'button' : undefined"
-      :tabindex="clickable && !isDisabled(item) ? 0 : undefined"
-      :aria-current="clickable && isActive(item, idx) ? 'page' : undefined"
-      :aria-disabled="isDisabled(item) ? 'true' : undefined"
-      @click="handleItemClick(item, idx)"
-      @keydown.enter="handleItemClick(item, idx)"
-      @keydown.space.prevent="handleItemClick(item, idx)"
-    >
-      <slot :item="item" :index="idx" :active="isActive(item, idx)" :disabled="isDisabled(item)">
-        <span v-if="getItemIcon(item)" class="base-list__icon" aria-hidden="true">
-          <BaseIcon :name="getItemIcon(item)" size="16" aria-hidden="true" />
-        </span>
-        <span class="base-list__content">
-          <span class="base-list__title-row">
-            <span class="base-list__label">{{ getItemLabel(item) }}</span>
-            <BaseBadge v-if="getItemBadge(item)" :type="getItemBadgeType(item)" size="xs">{{ getItemBadge(item) }}</BaseBadge>
+    <template v-else>
+      <li
+        v-for="(item, idx) in items"
+        :key="getItemKey(item, idx)"
+        :ref="(element) => setItemRef(getItemKey(item, idx), element)"
+        class="base-list__item"
+        :class="{ 'is-active': isActive(item, idx), 'is-disabled': isDisabled(item) }"
+        :role="isInteractive ? 'button' : undefined"
+        :tabindex="isInteractive && !isDisabled(item) ? 0 : undefined"
+        :aria-current="isInteractive && isActive(item, idx) ? 'page' : undefined"
+        :aria-disabled="isDisabled(item) ? 'true' : undefined"
+        :aria-label="isInteractive ? getItemLabel(item) : undefined"
+        @click="handleItemClick(item, idx)"
+        @keydown.enter="handleItemClick(item, idx)"
+        @keydown.space.prevent="handleItemClick(item, idx)"
+        @keydown="handleItemKeydown($event, item, idx)"
+      >
+        <slot :item="item" :index="idx" :active="isActive(item, idx)" :disabled="isDisabled(item)">
+          <span v-if="showIcon && !simple && getItemIcon(item)" class="base-list__icon" aria-hidden="true">
+            <BaseIcon :name="getItemIcon(item)" size="16" aria-hidden="true" />
           </span>
-          <span v-if="getItemDescription(item)" class="base-list__description">{{ getItemDescription(item) }}</span>
-        </span>
-        <span class="base-list__right">
-          <span v-if="getItemMeta(item)" class="base-list__meta">{{ getItemMeta(item) }}</span>
-          <slot name="actions" :item="item" :index="idx" :active="isActive(item, idx)" :disabled="isDisabled(item)" />
-        </span>
-      </slot>
-    </li>
+          <span class="base-list__content">
+            <span class="base-list__title-row">
+              <span class="base-list__label">{{ getItemLabel(item) }}</span>
+              <BaseBadge v-if="showBadge && !simple && getItemBadge(item)" :type="getItemBadgeType(item)" size="xs">{{ getItemBadge(item) }}</BaseBadge>
+            </span>
+            <span v-if="showDescription && !simple && getItemDescription(item)" class="base-list__description">{{ getItemDescription(item) }}</span>
+          </span>
+          <span v-if="(showMeta && getItemMeta(item)) || $slots.actions" class="base-list__right">
+            <span v-if="showMeta && getItemMeta(item)" class="base-list__meta">{{ getItemMeta(item) }}</span>
+            <slot name="actions" :item="item" :index="idx" :active="isActive(item, idx)" :disabled="isDisabled(item)" />
+          </span>
+        </slot>
+      </li>
+    </template>
   </transition-group>
 </template>
 
 <style scoped>
 .base-list {
   @apply m-0 w-full min-w-0 list-none p-0;
+}
+
+.base-list.is-disabled {
+  @apply opacity-75;
 }
 
 .base-list--card {
@@ -217,6 +335,26 @@ const handleItemClick = (item: any, index: number) => {
   @apply cursor-pointer;
 }
 
+.base-list--simple .base-list__item {
+  @apply h-8 gap-2 px-2.5 py-0;
+}
+
+.base-list--simple.base-list--sm .base-list__item {
+  @apply h-8;
+}
+
+.base-list--simple.base-list--xs .base-list__item {
+  @apply h-7 rounded-lg px-2;
+}
+
+.base-list--simple.base-list--md .base-list__item {
+  @apply h-9;
+}
+
+.base-list--simple.base-list--lg .base-list__item {
+  @apply h-10 px-3;
+}
+
 .base-list__item.is-disabled {
   @apply cursor-not-allowed opacity-55;
 }
@@ -247,12 +385,28 @@ const handleItemClick = (item: any, index: number) => {
   @apply min-w-0 flex-1;
 }
 
+.base-list--simple .base-list__content {
+  @apply flex min-h-0 items-center;
+}
+
 .base-list__title-row {
   @apply flex min-w-0 items-center gap-2;
 }
 
+.base-list--simple .base-list__title-row {
+  @apply w-full;
+}
+
 .base-list__label {
   @apply min-w-0 truncate text-xs font-black text-slate-700 dark:text-slate-200;
+}
+
+.base-list--wrap-label .base-list__label {
+  @apply whitespace-normal break-words;
+}
+
+.base-list--simple .base-list__label {
+  @apply leading-none;
 }
 
 .base-list__item.is-active .base-list__label {
@@ -267,12 +421,28 @@ const handleItemClick = (item: any, index: number) => {
   @apply ml-auto flex shrink-0 items-center gap-2;
 }
 
+.base-list--simple .base-list__right {
+  @apply gap-1.5;
+}
+
 .base-list__meta {
   @apply hidden text-[10px] font-black text-slate-400 dark:text-slate-500 sm:inline;
 }
 
+.base-list--simple .base-list__meta {
+  @apply inline text-[10px];
+}
+
 .base-list__empty {
   @apply rounded-xl border border-dashed border-slate-200 px-3 py-4 text-center text-xs font-black text-slate-400 dark:border-slate-800 dark:text-slate-500;
+}
+
+.base-list__loading {
+  @apply flex items-center justify-center gap-2 rounded-xl border border-dashed border-slate-200 px-3 py-4 text-center text-xs font-black text-slate-400 dark:border-slate-800 dark:text-slate-500;
+}
+
+.base-list__loading-icon {
+  @apply shrink-0 animate-spin;
 }
 
 .base-list--xs .base-list__item {
@@ -323,9 +493,11 @@ const handleItemClick = (item: any, index: number) => {
 
 @media (prefers-reduced-motion: reduce) {
   .base-list__item,
+  .base-list__loading-icon,
   .list-transition-enter-active,
   .list-transition-leave-active {
     transition: none !important;
+    animation: none !important;
   }
 }
 </style>

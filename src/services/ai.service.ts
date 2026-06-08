@@ -1,6 +1,6 @@
 import { ensureBrowserMessage, isTauriRuntime } from "./runtime";
 import { callTauri, convertFileSrc } from "./tauri";
-import { tryJsonParseObject } from "../utils";
+import { includesAllText, tryJsonParseObject } from "../utils";
 import type {
   AiProviderBackendQueueStatus,
   AiProviderConfig,
@@ -57,7 +57,7 @@ export const aiService = {
       return normalizeAiResultImages(result);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      if (message.includes("test_ai_provider") && message.includes("not found")) {
+      if (includesAllText(message, ["test_ai_provider", "not found"])) {
         throw new Error("[ERR_AI_COMMAND_MISSING] \u0041\u0049 \u6a21\u578b\u6d4b\u8bd5\u547d\u4ee4\u672a\u6ce8\u518c\uff0c\u8bf7\u91cd\u542f Tauri \u5f00\u53d1\u8fdb\u7a0b\u540e\u91cd\u8bd5");
       }
       throw normalizeAiError(err);
@@ -74,7 +74,7 @@ export const aiService = {
       return normalizeAiTask(task);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      if (message.includes("enqueue_ai_provider_test") && message.includes("not found")) {
+      if (includesAllText(message, ["enqueue_ai_provider_test", "not found"])) {
         throw new Error("[ERR_AI_COMMAND_MISSING] \u0041\u0049 \u6a21\u578b\u6d4b\u8bd5\u961f\u5217\u547d\u4ee4\u672a\u6ce8\u518c\uff0c\u8bf7\u91cd\u542f Tauri \u5f00\u53d1\u8fdb\u7a0b\u540e\u91cd\u8bd5");
       }
       throw normalizeAiError(err);

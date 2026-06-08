@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { findNextCircularItem, firstItem, lastItem } from "../../utils";
+import { filterByFalsyValue, findNextCircularItem, firstItem, lastItem } from "../../utils";
 import BaseIcon from "./BaseIcon.vue";
 
 export interface SegmentedOption {
@@ -39,7 +39,7 @@ const emit = defineEmits<{
 }>();
 
 const isReadonly = computed(() => props.disabled || props.readonly);
-const enabledOptions = computed(() => props.options.filter((option) => !option.disabled));
+const enabledOptions = computed(() => filterByFalsyValue(props.options, (option) => option.disabled));
 
 const selectOption = (option: SegmentedOption) => {
   if (isReadonly.value || option.disabled) return;

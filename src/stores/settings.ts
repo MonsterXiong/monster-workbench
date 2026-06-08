@@ -4,7 +4,7 @@ import { isTauriRuntime } from "../services/runtime";
 import { configService } from "../services/config.service";
 import { systemService } from "../services/system.service";
 import { useAppStore } from "./app";
-import { parseBoolean, parseEnum, safeJsonParseObject, safeJsonStringify } from "../utils";
+import { firstOf, parseBoolean, parseEnum, safeJsonParseObject, safeJsonStringify } from "../utils";
 
 export type ThemeMode = "light" | "dark" | "system";
 export type SettingsBackupResult = "desktop" | "browser" | "cancelled";
@@ -157,7 +157,7 @@ export const useSettingStore = defineStore("settings", () => {
       });
       if (!selected) return "cancelled";
 
-      const filePath = Array.isArray(selected) ? selected[0] : selected;
+      const filePath = firstOf(selected);
       await systemService.importDatabase(filePath);
       return "desktop";
     }

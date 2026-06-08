@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, useId, watch, type CSSProperties } from "vue";
 import { useI18n } from "../../composables/useI18n";
-import { clampNumber } from "../../utils";
+import { clampNumber, hasItem } from "../../utils";
 
 type Side = "left" | "right";
 type ThreeColumnLayoutSize = "sm" | "md" | "lg";
@@ -178,7 +178,7 @@ const collapse = (side: Side) => {
 const resizeByKeyboard = (side: Side, event: KeyboardEvent) => {
   if (props.disabled) return;
   const keys = ["ArrowLeft", "ArrowRight", "Home", "End"];
-  if (!keys.includes(event.key)) return;
+  if (!hasItem(keys, event.key)) return;
   event.preventDefault();
 
   if (side === "left") {

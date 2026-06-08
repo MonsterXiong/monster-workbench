@@ -1,14 +1,22 @@
 import { ensureBrowserMessage } from "./runtime";
 import {
-  compactArray,
+  drop,
+  filterByOptionalValues,
   filterBySearchTextFields,
+  findByValue,
+  findIndexByValue,
+  formatIsoDateTime,
   getNextNumberBy,
+  mapValuesToArray,
   paginateArray,
+  removeByValue,
+  removeByValues,
   safeJsonStringify,
   sortByMany,
+  take,
   tryJsonParse,
   tryJsonParseObject,
-  uniqueArray,
+  uniqueMappedValues,
 } from "../utils";
 
 // 内存式模拟数据库，支持基础的新增、列表、删除功能，实现高度自治的浏览器离线体验
@@ -88,8 +96,10 @@ const MOCK_IMAGE_DATA_URL =
   "data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%201024%201024%22%3E%3Cdefs%3E%3ClinearGradient%20id%3D%22g%22%20x1%3D%220%22%20x2%3D%221%22%20y1%3D%220%22%20y2%3D%221%22%3E%3Cstop%20stop-color%3D%22%2310b981%22/%3E%3Cstop%20offset%3D%221%22%20stop-color%3D%22%232563eb%22/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect%20width%3D%221024%22%20height%3D%221024%22%20rx%3D%2280%22%20fill%3D%22url(%23g)%22/%3E%3Ccircle%20cx%3D%22512%22%20cy%3D%22440%22%20r%3D%22140%22%20fill%3D%22white%22%20opacity%3D%22.88%22/%3E%3Crect%20x%3D%22272%22%20y%3D%22616%22%20width%3D%22480%22%20height%3D%2272%22%20rx%3D%2236%22%20fill%3D%22white%22%20opacity%3D%22.88%22/%3E%3Ctext%20x%3D%22512%22%20y%3D%22804%22%20text-anchor%3D%22middle%22%20font-family%3D%22Arial%2Csans-serif%22%20font-size%3D%2256%22%20font-weight%3D%22700%22%20fill%3D%22white%22%3EMock%20Image%3C/text%3E%3C/svg%3E";
 
 function trimMockAiTasks() {
-  const tasks = Array.from(mockAiTasks.values()).sort((left, right) => right.createdAtMs - left.createdAtMs);
-  for (const task of tasks.slice(MOCK_AI_TASK_LIMIT)) {
+  const tasks = sortByMany(mapValuesToArray(mockAiTasks), [
+    { getValue: (task) => task.createdAtMs, direction: "desc" },
+  ]);
+  for (const task of drop(tasks, MOCK_AI_TASK_LIMIT)) {
     mockAiTasks.delete(task.requestId);
   }
 }
@@ -221,9 +231,9 @@ export async function mockCallTauri<T = unknown>(
       }) as T;
 
     case "list_ai_provider_test_tasks":
-      return Array.from(mockAiTasks.values())
-        .sort((left, right) => right.createdAtMs - left.createdAtMs)
-        .slice(0, 40) as T;
+      return take(sortByMany(mapValuesToArray(mockAiTasks), [
+        { getValue: (task) => task.createdAtMs, direction: "desc" },
+      ]), MOCK_AI_TASK_LIMIT) as T;
 
     case "get_ai_provider_queue_status":
       return mockAiQueueStatus as T;
@@ -255,18 +265,12 @@ export async function mockCallTauri<T = unknown>(
         (item) => item.title,
         (item) => item.description,
         (item) => item.url,
-      ]).filter(item => {
-        if (category && item.category !== category) {
-          return false;
-        }
-        if (isFeatured !== undefined && isFeatured !== null && item.is_featured !== isFeatured) {
-          return false;
-        }
-        if (isHot !== undefined && isHot !== null && item.is_hot !== isHot) {
-          return false;
-        }
-        return true;
-      });
+      ]);
+      filtered = filterByOptionalValues(filtered, [
+        { getValue: (item) => item.category, value: category },
+        { getValue: (item) => item.is_featured, value: isFeatured },
+        { getValue: (item) => item.is_hot, value: isHot },
+      ]);
 
       // 排序：sort_order 升序，clicks 降序
       filtered = sortByMany(filtered, [
@@ -300,7 +304,7 @@ export async function mockCallTauri<T = unknown>(
         is_featured: newItem.is_featured || 0,
         is_hot: newItem.is_hot || 0,
         clicks: 0,
-        created_at: new Date().toISOString().replace("T", " ").substring(0, 19),
+        created_at: formatIsoDateTime(new Date(), " "),
         logo_path: newItem.logo_path || null,
         bg_path: newItem.bg_path || null,
         sort_order: nextSortOrder
@@ -310,7 +314,7 @@ export async function mockCallTauri<T = unknown>(
 
     case "update_navigation": {
       const updateItem = args.item as any;
-      const idx = navigationsStore.findIndex(i => i.id === updateItem.id);
+      const idx = findIndexByValue(navigationsStore, (item) => item.id, updateItem.id);
       if (idx !== -1) {
         navigationsStore[idx] = {
           ...navigationsStore[idx],
@@ -329,19 +333,19 @@ export async function mockCallTauri<T = unknown>(
 
     case "delete_navigation": {
       const deleteId = args.id as number;
-      navigationsStore = navigationsStore.filter(i => i.id !== deleteId);
+      navigationsStore = removeByValue(navigationsStore, (item) => item.id, deleteId);
       return null as T;
     }
 
     case "batch_delete_navigation": {
       const deleteIds = args.ids as number[];
-      navigationsStore = navigationsStore.filter(i => !deleteIds.includes(i.id));
+      navigationsStore = removeByValues(navigationsStore, (item) => item.id, deleteIds);
       return null as T;
     }
 
     case "increment_navigation_clicks": {
       const clickId = args.id as number;
-      const item = navigationsStore.find(i => i.id === clickId);
+      const item = findByValue(navigationsStore, (navigation) => navigation.id, clickId);
       if (item) {
         item.clicks += 1;
       }
@@ -349,8 +353,7 @@ export async function mockCallTauri<T = unknown>(
     }
 
     case "get_navigation_categories": {
-      const cats = uniqueArray(compactArray(navigationsStore.map(i => i.category)));
-      return cats as T;
+      return uniqueMappedValues(navigationsStore, (item) => item.category) as T;
     }
 
     case "migrate_navigation_category": {
@@ -367,7 +370,7 @@ export async function mockCallTauri<T = unknown>(
     case "save_navigation_sort_order": {
       const orders = args.orders as any[];
       orders.forEach(o => {
-        const item = navigationsStore.find(i => i.id === o.id);
+        const item = findByValue(navigationsStore, (navigation) => navigation.id, o.id);
         if (item) {
           item.sort_order = o.sort_order;
         }

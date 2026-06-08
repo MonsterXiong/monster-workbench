@@ -1,4 +1,15 @@
-import { createStableHashId, getTextAfterLogLevel, hasLogLevel, safeJsonParseObject, safeJsonStringify, splitOnce } from "../utils";
+import {
+  createStableHashId,
+  getCurrentIsoString,
+  getTextAfterLogLevel,
+  hasLogLevel,
+  isNonNullable,
+  objectKeys,
+  safeJsonParseObject,
+  safeJsonStringify,
+  splitOnce,
+  toReversedArray,
+} from "../utils";
 
 export type ErrorReviewStatus = "pending" | "needs_review" | "resolved";
 
@@ -25,7 +36,7 @@ const STORAGE_KEY = "monster-workbench-error-monitor-review";
 const DETAIL_SEPARATOR = " | Details: ";
 
 function getNowIsoString(): string {
-  return new Date().toISOString();
+  return getCurrentIsoString();
 }
 
 function readReviewMap(): Record<string, ErrorReviewRecord> {
@@ -131,7 +142,7 @@ function attachReviewState(entries: ErrorMonitorEntry[]) {
     return entry;
   });
 
-  if (Object.keys(currentReviewMap).length !== Object.keys(nextReviewMap).length) {
+  if (objectKeys(currentReviewMap).length !== objectKeys(nextReviewMap).length) {
     writeReviewMap(nextReviewMap);
   }
 
@@ -140,10 +151,11 @@ function attachReviewState(entries: ErrorMonitorEntry[]) {
 
 export const errorMonitorService = {
   buildEntries(logLines: string[]) {
-    const entries = logLines
-      .map((line) => parseErrorLine(line))
-      .filter((entry): entry is ErrorMonitorEntry => entry !== null)
-      .reverse();
+    const entries = toReversedArray(
+      logLines
+        .map((line) => parseErrorLine(line))
+        .filter(isNonNullable)
+    );
 
     return attachReviewState(entries);
   },

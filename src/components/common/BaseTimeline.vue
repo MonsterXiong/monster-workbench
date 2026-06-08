@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
+import { toReversedArray } from "../../utils";
 
 type TimelineType = "primary" | "success" | "warning" | "danger" | "neutral";
 type TimelineSize = "sm" | "md" | "lg";
@@ -50,7 +51,7 @@ defineSlots<{
   actions?: (props: { item: TimelineItem; index: number }) => any;
 }>();
 
-const renderedItems = computed(() => (props.reverse ? [...props.items].reverse() : props.items));
+const renderedItems = computed(() => (props.reverse ? toReversedArray(props.items) : props.items));
 
 const canSelect = (item: TimelineItem) => props.clickable && !item.disabled;
 

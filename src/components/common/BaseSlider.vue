@@ -235,7 +235,11 @@ const handleKeydown = (event: KeyboardEvent) => {
 
 .base-slider__control {
   @apply relative z-[2] h-6 w-full appearance-none bg-transparent;
+  border: 0;
+  color: transparent;
   cursor: pointer;
+  outline: none;
+  -webkit-appearance: none;
 }
 
 .base-slider__control:disabled {
@@ -255,6 +259,30 @@ const handleKeydown = (event: KeyboardEvent) => {
   @apply outline-none;
 }
 
+.base-slider__control::-webkit-slider-runnable-track {
+  width: 100%;
+  height: 24px;
+  border: 0;
+  background: transparent;
+  color: transparent;
+  box-shadow: none;
+}
+
+.base-slider__control::-moz-range-track {
+  width: 100%;
+  height: 24px;
+  border: 0;
+  background: transparent;
+  color: transparent;
+  box-shadow: none;
+}
+
+.base-slider__control::-moz-range-progress {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
 .base-slider:focus-within .base-slider__track {
   box-shadow: 0 0 0 3px rgba(var(--color-primary), 0.15);
 }
@@ -269,6 +297,7 @@ const handleKeydown = (event: KeyboardEvent) => {
 
 .base-slider__control::-webkit-slider-thumb {
   appearance: none;
+  -webkit-appearance: none;
   width: 16px;
   height: 16px;
   border-radius: 999px;

@@ -2,6 +2,7 @@
 import { ref, watch, nextTick } from "vue";
 import { RefreshCw, Download, Send, Trash2 } from "lucide-vue-next";
 import { useI18n } from "../../../composables/useI18n";
+import { getLogLevelFromText } from "../../../utils";
 
 const { t } = useI18n();
 
@@ -34,9 +35,10 @@ watch(
 
 // 终端行高亮配色
 function getLineColorClass(line: string): string {
-  if (line.includes("[ERROR]")) return "text-rose-600 dark:text-red-400 font-extrabold";
-  if (line.includes("[WARN]")) return "text-amber-600 dark:text-amber-400 font-semibold";
-  if (line.includes("[DEBUG]")) return "text-slate-500 dark:text-slate-500 font-medium";
+  const level = getLogLevelFromText(line);
+  if (level === "ERROR") return "text-rose-600 dark:text-red-400 font-extrabold";
+  if (level === "WARN") return "text-amber-600 dark:text-amber-400 font-semibold";
+  if (level === "DEBUG") return "text-slate-500 dark:text-slate-500 font-medium";
   return "text-slate-700 dark:text-sky-300";
 }
 </script>

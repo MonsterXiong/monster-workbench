@@ -2,6 +2,7 @@
 import { computed } from "vue";
 import BaseIcon from "./BaseIcon.vue";
 import { useI18n } from "../../composables/useI18n";
+import { hasItem } from "../../utils";
 
 export interface BaseTableColumn {
   key: string;
@@ -58,7 +59,7 @@ const getRowKey = (row: any, index: number) => {
   return index;
 };
 
-const isRowSelected = (row: any, index: number) => props.selectedKeys.includes(getRowKey(row, index));
+const isRowSelected = (row: any, index: number) => hasItem(props.selectedKeys, getRowKey(row, index));
 </script>
 
 <template>

@@ -2,6 +2,7 @@ import { defineStore } from "pinia";
 import { ref } from "vue";
 import { taskService } from "../services/task.service";
 import type { TauriUnlistenFn } from "../services/native-event.service";
+import { findByValue, hasByValue, removeByValue } from "../utils";
 
 export interface TaskItem {
   id: string;
@@ -16,7 +17,7 @@ export const useTaskStore = defineStore("task", () => {
   let unlistenTaskProgress: TauriUnlistenFn | null = null;
 
   const addTask = (id: string, name: string) => {
-    if (tasks.value.some((t) => t.id === id)) return;
+    if (hasByValue(tasks.value, (task) => task.id, id)) return;
     tasks.value.push({
       id,
       name,
@@ -32,7 +33,7 @@ export const useTaskStore = defineStore("task", () => {
     status: "running" | "success" | "failed",
     message: string
   ) => {
-    const task = tasks.value.find((t) => t.id === id);
+    const task = findByValue(tasks.value, (item) => item.id, id);
     if (task) {
       task.progress = progress;
       task.status = status;
@@ -41,7 +42,7 @@ export const useTaskStore = defineStore("task", () => {
   };
 
   const removeTask = (id: string) => {
-    tasks.value = tasks.value.filter((t) => t.id !== id);
+    tasks.value = removeByValue(tasks.value, (task) => task.id, id);
   };
 
   // 初始化监听底座主动广播的任务变化

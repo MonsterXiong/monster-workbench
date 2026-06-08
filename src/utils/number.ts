@@ -2,6 +2,10 @@ export interface ClampOptions {
   precision?: number;
 }
 
+export function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
 export function toFiniteNumber(value: unknown, fallback = 0): number {
   const numericValue = typeof value === "number" ? value : Number(value);
   return Number.isFinite(numericValue) ? numericValue : fallback;

@@ -26,6 +26,19 @@ const actionMenuItems = [
   { key: "delete", label: "删除组件", description: "危险操作需要确认。", icon: "Trash2", type: "danger" as const, divided: true },
 ];
 
+const longActionMenuItems = [
+  { key: "open", label: "打开详情", description: "进入组件详情页。", icon: "ExternalLink" },
+  { key: "pin", label: "固定到顶部", description: "加入常用操作。", icon: "Pin" },
+  { key: "copy", label: "复制名称", description: "写入剪贴板。", icon: "Copy", shortcut: "Ctrl C" },
+  { key: "duplicate", label: "创建副本", description: "复制当前配置。", icon: "CopyPlus" },
+  { key: "rename", label: "重命名", description: "更新组件显示名。", icon: "Pencil" },
+  { key: "tag", label: "添加标签", description: "补充检索标签。", icon: "Tag" },
+  { key: "export", label: "导出配置", description: "生成 JSON 配置。", icon: "Download" },
+  { key: "archive", label: "归档组件", description: "移入历史列表。", icon: "Archive" },
+  { key: "disabled", label: "暂不可用", description: "等待权限开放。", icon: "Lock", disabled: true },
+  { key: "delete", label: "删除组件", description: "危险操作需要确认。", icon: "Trash2", type: "danger" as const, divided: true },
+];
+
 const handleCommandSelect = (command: { label: string }) => {
   selectedCommand.value = command.label;
   triggerToast(`已选择命令：${command.label}`, "success");
@@ -75,13 +88,35 @@ const handleConfirmAction = (label: string) => {
             <BaseActionMenu :actions="actionMenuItems" icon="Settings2" aria-label="设置动作" />
           </div>
         </BasePanel>
+
+        <BasePanel title="智能定位" subtitle="贴近容器边缘时会自动夹住弹层，避免被视口裁切。">
+          <div class="action-edge-demo">
+            <div class="action-edge-demo__row">
+              <BaseActionMenu :actions="actionMenuItems" label="左上" align="left" placement="auto" />
+              <BaseActionMenu :actions="actionMenuItems" label="右上" placement="auto" />
+            </div>
+            <div class="action-edge-demo__row action-edge-demo__row--bottom">
+              <BaseActionMenu :actions="actionMenuItems" label="左下" align="left" placement="auto" />
+              <BaseActionMenu :actions="actionMenuItems" label="右下" placement="auto" />
+            </div>
+          </div>
+        </BasePanel>
+
+        <BasePanel title="长菜单与单开" subtitle="长列表限制高度并滚动；连续打开多个菜单时只保留当前一个。">
+          <div class="action-row">
+            <BaseActionMenu :actions="longActionMenuItems" label="长菜单" :max-height="220" />
+            <BaseActionMenu :actions="actionMenuItems" label="菜单 A" />
+            <BaseActionMenu :actions="actionMenuItems" label="菜单 B" align="left" />
+            <BaseActionMenu :actions="actionMenuItems" icon="SlidersHorizontal" aria-label="更多设置" />
+          </div>
+        </BasePanel>
       </div>
     </PlaygroundDemoSection>
   </section>
 
   <section v-else-if="activeComponentKey === 'toolbar'" class="detail-stack">
     <PlaygroundDemoSection title="工具栏" subtitle="统一页面、表格、编辑器顶部的左中右操作组。" icon="Wrench">
-      <BaseToolbar aria-label="组件编辑工具栏">
+      <BaseToolbar aria-label="组件编辑工具栏" size="lg" divided left-label="上下文" main-label="编辑动作" right-label="发布动作">
         <template #left>
           <BaseBadge type="primary">组件库</BaseBadge>
           <BaseButton type="neutral" size="sm">返回</BaseButton>
@@ -100,16 +135,79 @@ const handleConfirmAction = (label: string) => {
         </template>
       </BaseToolbar>
 
-      <BaseToolbar compact :wrap="false" aria-label="紧凑工具栏">
+      <BaseToolbar compact :wrap="false" aria-label="紧凑滚动工具栏" surface="muted">
         <template #left>
           <BaseStatusDot type="success" label="已同步" description="刚刚" />
         </template>
         <BaseButton type="ghost" size="sm">复制</BaseButton>
         <BaseButton type="ghost" size="sm">导出</BaseButton>
+        <BaseButton type="ghost" size="sm">归档</BaseButton>
+        <BaseButton type="ghost" size="sm">同步</BaseButton>
         <template #right>
           <BaseActionMenu :actions="actionMenuItems" />
         </template>
       </BaseToolbar>
+
+      <div class="demo-grid">
+        <BasePanel title="嵌入式工具栏" subtitle="plain 表面适合放进卡片正文、抽屉或侧栏。">
+          <BaseToolbar surface="plain" justify="start" main-align="start" aria-label="嵌入式工具栏">
+            <template #left>
+              <BaseBadge type="neutral" variant="outline">Plain</BaseBadge>
+            </template>
+            <BaseButton type="neutral" size="sm">筛选</BaseButton>
+            <BaseButton type="neutral" size="sm">排序</BaseButton>
+            <BaseButton type="primary" size="sm">应用</BaseButton>
+          </BaseToolbar>
+        </BasePanel>
+
+        <BasePanel title="吸顶工具栏" subtitle="列表或长表单滚动时可保持操作入口稳定。">
+          <div class="toolbar-scroll-demo">
+            <BaseToolbar sticky surface="muted" compact aria-label="吸顶工具栏">
+              <template #left>
+                <BaseBadge type="primary" variant="outline">Sticky</BaseBadge>
+              </template>
+              <BaseButton type="neutral" size="sm">刷新</BaseButton>
+              <template #right>
+                <BaseButton type="primary" size="sm">保存</BaseButton>
+              </template>
+            </BaseToolbar>
+            <BaseList
+              class="mt-3"
+              :items="[
+                { id: 'a', title: '字段配置', meta: '8' },
+                { id: 'b', title: '展示设置', meta: '6' },
+                { id: 'c', title: '权限策略', meta: '4' },
+                { id: 'd', title: '审计日志', meta: '12' },
+              ]"
+              variant="plain"
+              simple
+              :bordered="false"
+            />
+          </div>
+        </BasePanel>
+      </div>
+
+      <div class="demo-grid">
+        <BaseToolbar loading loading-text="保存工具栏状态" aria-label="加载工具栏">
+          <template #left>
+            <BaseBadge type="warning">保存中</BaseBadge>
+          </template>
+          <BaseButton type="neutral" size="sm">撤销</BaseButton>
+          <template #right>
+            <BaseButton type="primary" size="sm">保存</BaseButton>
+          </template>
+        </BaseToolbar>
+
+        <BaseToolbar disabled surface="muted" aria-label="禁用工具栏">
+          <template #left>
+            <BaseBadge type="neutral">只读</BaseBadge>
+          </template>
+          <BaseButton type="neutral" size="sm">编辑</BaseButton>
+          <template #right>
+            <BaseButton type="primary" size="sm">提交</BaseButton>
+          </template>
+        </BaseToolbar>
+      </div>
     </PlaygroundDemoSection>
   </section>
 
@@ -193,5 +291,21 @@ const handleConfirmAction = (label: string) => {
 
 .action-row {
   @apply flex min-w-0 flex-wrap items-center gap-2;
+}
+
+.action-edge-demo {
+  @apply flex min-h-[220px] flex-col justify-between rounded-lg border border-dashed border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950;
+}
+
+.action-edge-demo__row {
+  @apply flex items-center justify-between gap-2;
+}
+
+.action-edge-demo__row--bottom {
+  @apply items-end;
+}
+
+.toolbar-scroll-demo {
+  @apply h-48 overflow-auto rounded-xl border border-slate-200 bg-slate-50 p-2 dark:border-slate-800 dark:bg-slate-950;
 }
 </style>

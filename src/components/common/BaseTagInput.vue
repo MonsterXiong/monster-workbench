@@ -2,7 +2,7 @@
 import { computed, ref, useId } from "vue";
 import { Plus, X } from "lucide-vue-next";
 import { useI18n } from "../../composables/useI18n";
-import { lastItem, mergeLimitedUniqueItems, removeFirstMatching, splitBySeparators } from "../../utils";
+import { hasItem, includesAnyText, lastItem, mergeLimitedUniqueItems, removeByValue, removeFirstMatching, splitBySeparators } from "../../utils";
 
 interface Props {
   modelValue: string[];
@@ -83,14 +83,14 @@ const removeTag = (tag: string) => {
   if (isReadonly.value) return;
   const nextTags = props.allowDuplicates
     ? removeFirstMatching(props.modelValue, (item) => item === tag)
-    : props.modelValue.filter((item) => item !== tag);
+    : removeByValue(props.modelValue, (item) => item, tag);
   emit("update:modelValue", nextTags);
   emit("change", nextTags);
   emit("remove", tag);
 };
 
 const handleKeydown = (event: KeyboardEvent) => {
-  if (event.key === "Enter" || props.separators.includes(event.key)) {
+  if (event.key === "Enter" || hasItem(props.separators, event.key)) {
     event.preventDefault();
     addTag();
   }
@@ -102,7 +102,7 @@ const handleKeydown = (event: KeyboardEvent) => {
 
 const handlePaste = (event: ClipboardEvent) => {
   const text = event.clipboardData?.getData("text") || "";
-  if (!text || !props.separators.some((separator) => text.includes(separator))) return;
+  if (!text || !includesAnyText(text, props.separators, { trimKeyword: false })) return;
   event.preventDefault();
   mergeTags(splitDraft(text));
 };

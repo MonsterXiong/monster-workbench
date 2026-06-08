@@ -6,6 +6,7 @@ import { useToast } from "../../../composables/useToast";
 import { useConfirm } from "../../../composables/useConfirm";
 import { useLoading } from "../../../composables/useLoading";
 import { useSystemStore } from "../../../stores/system";
+import { getLogLevelFromText } from "../../../utils";
 
 const { triggerToast } = useToast();
 const { confirm } = useConfirm();
@@ -33,6 +34,17 @@ const dbStatusText = computed(() => {
 });
 
 // 加载日志
+function getDiagnosticLogClass(log: string) {
+  const level = getLogLevelFromText(log);
+
+  return {
+    "text-red-600 dark:text-red-400 bg-red-500/5": level === "ERROR",
+    "text-amber-600 dark:text-amber-400 bg-amber-500/5": level === "WARN",
+    "text-blue-600 dark:text-blue-400 bg-blue-500/5": level === "DEBUG",
+    "text-slate-600 dark:text-slate-300 hover:bg-slate-200/40 dark:hover:bg-slate-900": level !== "ERROR" && level !== "WARN" && level !== "DEBUG",
+  };
+}
+
 async function loadLogs() {
   try {
     await systemStore.fetchLogs();
@@ -192,12 +204,7 @@ onMounted(async () => {
           v-for="(log, idx) in recentLogLines"
           :key="idx"
           class="p-1 rounded transition-colors whitespace-pre-wrap leading-normal"
-          :class="{
-            'text-red-600 dark:text-red-400 bg-red-500/5': log.includes('[ERROR]'),
-            'text-amber-600 dark:text-amber-400 bg-amber-500/5': log.includes('[WARN]'),
-            'text-blue-600 dark:text-blue-400 bg-blue-500/5': log.includes('[DEBUG]'),
-            'text-slate-600 dark:text-slate-300 hover:bg-slate-200/40 dark:hover:bg-slate-900': !log.includes('[ERROR]') && !log.includes('[WARN]') && !log.includes('[DEBUG]')
-          }"
+          :class="getDiagnosticLogClass(log)"
         >
           {{ log }}
         </div>

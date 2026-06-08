@@ -4,7 +4,7 @@ import { Clock, RefreshCw, Copy } from "lucide-vue-next";
 import { storeToRefs } from "pinia";
 import { useToolsStore } from "../../../stores/tools";
 import { useI18n } from "../../../composables/useI18n";
-import { formatDate, getCurrentUnixTimestamp, normalizeUnixTimestamp, parseDateInput, toDate, toUnixTimestamp } from "../../../utils";
+import { formatDate, getCurrentUnixTimestamp, parseDateInput, parseUnixTimestampInput, splitOnce, toUnixTimestamp } from "../../../utils";
 
 const emit = defineEmits<{
   (e: "copy", text: string): void;
@@ -51,13 +51,7 @@ function handleConvertTsToDate() {
     return;
   }
   try {
-    const rawVal = normalizeUnixTimestamp(Number(timestampConverter.value.timestampInput.trim()));
-    if (rawVal === null) {
-      tsOutput.value = t("tools.timestamp.invalidTsError");
-      hasTsError.value = true;
-      return;
-    }
-    const date = toDate(rawVal * 1000);
+    const date = parseUnixTimestampInput(timestampConverter.value.timestampInput);
     if (!date) {
       tsOutput.value = t("tools.timestamp.invalidTsError");
       hasTsError.value = true;
@@ -165,7 +159,7 @@ function handleUseCurrentTs() {
             size="xs"
             class="text-blue-650 dark:text-blue-450 hover:text-blue-800 transition shrink-0 mt-0.5 !p-1 h-auto min-h-0"
             :title="t('tools.timestamp.copyBtnTitle')"
-            @click="emit('copy', dateOutput.split(' ')[0])"
+            @click="emit('copy', splitOnce(dateOutput, ' ').before)"
           >
             <template #icon><Copy class="h-3.5 w-3.5" /></template>
           </BaseButton>

@@ -6,6 +6,9 @@ import {
   getFileExtensionWithDot,
   getSafeFileName,
   getYearMonthPath,
+  equalsIgnoreCase,
+  normalizeStringKey,
+  objectEntries,
   safeJsonParse,
   safeJsonStringifyPretty,
   tryJsonParseObject,
@@ -218,7 +221,7 @@ export const systemService = {
         keysToRemove.forEach(k => localStorage.removeItem(k));
 
         const backup = backupResult.data;
-        Object.entries(backup).forEach(([key, val]) => {
+        objectEntries(backup).forEach(([key, val]) => {
           localStorage.setItem(key, val);
         });
 
@@ -247,8 +250,7 @@ export const systemService = {
   async isProcessRunning(name: string): Promise<boolean> {
     if (!isTauriRuntime()) {
       // 浏览器 Mock 环境下，判断特定名字是否占用
-      const lowercaseName = name.toLowerCase();
-      return ["monster-tools.exe", "nginx.exe", "node.exe"].includes(lowercaseName);
+      return ["monster-tools.exe", "nginx.exe", "node.exe"].includes(normalizeStringKey(name));
     }
     return callTauri<boolean>("is_process_running", { name });
   },
@@ -256,14 +258,13 @@ export const systemService = {
   async findProcessByName(name: string): Promise<ProcessInstanceInfo[]> {
     if (!isTauriRuntime()) {
       console.log("[Browser Mock] Query process name instances:", name);
-      const lowercaseName = name.toLowerCase();
-      if (lowercaseName === "nginx.exe") {
+      if (equalsIgnoreCase(name, "nginx.exe")) {
         return [
           { name: "nginx.exe", pid: 1024, session_name: "Console", session_num: 1, mem_usage: "7,688 K" },
           { name: "nginx.exe", pid: 2048, session_name: "Console", session_num: 1, mem_usage: "12,140 K" }
         ];
       }
-      if (lowercaseName === "monster-tools.exe") {
+      if (equalsIgnoreCase(name, "monster-tools.exe")) {
         return [
           { name: "monster-tools.exe", pid: 9912, session_name: "Services", session_num: 0, mem_usage: "45,820 K" }
         ];

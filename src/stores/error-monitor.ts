@@ -5,7 +5,7 @@ import {
   type ErrorMonitorEntry,
   type ErrorReviewStatus,
 } from "../services/error-monitor.service";
-import { countBy, countWhere } from "../utils";
+import { countBy, countWhere, filterByValue, findByValue } from "../utils";
 
 export type { ErrorMonitorEntry, ErrorReviewStatus };
 
@@ -24,7 +24,7 @@ export const useErrorMonitorStore = defineStore("error-monitor", () => {
       return entries.value;
     }
 
-    return entries.value.filter((entry) => entry.status === statusFilter.value);
+    return filterByValue(entries.value, (entry) => entry.status, statusFilter.value);
   });
 
   const syncFromLogLines = (logLines: string[]) => {
@@ -37,7 +37,7 @@ export const useErrorMonitorStore = defineStore("error-monitor", () => {
 
   const updateEntryStatus = (fingerprint: string, status: ErrorReviewStatus) => {
     const statusUpdatedAt = errorMonitorService.updateReviewStatus(fingerprint, status);
-    const target = entries.value.find((entry) => entry.fingerprint === fingerprint);
+    const target = findByValue(entries.value, (entry) => entry.fingerprint, fingerprint);
     if (target) {
       target.status = status;
       target.statusUpdatedAt = statusUpdatedAt;

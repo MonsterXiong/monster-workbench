@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, useId } from "vue";
-import { findNextCircularItem, firstItem, lastItem } from "../../utils";
+import { filterByFalsyValue, findNextCircularItem, firstItem, lastItem } from "../../utils";
 
 export interface RadioOption {
   label: string;
@@ -39,7 +39,7 @@ const emit = defineEmits<{
 
 const groupId = useId();
 const isReadonly = computed(() => props.disabled || props.readonly);
-const enabledOptions = computed(() => props.options.filter((option) => !option.disabled));
+const enabledOptions = computed(() => filterByFalsyValue(props.options, (option) => option.disabled));
 
 const currentValue = computed({
   get: () => props.modelValue,

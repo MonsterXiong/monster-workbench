@@ -20,6 +20,7 @@ interface Props {
   decrementLabel?: string;
   incrementLabel?: string;
   size?: "sm" | "md" | "lg";
+  block?: boolean;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -37,6 +38,7 @@ const props = withDefaults(defineProps<Props>(), {
   decrementLabel: "",
   incrementLabel: "",
   size: "md",
+  block: false,
 });
 
 const emit = defineEmits<{
@@ -63,9 +65,13 @@ const clamp = (nextValue: number) => {
 
 const formatText = (value: number) => {
   const normalizedValue = clamp(value);
-  const valueText = props.formatValue ? formatNumber(normalizedValue) : String(normalizedValue);
-  return props.unit ? `${valueText} ${props.unit}` : valueText;
+  return props.formatValue ? formatNumber(normalizedValue) : String(normalizedValue);
 };
+
+const resolvedValueText = computed(() => {
+  const valueText = formatText(props.modelValue);
+  return props.unit ? `${valueText} ${props.unit}` : valueText;
+});
 
 const syncInputText = () => {
   inputText.value = formatText(props.modelValue);
@@ -137,7 +143,7 @@ watch(
     class="base-number-input"
     :class="[
       `base-number-input--${size}`,
-      { 'is-disabled': disabled, 'is-readonly': readonly, 'is-error': error, 'has-unit': unit }
+      { 'is-disabled': disabled, 'is-readonly': readonly, 'is-error': error, 'has-unit': unit, 'base-number-input--block': block }
     ]"
   >
     <button
@@ -163,7 +169,7 @@ watch(
       :aria-valuemin="Number.isFinite(min) ? min : undefined"
       :aria-valuemax="Number.isFinite(max) ? max : undefined"
       :aria-valuenow="modelValue"
-      :aria-valuetext="unit ? `${modelValue} ${unit}` : String(modelValue)"
+      :aria-valuetext="resolvedValueText"
       @input="handleInput"
       @blur="handleBlur"
       @focus="emit('focus', $event)"
@@ -189,12 +195,24 @@ watch(
   @apply inline-flex h-9 min-w-32 items-center overflow-hidden rounded-xl border border-slate-300 bg-slate-50 shadow-sm transition-all dark:border-slate-700 dark:bg-slate-950;
 }
 
+.base-number-input--block {
+  @apply flex w-full min-w-0;
+}
+
 .base-number-input--sm {
   @apply h-8 min-w-28;
 }
 
+.base-number-input--sm.base-number-input--block {
+  @apply min-w-0;
+}
+
 .base-number-input--lg {
   @apply h-10 min-w-36;
+}
+
+.base-number-input--lg.base-number-input--block {
+  @apply min-w-0;
 }
 
 .base-number-input:focus-within {

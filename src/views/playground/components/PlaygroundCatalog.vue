@@ -57,6 +57,8 @@ const emit = defineEmits<{
           label-key="title"
           :active-key="activeComponentKey"
           clickable
+          simple
+          :bordered="false"
           @item-click="(component: ComponentEntry) => emit('select-component', component.key)"
         />
       </div>
@@ -136,15 +138,7 @@ const emit = defineEmits<{
 }
 
 .component-list {
-  @apply my-1 ml-1 space-y-1 rounded-xl border border-slate-200 bg-slate-50/70 p-1 dark:border-slate-800 dark:bg-slate-950/70;
+  @apply my-1 ml-1 space-y-0.5 rounded-xl border border-slate-200 bg-slate-50/70 p-1 dark:border-slate-800 dark:bg-slate-950/70;
   width: calc(100% - 0.25rem);
-}
-
-.component-list :deep(.base-list--plain.base-list--xs .base-list__item) {
-  @apply rounded-lg;
-}
-
-.component-list :deep(.base-list__label) {
-  @apply text-[11px];
 }
 </style>

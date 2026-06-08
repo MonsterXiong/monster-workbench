@@ -2,7 +2,34 @@ import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 import { aiService } from "../services/ai.service";
 import { configService } from "../services/config.service";
-import { clampNumber, createTimestampId, findLastItem, safeJsonParseObject, safeJsonStringify, sleep } from "../utils";
+import {
+  arrayIfArray,
+  clampNumber,
+  countWhere,
+  createTimestampId,
+  equalsIgnoreCase,
+  filterByValue,
+  filterByValues,
+  findByValue,
+  findLastItem,
+  hasByValue,
+  keySetBy,
+  mapToMap,
+  mapArrayIfArray,
+  objectKeys,
+  removeByValue,
+  removeByValues,
+  replaceByValue,
+  safeJsonParseObject,
+  safeJsonStringify,
+  sleep,
+  sortByMany,
+  take,
+  truncateText,
+  toReversedArray,
+  toTrimmedString,
+  updateByValue,
+} from "../utils";
 import type {
   AiActiveConfigIds,
   AiConversationSession,
@@ -12,6 +39,7 @@ import type {
   AiPromptInput,
   AiPromptLibrary,
   AiPromptType,
+  AiProviderSavedFile,
   AiProviderTestAction,
   AiProviderTestQueueItem,
   AiProviderTestResult,
@@ -27,6 +55,9 @@ const PROMPT_LIBRARY_KEY = "aiPromptLibrary";
 const TASK_POLL_INTERVAL_MS = 600;
 const TASK_POLL_RECOVERY_SLACK_MS = 30_000;
 const LOCAL_FINISHED_TASK_LIMIT = 40;
+const IMAGE_REQUEST_TIMEOUT_MS = 600_000;
+const IMAGE_SIDECAR_TIMEOUT_SLACK_MS = 15_000;
+const IMAGE_STALE_TIMEOUT_MS = IMAGE_REQUEST_TIMEOUT_MS + IMAGE_SIDECAR_TIMEOUT_SLACK_MS + TASK_POLL_RECOVERY_SLACK_MS;
 const SUPPORTED_IMAGE_SIZES = new Set([
   "1024x1024",
   "1008x1792",
@@ -40,9 +71,37 @@ const SUPPORTED_IMAGE_SIZES = new Set([
   "2048x1536",
   "1344x2016",
   "2016x1344",
+  "2000x1600",
+  "1600x2000",
+  "2000x1200",
+  "1200x2000",
+  "2048x1024",
+  "1024x2048",
+  "2048x1104",
+  "2048x864",
   "2048x880",
-  "3840x2160",
+  "880x2048",
+  "2048x688",
+  "688x2048",
+  "2880x2880",
   "2160x3840",
+  "3840x2160",
+  "2160x2880",
+  "2880x2160",
+  "2304x3456",
+  "3456x2304",
+  "2880x2304",
+  "2304x2880",
+  "3600x2160",
+  "2160x3600",
+  "3840x1920",
+  "1920x3840",
+  "3840x2080",
+  "3840x1616",
+  "3840x1648",
+  "1648x3840",
+  "3840x1280",
+  "1280x3840",
 ]);
 
 const providerDefaults: Record<AiProviderType, Pick<AiProviderConfig, "displayName" | "baseUrl" | "model">> = {
@@ -79,7 +138,7 @@ const defaultConfig: AiProviderConfig = {
   imageModel: "gpt-image-2",
   imagePrompt: "生成一张简洁的蓝色机器人图标，白色背景。",
   imageSize: "1024x1024",
-  timeoutMs: 285000,
+  timeoutMs: IMAGE_REQUEST_TIMEOUT_MS,
 };
 
 const currentTime = () => Date.now();
@@ -189,13 +248,13 @@ function createId(prefix: string) {
 }
 
 function normalizeImageSize(value: unknown) {
-  const size = String(value || "").trim();
+  const size = toTrimmedString(value);
   return SUPPORTED_IMAGE_SIZES.has(size) ? size : defaultConfig.imageSize;
 }
 
 function normalizeMessageStatus(message: Record<string, unknown>) {
   const createdAt = Number(message?.createdAt || currentTime());
-  if (message?.status === "pending" && currentTime() - createdAt > 5 * 60 * 1000) {
+  if (message?.status === "pending" && currentTime() - createdAt > IMAGE_STALE_TIMEOUT_MS) {
     return "failed";
   }
   return message?.status === "failed" ? "failed" : message?.status === "pending" ? "pending" : "success";
@@ -214,7 +273,7 @@ function normalizeConfig(raw: Partial<AiProviderConfig> | null | undefined): AiP
   const provider = (raw?.provider && raw.provider in providerDefaults ? raw.provider : "custom") as AiProviderType;
   const preset = providerDefaults[provider];
   const rawTimeoutMs = Number(raw?.timeoutMs || defaultConfig.timeoutMs);
-  const timeoutMs = rawTimeoutMs === 20000 ? defaultConfig.timeoutMs : rawTimeoutMs;
+  const timeoutMs = rawTimeoutMs === 20000 || rawTimeoutMs === 285000 ? defaultConfig.timeoutMs : rawTimeoutMs;
 
   return {
     ...defaultConfig,
@@ -224,14 +283,14 @@ function normalizeConfig(raw: Partial<AiProviderConfig> | null | undefined): AiP
     displayName: raw?.displayName || preset.displayName,
     baseUrl: raw?.baseUrl || preset.baseUrl,
     model: raw?.model || preset.model,
-    timeoutMs: clampNumber(timeoutMs, 3000, 300000, defaultConfig.timeoutMs, 0),
+    timeoutMs: clampNumber(timeoutMs, 3000, IMAGE_REQUEST_TIMEOUT_MS, defaultConfig.timeoutMs, 0),
   };
 }
 
 function normalizeModelConfig(raw: Partial<AiModelConfig | AiProviderConfig> | null | undefined): AiModelConfig {
   const timestamp = currentTime();
   const normalized = normalizeConfig(raw);
-  const name = String((raw as Partial<AiModelConfig> | undefined)?.name || normalized.displayName || "AI Model").trim();
+  const name = toTrimmedString((raw as Partial<AiModelConfig> | undefined)?.name || normalized.displayName || "AI Model", "AI Model");
   return {
     ...normalized,
     id: String((raw as Partial<AiModelConfig> | undefined)?.id || createId("ai-model")),
@@ -283,31 +342,33 @@ function normalizeActiveConfigIds(raw: Partial<AiActiveConfigIds> | null | undef
 }
 
 function normalizeSessions(raw: unknown, configIds: Set<string>, fallbackConfigId: string): AiConversationSession[] {
-  if (!Array.isArray(raw)) {
+  const rawSessions = arrayIfArray<Record<string, unknown>>(raw);
+  if (!rawSessions) {
     return [];
   }
 
-  return raw
+  return rawSessions
     .map((session) => {
       const type: AiPromptType = session?.type === "image" ? "image" : "chat";
       const modelConfigId = configIds.has(String(session?.modelConfigId)) ? String(session.modelConfigId) : fallbackConfigId;
       const timestamp = Number(session?.createdAt || currentTime());
-      const messages = Array.isArray(session?.messages)
-        ? session.messages.map((message: Record<string, unknown>) => ({
-            id: String(message?.id || createId("ai-message")),
-            role: message?.role === "assistant" || message?.role === "error" ? message.role : "user",
-            status: normalizeMessageStatus(message),
-            content: normalizeMessageContent(message),
-            modelConfigId: configIds.has(String(message?.modelConfigId)) ? String(message.modelConfigId) : modelConfigId,
-            model: String(message?.model || ""),
-            error: message?.error ? String(message.error) : undefined,
-            imageSize: message?.imageSize ? normalizeImageSize(message.imageSize) : undefined,
-            imageUrls: Array.isArray(message?.imageUrls) ? message.imageUrls.map(String) : undefined,
-            imagePaths: Array.isArray(message?.imagePaths) ? message.imagePaths.map(String) : undefined,
-            savedFiles: Array.isArray(message?.savedFiles) ? message.savedFiles : undefined,
-            createdAt: Number(message?.createdAt || timestamp),
-          }))
-        : [];
+      const messages = mapArrayIfArray<Record<string, unknown>, AiConversationSession["messages"][number]>(
+        session?.messages,
+        (message) => ({
+          id: String(message?.id || createId("ai-message")),
+          role: message?.role === "assistant" || message?.role === "error" ? message.role : "user",
+          status: normalizeMessageStatus(message),
+          content: normalizeMessageContent(message),
+          modelConfigId: configIds.has(String(message?.modelConfigId)) ? String(message.modelConfigId) : modelConfigId,
+          model: String(message?.model || ""),
+          error: message?.error ? String(message.error) : undefined,
+          imageSize: message?.imageSize ? normalizeImageSize(message.imageSize) : undefined,
+          imageUrls: mapArrayIfArray(message?.imageUrls, String),
+          imagePaths: mapArrayIfArray(message?.imagePaths, String),
+          savedFiles: arrayIfArray<AiProviderSavedFile>(message?.savedFiles),
+          createdAt: Number(message?.createdAt || timestamp),
+        })
+      ) ?? [];
 
       return {
         id: String(session?.id || createId("ai-session")),
@@ -330,12 +391,12 @@ function normalizePromptLibrary(raw: Partial<AiPromptLibrary> | null | undefined
     createdAt: category.createdAt || timestamp,
     updatedAt: category.updatedAt || timestamp,
   }));
-  const rawCategories = Array.isArray(raw?.categories) ? raw.categories : [];
+  const rawCategories = arrayIfArray<Partial<AiPromptLibrary["categories"][number]>>(raw?.categories) ?? [];
   const categories = rawCategories
     .map((category) => ({
       id: String(category?.id || createId("prompt-category")),
       type: normalizePromptType(category?.type),
-      name: String(category?.name || "").trim(),
+      name: toTrimmedString(category?.name),
       createdAt: Number(category?.createdAt || timestamp),
       updatedAt: Number(category?.updatedAt || timestamp),
     }))
@@ -347,12 +408,12 @@ function normalizePromptLibrary(raw: Partial<AiPromptLibrary> | null | undefined
     }
   }
 
-  const categoryIds = new Set(categories.map((category) => category.id));
+  const categoryIds = keySetBy(categories, (category) => category.id);
   const firstCategoryByType = (type: AiPromptType) =>
-    categories.find((category) => category.type === type)?.id ||
-    baseCategories.find((category) => category.type === type)?.id ||
+    findByValue(categories, (category) => category.type, type)?.id ||
+    findByValue(baseCategories, (category) => category.type, type)?.id ||
     "";
-  const defaultCategoryById = new Map(defaultPromptLibrary.categories.map((category) => [category.id, category]));
+  const defaultCategoryById = mapToMap(defaultPromptLibrary.categories, (category) => category.id, (category) => category);
   const fallbackCategoryId = (fallback: AiPromptLibrary["prompts"][number]) => {
     if (categoryIds.has(fallback.categoryId)) {
       return fallback.categoryId;
@@ -365,7 +426,7 @@ function normalizePromptLibrary(raw: Partial<AiPromptLibrary> | null | undefined
       : null;
     return matchedCategory?.id || firstCategoryByType(fallback.type);
   };
-  const rawPrompts = Array.isArray(raw?.prompts) ? raw.prompts : [];
+  const rawPrompts = arrayIfArray<Partial<AiPromptLibrary["prompts"][number]>>(raw?.prompts) ?? [];
   const prompts = rawPrompts
     .map((prompt) => {
       const type = normalizePromptType(prompt?.type);
@@ -374,8 +435,8 @@ function normalizePromptLibrary(raw: Partial<AiPromptLibrary> | null | undefined
         id: String(prompt?.id || createId("prompt")),
         type,
         categoryId: categoryIds.has(categoryId) ? categoryId : firstCategoryByType(type),
-        title: String(prompt?.title || "").trim(),
-        content: String(prompt?.content || "").trim(),
+        title: toTrimmedString(prompt?.title),
+        content: toTrimmedString(prompt?.content),
         createdAt: Number(prompt?.createdAt || timestamp),
         updatedAt: Number(prompt?.updatedAt || timestamp),
       };
@@ -428,7 +489,7 @@ export const useAiStore = defineStore("ai", () => {
   });
 
   const providerOptions = computed(() =>
-    (Object.keys(providerDefaults) as AiProviderType[]).map((provider) => ({
+    objectKeys(providerDefaults).map((provider) => ({
       label: providerDefaults[provider].displayName,
       value: provider,
     }))
@@ -443,16 +504,20 @@ export const useAiStore = defineStore("ai", () => {
   const activeChatConfig = computed(() => getModelConfig(activeModelConfigIds.value.chat));
   const activeImageConfig = computed(() => getModelConfig(activeModelConfigIds.value.image));
   const chatSessions = computed(() =>
-    sessions.value.filter((session) => session.type === "chat").sort((left, right) => right.updatedAt - left.updatedAt)
+    sortByMany(filterByValue(sessions.value, (session) => session.type, "chat"), [
+      { getValue: (session) => session.updatedAt, direction: "desc" },
+    ])
   );
   const imageSessions = computed(() =>
-    sessions.value.filter((session) => session.type === "image").sort((left, right) => right.updatedAt - left.updatedAt)
+    sortByMany(filterByValue(sessions.value, (session) => session.type, "image"), [
+      { getValue: (session) => session.updatedAt, direction: "desc" },
+    ])
   );
   const activeChatSession = computed(() => getActiveSession("chat"));
   const activeImageSession = computed(() => getActiveSession("image"));
-  const activeQueueItem = computed(() => testQueue.value.find((item) => item.status === "running") ?? null);
-  const pendingQueueCount = computed(
-    () => testQueue.value.filter((item) => item.status === "queued" || item.status === "running").length
+  const activeQueueItem = computed(() => findByValue(testQueue.value, (item) => item.status, "running") ?? null);
+  const pendingQueueCount = computed(() =>
+    countWhere(testQueue.value, (item) => item.status === "queued" || item.status === "running")
   );
   const promptTypeOptions = computed(() => [
     { label: "对话", value: "chat" },
@@ -468,7 +533,7 @@ export const useAiStore = defineStore("ai", () => {
   }
 
   function getModelConfig(configId: string) {
-    return modelConfigs.value.find((item) => item.id === configId) ?? modelConfigs.value[0] ?? normalizeModelConfig(defaultConfig);
+    return findByValue(modelConfigs.value, (item) => item.id, configId) ?? modelConfigs.value[0] ?? normalizeModelConfig(defaultConfig);
   }
 
   function syncEditableConfig(configId = selectedConfigId.value) {
@@ -534,10 +599,10 @@ export const useAiStore = defineStore("ai", () => {
   }
 
   async function deleteSession(sessionId: string) {
-    const session = sessions.value.find((item) => item.id === sessionId);
-    sessions.value = sessions.value.filter((item) => item.id !== sessionId);
+    const session = findByValue(sessions.value, (item) => item.id, sessionId);
+    sessions.value = removeByValue(sessions.value, (item) => item.id, sessionId);
     if (session && activeSessionIds.value[session.type] === sessionId) {
-      activeSessionIds.value[session.type] = sessions.value.find((item) => item.type === session.type)?.id || "";
+      activeSessionIds.value[session.type] = findByValue(sessions.value, (item) => item.type, session.type)?.id || "";
     }
     await persistAiState();
   }
@@ -547,17 +612,17 @@ export const useAiStore = defineStore("ai", () => {
     if (!nextTitle) {
       throw new Error("会话名称不能为空");
     }
-    const session = sessions.value.find((item) => item.id === sessionId);
+    const session = findByValue(sessions.value, (item) => item.id, sessionId);
     if (!session) {
       throw new Error("会话不存在或已被删除");
     }
-    session.title = nextTitle.slice(0, 48);
+    session.title = truncateText(nextTitle, 48, "");
     session.updatedAt = currentTime();
     await persistAiState();
   }
 
   async function duplicateSession(sessionId: string) {
-    const session = sessions.value.find((item) => item.id === sessionId);
+    const session = findByValue(sessions.value, (item) => item.id, sessionId);
     if (!session) {
       throw new Error("会话不存在或已被删除");
     }
@@ -565,7 +630,7 @@ export const useAiStore = defineStore("ai", () => {
     const copy: AiConversationSession = {
       ...session,
       id: createId("ai-session"),
-      title: `${session.title} 副本`.slice(0, 48),
+      title: truncateText(`${session.title} 副本`, 48, ""),
       createdAt: timestamp,
       updatedAt: timestamp,
       messages: session.messages.map((message) => ({
@@ -586,7 +651,7 @@ export const useAiStore = defineStore("ai", () => {
   ) {
     session.messages.push(message);
     if (session.messages.length === 1 && message.content.trim()) {
-      session.title = message.content.trim().slice(0, 24);
+      session.title = truncateText(message.content.trim(), 24, "");
     }
     session.updatedAt = currentTime();
   }
@@ -595,15 +660,13 @@ export const useAiStore = defineStore("ai", () => {
     messageId: string,
     patch: Partial<AiConversationSession["messages"][number]>
   ) {
-    const session = sessions.value.find((item) => item.messages.some((message) => message.id === messageId));
+    const session = sessions.value.find((item) => hasByValue(item.messages, (message) => message.id, messageId));
     if (!session) {
       return null;
     }
-    session.messages = session.messages.map((message) =>
-      message.id === messageId ? { ...message, ...patch } : message
-    );
+    session.messages = updateByValue(session.messages, (message) => message.id, messageId, (message) => ({ ...message, ...patch }));
     session.updatedAt = currentTime();
-    return session.messages.find((message) => message.id === messageId) ?? null;
+    return findByValue(session.messages, (message) => message.id, messageId) ?? null;
   }
 
   async function typewriterMessage(message: AiConversationSession["messages"][number], content: string) {
@@ -664,7 +727,7 @@ export const useAiStore = defineStore("ai", () => {
     if (modelConfigs.value.length <= 1) {
       throw new Error("至少保留一套模型配置");
     }
-    modelConfigs.value = modelConfigs.value.filter((item) => item.id !== configId);
+    modelConfigs.value = removeByValue(modelConfigs.value, (item) => item.id, configId);
     const fallbackId = modelConfigs.value[0].id;
     if (selectedConfigId.value === configId) {
       syncEditableConfig(fallbackId);
@@ -686,7 +749,7 @@ export const useAiStore = defineStore("ai", () => {
   function getTaskPollTimeoutMs(action: AiProviderTestAction, configSnapshot: AiProviderConfig) {
     const requestTimeoutMs =
       action === "image"
-        ? clampNumber(configSnapshot.timeoutMs, 285_000, 285_000, 285_000, 0) + 15_000
+        ? IMAGE_REQUEST_TIMEOUT_MS + IMAGE_SIDECAR_TIMEOUT_SLACK_MS
         : clampNumber(configSnapshot.timeoutMs, 3_000, 60_000, defaultConfig.timeoutMs, 0);
     const queueTimeoutMs =
       action === "image"
@@ -723,13 +786,12 @@ export const useAiStore = defineStore("ai", () => {
   }
 
   function trimLocalTestQueue() {
-    const pendingItems = testQueue.value.filter((item) => item.status === "queued" || item.status === "running");
-    const finishedItems = testQueue.value
-      .filter((item) => item.status !== "queued" && item.status !== "running")
-      .sort((left, right) => (right.finishedAt ?? right.createdAt) - (left.finishedAt ?? left.createdAt))
-      .slice(0, LOCAL_FINISHED_TASK_LIMIT);
+    const pendingItems = filterByValues(testQueue.value, (item) => item.status, ["queued", "running"]);
+    const finishedItems = take(sortByMany(removeByValues(testQueue.value, (item) => item.status, ["queued", "running"]), [
+      { getValue: (item) => item.finishedAt ?? item.createdAt, direction: "desc" },
+    ]), LOCAL_FINISHED_TASK_LIMIT);
 
-    testQueue.value = [...pendingItems, ...finishedItems].sort((left, right) => left.createdAt - right.createdAt);
+    testQueue.value = sortByMany([...pendingItems, ...finishedItems], [{ getValue: (item) => item.createdAt }]);
   }
 
   function syncLocalQueueWithBackendStatus() {
@@ -738,7 +800,7 @@ export const useAiStore = defineStore("ai", () => {
       ...backendQueueStatus.value.queued,
     ];
     for (const backendItem of backendItems) {
-      if (testQueue.value.some((item) => item.id === backendItem.requestId)) {
+      if (hasByValue(testQueue.value, (item) => item.id, backendItem.requestId)) {
         continue;
       }
 
@@ -752,7 +814,7 @@ export const useAiStore = defineStore("ai", () => {
     }
 
     const runningRequestId = backendQueueStatus.value.running?.requestId ?? null;
-    const queuedRequestIds = new Set(backendQueueStatus.value.queued.map((item) => item.requestId));
+    const queuedRequestIds = keySetBy(backendQueueStatus.value.queued, (item) => item.requestId);
 
     for (const item of testQueue.value) {
       if (item.status !== "queued" && item.status !== "running") {
@@ -774,7 +836,7 @@ export const useAiStore = defineStore("ai", () => {
   function applyBackendTask(task: AiProviderTestTask, item?: AiProviderTestQueueItem) {
     const queueItem =
       item ??
-      testQueue.value.find((candidate) => candidate.id === task.requestId) ??
+      findByValue(testQueue.value, (candidate) => candidate.id, task.requestId) ??
       ({
         id: task.requestId,
         action: task.action,
@@ -782,7 +844,7 @@ export const useAiStore = defineStore("ai", () => {
         createdAt: Number(task.createdAtMs),
       } satisfies AiProviderTestQueueItem);
 
-    if (!testQueue.value.some((candidate) => candidate.id === queueItem.id)) {
+    if (!hasByValue(testQueue.value, (candidate) => candidate.id, queueItem.id)) {
       testQueue.value.push(queueItem);
     }
 
@@ -839,7 +901,7 @@ export const useAiStore = defineStore("ai", () => {
       backendQueueStatus.value = await aiService.getProviderQueueStatus();
       syncLocalQueueWithBackendStatus();
       const recentTasks = await aiService.listProviderTestTasks();
-      for (const task of [...recentTasks].reverse()) {
+      for (const task of toReversedArray(recentTasks)) {
         applyBackendTask(task);
       }
       updateTestingState();
@@ -849,14 +911,12 @@ export const useAiStore = defineStore("ai", () => {
   }
 
   async function cancelBackendQueuedTests() {
-    const queuedRequestIds = testQueue.value
-      .filter((item) => item.status === "queued")
-      .map((item) => item.id);
+    const queuedRequestIds = filterByValue(testQueue.value, (item) => item.status, "queued").map((item) => item.id);
     const cancelled = await aiService.cancelProviderQueuedTests();
     await refreshBackendQueueStatus();
     await Promise.allSettled(
       queuedRequestIds.map(async (requestId) => {
-        const item = testQueue.value.find((candidate) => candidate.id === requestId);
+        const item = findByValue(testQueue.value, (candidate) => candidate.id, requestId);
         try {
           const task = await aiService.getProviderTestTask(requestId);
           applyBackendTask(task, item);
@@ -877,7 +937,7 @@ export const useAiStore = defineStore("ai", () => {
   async function cancelBackendQueuedTest(requestId: string) {
     const cancelled = await aiService.cancelProviderTestTask(requestId);
     await refreshBackendQueueStatus();
-    const item = testQueue.value.find((candidate) => candidate.id === requestId);
+    const item = findByValue(testQueue.value, (candidate) => candidate.id, requestId);
     if (!cancelled) {
       return false;
     }
@@ -905,7 +965,7 @@ export const useAiStore = defineStore("ai", () => {
         parsed[MODEL_CONFIGS_KEY],
         parsed[CONFIG_KEY] as Partial<AiProviderConfig> | null | undefined
       );
-      const configIds = new Set(modelConfigs.value.map((item) => item.id));
+      const configIds = keySetBy(modelConfigs.value, (item) => item.id);
       const fallbackId = modelConfigs.value[0].id;
       const activeIds = normalizeActiveConfigIds(
         parsed[ACTIVE_MODEL_CONFIGS_KEY] as Partial<AiActiveConfigIds> | null | undefined,
@@ -919,8 +979,8 @@ export const useAiStore = defineStore("ai", () => {
       syncEditableConfig(selectedConfigId.value);
       sessions.value = normalizeSessions(parsed[SESSIONS_KEY], configIds, fallbackId);
       activeSessionIds.value = {
-        chat: sessions.value.find((session) => session.type === "chat")?.id || "",
-        image: sessions.value.find((session) => session.type === "image")?.id || "",
+        chat: findByValue(sessions.value, (session) => session.type, "chat")?.id || "",
+        image: findByValue(sessions.value, (session) => session.type, "image")?.id || "",
       };
       promptLibrary.value = normalizePromptLibrary(parsed[PROMPT_LIBRARY_KEY] as Partial<AiPromptLibrary> | null | undefined);
     } catch (err) {
@@ -959,7 +1019,7 @@ export const useAiStore = defineStore("ai", () => {
       name: patch.displayName ? String(patch.displayName) : current.name || next.displayName,
       updatedAt: currentTime(),
     };
-    modelConfigs.value = modelConfigs.value.map((item) => (item.id === current.id ? updated : item));
+    modelConfigs.value = replaceByValue(modelConfigs.value, (item) => item.id, current.id, updated);
     config.value = toProviderConfig(updated);
     if (!isTesting.value) {
       testResult.value = null;
@@ -980,7 +1040,7 @@ export const useAiStore = defineStore("ai", () => {
   }
 
   function getPromptCategories(type: AiPromptType) {
-    return promptLibrary.value.categories.filter((category) => category.type === type);
+    return filterByValue(promptLibrary.value.categories, (category) => category.type, type);
   }
 
   function getPromptCategoryOptions(type: AiPromptType) {
@@ -991,9 +1051,8 @@ export const useAiStore = defineStore("ai", () => {
   }
 
   function getPromptOptions(type: AiPromptType) {
-    const categoryNameMap = new Map(promptLibrary.value.categories.map((category) => [category.id, category.name]));
-    return promptLibrary.value.prompts
-      .filter((prompt) => prompt.type === type)
+    const categoryNameMap = mapToMap(promptLibrary.value.categories, (category) => category.id, (category) => category.name);
+    return filterByValue(promptLibrary.value.prompts, (prompt) => prompt.type, type)
       .map((prompt) => ({
         label: `${prompt.title} · ${categoryNameMap.get(prompt.categoryId) || "未分类"}`,
         value: prompt.id,
@@ -1007,7 +1066,7 @@ export const useAiStore = defineStore("ai", () => {
   }
 
   function findPrompt(promptId: string) {
-    return promptLibrary.value.prompts.find((prompt) => prompt.id === promptId) ?? null;
+    return findByValue(promptLibrary.value.prompts, (prompt) => prompt.id, promptId) ?? null;
   }
 
   function ensurePromptCategory(type: AiPromptType, name: string) {
@@ -1017,7 +1076,7 @@ export const useAiStore = defineStore("ai", () => {
     }
 
     const existing = promptLibrary.value.categories.find(
-      (category) => category.type === type && category.name.toLowerCase() === normalizedName.toLowerCase()
+      (category) => category.type === type && equalsIgnoreCase(category.name, normalizedName)
     );
     if (existing) {
       return existing.id;
@@ -1059,7 +1118,7 @@ export const useAiStore = defineStore("ai", () => {
         ensurePromptCategory(input.type, input.type === "image" ? "通用生图" : "通用对话");
 
     if (input.id) {
-      const existing = promptLibrary.value.prompts.find((prompt) => prompt.id === input.id);
+      const existing = findByValue(promptLibrary.value.prompts, (prompt) => prompt.id, input.id);
       if (existing) {
         existing.type = input.type;
         existing.categoryId = categoryId;
@@ -1086,7 +1145,7 @@ export const useAiStore = defineStore("ai", () => {
   }
 
   async function deletePrompt(promptId: string) {
-    promptLibrary.value.prompts = promptLibrary.value.prompts.filter((prompt) => prompt.id !== promptId);
+    promptLibrary.value.prompts = removeByValue(promptLibrary.value.prompts, (prompt) => prompt.id, promptId);
     await savePromptLibrary();
   }
 
@@ -1358,7 +1417,7 @@ export const useAiStore = defineStore("ai", () => {
   }
 
   function clearFinishedTests() {
-    testQueue.value = testQueue.value.filter((item) => item.status === "queued" || item.status === "running");
+    testQueue.value = filterByValues(testQueue.value, (item) => item.status, ["queued", "running"]);
   }
 
   function resetTestQueue() {

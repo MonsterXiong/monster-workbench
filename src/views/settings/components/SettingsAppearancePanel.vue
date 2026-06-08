@@ -3,6 +3,7 @@ import { LayoutPanelLeft, Type, PanelBottom, Palette } from "lucide-vue-next";
 import { useI18n } from "../../../composables/useI18n";
 import type { LayoutPrefs } from "../../../stores/app";
 import { useSettingStore } from "../../../stores/settings";
+import { applyObjectPatch } from "../../../utils";
 
 const { t } = useI18n();
 const settingsStore = useSettingStore();
@@ -16,10 +17,7 @@ const emit = defineEmits<{
 }>();
 
 function patchPrefs(patch: Partial<LayoutPrefs>) {
-  emit("update:modelValue", {
-    ...props.modelValue,
-    ...patch,
-  });
+  emit("update:modelValue", applyObjectPatch(props.modelValue, patch));
 }
 </script>
 

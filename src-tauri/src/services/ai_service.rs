@@ -236,12 +236,15 @@ impl AiProviderService {
             .map(|stderr| spawn_limited_output_reader(stderr, SIDECAR_STDERR_MAX_BYTES, "stderr"));
 
         let request_timeout_ms = if action == "image" {
-            config.timeout_ms.clamp(285_000, 285_000)
+            config.timeout_ms.clamp(
+                AI_PROVIDER_IMAGE_REQUEST_TIMEOUT_MS,
+                AI_PROVIDER_IMAGE_REQUEST_TIMEOUT_MS,
+            )
         } else {
             config.timeout_ms.clamp(3_000, 60_000)
         };
         let timeout_ms = if action == "image" {
-            request_timeout_ms + 15_000
+            request_timeout_ms + AI_PROVIDER_IMAGE_SIDECAR_TIMEOUT_SLACK_MS
         } else {
             request_timeout_ms
         };
@@ -402,6 +405,8 @@ const AI_PROVIDER_TEST_QUEUE_LIMIT: usize = 8;
 const AI_PROVIDER_TEST_QUEUE_WAIT_TIMEOUT: Duration = Duration::from_secs(90);
 const AI_PROVIDER_IMAGE_QUEUE_WAIT_SLACK: Duration = Duration::from_secs(30);
 const AI_PROVIDER_FINISHED_TASK_LIMIT: usize = 40;
+const AI_PROVIDER_IMAGE_REQUEST_TIMEOUT_MS: u64 = 600_000;
+const AI_PROVIDER_IMAGE_SIDECAR_TIMEOUT_SLACK_MS: u64 = 15_000;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -670,8 +675,13 @@ fn annotate_queue_item(mut item: AiProviderQueueItem, now_ms: u128) -> AiProvide
 
 fn provider_test_queue_wait_timeout(action: &str, config: &AiProviderConfig) -> Duration {
     if action == "image" {
-        let request_timeout_ms = config.timeout_ms.clamp(285_000, 285_000);
-        let sidecar_timeout = Duration::from_millis(request_timeout_ms + 15_000);
+        let request_timeout_ms = config.timeout_ms.clamp(
+            AI_PROVIDER_IMAGE_REQUEST_TIMEOUT_MS,
+            AI_PROVIDER_IMAGE_REQUEST_TIMEOUT_MS,
+        );
+        let sidecar_timeout = Duration::from_millis(
+            request_timeout_ms + AI_PROVIDER_IMAGE_SIDECAR_TIMEOUT_SLACK_MS,
+        );
         return (sidecar_timeout + AI_PROVIDER_IMAGE_QUEUE_WAIT_SLACK) * AI_PROVIDER_TEST_QUEUE_LIMIT as u32;
     }
 
@@ -1132,13 +1142,18 @@ mod queue_tests {
 
     #[test]
     fn image_queue_wait_timeout_covers_long_running_image_slots() {
-        let config = test_config(300_000);
+        let config = test_config(AI_PROVIDER_IMAGE_REQUEST_TIMEOUT_MS);
         let wait_timeout = provider_test_queue_wait_timeout("image", &config);
 
         assert!(wait_timeout > AI_PROVIDER_TEST_QUEUE_WAIT_TIMEOUT);
         assert_eq!(
             wait_timeout,
-            (Duration::from_millis(300_000) + AI_PROVIDER_IMAGE_QUEUE_WAIT_SLACK)
+            (
+                Duration::from_millis(
+                    AI_PROVIDER_IMAGE_REQUEST_TIMEOUT_MS
+                        + AI_PROVIDER_IMAGE_SIDECAR_TIMEOUT_SLACK_MS
+                ) + AI_PROVIDER_IMAGE_QUEUE_WAIT_SLACK
+            )
                 * AI_PROVIDER_TEST_QUEUE_LIMIT as u32
         );
     }
@@ -1693,9 +1708,37 @@ fn validate_provider_config(config: &AiProviderConfig, action: &str) -> AppResul
                 | "2048x1536"
                 | "1344x2016"
                 | "2016x1344"
+                | "2000x1600"
+                | "1600x2000"
+                | "2000x1200"
+                | "1200x2000"
+                | "2048x1024"
+                | "1024x2048"
+                | "2048x1104"
+                | "2048x864"
                 | "2048x880"
-                | "3840x2160"
+                | "880x2048"
+                | "2048x688"
+                | "688x2048"
+                | "2880x2880"
                 | "2160x3840"
+                | "3840x2160"
+                | "2160x2880"
+                | "2880x2160"
+                | "2304x3456"
+                | "3456x2304"
+                | "2880x2304"
+                | "2304x2880"
+                | "3600x2160"
+                | "2160x3600"
+                | "3840x1920"
+                | "1920x3840"
+                | "3840x2080"
+                | "3840x1616"
+                | "3840x1648"
+                | "1648x3840"
+                | "3840x1280"
+                | "1280x3840"
         ) {
             return Err(AppError::Config("不支持的生图尺寸".to_string()));
         }

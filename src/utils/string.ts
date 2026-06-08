@@ -6,6 +6,15 @@ export function trimToEmpty(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
+export function toTrimmedString(value: unknown, fallback = ""): string {
+  if (value === undefined || value === null) {
+    return fallback;
+  }
+
+  const text = String(value).trim();
+  return text || fallback;
+}
+
 export function normalizeWhitespace(value: string): string {
   return value.replace(/\s+/g, " ").trim();
 }
@@ -40,6 +49,22 @@ export interface SplitOnceResult {
 export interface IncludesAnyTextOptions {
   ignoreCase?: boolean;
   trimKeyword?: boolean;
+}
+
+function normalizeTextListMatchValue(value: string, ignoreCase: boolean): string {
+  return ignoreCase ? value.toLowerCase() : value;
+}
+
+function normalizeTextListMatchNeedle(value: string, options: Required<IncludesAnyTextOptions>): string {
+  const normalizedValue = options.trimKeyword ? value.trim() : value;
+  return options.ignoreCase ? normalizedValue.toLowerCase() : normalizedValue;
+}
+
+function getTextListMatchOptions(options: IncludesAnyTextOptions): Required<IncludesAnyTextOptions> {
+  return {
+    ignoreCase: options.ignoreCase ?? false,
+    trimKeyword: options.trimKeyword ?? true,
+  };
 }
 
 export function splitLines(value: string, options: SplitLinesOptions = {}): string[] {
@@ -163,18 +188,47 @@ export function includesIgnoreCase(value: string, keyword: string): boolean {
 }
 
 export function includesAnyText(value: string, keywords: readonly string[], options: IncludesAnyTextOptions = {}): boolean {
-  const ignoreCase = options.ignoreCase ?? false;
-  const trimKeyword = options.trimKeyword ?? true;
-  const normalizedValue = ignoreCase ? value.toLowerCase() : value;
+  const matchOptions = getTextListMatchOptions(options);
+  const normalizedValue = normalizeTextListMatchValue(value, matchOptions.ignoreCase);
 
   return keywords.some((keyword) => {
-    const normalizedKeyword = trimKeyword ? keyword.trim() : keyword;
+    const normalizedKeyword = normalizeTextListMatchNeedle(keyword, matchOptions);
 
     if (!normalizedKeyword) {
       return false;
     }
 
-    return normalizedValue.includes(ignoreCase ? normalizedKeyword.toLowerCase() : normalizedKeyword);
+    return normalizedValue.includes(normalizedKeyword);
+  });
+}
+
+export function includesAllText(value: string, keywords: readonly string[], options: IncludesAnyTextOptions = {}): boolean {
+  const matchOptions = getTextListMatchOptions(options);
+  const normalizedValue = normalizeTextListMatchValue(value, matchOptions.ignoreCase);
+
+  return keywords.every((keyword) => {
+    const normalizedKeyword = normalizeTextListMatchNeedle(keyword, matchOptions);
+    return !normalizedKeyword || normalizedValue.includes(normalizedKeyword);
+  });
+}
+
+export function startsWithAnyText(value: string, prefixes: readonly string[], options: IncludesAnyTextOptions = {}): boolean {
+  const matchOptions = getTextListMatchOptions(options);
+  const normalizedValue = normalizeTextListMatchValue(value, matchOptions.ignoreCase);
+
+  return prefixes.some((prefix) => {
+    const normalizedPrefix = normalizeTextListMatchNeedle(prefix, matchOptions);
+    return Boolean(normalizedPrefix) && normalizedValue.startsWith(normalizedPrefix);
+  });
+}
+
+export function endsWithAnyText(value: string, suffixes: readonly string[], options: IncludesAnyTextOptions = {}): boolean {
+  const matchOptions = getTextListMatchOptions(options);
+  const normalizedValue = normalizeTextListMatchValue(value, matchOptions.ignoreCase);
+
+  return suffixes.some((suffix) => {
+    const normalizedSuffix = normalizeTextListMatchNeedle(suffix, matchOptions);
+    return Boolean(normalizedSuffix) && normalizedValue.endsWith(normalizedSuffix);
   });
 }
 

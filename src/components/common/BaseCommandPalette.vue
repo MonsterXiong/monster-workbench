@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from "vue";
 import { useI18n } from "../../composables/useI18n";
-import { createRandomId, filterBySearchFields, getNextCircularIndex, groupByEntries, normalizeSearchText } from "../../utils";
+import { createRandomId, filterByFalsyValue, filterBySearchFields, getNextCircularIndex, groupByEntries, normalizeSearchText } from "../../utils";
 
 export interface CommandPaletteItem {
   key: string;
@@ -63,7 +63,7 @@ const filteredItems = computed(() => {
     ]);
 });
 
-const enabledItems = computed(() => filteredItems.value.filter((item) => !item.disabled));
+const enabledItems = computed(() => filterByFalsyValue(filteredItems.value, (item) => item.disabled));
 
 const groupedItems = computed(() => {
   return groupByEntries(filteredItems.value, (item) => item.group || t("common.commandPalette.defaultGroup"))

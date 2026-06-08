@@ -12,7 +12,7 @@ const LEVEL_WEIGHTS: Record<LogLevel, number> = {
 };
 
 function getTodayLogFileName(): string {
-  return buildDatedFileName("", "log").replace(/^_/, "");
+  return buildDatedFileName("", "log");
 }
 
 function formatTime(d: Date): string {

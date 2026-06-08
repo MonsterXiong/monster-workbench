@@ -22,6 +22,7 @@ import PlaygroundLayoutDemos from "./components/PlaygroundLayoutDemos.vue";
 import PlaygroundLoadingDemos from "./components/PlaygroundLoadingDemos.vue";
 import PlaygroundNavigationDemos from "./components/PlaygroundNavigationDemos.vue";
 import PlaygroundWorkflowDemos from "./components/PlaygroundWorkflowDemos.vue";
+import { findByValue } from "../../utils";
 
 type ComponentGroupKey =
   | "foundation"
@@ -233,9 +234,9 @@ const playgroundPanes = [
   { key: "detail", size: 82, minSize: 74, maxSize: 86, label: "组件详情" },
 ];
 
-const activeGroup = computed(() => componentGroups.find((group) => group.key === activeGroupKey.value) ?? componentGroups[0]);
+const activeGroup = computed(() => findByValue(componentGroups, (group) => group.key, activeGroupKey.value) ?? componentGroups[0]);
 const activeEntry = computed(
-  () => activeGroup.value.components.find((component) => component.key === activeComponentKey.value) ?? activeGroup.value.components[0]
+  () => findByValue(activeGroup.value.components, (component) => component.key, activeComponentKey.value) ?? activeGroup.value.components[0]
 );
 const hasActiveDemo = computed(() => coveredComponentKeys.includes(activeComponentKey.value));
 
@@ -245,7 +246,7 @@ const detailBreadcrumbs = computed(() => [
 ]);
 
 const selectGroup = (key: string) => {
-  const nextGroup = componentGroups.find((group) => group.key === key);
+  const nextGroup = findByValue(componentGroups, (group) => group.key, key);
   if (!nextGroup) return;
   activeGroupKey.value = nextGroup.key;
   activeComponentKey.value = nextGroup.components[0]?.key ?? "";

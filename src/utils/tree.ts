@@ -6,6 +6,19 @@ export interface FlattenTreeItem<T> {
   path: number[];
 }
 
+export interface TreeFlatListItem<T, K extends PropertyKey> extends FlattenTreeItem<T> {
+  id: K;
+  parentId: K | null;
+}
+
+export type TreeFlatListMeta<T, K extends PropertyKey> = Omit<TreeFlatListItem<T, K>, "node">;
+
+export interface TreeFlatListOptions<T, K extends PropertyKey> {
+  getId: (item: T, meta: Omit<FlattenTreeItem<T>, "node">) => K;
+  getChildren: (item: T) => readonly T[] | undefined;
+  rootParentId?: K | null;
+}
+
 export interface TreeSearchResult<T> extends FlattenTreeItem<T> {
   ancestors: T[];
 }
@@ -15,6 +28,32 @@ export interface ListToTreeOptions<T, K extends PropertyKey, C extends string = 
   getParentId: (item: T) => K | null | undefined;
   childrenKey?: C;
   rootParentIds?: readonly (K | null | undefined)[];
+}
+
+export interface ListTreeIssue<T, K extends PropertyKey> {
+  type: "duplicate-id" | "missing-parent" | "self-parent" | "cycle";
+  id: K;
+  parentId?: K | null | undefined;
+  item: T;
+}
+
+export type ListTreeIssueType = ListTreeIssue<unknown, PropertyKey>["type"];
+
+export type ListTreeIssueGroups<T, K extends PropertyKey> = Record<ListTreeIssueType, Array<ListTreeIssue<T, K>>>;
+
+export interface ListTreeIssueStats {
+  duplicateId: number;
+  missingParent: number;
+  selfParent: number;
+  cycle: number;
+  total: number;
+}
+
+export interface ListTreeDiagnostic<T, K extends PropertyKey> {
+  issues: Array<ListTreeIssue<T, K>>;
+  groups: ListTreeIssueGroups<T, K>;
+  stats: ListTreeIssueStats;
+  hasIssues: boolean;
 }
 
 export type TreeWithChildren<T, C extends string = "children"> = T & {
@@ -48,6 +87,63 @@ export function treeToList<T>(items: readonly T[], getChildren: (item: T) => rea
   return flattenTree(items, getChildren).map((item) => item.node);
 }
 
+export function treeToMappedList<T, R>(
+  items: readonly T[],
+  getChildren: (item: T) => readonly T[] | undefined,
+  mapper: (item: T, meta: Omit<FlattenTreeItem<T>, "node">) => R
+): R[] {
+  return flattenTree(items, getChildren).map(({ node, ...meta }) => mapper(node, meta));
+}
+
+export function treeToFlatList<T, K extends PropertyKey>(
+  items: readonly T[],
+  options: TreeFlatListOptions<T, K>,
+  depth = 0,
+  parent: T | null = null,
+  parentId: K | null = options.rootParentId ?? null,
+  parentPath: number[] = []
+): Array<TreeFlatListItem<T, K>> {
+  return items.flatMap((node, index) => {
+    const path = [...parentPath, index];
+    const meta = { depth, index, parent, path };
+    const id = options.getId(node, meta);
+    const children = options.getChildren(node) ?? [];
+
+    return [
+      { node, ...meta, id, parentId },
+      ...treeToFlatList(children, options, depth + 1, node, id, path),
+    ];
+  });
+}
+
+export function treeToMappedFlatList<T, K extends PropertyKey, R>(
+  items: readonly T[],
+  options: TreeFlatListOptions<T, K>,
+  mapper: (item: T, meta: TreeFlatListMeta<T, K>) => R
+): R[] {
+  return treeToFlatList(items, options).map(({ node, ...meta }) => mapper(node, meta));
+}
+
+export function treeToNodeMap<T, K extends PropertyKey>(items: readonly T[], options: TreeFlatListOptions<T, K>): Map<K, T> {
+  const result = new Map<K, T>();
+
+  for (const item of treeToFlatList(items, options)) {
+    result.set(item.id, item.node);
+  }
+
+  return result;
+}
+
+export function treeToParentIdMap<T, K extends PropertyKey>(items: readonly T[], options: TreeFlatListOptions<T, K>): Map<K, K | null> {
+  const result = new Map<K, K | null>();
+
+  for (const item of treeToFlatList(items, options)) {
+    result.set(item.id, item.parentId);
+  }
+
+  return result;
+}
+
 export function walkTree<T>(
   items: readonly T[],
   visitor: (item: T, meta: Omit<FlattenTreeItem<T>, "node">) => void,
@@ -74,6 +170,10 @@ export function reduceTree<T, R>(
     result = reducer(result, item, meta);
   }, getChildren);
   return result;
+}
+
+export function countTreeNodes<T>(items: readonly T[], getChildren: (item: T) => readonly T[] | undefined): number {
+  return reduceTree(items, (count) => count + 1, 0, getChildren);
 }
 
 export function someTree<T>(
@@ -128,12 +228,49 @@ export function findTreeNode<T>(
   return null;
 }
 
+export function findTreeNodeByValue<T, K>(
+  items: readonly T[],
+  getValue: (item: T, meta: Omit<FlattenTreeItem<T>, "node">) => K,
+  targetValue: K,
+  getChildren: (item: T) => readonly T[] | undefined
+): TreeSearchResult<T> | null {
+  return findTreeNode(items, (item, meta) => getValue(item, meta) === targetValue, getChildren);
+}
+
+export function getTreeNodeByValue<T, K>(
+  items: readonly T[],
+  getValue: (item: T, meta: Omit<FlattenTreeItem<T>, "node">) => K,
+  targetValue: K,
+  getChildren: (item: T) => readonly T[] | undefined
+): T | null {
+  return findTreeNodeByValue(items, getValue, targetValue, getChildren)?.node ?? null;
+}
+
+export function hasTreeNodeByValue<T, K>(
+  items: readonly T[],
+  getValue: (item: T, meta: Omit<FlattenTreeItem<T>, "node">) => K,
+  targetValue: K,
+  getChildren: (item: T) => readonly T[] | undefined
+): boolean {
+  return findTreeNodeByValue(items, getValue, targetValue, getChildren) !== null;
+}
+
 export function getTreeNodePath<T>(
   items: readonly T[],
   predicate: (item: T) => boolean,
   getChildren: (item: T) => readonly T[] | undefined
 ): T[] {
   const match = findTreeNode(items, (item) => predicate(item), getChildren);
+  return match ? [...match.ancestors, match.node] : [];
+}
+
+export function getTreeNodePathByValue<T, K>(
+  items: readonly T[],
+  getValue: (item: T, meta: Omit<FlattenTreeItem<T>, "node">) => K,
+  targetValue: K,
+  getChildren: (item: T) => readonly T[] | undefined
+): T[] {
+  const match = findTreeNodeByValue(items, getValue, targetValue, getChildren);
   return match ? [...match.ancestors, match.node] : [];
 }
 
@@ -217,6 +354,95 @@ export function listToTree<T extends object, K extends PropertyKey, C extends st
   }
 
   return roots;
+}
+
+export function validateListTreeItems<T, K extends PropertyKey>(
+  items: readonly T[],
+  options: Pick<ListToTreeOptions<T, K>, "getId" | "getParentId" | "rootParentIds">
+): Array<ListTreeIssue<T, K>> {
+  const issues: Array<ListTreeIssue<T, K>> = [];
+  const rootParentIds = new Set<K | null | undefined>(options.rootParentIds ?? [null, undefined]);
+  const seenIds = new Set<K>();
+  const itemById = new Map<K, T>();
+  const parentIdById = new Map<K, K | null | undefined>();
+
+  for (const item of items) {
+    const id = options.getId(item);
+    const parentId = options.getParentId(item);
+
+    if (seenIds.has(id)) {
+      issues.push({ type: "duplicate-id", id, parentId, item });
+    } else {
+      seenIds.add(id);
+      itemById.set(id, item);
+      parentIdById.set(id, parentId);
+    }
+  }
+
+  for (const item of items) {
+    const id = options.getId(item);
+    const parentId = options.getParentId(item);
+
+    if (parentId === id) {
+      issues.push({ type: "self-parent", id, parentId, item });
+      continue;
+    }
+
+    if (!rootParentIds.has(parentId) && parentId !== null && parentId !== undefined && !itemById.has(parentId)) {
+      issues.push({ type: "missing-parent", id, parentId, item });
+      continue;
+    }
+
+    const visitedIds = new Set<K>();
+    let currentParentId = parentId;
+
+    while (!rootParentIds.has(currentParentId) && currentParentId !== null && currentParentId !== undefined) {
+      if (currentParentId === id || visitedIds.has(currentParentId)) {
+        issues.push({ type: "cycle", id, parentId, item });
+        break;
+      }
+
+      visitedIds.add(currentParentId);
+      currentParentId = parentIdById.get(currentParentId);
+    }
+  }
+
+  return issues;
+}
+
+export function groupListTreeIssues<T, K extends PropertyKey>(issues: readonly ListTreeIssue<T, K>[]): ListTreeIssueGroups<T, K> {
+  return {
+    "duplicate-id": issues.filter((issue) => issue.type === "duplicate-id"),
+    "missing-parent": issues.filter((issue) => issue.type === "missing-parent"),
+    "self-parent": issues.filter((issue) => issue.type === "self-parent"),
+    cycle: issues.filter((issue) => issue.type === "cycle"),
+  };
+}
+
+export function getListTreeIssueStats<T, K extends PropertyKey>(issues: readonly ListTreeIssue<T, K>[]): ListTreeIssueStats {
+  const groups = groupListTreeIssues(issues);
+
+  return {
+    duplicateId: groups["duplicate-id"].length,
+    missingParent: groups["missing-parent"].length,
+    selfParent: groups["self-parent"].length,
+    cycle: groups.cycle.length,
+    total: issues.length,
+  };
+}
+
+export function diagnoseListTreeItems<T, K extends PropertyKey>(
+  items: readonly T[],
+  options: Pick<ListToTreeOptions<T, K>, "getId" | "getParentId" | "rootParentIds">
+): ListTreeDiagnostic<T, K> {
+  const issues = validateListTreeItems(items, options);
+
+  return {
+    issues,
+    groups: groupListTreeIssues(issues),
+    stats: getListTreeIssueStats(issues),
+    hasIssues: issues.length > 0,
+  };
 }
 
 export function mapTree<T, R>(

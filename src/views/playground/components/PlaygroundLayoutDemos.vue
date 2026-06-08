@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref } from "vue";
 import { useToast } from "../../../composables/useToast";
+import { joinBy } from "../../../utils";
 import PlaygroundDemoSection from "./PlaygroundDemoSection.vue";
 
 defineProps<{
@@ -34,7 +35,7 @@ const pageShellBreadcrumbs = [
 
 type PanelResizePayload = { panes: Array<{ size: number }> };
 
-const formatPanelSummary = (payload: PanelResizePayload) => payload.panes.map((pane) => `${Math.round(pane.size)}%`).join(" / ");
+const formatPanelSummary = (payload: PanelResizePayload) => joinBy(payload.panes, (pane) => `${Math.round(pane.size)}%`, " / ");
 
 const handlePanelResized = (payload: PanelResizePayload) => {
   panelSummary.value = formatPanelSummary(payload);
@@ -498,14 +499,33 @@ const handleCompactThreeColumnResize = (payload: { leftWidth: number; rightWidth
           <BaseStatusDot type="primary" label="Hover / Focus" description="带键盘焦点反馈" />
         </BasePanel>
 
-        <BasePanel title="加载面板" description="保持结构，提示内容正在更新。" icon="LoaderCircle" loading size="sm">
-          <BaseSkeletonCard compact />
+        <BasePanel
+          title="加载面板"
+          description="保持结构，提示内容正在更新。"
+          icon="LoaderCircle"
+          loading
+          loading-text="同步配置"
+          size="sm"
+          body-gap="sm"
+        >
+          <BaseSkeletonCard compact surface="plain" :bordered="false" />
+          <template #footer>
+            <BaseFormActions compact justify="end">
+              <BaseButton type="neutral" size="sm">刷新</BaseButton>
+              <BaseButton type="primary" size="sm">保存</BaseButton>
+            </BaseFormActions>
+          </template>
         </BasePanel>
 
-        <BasePanel title="禁用面板" description="权限不足或上下文不可用。" icon="Lock" disabled size="sm">
+        <BasePanel title="禁用面板" description="权限不足或上下文不可用，正文会统一锁定。" icon="Lock" disabled size="sm" body-gap="sm">
           <BaseFormItem label="继承配置" compact>
-            <BaseInput model-value="系统默认" size="sm" disabled />
+            <BaseInput model-value="系统默认" size="sm" />
           </BaseFormItem>
+          <template #footer>
+            <BaseFormActions compact justify="end">
+              <BaseButton type="primary" size="sm">保存配置</BaseButton>
+            </BaseFormActions>
+          </template>
         </BasePanel>
 
         <BasePanel title="Muted 表面" description="适合次级容器和侧栏。" icon="PanelBottom" surface="muted">
@@ -676,6 +696,24 @@ const handleCompactThreeColumnResize = (payload: { leftWidth: number; rightWidth
             ]"
             compact
           />
+        </BaseFieldGroup>
+
+        <BaseFieldGroup
+          compact
+          title="加载分组"
+          description="异步刷新时保留结构，并锁定内部表单和页脚动作。"
+          icon="LoaderCircle"
+          loading
+          loading-text="加载设置"
+          body-gap="sm"
+        >
+          <BaseSkeletonCard compact surface="plain" :bordered="false" />
+          <template #footer>
+            <BaseFormActions compact justify="end">
+              <BaseButton type="neutral" size="sm">刷新</BaseButton>
+              <BaseButton type="primary" size="sm">保存</BaseButton>
+            </BaseFormActions>
+          </template>
         </BaseFieldGroup>
 
         <BaseFieldGroup compact title="禁用分组" description="整组锁定时内部控件不可编辑。" icon="Lock" disabled>
@@ -1107,7 +1145,7 @@ const handleCompactThreeColumnResize = (payload: { leftWidth: number; rightWidth
 }
 
 .field-group-demo-grid {
-  @apply grid gap-4 lg:grid-cols-2;
+  @apply mt-4 grid gap-4 lg:grid-cols-2;
 }
 
 .page-header-demo-grid {

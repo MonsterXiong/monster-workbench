@@ -4,6 +4,7 @@ import { Check, FilePenLine, Plus, ScrollText, Sparkles, Trash2 } from "lucide-v
 import { useAiStore } from "../../../stores/ai";
 import { useI18n } from "../../../composables/useI18n";
 import { useToast } from "../../../composables/useToast";
+import { findByValue, hasByValue, mapToMap } from "../../../utils";
 import type { AiPromptItem, AiPromptType } from "../../../types/ai";
 
 const aiStore = useAiStore();
@@ -38,9 +39,9 @@ const filterCategoryOptions = computed(() => [
   ...categoryOptions.value,
 ]);
 const prompts = computed(() => aiStore.getPrompts(activeType.value, filterCategoryId.value));
-const categoryNameMap = computed(() => new Map(aiStore.promptLibrary.categories.map((item) => [item.id, item.name])));
+const categoryNameMap = computed(() => mapToMap(aiStore.promptLibrary.categories, (item) => item.id, (item) => item.name));
 const dialogTitle = computed(() => (editingId.value ? t("aiPage.prompts.editDialog") : t("aiPage.prompts.createDialog")));
-const selectedPrompt = computed(() => prompts.value.find((prompt) => prompt.id === selectedPromptId.value) ?? prompts.value[0] ?? null);
+const selectedPrompt = computed(() => findByValue(prompts.value, (prompt) => prompt.id, selectedPromptId.value) ?? prompts.value[0] ?? null);
 
 watch(activeType, () => {
   filterCategoryId.value = "";
@@ -50,7 +51,7 @@ watch(activeType, () => {
 watch(
   prompts,
   (items) => {
-    if (!items.some((prompt) => prompt.id === selectedPromptId.value)) {
+    if (!hasByValue(items, (prompt) => prompt.id, selectedPromptId.value)) {
       selectedPromptId.value = items[0]?.id || "";
     }
   },

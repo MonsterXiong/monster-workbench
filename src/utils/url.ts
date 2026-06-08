@@ -5,6 +5,24 @@ export interface BuildUrlOptions {
   params?: Record<string, QueryValue>;
 }
 
+export function stringifyQuery(params: Record<string, QueryValue>, prefix = true): string {
+  const searchParams = new URLSearchParams();
+
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== null && value !== "") {
+      searchParams.set(key, String(value));
+    }
+  }
+
+  const query = searchParams.toString();
+
+  if (!query) {
+    return "";
+  }
+
+  return prefix ? `?${query}` : query;
+}
+
 export function isHttpUrl(value: string): boolean {
   try {
     const url = new URL(value);

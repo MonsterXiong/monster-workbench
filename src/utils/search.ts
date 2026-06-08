@@ -1,4 +1,4 @@
-import { normalizeWhitespace } from "./string";
+import { escapeRegExp, normalizeWhitespace } from "./string";
 
 export interface SearchMatchPart {
   text: string;
@@ -20,6 +20,14 @@ export function normalizeSearchText(value: unknown): string {
 
 export function tokenizeKeyword(keyword: string): string[] {
   return normalizeSearchText(keyword).split(/\s+/).filter(Boolean);
+}
+
+export function normalizeSearchTokens(value: string | readonly string[]): string[] {
+  const tokens = typeof value === "string"
+    ? tokenizeKeyword(value)
+    : value.flatMap((item) => tokenizeKeyword(item));
+
+  return Array.from(new Set(tokens));
 }
 
 export function matchesTokens(value: unknown, tokens: readonly string[], options: KeywordMatchOptions = {}): boolean {
@@ -98,4 +106,37 @@ export function splitTextByKeyword(value: string, keyword: string): SearchMatchP
     { text: value.slice(index, end), matched: true },
     { text: value.slice(end), matched: false },
   ].filter((part) => part.text.length > 0);
+}
+
+export function splitTextByTokens(value: string, tokens: readonly string[]): SearchMatchPart[] {
+  const normalizedTokens = Array.from(new Set(tokens.map((token) => token.trim()).filter(Boolean)))
+    .sort((left, right) => right.length - left.length);
+
+  if (normalizedTokens.length === 0) {
+    return [{ text: value, matched: false }];
+  }
+
+  const regexp = new RegExp(normalizedTokens.map(escapeRegExp).join("|"), "gi");
+  const parts: SearchMatchPart[] = [];
+  let cursor = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = regexp.exec(value)) !== null) {
+    if (match.index > cursor) {
+      parts.push({ text: value.slice(cursor, match.index), matched: false });
+    }
+
+    parts.push({ text: match[0], matched: true });
+    cursor = match.index + match[0].length;
+
+    if (match[0].length === 0) {
+      regexp.lastIndex += 1;
+    }
+  }
+
+  if (cursor < value.length) {
+    parts.push({ text: value.slice(cursor), matched: false });
+  }
+
+  return parts.length > 0 ? parts : [{ text: value, matched: false }];
 }

@@ -9,6 +9,8 @@ export interface ObjectDiffEntry {
   after?: unknown;
 }
 
+export type ObjectDiffEntryType = ObjectDiffEntry["type"];
+
 export interface ObjectDiffStats {
   added: number;
   removed: number;
@@ -17,6 +19,33 @@ export interface ObjectDiffStats {
 }
 
 export type ObjectDiffGroups = Record<ObjectDiffEntry["type"], ObjectDiffEntry[]>;
+
+export interface ObjectDiffSummary {
+  entries: ObjectDiffEntry[];
+  groups: ObjectDiffGroups;
+  stats: ObjectDiffStats;
+  paths: string[];
+  hasChanges: boolean;
+}
+
+export interface ObjectKeyDiff {
+  addedKeys: string[];
+  removedKeys: string[];
+  changedKeys: string[];
+  unchangedKeys: string[];
+  total: number;
+  hasChanges: boolean;
+}
+
+export interface ObjectDiffPatchOptions {
+  includeRemoved?: boolean;
+  removedValue?: unknown;
+}
+
+export interface ObjectDiffPathFilterOptions {
+  includeChildren?: boolean;
+  type?: ObjectDiffEntryType | readonly ObjectDiffEntryType[];
+}
 
 export interface RedactSensitiveOptions {
   replacement?: string;
@@ -114,6 +143,20 @@ export function objectEntries<T extends AnyRecord>(value: T): Array<[keyof T, T[
   return Object.entries(value) as Array<[keyof T, T[keyof T]]>;
 }
 
+export function objectValues<T extends AnyRecord>(value: T): Array<T[keyof T]> {
+  return Object.values(value) as Array<T[keyof T]>;
+}
+
+export function objectFromEntries<K extends PropertyKey, V>(entries: readonly (readonly [K, V])[]): Record<K, V> {
+  const result = {} as Record<K, V>;
+
+  for (const [key, value] of entries) {
+    result[key] = value;
+  }
+
+  return result;
+}
+
 export function hasOwnKey<T extends object, K extends PropertyKey>(value: T, key: K): key is K & keyof T {
   return Object.prototype.hasOwnProperty.call(value, key);
 }
@@ -138,6 +181,17 @@ export function createObjectPatch<T extends AnyRecord>(before: T, after: T, keys
   }
 
   return result;
+}
+
+export function hasObjectPatch<T extends object>(patch: Partial<T>): boolean {
+  return Object.keys(patch).length > 0;
+}
+
+export function applyObjectPatch<T extends object>(value: T, patch: Partial<T>): T {
+  return {
+    ...value,
+    ...patch,
+  };
 }
 
 export function isSensitiveObjectKey(key: string, sensitiveKeys: readonly string[] = DEFAULT_SENSITIVE_KEYS): boolean {
@@ -178,6 +232,23 @@ export function parseObjectPath(path: ObjectPathInput): string[] {
 
 export function objectPathToString(path: ObjectPathInput): string {
   return parseObjectPath(path).join(".");
+}
+
+export function isObjectPathEqual(left: ObjectPathInput, right: ObjectPathInput): boolean {
+  const leftPath = parseObjectPath(left);
+  const rightPath = parseObjectPath(right);
+  return leftPath.length === rightPath.length && leftPath.every((item, index) => item === rightPath[index]);
+}
+
+export function isObjectPathPrefix(path: ObjectPathInput, prefix: ObjectPathInput): boolean {
+  const normalizedPath = parseObjectPath(path);
+  const normalizedPrefix = parseObjectPath(prefix);
+
+  if (normalizedPrefix.length > normalizedPath.length) {
+    return false;
+  }
+
+  return normalizedPrefix.every((item, index) => item === normalizedPath[index]);
 }
 
 export function flattenObject(value: unknown, prefix: ObjectPathInput = [], separator = "."): Record<string, unknown> {
@@ -319,6 +390,48 @@ export function hasObjectDiff(before: unknown, after: unknown): boolean {
   return !deepEqual(before, after);
 }
 
+export function filterObjectDiffEntries(
+  entries: readonly ObjectDiffEntry[],
+  typeOrTypes: ObjectDiffEntryType | readonly ObjectDiffEntryType[]
+): ObjectDiffEntry[] {
+  const types = Array.isArray(typeOrTypes) ? typeOrTypes : [typeOrTypes];
+  const typeSet = new Set<ObjectDiffEntryType>(types);
+  return entries.filter((entry) => typeSet.has(entry.type));
+}
+
+export function hasObjectDiffEntry(entries: readonly ObjectDiffEntry[], type?: ObjectDiffEntryType): boolean {
+  return type ? entries.some((entry) => entry.type === type) : entries.length > 0;
+}
+
+export function filterObjectDiffEntriesByPath(
+  entries: readonly ObjectDiffEntry[],
+  path: ObjectPathInput,
+  options: ObjectDiffPathFilterOptions = {}
+): ObjectDiffEntry[] {
+  const filteredEntries = options.type ? filterObjectDiffEntries(entries, options.type) : [...entries];
+  const matchesPath = options.includeChildren
+    ? (entry: ObjectDiffEntry) => isObjectPathPrefix(entry.path, path)
+    : (entry: ObjectDiffEntry) => isObjectPathEqual(entry.path, path);
+
+  return filteredEntries.filter(matchesPath);
+}
+
+export function findObjectDiffEntryByPath(
+  entries: readonly ObjectDiffEntry[],
+  path: ObjectPathInput,
+  options: ObjectDiffPathFilterOptions = {}
+): ObjectDiffEntry | undefined {
+  return filterObjectDiffEntriesByPath(entries, path, options)[0];
+}
+
+export function hasObjectDiffPath(
+  entries: readonly ObjectDiffEntry[],
+  path: ObjectPathInput,
+  options: ObjectDiffPathFilterOptions = {}
+): boolean {
+  return findObjectDiffEntryByPath(entries, path, options) !== undefined;
+}
+
 export function groupObjectDiffEntries(entries: readonly ObjectDiffEntry[]): ObjectDiffGroups {
   return {
     added: entries.filter((entry) => entry.type === "added"),
@@ -357,6 +470,102 @@ export function applyObjectDiff<T extends AnyRecord>(value: T, entries: readonly
 
     return setByPath(result, entry.path, entry.after);
   }, { ...value });
+}
+
+export function createObjectDiffPatch(entries: readonly ObjectDiffEntry[], options: ObjectDiffPatchOptions = {}): AnyRecord {
+  return entries.reduce<AnyRecord>((result, entry) => {
+    if (entry.type === "removed") {
+      return options.includeRemoved ? setByPath(result, entry.path, options.removedValue) : result;
+    }
+
+    return setByPath(result, entry.path, entry.after);
+  }, {});
+}
+
+export function summarizeObjectDiff(entries: readonly ObjectDiffEntry[]): ObjectDiffSummary {
+  return {
+    entries: [...entries],
+    groups: groupObjectDiffEntries(entries),
+    stats: getObjectDiffStats(entries),
+    paths: getObjectDiffPaths(entries),
+    hasChanges: entries.length > 0,
+  };
+}
+
+export function diffObjectKeys(before: AnyRecord, after: AnyRecord): ObjectKeyDiff {
+  const beforeKeys = new Set(Object.keys(before));
+  const afterKeys = new Set(Object.keys(after));
+  const addedKeys: string[] = [];
+  const removedKeys: string[] = [];
+  const changedKeys: string[] = [];
+  const unchangedKeys: string[] = [];
+
+  for (const key of afterKeys) {
+    if (!beforeKeys.has(key)) {
+      addedKeys.push(key);
+      continue;
+    }
+
+    if (deepEqual(before[key], after[key])) {
+      unchangedKeys.push(key);
+    } else {
+      changedKeys.push(key);
+    }
+  }
+
+  for (const key of beforeKeys) {
+    if (!afterKeys.has(key)) {
+      removedKeys.push(key);
+    }
+  }
+
+  return {
+    addedKeys,
+    removedKeys,
+    changedKeys,
+    unchangedKeys,
+    total: addedKeys.length + removedKeys.length + changedKeys.length,
+    hasChanges: addedKeys.length > 0 || removedKeys.length > 0 || changedKeys.length > 0,
+  };
+}
+
+export function createObjectDiffSummary(before: unknown, after: unknown, basePath: string[] = []): ObjectDiffSummary {
+  return summarizeObjectDiff(diffObjects(before, after, basePath));
+}
+
+export function getObjectDiff(before: unknown, after: unknown, basePath: string[] = []): ObjectDiffSummary {
+  return createObjectDiffSummary(before, after, basePath);
+}
+
+export function invertObjectDiff(entries: readonly ObjectDiffEntry[]): ObjectDiffEntry[] {
+  return entries.map((entry) => {
+    if (entry.type === "added") {
+      return {
+        type: "removed",
+        path: entry.path,
+        before: entry.after,
+      };
+    }
+
+    if (entry.type === "removed") {
+      return {
+        type: "added",
+        path: entry.path,
+        after: entry.before,
+      };
+    }
+
+    return {
+      type: "changed",
+      path: entry.path,
+      before: entry.after,
+      after: entry.before,
+    };
+  });
+}
+
+export function revertObjectDiff<T extends AnyRecord>(value: T, entries: readonly ObjectDiffEntry[]): T {
+  return applyObjectDiff(value, invertObjectDiff(entries));
 }
 
 export function diffObjects(before: unknown, after: unknown, basePath: string[] = []): ObjectDiffEntry[] {

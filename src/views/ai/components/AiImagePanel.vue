@@ -5,7 +5,7 @@ import { useAiStore } from "../../../stores/ai";
 import { useI18n } from "../../../composables/useI18n";
 import type { ActionMenuItem } from "../../../components/common/BaseActionMenu.vue";
 import type { AiConversationSession } from "../../../types/ai";
-import { findLastItem, formatBytes } from "../../../utils";
+import { findIndexByValue, findLastItem, formatBytes, joinBy, take } from "../../../utils";
 
 const aiStore = useAiStore();
 const { t } = useI18n();
@@ -28,9 +28,37 @@ const imageSizeOptions = computed(() => [
   { label: t("aiPage.image.sizeLandscape2K43"), selectedLabel: "2K 4:3", value: "2048x1536" },
   { label: t("aiPage.image.sizePortrait2K23"), selectedLabel: "2K 2:3", value: "1344x2016" },
   { label: t("aiPage.image.sizeLandscape2K32"), selectedLabel: "2K 3:2", value: "2016x1344" },
+  { label: t("aiPage.image.sizeLandscape2K54"), selectedLabel: "2K 5:4", value: "2000x1600" },
+  { label: t("aiPage.image.sizePortrait2K45"), selectedLabel: "2K 4:5", value: "1600x2000" },
+  { label: t("aiPage.image.sizeLandscape2K53"), selectedLabel: "2K 5:3", value: "2000x1200" },
+  { label: t("aiPage.image.sizePortrait2K35"), selectedLabel: "2K 3:5", value: "1200x2000" },
+  { label: t("aiPage.image.sizeLandscape2K21"), selectedLabel: "2K 2:1", value: "2048x1024" },
+  { label: t("aiPage.image.sizePortrait2K12"), selectedLabel: "2K 1:2", value: "1024x2048" },
+  { label: t("aiPage.image.sizeCinema2K185"), selectedLabel: "2K 1.85:1", value: "2048x1104" },
+  { label: t("aiPage.image.sizeScope2K237"), selectedLabel: "2K 2.37:1", value: "2048x864" },
   { label: t("aiPage.image.sizeUltrawide2K219"), selectedLabel: "2K 21:9", value: "2048x880" },
-  { label: t("aiPage.image.sizeLandscape4K"), selectedLabel: "4K 16:9", value: "3840x2160" },
+  { label: t("aiPage.image.sizePortrait2K921"), selectedLabel: "2K 9:21", value: "880x2048" },
+  { label: t("aiPage.image.sizePanorama2K31"), selectedLabel: "2K 3:1", value: "2048x688" },
+  { label: t("aiPage.image.sizeVerticalPanorama2K13"), selectedLabel: "2K 1:3", value: "688x2048" },
+  { label: t("aiPage.image.sizeSquare4K"), selectedLabel: "4K 1:1", value: "2880x2880" },
   { label: t("aiPage.image.sizePortrait4K"), selectedLabel: "4K 9:16", value: "2160x3840" },
+  { label: t("aiPage.image.sizeLandscape4K"), selectedLabel: "4K 16:9", value: "3840x2160" },
+  { label: t("aiPage.image.sizePortrait4K34"), selectedLabel: "4K 3:4", value: "2160x2880" },
+  { label: t("aiPage.image.sizeLandscape4K43"), selectedLabel: "4K 4:3", value: "2880x2160" },
+  { label: t("aiPage.image.sizePortrait4K23"), selectedLabel: "4K 2:3", value: "2304x3456" },
+  { label: t("aiPage.image.sizeLandscape4K32"), selectedLabel: "4K 3:2", value: "3456x2304" },
+  { label: t("aiPage.image.sizeLandscape4K54"), selectedLabel: "4K 5:4", value: "2880x2304" },
+  { label: t("aiPage.image.sizePortrait4K45"), selectedLabel: "4K 4:5", value: "2304x2880" },
+  { label: t("aiPage.image.sizeLandscape4K53"), selectedLabel: "4K 5:3", value: "3600x2160" },
+  { label: t("aiPage.image.sizePortrait4K35"), selectedLabel: "4K 3:5", value: "2160x3600" },
+  { label: t("aiPage.image.sizeLandscape4K21"), selectedLabel: "4K 2:1", value: "3840x1920" },
+  { label: t("aiPage.image.sizePortrait4K12"), selectedLabel: "4K 1:2", value: "1920x3840" },
+  { label: t("aiPage.image.sizeCinema4K185"), selectedLabel: "4K 1.85:1", value: "3840x2080" },
+  { label: t("aiPage.image.sizeScope4K237"), selectedLabel: "4K 2.37:1", value: "3840x1616" },
+  { label: t("aiPage.image.sizeUltrawide4K219"), selectedLabel: "4K 21:9", value: "3840x1648" },
+  { label: t("aiPage.image.sizePortrait4K921"), selectedLabel: "4K 9:21", value: "1648x3840" },
+  { label: t("aiPage.image.sizePanorama4K31"), selectedLabel: "4K 3:1", value: "3840x1280" },
+  { label: t("aiPage.image.sizeVerticalPanorama4K13"), selectedLabel: "4K 1:3", value: "1280x3840" },
 ]);
 
 const emit = defineEmits<{
@@ -41,7 +69,7 @@ const emit = defineEmits<{
 const session = computed(() => aiStore.activeImageSession);
 const messages = computed(() => session.value?.messages || []);
 const isBusy = computed(() => Boolean(aiStore.getActionQueueStatus("image")) || aiStore.activeAction === "image");
-const scrollAnchor = computed(() => messages.value.map((message) => `${message.id}:${message.status}`).join("|"));
+const scrollAnchor = computed(() => joinBy(messages.value, (message) => `${message.id}:${message.status}`, "|"));
 const sessionActions = computed<ActionMenuItem[]>(() => [
   { key: "rename", label: t("aiPage.sessions.rename"), icon: "Pencil" },
   { key: "duplicate", label: t("aiPage.sessions.duplicate"), icon: "Copy" },
@@ -98,11 +126,11 @@ async function handleGenerate() {
 }
 
 function findRetryPrompt(messageId: string) {
-  const index = messages.value.findIndex((message) => message.id === messageId);
+  const index = findIndexByValue(messages.value, (message) => message.id, messageId);
   if (index <= 0) {
     return "";
   }
-  return findLastItem(messages.value.slice(0, index), (message) => message.role === "user")?.content || "";
+  return findLastItem(take(messages.value, index), (message) => message.role === "user")?.content || "";
 }
 
 function canRetryImageMessage(message: AiConversationSession["messages"][number]) {

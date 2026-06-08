@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, useId, watch } from "vue";
+import { useI18n } from "../../composables/useI18n";
 
 type FieldGroupSize = "sm" | "md" | "lg";
 type FieldGroupLevel = 2 | 3 | 4 | 5 | 6;
@@ -18,6 +19,9 @@ interface Props {
   divided?: boolean;
   disabled?: boolean;
   loading?: boolean;
+  loadingText?: string;
+  showLoadingIndicator?: boolean;
+  lockContent?: boolean;
   collapsible?: boolean;
   collapsed?: boolean;
   keepMounted?: boolean;
@@ -46,6 +50,9 @@ const props = withDefaults(defineProps<Props>(), {
   divided: false,
   disabled: false,
   loading: false,
+  loadingText: "",
+  showLoadingIndicator: true,
+  lockContent: true,
   collapsible: false,
   collapsed: false,
   keepMounted: true,
@@ -66,12 +73,14 @@ const emit = defineEmits<{
   (e: "toggle", value: boolean): void;
 }>();
 
+const { t } = useI18n();
 const groupId = useId();
 const titleId = `${groupId}-title`;
 const descriptionId = `${groupId}-description`;
 const bodyId = `${groupId}-body`;
 const localCollapsed = ref(props.collapsed);
 const isDisabled = computed(() => props.disabled || props.loading);
+const isContentLocked = computed(() => props.lockContent && isDisabled.value);
 const isCollapsed = computed(() => props.collapsible && localCollapsed.value);
 const describedBy = computed(() => (props.description ? descriptionId : undefined));
 const headingTag = computed(() => `h${props.level}`);
@@ -79,6 +88,7 @@ const toggleLabel = computed(() => (isCollapsed.value ? props.expandLabel : prop
 const resolvedActionsLabel = computed(() => props.actionsLabel || `${props.title || props.ariaLabel || "字段分组"} 操作`);
 const resolvedBodyLabel = computed(() => props.bodyLabel || `${props.title || props.ariaLabel || "字段分组"} 内容`);
 const resolvedFooterLabel = computed(() => props.footerLabel || `${props.title || props.ariaLabel || "字段分组"} 页脚`);
+const resolvedLoadingText = computed(() => props.loadingText || t("common.loading"));
 
 const toggleCollapsed = () => {
   if (!props.collapsible || isDisabled.value) return;
@@ -121,11 +131,14 @@ watch(
     :aria-labelledby="title ? titleId : undefined"
     :aria-describedby="describedBy"
     :aria-busy="loading ? 'true' : undefined"
-    :aria-disabled="disabled ? 'true' : undefined"
+    :aria-disabled="isDisabled ? 'true' : undefined"
     :aria-expanded="collapsible ? !isCollapsed : undefined"
   >
-    <header v-if="title || description || icon || $slots.actions || collapsible" class="base-field-group__header">
-      <div class="base-field-group__title-wrap">
+    <header
+      v-if="title || description || icon || $slots.actions || collapsible || (loading && showLoadingIndicator)"
+      class="base-field-group__header"
+    >
+      <div v-if="title || description || icon" class="base-field-group__title-wrap">
         <div v-if="icon" class="base-field-group__icon" aria-hidden="true">
           <BaseIcon :name="icon" size="16" aria-hidden="true" />
         </div>
@@ -134,22 +147,36 @@ watch(
           <p v-if="description" :id="descriptionId">{{ description }}</p>
         </div>
       </div>
-      <div v-if="$slots.actions" class="base-field-group__actions" :aria-label="resolvedActionsLabel">
-        <slot name="actions"></slot>
+      <div v-if="(loading && showLoadingIndicator) || $slots.actions || collapsible" class="base-field-group__trailing">
+        <div
+          v-if="loading && showLoadingIndicator"
+          class="base-field-group__loading"
+          role="status"
+          aria-live="polite"
+          :aria-label="resolvedLoadingText"
+        >
+          <slot name="loading">
+            <BaseIcon name="LoaderCircle" size="14" aria-hidden="true" />
+            <span>{{ resolvedLoadingText }}</span>
+          </slot>
+        </div>
+        <div v-if="$slots.actions" class="base-field-group__actions" :aria-label="resolvedActionsLabel">
+          <slot name="actions"></slot>
+        </div>
+        <button
+          v-if="collapsible"
+          type="button"
+          class="base-field-group__toggle"
+          :disabled="isDisabled"
+          :aria-expanded="!isCollapsed"
+          :aria-controls="bodyId"
+          :aria-label="toggleLabel"
+          :title="toggleLabel"
+          @click="toggleCollapsed"
+        >
+          <BaseIcon name="ChevronDown" size="15" aria-hidden="true" />
+        </button>
       </div>
-      <button
-        v-if="collapsible"
-        type="button"
-        class="base-field-group__toggle"
-        :disabled="isDisabled"
-        :aria-expanded="!isCollapsed"
-        :aria-controls="bodyId"
-        :aria-label="toggleLabel"
-        :title="toggleLabel"
-        @click="toggleCollapsed"
-      >
-        <BaseIcon name="ChevronDown" size="15" aria-hidden="true" />
-      </button>
     </header>
 
     <fieldset
@@ -157,7 +184,8 @@ watch(
       v-show="!isCollapsed"
       :id="bodyId"
       class="base-field-group__fieldset"
-      :disabled="isDisabled"
+      :disabled="isContentLocked"
+      :aria-disabled="isContentLocked ? 'true' : undefined"
       :aria-label="resolvedBodyLabel"
     >
       <div class="base-field-group__body">
@@ -198,7 +226,7 @@ watch(
 }
 
 .base-field-group.is-disabled,
-.base-field-group.is-loading {
+.base-field-group.is-loading .base-field-group__fieldset {
   @apply opacity-75;
 }
 
@@ -265,8 +293,23 @@ watch(
   @apply whitespace-normal break-words;
 }
 
+.base-field-group__trailing {
+  @apply ml-auto flex max-w-full shrink-0 flex-wrap items-center justify-end gap-2;
+}
+
+.base-field-group__loading {
+  border-color: rgb(var(--color-primary) / 0.18);
+  background-color: rgb(var(--color-primary) / 0.08);
+  color: rgb(var(--color-primary));
+  @apply inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full border px-2 text-[11px] font-black;
+}
+
+.base-field-group__loading :deep(svg) {
+  animation: base-field-group-spin 0.9s linear infinite;
+}
+
 .base-field-group__actions {
-  @apply flex max-w-full shrink-0 flex-wrap items-center justify-end gap-2;
+  @apply flex max-w-full flex-wrap items-center justify-end gap-2;
 }
 
 .base-field-group__toggle {
@@ -355,8 +398,16 @@ watch(
 
 @media (prefers-reduced-motion: reduce) {
   .base-field-group__toggle,
-  .base-field-group__toggle :deep(svg) {
+  .base-field-group__toggle :deep(svg),
+  .base-field-group__loading :deep(svg) {
     transition: none !important;
+    animation: none !important;
+  }
+}
+
+@keyframes base-field-group-spin {
+  to {
+    transform: rotate(360deg);
   }
 }
 </style>

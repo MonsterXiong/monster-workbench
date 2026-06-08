@@ -12,6 +12,10 @@ const { triggerToast } = useToast();
 const selectedBreadcrumbKey = ref("detail");
 const activeTab = ref("overview");
 const underlineTab = ref("config");
+const compactTab = ref("all");
+const equalTab = ref("build");
+const scrollTab = ref("assets");
+const customTab = ref("preview");
 const singleAccordion = ref(["usage"]);
 const multiAccordion = ref(["usage", "config"]);
 const lockedAccordion = ref(["config"]);
@@ -19,6 +23,8 @@ const embeddedAccordion = ref(["usage"]);
 const accordionEvent = ref("等待操作");
 const activeTreePath = ref("components/playground/PlaygroundNavigationDemos.vue");
 const treeEvent = ref("等待选择");
+const breadcrumbExpandEvent = ref("等待展开");
+const controlledTreeExpandedKeys = ref(["resources", "resources/layouts"]);
 
 const breadcrumbItems = [
   { key: "workspace", label: "工作台", icon: "LayoutDashboard" },
@@ -42,11 +48,52 @@ const stateBreadcrumbItems = [
   { key: "audit", label: "审计规则" },
 ];
 
+const guardedBreadcrumbItems = [
+  { key: "security", label: "安全中心", icon: "ShieldCheck", href: "#/settings/security", disabled: true, badge: "禁用", badgeType: "warning" as const },
+  { key: "policy", label: "策略模板", href: "#/settings/policy" },
+  { key: "review", label: "审批详情", href: "#/settings/review", badge: "当前", badgeType: "success" as const },
+];
+
+const nowrapBreadcrumbItems = [
+  { key: "workspace", label: "工作台", icon: "LayoutDashboard" },
+  { key: "tenant", label: "华东区域生产环境多租户资源编排中心" },
+  { key: "pipeline", label: "自动化发布流水线与审批策略" },
+  { key: "detail", label: "版本回滚任务详情" },
+];
+
 const tabs = [
   { key: "overview", title: "概览", icon: "LayoutDashboard", badge: "New", badgeColor: "bg-primary text-white" },
   { key: "config", title: "配置", icon: "SlidersHorizontal" },
   { key: "activity", title: "动态", icon: "History", badge: "3" },
   { key: "disabled", title: "受限", icon: "Lock", disabled: true },
+];
+
+const compactTabs = [
+  { key: "all", title: "全部" },
+  { key: "ready", title: "可用", badge: "18" },
+  { key: "draft", title: "草稿", badge: "6" },
+  { key: "locked", title: "锁定", disabled: true },
+];
+
+const equalTabs = [
+  { key: "build", title: "构建", icon: "Hammer" },
+  { key: "preview", title: "预览", icon: "Eye" },
+  { key: "release", title: "发布", icon: "Rocket", badge: "2" },
+];
+
+const scrollTabs = [
+  { key: "assets", title: "资源与素材配置", icon: "PackageOpen" },
+  { key: "workflow", title: "自动化流程编排", icon: "Workflow" },
+  { key: "permission", title: "成员权限与审批", icon: "ShieldCheck" },
+  { key: "audit", title: "审计记录", icon: "History" },
+  { key: "archive", title: "归档策略", icon: "Archive" },
+  { key: "disabled", title: "受限视图", icon: "Lock", disabled: true },
+];
+
+const customTabs = [
+  { key: "preview", title: "预览", icon: "Monitor", badge: "Live", badgeColor: "bg-emerald-500 text-white" },
+  { key: "schema", title: "结构", icon: "Braces", badge: "JSON" },
+  { key: "history", title: "历史", icon: "History" },
 ];
 
 const accordionItems = [
@@ -161,6 +208,13 @@ const simpleListItems: SimpleListItem[] = [
   { id: "toolbar", title: "列表工具栏", disabled: true },
 ];
 
+const simpleMetaListItems = [
+  { id: "catalog", title: "组件目录", meta: "10" },
+  { id: "form", title: "表单输入", meta: "8" },
+  { id: "layout", title: "布局容器", meta: "7" },
+  { id: "feedback", title: "反馈浮层", meta: "4" },
+];
+
 const rowListItems: RowListItem[] = [
   { id: "queue", title: "任务队列", description: "排队、执行中和失败重试的状态列表。", icon: "ListChecks", badge: "运行中", type: "primary" as const, meta: "12 项" },
   { id: "audit", title: "审计记录", description: "按时间记录关键操作，可点击进入详情。", icon: "History", badge: "已归档", type: "success" as const, meta: "48 条" },
@@ -170,6 +224,10 @@ const rowListItems: RowListItem[] = [
 const handleBreadcrumbSelect = (item: { key: string; label: string }) => {
   selectedBreadcrumbKey.value = item.key;
   triggerToast(`选择面包屑：${item.label}`, "info");
+};
+
+const handleBreadcrumbExpand = (count: number) => {
+  breadcrumbExpandEvent.value = `展开 ${count} 级路径`;
 };
 
 const handleAccordionToggle = (payload: { key: string; expanded: boolean }) => {
@@ -206,7 +264,11 @@ const handleTreeToggle = (payload: { node: { name: string; path: string }; expan
             :max-items="4"
             aria-label="长路径面包屑"
             @select="handleBreadcrumbSelect"
+            @expand="handleBreadcrumbExpand"
           />
+          <template #footer>
+            <span class="navigation-result">{{ breadcrumbExpandEvent }}</span>
+          </template>
         </BasePanel>
 
         <BasePanel title="返回入口" subtitle="返回按钮会优先选择上一级，也可以单独监听 back 事件。">
@@ -228,6 +290,16 @@ const handleTreeToggle = (payload: { node: { name: string; path: string }; expan
           <BaseBreadcrumb :items="stateBreadcrumbItems" size="sm" surface="plain" :wrap="false" />
         </BasePanel>
 
+        <BasePanel title="链接拦截" subtitle="禁用项和不可点击当前项会保留 href 信息，但不会触发默认跳转。">
+          <BaseBreadcrumb :items="guardedBreadcrumbItems" surface="card" aria-label="链接拦截面包屑" @select="handleBreadcrumbSelect" />
+        </BasePanel>
+      </div>
+
+      <div class="demo-grid">
+        <BasePanel title="窄容器不换行" subtitle="wrap=false 会在组件内部横向滚动，避免撑破页面。">
+          <BaseBreadcrumb :items="nowrapBreadcrumbItems" surface="muted" :wrap="false" aria-label="不换行长路径面包屑" />
+        </BasePanel>
+
         <BasePanel title="自定义项内容" subtitle="通过 item 插槽接入业务状态或更强的视觉提示。">
           <BaseBreadcrumb :items="breadcrumbItems" surface="muted" aria-label="自定义面包屑">
             <template #item="{ item, current }">
@@ -244,7 +316,7 @@ const handleTreeToggle = (payload: { node: { name: string; path: string }; expan
   <section v-else-if="activeComponentKey === 'tabs'" class="detail-stack">
     <PlaygroundDemoSection title="标签页" subtitle="覆盖胶囊、下划线、图标、徽标和禁用状态，适合页面内视图切换。" icon="PanelTop">
       <BasePanel title="胶囊标签" subtitle="适合紧凑工具面板、设置分段和局部视图切换。">
-        <BaseTab v-model="activeTab" :tabs="tabs" />
+        <BaseTab v-model="activeTab" :tabs="tabs" size="lg" @select="(tab) => triggerToast(`切换到 ${tab.title}`, 'info')" />
         <BaseDataState class="mt-4" state="ready" :title="`当前视图：${activeTab}`" description="切换后业务区保持稳定，只替换当前内容。">
           <BaseDescriptionList
             :items="[
@@ -256,9 +328,43 @@ const handleTreeToggle = (payload: { node: { name: string; path: string }; expan
         </BaseDataState>
       </BasePanel>
 
-      <BasePanel title="下划线标签" subtitle="适合详情页二级导航和内容区顶部分类。">
-        <BaseTab v-model="underlineTab" :tabs="tabs" variant="underline" />
-      </BasePanel>
+      <div class="demo-grid">
+        <BasePanel title="下划线标签" subtitle="适合详情页二级导航和内容区顶部分类。">
+          <BaseTab v-model="underlineTab" :tabs="tabs" variant="underline" full-width />
+        </BasePanel>
+
+        <BasePanel title="紧凑 Plain" subtitle="无背景表面适合嵌入工具栏、卡片页脚和浮层顶部。">
+          <BaseTab v-model="compactTab" :tabs="compactTabs" size="sm" surface="plain" />
+        </BasePanel>
+      </div>
+
+      <div class="demo-grid">
+        <BasePanel title="等分填充" subtitle="equal + fullWidth 适合流程分段和三段式工作区。">
+          <BaseTab v-model="equalTab" :tabs="equalTabs" surface="muted" full-width equal align="between" />
+        </BasePanel>
+
+        <BasePanel title="禁用整组" subtitle="流程锁定时整组禁用，但仍保留当前状态可读。">
+          <BaseTab model-value="build" :tabs="equalTabs" disabled full-width equal aria-label="禁用标签页" />
+        </BasePanel>
+      </div>
+
+      <div class="demo-grid">
+        <BasePanel title="长标签滚动" subtitle="内容较多时在组件内部横向滚动，不撑破页面。">
+          <BaseTab v-model="scrollTab" :tabs="scrollTabs" size="sm" surface="muted" full-width aria-label="长标签页" />
+        </BasePanel>
+
+        <BasePanel title="自定义项内容" subtitle="通过 tab / badge 插槽接入业务标记，同时保留键盘和选中状态。">
+          <BaseTab v-model="customTab" :tabs="customTabs" surface="plain" full-width aria-label="自定义标签页">
+            <template #tab="{ tab, active }">
+              <span class="tab-demo-custom-icon" :class="{ 'is-active': active }">
+                <BaseIcon v-if="tab.icon" :name="tab.icon" size="14" aria-hidden="true" />
+              </span>
+              <span class="min-w-0 truncate">{{ tab.title }}</span>
+              <BaseBadge v-if="tab.badge" :type="active ? 'primary' : 'neutral'" size="xs">{{ tab.badge }}</BaseBadge>
+            </template>
+          </BaseTab>
+        </BasePanel>
+      </div>
     </PlaygroundDemoSection>
   </section>
 
@@ -328,6 +434,44 @@ const handleTreeToggle = (payload: { node: { name: string; path: string }; expan
           </BaseAccordion>
         </BasePanel>
       </div>
+
+      <div class="demo-grid">
+        <BasePanel title="自管理状态" subtitle="不传 v-model 时通过 defaultValue 初始化，组件内部维护展开状态。">
+          <BaseAccordion
+            :items="accordionItems"
+            :default-value="['usage']"
+            multiple
+            surface="muted"
+            :show-chevron="false"
+            aria-label="自管理折叠面板"
+            @toggle="handleAccordionToggle"
+          >
+            <template #actions="{ expanded }">
+              <BaseBadge :type="expanded ? 'primary' : 'neutral'" size="xs">{{ expanded ? "已打开" : "未打开" }}</BaseBadge>
+            </template>
+            <template #default="{ item, expanded }">
+              <BaseDescriptionList
+                :items="[
+                  { key: 'key', label: '节点', value: item.key, status: expanded ? 'primary' : 'neutral' },
+                  { key: 'mode', label: '状态来源', value: 'internal' },
+                ]"
+                compact
+              />
+            </template>
+          </BaseAccordion>
+          <template #footer>
+            <span class="navigation-result">最近事件：{{ accordionEvent }}</span>
+          </template>
+        </BasePanel>
+
+        <BasePanel title="整组禁用" subtitle="权限不足或流程锁定时禁用所有触发器，但保留内容状态可读。">
+          <BaseAccordion :items="accordionItems" :default-value="['usage']" disabled surface="card" aria-label="禁用折叠面板">
+            <template #default="{ item }">
+              <BaseAlert type="warning" :title="item.title" description="当前流程锁定，只展示已有配置。" compact />
+            </template>
+          </BaseAccordion>
+        </BasePanel>
+      </div>
     </PlaygroundDemoSection>
   </section>
 
@@ -356,6 +500,36 @@ const handleTreeToggle = (payload: { node: { name: string; path: string }; expan
             show-lines
             aria-label="工作台资源树"
             @node-click="handleTreeNodeClick"
+          />
+        </BasePanel>
+      </div>
+
+      <div class="demo-grid">
+        <BasePanel title="受控展开" subtitle="通过 expandedKeys 接管展开状态，适合与路由、搜索或偏好设置联动。">
+          <BaseTree
+            v-model:expanded-keys="controlledTreeExpandedKeys"
+            :data="resourceTreeData"
+            :active-key="activeTreePath"
+            surface="muted"
+            show-lines
+            aria-label="受控展开资源树"
+            @node-click="handleTreeNodeClick"
+            @node-toggle="handleTreeToggle"
+          />
+          <template #footer>
+            <span class="navigation-result">展开节点：{{ controlledTreeExpandedKeys.join(" / ") }}</span>
+          </template>
+        </BasePanel>
+
+        <BasePanel title="整组禁用" subtitle="流程锁定或权限不足时禁用所有节点，同时保留展开内容可读。">
+          <BaseTree
+            :data="resourceTreeData"
+            :default-expanded-keys="['resources', 'resources/layouts']"
+            disabled
+            :selectable="false"
+            size="sm"
+            surface="card"
+            aria-label="禁用资源树"
           />
         </BasePanel>
       </div>
@@ -434,9 +608,25 @@ const handleTreeToggle = (payload: { node: { name: string; path: string }; expan
             :items="simpleListItems"
             variant="plain"
             size="sm"
+            simple
+            :bordered="false"
             :active-key="activeSimpleListKey"
             clickable
             @item-click="(item: SimpleListItem) => (activeSimpleListKey = item.id)"
+          />
+        </BasePanel>
+
+        <BasePanel title="单行带计数" subtitle="标题和右侧 meta 固定在同一行，适合侧栏分类和轻量统计。">
+          <BaseList
+            :items="simpleMetaListItems"
+            variant="plain"
+            size="xs"
+            surface="transparent"
+            simple
+            :bordered="false"
+            clickable
+            active-key="form"
+            aria-label="单行带计数列表"
           />
         </BasePanel>
       </div>
@@ -464,6 +654,31 @@ const handleTreeToggle = (payload: { node: { name: string; path: string }; expan
               </span>
             </template>
           </BaseList>
+        </BasePanel>
+      </div>
+
+      <div class="demo-grid">
+        <BasePanel title="加载列表" subtitle="异步刷新时使用 loading 锁定行交互，并展示轻量状态行。">
+          <BaseList
+            :items="rowListItems"
+            variant="row"
+            surface="muted"
+            loading
+            loading-text="正在加载组件列表"
+            aria-label="加载中的动态列表"
+          />
+        </BasePanel>
+
+        <BasePanel title="整组禁用" subtitle="流程锁定或权限不足时禁用所有行，但保留当前内容可读。">
+          <BaseList
+            :items="rowListItems"
+            variant="row"
+            surface="transparent"
+            disabled
+            clickable
+            active-key="queue"
+            aria-label="禁用动态列表"
+          />
         </BasePanel>
       </div>
     </PlaygroundDemoSection>
@@ -497,5 +712,13 @@ const handleTreeToggle = (payload: { node: { name: string; path: string }; expan
 
 .list-demo-icon {
   @apply flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-primary dark:bg-slate-800;
+}
+
+.tab-demo-custom-icon {
+  @apply flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400;
+}
+
+.tab-demo-custom-icon.is-active {
+  @apply bg-primary text-white;
 }
 </style>

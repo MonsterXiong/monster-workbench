@@ -1,4 +1,5 @@
 import { toFiniteNumber } from "./number";
+import { joinNonEmptyStrings } from "./string";
 
 export interface FormatBytesOptions {
   base?: 1000 | 1024;
@@ -135,6 +136,35 @@ export function formatRelativeTime(value: number | Date, options: FormatRelative
 export function formatCount(count: number, singular: string, plural = `${singular}s`): string {
   const safeCount = toFiniteNumber(count);
   return `${formatNumber(safeCount)} ${safeCount === 1 ? singular : plural}`;
+}
+
+export function formatNullable(value: unknown, fallback = "--"): string {
+  if (value === undefined || value === null) {
+    return fallback;
+  }
+
+  const text = String(value).trim();
+  return text || fallback;
+}
+
+export function formatList(values: readonly unknown[], separator = "\u3001", fallback = "--"): string {
+  const text = joinNonEmptyStrings(values, separator);
+  return text || fallback;
+}
+
+export function formatRange(start: unknown, end: unknown, separator = " - ", fallback = "--"): string {
+  const startText = formatNullable(start, "");
+  const endText = formatNullable(end, "");
+
+  if (!startText && !endText) {
+    return fallback;
+  }
+
+  if (!startText || !endText) {
+    return startText || endText;
+  }
+
+  return `${startText}${separator}${endText}`;
 }
 
 export function formatTemplate(template: string, params: Record<string, string | number | boolean | null | undefined>): string {

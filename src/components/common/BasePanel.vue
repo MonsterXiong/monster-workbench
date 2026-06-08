@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, useId } from "vue";
+import { useI18n } from "../../composables/useI18n";
 
 type PanelSize = "sm" | "md" | "lg";
 type PanelLevel = 2 | 3 | 4 | 5 | 6;
@@ -19,6 +20,9 @@ interface Props {
   bodyGap?: PanelBodyGap;
   disabled?: boolean;
   loading?: boolean;
+  loadingText?: string;
+  showLoadingIndicator?: boolean;
+  lockContent?: boolean;
   clickable?: boolean;
   selected?: boolean;
   wrapTitle?: boolean;
@@ -43,6 +47,9 @@ const props = withDefaults(defineProps<Props>(), {
   bodyGap: "none",
   disabled: false,
   loading: false,
+  loadingText: "",
+  showLoadingIndicator: true,
+  lockContent: true,
   clickable: false,
   selected: false,
   wrapTitle: false,
@@ -53,6 +60,7 @@ const props = withDefaults(defineProps<Props>(), {
   ariaLabel: "",
 });
 
+const { t } = useI18n();
 const emit = defineEmits<{
   (e: "click", event: MouseEvent): void;
   (e: "keydown", event: KeyboardEvent): void;
@@ -66,8 +74,11 @@ const resolvedSubtitle = computed(() => props.subtitle || props.description);
 const describedBy = computed(() => (resolvedSubtitle.value ? subtitleId : undefined));
 const resolvedSurface = computed(() => (props.muted ? "muted" : props.surface));
 const isInteractive = computed(() => props.clickable && !props.disabled && !props.loading);
+const isContentLocked = computed(() => props.lockContent && (props.disabled || props.loading));
+const isAriaDisabled = computed(() => props.disabled || (props.clickable && props.loading));
 const headingTag = computed(() => `h${props.level}`);
 const resolvedActionsLabel = computed(() => props.actionsLabel || `${props.title || props.ariaLabel || "面板"} 操作`);
+const resolvedLoadingText = computed(() => props.loadingText || t("common.loading"));
 
 const shouldIgnorePanelClick = (event: Event) => {
   if (!(event.target instanceof Element) || event.target === event.currentTarget) return false;
@@ -114,13 +125,16 @@ const handleKeydown = (event: KeyboardEvent) => {
     :aria-labelledby="labelledBy"
     :aria-describedby="describedBy"
     :aria-busy="props.loading ? 'true' : undefined"
-    :aria-disabled="props.disabled ? 'true' : undefined"
+    :aria-disabled="isAriaDisabled ? 'true' : undefined"
     :aria-pressed="props.clickable && props.selected ? true : undefined"
     @click="handleClick"
     @keydown="handleKeydown"
   >
-    <header v-if="props.title || resolvedSubtitle || props.icon || $slots.icon || $slots.actions" class="base-panel__header">
-      <div class="base-panel__title-group">
+    <header
+      v-if="props.title || resolvedSubtitle || props.icon || $slots.icon || $slots.actions || (props.loading && props.showLoadingIndicator)"
+      class="base-panel__header"
+    >
+      <div v-if="props.title || resolvedSubtitle || props.icon || $slots.icon" class="base-panel__title-group">
         <div v-if="$slots.icon || props.icon" class="base-panel__icon" aria-hidden="true">
           <slot name="icon">
             <BaseIcon :name="props.icon" size="16" aria-hidden="true" />
@@ -133,18 +147,35 @@ const handleKeydown = (event: KeyboardEvent) => {
           <p v-if="resolvedSubtitle" :id="subtitleId" class="base-panel__subtitle">{{ resolvedSubtitle }}</p>
         </div>
       </div>
-      <div v-if="$slots.actions" class="base-panel__actions" :aria-label="resolvedActionsLabel">
-        <slot name="actions"></slot>
+
+      <div v-if="(props.loading && props.showLoadingIndicator) || $slots.actions" class="base-panel__trailing">
+        <div
+          v-if="props.loading && props.showLoadingIndicator"
+          class="base-panel__loading"
+          role="status"
+          aria-live="polite"
+          :aria-label="resolvedLoadingText"
+        >
+          <slot name="loading">
+            <BaseIcon name="LoaderCircle" size="14" aria-hidden="true" />
+            <span>{{ resolvedLoadingText }}</span>
+          </slot>
+        </div>
+        <div v-if="$slots.actions" class="base-panel__actions" :aria-label="resolvedActionsLabel">
+          <slot name="actions"></slot>
+        </div>
       </div>
     </header>
 
-    <div class="base-panel__body" :role="props.bodyLabel ? 'region' : undefined" :aria-label="props.bodyLabel || undefined">
-      <slot></slot>
-    </div>
+    <fieldset class="base-panel__content" :disabled="isContentLocked" :aria-disabled="isContentLocked ? 'true' : undefined">
+      <div class="base-panel__body" :role="props.bodyLabel ? 'region' : undefined" :aria-label="props.bodyLabel || undefined">
+        <slot></slot>
+      </div>
 
-    <footer v-if="$slots.footer" class="base-panel__footer" :aria-label="props.footerLabel || undefined">
-      <slot name="footer"></slot>
-    </footer>
+      <footer v-if="$slots.footer" class="base-panel__footer" :aria-label="props.footerLabel || undefined">
+        <slot name="footer"></slot>
+      </footer>
+    </fieldset>
   </section>
 </template>
 
@@ -174,7 +205,7 @@ const handleKeydown = (event: KeyboardEvent) => {
 }
 
 .base-panel.is-disabled,
-.base-panel.is-loading {
+.base-panel.is-loading .base-panel__content {
   @apply opacity-75;
 }
 
@@ -262,8 +293,31 @@ const handleKeydown = (event: KeyboardEvent) => {
   @apply whitespace-normal break-words;
 }
 
+.base-panel__trailing {
+  @apply ml-auto flex max-w-full shrink-0 flex-wrap items-center justify-end gap-2;
+}
+
+.base-panel__loading {
+  border-color: rgb(var(--color-primary) / 0.18);
+  background-color: rgb(var(--color-primary) / 0.08);
+  color: rgb(var(--color-primary));
+  @apply inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full px-2 text-[11px] font-black;
+}
+
+.base-panel__loading :deep(svg) {
+  animation: base-panel-spin 0.9s linear infinite;
+}
+
 .base-panel__actions {
-  @apply flex max-w-full shrink-0 flex-wrap items-center justify-end gap-2;
+  @apply flex max-w-full flex-wrap items-center justify-end gap-2;
+}
+
+.base-panel__content {
+  @apply m-0 min-w-0 border-0 p-0;
+}
+
+.base-panel__content:disabled {
+  @apply cursor-not-allowed;
 }
 
 .base-panel__body {
@@ -288,7 +342,7 @@ const handleKeydown = (event: KeyboardEvent) => {
   @apply gap-4;
 }
 
-.base-panel__header + .base-panel__body {
+.base-panel__header + .base-panel__content {
   @apply mt-3;
 }
 
@@ -317,6 +371,16 @@ const handleKeydown = (event: KeyboardEvent) => {
 @media (prefers-reduced-motion: reduce) {
   .base-panel {
     transition: none !important;
+  }
+
+  .base-panel__loading :deep(svg) {
+    animation: none !important;
+  }
+}
+
+@keyframes base-panel-spin {
+  to {
+    transform: rotate(360deg);
   }
 }
 </style>

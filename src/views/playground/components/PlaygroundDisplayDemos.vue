@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref } from "vue";
 import { useToast } from "../../../composables/useToast";
+import { joinFileNames } from "../../../utils";
 import PlaygroundDemoSection from "./PlaygroundDemoSection.vue";
 
 defineProps<{
@@ -19,7 +20,7 @@ const codeSnippet = `const panel = {
 };`;
 
 const handleUploadSelect = (files: FileList) => {
-  uploadSummary.value = Array.from(files).map((file) => file.name).join("、");
+  uploadSummary.value = joinFileNames(files);
   triggerToast(`已选择 ${files.length} 个文件`, "success");
 };
 </script>

@@ -187,9 +187,9 @@ async function handleDeleteConfig() {
             :model-value="Math.round(config.timeoutMs / 1000)"
             type="number"
             min="3"
-            max="300"
+            max="600"
             :placeholder="t('settings.aiProvider.timeoutPlaceholder')"
-            @update:model-value="aiStore.patchConfig({ timeoutMs: clampNumber($event, 3, 300, 285, 0) * 1000 })"
+            @update:model-value="aiStore.patchConfig({ timeoutMs: clampNumber($event, 3, 600, 600, 0) * 1000 })"
           />
         </label>
 

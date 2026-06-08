@@ -1,6 +1,14 @@
 <script setup lang="ts">
-import { computed, useId } from "vue";
-import { sanitizeDomIdSegment, toggleItem as toggleArrayItem } from "../../utils";
+import { computed, nextTick, ref, useId, watch } from "vue";
+import type { ComponentPublicInstance } from "vue";
+import {
+  filterByFalsyValue,
+  findIndexByValue,
+  getNextCircularIndex,
+  hasItem,
+  sanitizeDomIdSegment,
+  toggleItem as toggleArrayItem,
+} from "../../utils";
 
 type AccordionSize = "sm" | "md" | "lg";
 type AccordionSurface = "card" | "muted" | "plain";
@@ -19,6 +27,7 @@ export interface AccordionItem {
 
 interface Props {
   modelValue?: string[];
+  defaultValue?: string[];
   items: AccordionItem[];
   multiple?: boolean;
   compact?: boolean;
@@ -29,10 +38,12 @@ interface Props {
   allowCollapse?: boolean;
   keepMounted?: boolean;
   ariaLabel?: string;
+  disabled?: boolean;
+  showChevron?: boolean;
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  modelValue: () => [],
+  defaultValue: () => [],
   multiple: false,
   compact: false,
   size: "md",
@@ -42,6 +53,8 @@ const props = withDefaults(defineProps<Props>(), {
   allowCollapse: true,
   keepMounted: false,
   ariaLabel: "",
+  disabled: false,
+  showChevron: true,
 });
 
 const emit = defineEmits<{
@@ -56,15 +69,55 @@ defineSlots<{
 }>();
 
 const accordionId = useId();
-const activeKeys = computed(() => props.modelValue ?? []);
+const internalValue = ref<string[]>([...props.defaultValue]);
+const triggerRefs = ref(new Map<string, HTMLButtonElement>());
 
-const isExpanded = (key: string) => activeKeys.value.includes(key);
+const activeKeys = computed(() => props.modelValue ?? internalValue.value);
+const enabledItems = computed(() => filterByFalsyValue(props.items, isItemDisabled));
+
+const isExpanded = (key: string) => hasItem(activeKeys.value, key);
+const isItemDisabled = (item: AccordionItem) => Boolean(props.disabled || item.disabled);
 const stableKey = (key: string) => sanitizeDomIdSegment(key);
 const panelId = (key: string) => `${accordionId}-panel-${stableKey(key)}`;
 const triggerId = (key: string) => `${accordionId}-trigger-${stableKey(key)}`;
 
+watch(
+  () => props.defaultValue,
+  (value) => {
+    if (props.modelValue === undefined) {
+      internalValue.value = [...value];
+    }
+  },
+);
+
+const setTriggerRef = (key: string, element: Element | ComponentPublicInstance | null) => {
+  if (!element) {
+    triggerRefs.value.delete(key);
+    return;
+  }
+
+  if (element instanceof HTMLButtonElement) {
+    triggerRefs.value.set(key, element);
+  }
+};
+
+const focusTrigger = (key: string) => {
+  void nextTick(() => {
+    triggerRefs.value.get(key)?.focus({ preventScroll: true });
+  });
+};
+
+const commitValue = (nextValue: string[], payload: { key: string; expanded: boolean }) => {
+  if (props.modelValue === undefined) {
+    internalValue.value = nextValue;
+  }
+
+  emit("update:modelValue", nextValue);
+  emit("toggle", payload);
+};
+
 const toggleItem = (item: AccordionItem) => {
-  if (item.disabled) return;
+  if (isItemDisabled(item)) return;
 
   const expanded = isExpanded(item.key);
   if (expanded && !props.allowCollapse) return;
@@ -77,8 +130,40 @@ const toggleItem = (item: AccordionItem) => {
     nextValue = expanded ? [] : [item.key];
   }
 
-  emit("update:modelValue", nextValue);
-  emit("toggle", { key: item.key, expanded: !expanded });
+  commitValue(nextValue, { key: item.key, expanded: !expanded });
+};
+
+const moveFocus = (item: AccordionItem, direction: 1 | -1) => {
+  if (!enabledItems.value.length) return;
+  const currentIndex = findIndexByValue(enabledItems.value, (current) => current.key, item.key);
+  const nextIndex = getNextCircularIndex(enabledItems.value.length, currentIndex, direction);
+  focusTrigger(enabledItems.value[nextIndex].key);
+};
+
+const handleTriggerKeydown = (event: KeyboardEvent, item: AccordionItem) => {
+  if (isItemDisabled(item)) return;
+
+  if (event.key === "ArrowDown" || event.key === "ArrowRight") {
+    event.preventDefault();
+    moveFocus(item, 1);
+  }
+
+  if (event.key === "ArrowUp" || event.key === "ArrowLeft") {
+    event.preventDefault();
+    moveFocus(item, -1);
+  }
+
+  if (event.key === "Home") {
+    event.preventDefault();
+    const firstItem = enabledItems.value[0];
+    if (firstItem) focusTrigger(firstItem.key);
+  }
+
+  if (event.key === "End") {
+    event.preventDefault();
+    const lastItem = enabledItems.value[enabledItems.value.length - 1];
+    if (lastItem) focusTrigger(lastItem.key);
+  }
 };
 </script>
 
@@ -93,24 +178,28 @@ const toggleItem = (item: AccordionItem) => {
         'base-accordion--bordered': bordered,
         'base-accordion--divided': divided,
         'base-accordion--keep-mounted': keepMounted,
+        'is-disabled': disabled,
       },
     ]"
     :aria-label="ariaLabel || undefined"
+    :aria-disabled="disabled ? 'true' : undefined"
   >
     <section
       v-for="item in items"
       :key="item.key"
       class="base-accordion__item"
-      :class="{ 'is-disabled': item.disabled, 'is-expanded': isExpanded(item.key) }"
+      :class="{ 'is-disabled': isItemDisabled(item), 'is-expanded': isExpanded(item.key) }"
     >
       <button
+        :ref="(element) => setTriggerRef(item.key, element)"
         type="button"
         class="base-accordion__trigger"
         :id="triggerId(item.key)"
-        :disabled="item.disabled"
+        :disabled="isItemDisabled(item)"
         :aria-expanded="isExpanded(item.key)"
         :aria-controls="panelId(item.key)"
         @click="toggleItem(item)"
+        @keydown="handleTriggerKeydown($event, item)"
       >
         <div class="base-accordion__meta">
           <span v-if="item.icon" class="base-accordion__icon" aria-hidden="true">
@@ -128,6 +217,7 @@ const toggleItem = (item: AccordionItem) => {
           <span v-if="item.meta" class="base-accordion__item-meta">{{ item.meta }}</span>
           <slot name="actions" :item="item" :expanded="isExpanded(item.key)"></slot>
           <BaseIcon
+            v-if="showChevron"
             name="ChevronDown"
             size="16"
             class="base-accordion__chevron"
@@ -160,6 +250,10 @@ const toggleItem = (item: AccordionItem) => {
   @apply overflow-hidden rounded-2xl bg-white shadow-sm dark:bg-slate-900;
 }
 
+.base-accordion.is-disabled {
+  @apply opacity-75;
+}
+
 .base-accordion--bordered {
   @apply border border-slate-200 dark:border-slate-800;
 }
@@ -186,6 +280,18 @@ const toggleItem = (item: AccordionItem) => {
 
 .base-accordion__item.is-disabled {
   @apply opacity-55;
+}
+
+.base-accordion__item.is-expanded .base-accordion__trigger {
+  @apply bg-slate-50 dark:bg-slate-950;
+}
+
+.base-accordion--muted .base-accordion__item.is-expanded .base-accordion__trigger {
+  @apply bg-white dark:bg-slate-900;
+}
+
+.base-accordion--plain .base-accordion__item.is-expanded .base-accordion__trigger {
+  @apply bg-slate-50 dark:bg-slate-900;
 }
 
 .base-accordion__trigger {
@@ -227,6 +333,10 @@ const toggleItem = (item: AccordionItem) => {
 
 .base-accordion__text strong {
   @apply block truncate text-xs font-black text-slate-800 dark:text-slate-100;
+}
+
+.base-accordion__item.is-expanded .base-accordion__text strong {
+  @apply text-primary;
 }
 
 .base-accordion__text small {

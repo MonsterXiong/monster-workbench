@@ -41,6 +41,13 @@ export interface CollapsedMiddleEllipsis {
 
 export type CollapsedMiddleEntry<T> = CollapsedMiddleItem<T> | CollapsedMiddleEllipsis;
 
+export interface OptionalValueFilter<T> {
+  getValue: (item: T, index: number) => unknown;
+  value: unknown;
+  isActive?: (value: unknown) => boolean;
+  equals?: (actual: unknown, expected: unknown) => boolean;
+}
+
 export function uniqueBy<T, K extends PropertyKey>(items: readonly T[], getKey: (item: T) => K): T[] {
   const seen = new Set<K>();
   const result: T[] = [];
@@ -61,8 +68,22 @@ export function uniqueArray<T>(items: readonly T[]): T[] {
   return Array.from(new Set(items));
 }
 
+export function uniqueMappedValues<T, V>(items: readonly T[], getValue: (item: T, index: number) => V): V[] {
+  return uniqueArray(items.map((item, index) => getValue(item, index)));
+}
+
 export function keySetBy<T, K extends PropertyKey>(items: readonly T[], getKey: (item: T) => K): Set<K> {
   return new Set(items.map(getKey));
+}
+
+export function indexMapBy<T, K>(items: readonly T[], getKey: (item: T, index: number) => K): Map<K, number> {
+  const result = new Map<K, number>();
+
+  items.forEach((item, index) => {
+    result.set(getKey(item, index), index);
+  });
+
+  return result;
 }
 
 export function mapBy<T, K extends PropertyKey>(items: readonly T[], getKey: (item: T) => K): Map<K, T> {
@@ -73,6 +94,42 @@ export function mapBy<T, K extends PropertyKey>(items: readonly T[], getKey: (it
   }
 
   return result;
+}
+
+export function mapToMap<T, K, V>(
+  items: readonly T[],
+  getKey: (item: T, index: number) => K,
+  getValue: (item: T, index: number) => V
+): Map<K, V> {
+  const result = new Map<K, V>();
+
+  items.forEach((item, index) => {
+    result.set(getKey(item, index), getValue(item, index));
+  });
+
+  return result;
+}
+
+export function mapToRecord<T, K extends PropertyKey, V>(
+  items: readonly T[],
+  getKey: (item: T, index: number) => K,
+  getValue: (item: T, index: number) => V
+): Record<K, V> {
+  const result = {} as Record<K, V>;
+
+  items.forEach((item, index) => {
+    result[getKey(item, index)] = getValue(item, index);
+  });
+
+  return result;
+}
+
+export function mapValuesToArray<K, V>(value: ReadonlyMap<K, V>): V[] {
+  return Array.from(value.values());
+}
+
+export function pluck<T, V>(items: readonly T[], getValue: (item: T, index: number) => V): V[] {
+  return items.map((item, index) => getValue(item, index));
 }
 
 export function hasDuplicateBy<T, K extends PropertyKey>(items: readonly T[], getKey: (item: T) => K): boolean {
@@ -113,8 +170,68 @@ export function ensureArray<T>(value: T | T[] | readonly T[] | null | undefined)
   return Array.isArray(value) ? Array.from(value as readonly T[]) : [value as T];
 }
 
+export function arrayIfArray<T = unknown>(value: unknown): T[] | undefined {
+  return Array.isArray(value) ? Array.from(value as readonly T[]) : undefined;
+}
+
+export function mapArrayIfArray<T = unknown, R = T>(
+  value: unknown,
+  mapper: (item: T, index: number) => R
+): R[] | undefined {
+  return arrayIfArray<T>(value)?.map((item, index) => mapper(item, index));
+}
+
+export function firstOf<T>(value: T | readonly T[]): T;
+export function firstOf<T>(value: T | readonly T[] | null | undefined): T | undefined;
+export function firstOf<T>(value: T | readonly T[] | null | undefined): T | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  if (Array.isArray(value)) {
+    return (value as readonly T[])[0];
+  }
+
+  return value as T;
+}
+
 export function isNonEmptyArray<T>(value: readonly T[] | null | undefined): value is readonly [T, ...T[]] {
   return Array.isArray(value) && value.length > 0;
+}
+
+export function isArrayEqual<T>(
+  left: readonly T[],
+  right: readonly T[],
+  equals: (left: T, right: T, index: number) => boolean = Object.is
+): boolean {
+  return left.length === right.length && left.every((item, index) => equals(item, right[index], index));
+}
+
+export function isArrayEqualBy<T, K>(
+  left: readonly T[],
+  right: readonly T[],
+  getValue: (item: T, index: number) => K,
+  equals: (left: K, right: K, index: number) => boolean = Object.is
+): boolean {
+  return isArrayEqual(left, right, (leftItem, rightItem, index) =>
+    equals(getValue(leftItem, index), getValue(rightItem, index), index)
+  );
+}
+
+export function hasItem<T>(items: readonly T[], item: T): boolean {
+  return items.includes(item);
+}
+
+export function hasAnyItem<T>(items: readonly T[], targets: readonly T[]): boolean {
+  if (targets.length === 0) {
+    return false;
+  }
+
+  return targets.some((target) => items.includes(target));
+}
+
+export function hasEveryItem<T>(items: readonly T[], targets: readonly T[]): boolean {
+  return targets.every((target) => items.includes(target));
 }
 
 export function compactArray<T>(items: readonly (T | null | undefined | false | "")[]): T[] {
@@ -139,6 +256,32 @@ export function findLastItem<T>(items: readonly T[], predicate: (item: T, index:
   return undefined;
 }
 
+export function findByValue<T, K>(items: readonly T[], getValue: (item: T, index: number) => K, targetValue: K): T | undefined {
+  return items.find((item, index) => getValue(item, index) === targetValue);
+}
+
+export function findByValues<T, K>(
+  items: readonly T[],
+  getValue: (item: T, index: number) => K,
+  targetValues: readonly K[]
+): T | undefined {
+  const index = findIndexByValues(items, getValue, targetValues);
+  return index >= 0 ? items[index] : undefined;
+}
+
+export function findIndexByValues<T, K>(
+  items: readonly T[],
+  getValue: (item: T, index: number) => K,
+  targetValues: readonly K[]
+): number {
+  if (targetValues.length === 0) {
+    return -1;
+  }
+
+  const targetValueSet = new Set<K>(targetValues);
+  return items.findIndex((item, index) => targetValueSet.has(getValue(item, index)));
+}
+
 export function findLastIndex<T>(items: readonly T[], predicate: (item: T, index: number) => boolean): number {
   for (let index = items.length - 1; index >= 0; index -= 1) {
     if (predicate(items[index], index)) {
@@ -147,6 +290,18 @@ export function findLastIndex<T>(items: readonly T[], predicate: (item: T, index
   }
 
   return -1;
+}
+
+export function findIndexByValue<T, K>(items: readonly T[], getValue: (item: T, index: number) => K, targetValue: K): number {
+  return items.findIndex((item, index) => getValue(item, index) === targetValue);
+}
+
+export function hasByValue<T, K>(items: readonly T[], getValue: (item: T, index: number) => K, targetValue: K): boolean {
+  return findIndexByValue(items, getValue, targetValue) >= 0;
+}
+
+export function hasByValues<T, K>(items: readonly T[], getValue: (item: T, index: number) => K, targetValues: readonly K[]): boolean {
+  return findIndexByValues(items, getValue, targetValues) >= 0;
 }
 
 export function getNextCircularIndex(length: number, currentIndex: number, offset = 1, fallbackIndex = 0): number {
@@ -161,6 +316,20 @@ export function getNextCircularIndex(length: number, currentIndex: number, offse
   }
 
   return (currentIndex + offset + safeLength) % safeLength;
+}
+
+export function getNextClampedIndex(length: number, currentIndex: number, offset = 1, fallbackIndex = 0): number {
+  const safeLength = Math.max(0, Math.floor(length));
+
+  if (safeLength === 0) {
+    return -1;
+  }
+
+  if (currentIndex < 0 || currentIndex >= safeLength) {
+    return Math.max(0, Math.min(safeLength - 1, Math.floor(fallbackIndex)));
+  }
+
+  return Math.max(0, Math.min(safeLength - 1, currentIndex + offset));
 }
 
 export function getNextCircularItem<T>(items: readonly T[], currentIndex: number, offset = 1): T | undefined {
@@ -227,6 +396,10 @@ export function repeatValue<T>(value: T, count: number): T[] {
   return Array.from({ length: Math.max(0, Math.floor(count)) }, () => value);
 }
 
+export function joinBy<T>(items: readonly T[], getValue: (item: T, index: number) => unknown, separator = ","): string {
+  return items.map((item, index) => String(getValue(item, index) ?? "")).join(separator);
+}
+
 export function mergeLimitedUniqueItems<T>(
   currentItems: readonly T[],
   nextItems: readonly T[],
@@ -281,6 +454,17 @@ export function groupByEntries<T, K extends PropertyKey>(items: readonly T[], ge
   }
 
   return Array.from(groups.entries()).map(([key, groupItems]) => ({ key, items: groupItems }));
+}
+
+export function groupByToMap<T, K>(items: readonly T[], getKey: (item: T, index: number) => K): Map<K, T[]> {
+  const groups = new Map<K, T[]>();
+
+  items.forEach((item, index) => {
+    const key = getKey(item, index);
+    groups.set(key, [...(groups.get(key) ?? []), item]);
+  });
+
+  return groups;
 }
 
 export function keyBy<T, K extends PropertyKey>(items: readonly T[], getKey: (item: T) => K): Record<K, T> {
@@ -397,6 +581,10 @@ export function intersectionBy<T, K extends PropertyKey>(left: readonly T[], rig
   return left.filter((item) => rightKeys.has(getKey(item)));
 }
 
+export function symmetricDifferenceBy<T, K extends PropertyKey>(left: readonly T[], right: readonly T[], getKey: (item: T) => K): T[] {
+  return [...differenceBy(left, right, getKey), ...differenceBy(right, left, getKey)];
+}
+
 export function sumBy<T>(items: readonly T[], getValue: (item: T) => number): number {
   return items.reduce((total, item) => total + getValue(item), 0);
 }
@@ -453,6 +641,14 @@ export function removeAt<T>(items: readonly T[], index: number): T[] {
   return items.filter((_, itemIndex) => itemIndex !== index);
 }
 
+export function updateAt<T>(items: readonly T[], index: number, updater: (item: T, index: number) => T): T[] {
+  if (index < 0 || index >= items.length) {
+    return [...items];
+  }
+
+  return items.map((item, itemIndex) => (itemIndex === index ? updater(item, itemIndex) : item));
+}
+
 export function replaceBy<T, K extends PropertyKey>(items: readonly T[], nextItem: T, getKey: (item: T) => K): T[] {
   const nextKey = getKey(nextItem);
   return items.map((item) => (getKey(item) === nextKey ? nextItem : item));
@@ -464,13 +660,79 @@ export function upsertBy<T, K extends PropertyKey>(items: readonly T[], nextItem
   return exists ? replaceBy(items, nextItem, getKey) : [...items, nextItem];
 }
 
+export function upsertManyBy<T, K extends PropertyKey>(items: readonly T[], nextItems: readonly T[], getKey: (item: T) => K): T[] {
+  return nextItems.reduce<T[]>((result, item) => upsertBy(result, item, getKey), [...items]);
+}
+
 export function removeBy<T, K extends PropertyKey>(items: readonly T[], target: T, getKey: (item: T) => K): T[] {
   const targetKey = getKey(target);
   return items.filter((item) => getKey(item) !== targetKey);
 }
 
+export function filterByValues<T, K>(items: readonly T[], getValue: (item: T, index: number) => K, targetValues: readonly K[]): T[] {
+  if (targetValues.length === 0) {
+    return [];
+  }
+
+  const targetValueSet = new Set<K>(targetValues);
+  return items.filter((item, index) => targetValueSet.has(getValue(item, index)));
+}
+
+export function filterByValue<T, K>(items: readonly T[], getValue: (item: T, index: number) => K, targetValue: K): T[] {
+  return filterByValues(items, getValue, [targetValue]);
+}
+
+export function filterByTruthyValue<T>(items: readonly T[], getValue: (item: T, index: number) => unknown): T[] {
+  return items.filter((item, index) => Boolean(getValue(item, index)));
+}
+
+export function filterByFalsyValue<T>(items: readonly T[], getValue: (item: T, index: number) => unknown): T[] {
+  return items.filter((item, index) => !getValue(item, index));
+}
+
+export function filterByOptionalValues<T>(items: readonly T[], filters: readonly OptionalValueFilter<T>[]): T[] {
+  return items.filter((item, index) =>
+    filters.every((filter) => {
+      const isActive = filter.isActive ?? ((value: unknown) => value !== undefined && value !== null && value !== "");
+
+      if (!isActive(filter.value)) {
+        return true;
+      }
+
+      const equals = filter.equals ?? Object.is;
+      return equals(filter.getValue(item, index), filter.value);
+    })
+  );
+}
+
+export function removeByValue<T, K>(items: readonly T[], getValue: (item: T, index: number) => K, targetValue: K): T[] {
+  return removeByValues(items, getValue, [targetValue]);
+}
+
+export function removeByValues<T, K>(items: readonly T[], getValue: (item: T, index: number) => K, targetValues: readonly K[]): T[] {
+  if (targetValues.length === 0) {
+    return [...items];
+  }
+
+  const targetValueSet = new Set<K>(targetValues);
+  return items.filter((item, index) => !targetValueSet.has(getValue(item, index)));
+}
+
 export function updateWhere<T>(items: readonly T[], predicate: (item: T, index: number) => boolean, updater: (item: T, index: number) => T): T[] {
   return items.map((item, index) => (predicate(item, index) ? updater(item, index) : item));
+}
+
+export function updateByValue<T, K>(
+  items: readonly T[],
+  getValue: (item: T, index: number) => K,
+  targetValue: K,
+  updater: (item: T, index: number) => T
+): T[] {
+  return updateWhere(items, (item, index) => getValue(item, index) === targetValue, updater);
+}
+
+export function replaceByValue<T, K>(items: readonly T[], getValue: (item: T, index: number) => K, targetValue: K, nextItem: T): T[] {
+  return updateByValue(items, getValue, targetValue, () => nextItem);
 }
 
 export function removeWhere<T>(items: readonly T[], predicate: (item: T, index: number) => boolean): T[] {

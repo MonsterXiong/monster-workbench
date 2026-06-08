@@ -5,7 +5,7 @@ import {
   type UploadedFileInfo,
 } from "../services/file-manager.service";
 import { useAppStore } from "./app";
-import { filterBySearchTextFields, toggleAllSelection, toggleSelectionKey, uniqueArray } from "../utils";
+import { filterBySearchTextFields, getFileNames, toggleAllSelection, toggleSelectionKey, uniqueArray } from "../utils";
 
 export type FileTypeFilter = "image" | "file" | undefined;
 
@@ -214,7 +214,7 @@ export const useFileManagerStore = defineStore("file-manager", () => {
     const filesList = event.dataTransfer?.files;
     if (!filesList || filesList.length === 0) return null;
 
-    const paths = Array.from(filesList).map(file => file.name);
+    const paths = getFileNames(filesList);
     return batchUploadFiles(paths);
   }
 

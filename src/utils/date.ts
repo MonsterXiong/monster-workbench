@@ -5,6 +5,12 @@ export interface DateRangeLike<T = DateInput | null | undefined> {
   end?: T;
 }
 
+export interface WeekdayLabelOptions {
+  firstDayOfWeek?: number;
+  stripZhWeekPrefix?: boolean;
+  format?: Intl.DateTimeFormatOptions["weekday"];
+}
+
 const DATE_TOKEN_REGEXP = /YYYY|MM|DD|HH|mm|ss|SSS/g;
 
 export function toDate(value: DateInput): Date | null {
@@ -54,6 +60,20 @@ export function formatTimeOnly(value: DateInput, fallback = "--"): string {
   return formatDate(value, "HH:mm:ss", fallback);
 }
 
+export function formatIsoString(value: DateInput = new Date(), fallback = ""): string {
+  const date = toDate(value);
+  return date ? date.toISOString() : fallback;
+}
+
+export function getCurrentIsoString(): string {
+  return formatIsoString(new Date());
+}
+
+export function formatIsoDateTime(value: DateInput = new Date(), separator: "T" | " " = "T", fallback = ""): string {
+  const isoText = formatIsoString(value, fallback);
+  return isoText ? isoText.replace("T", separator).slice(0, 19) : fallback;
+}
+
 export function normalizeDateInputText(value: string): string {
   return value.trim().replace(/[\\/]+/g, "-").replace(/\s+/g, " ");
 }
@@ -89,6 +109,21 @@ export function addDays(value: DateInput, days: number): Date | null {
   return date;
 }
 
+export function addMonths(value: DateInput, months: number): Date | null {
+  const date = toDate(value);
+
+  if (!date) {
+    return null;
+  }
+
+  const day = date.getDate();
+  date.setDate(1);
+  date.setMonth(date.getMonth() + months);
+  const lastDayOfTargetMonth = new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
+  date.setDate(Math.min(day, lastDayOfTargetMonth));
+  return date;
+}
+
 export function startOfDay(value: DateInput): Date | null {
   const date = toDate(value);
 
@@ -111,6 +146,26 @@ export function endOfDay(value: DateInput): Date | null {
   return date;
 }
 
+export function startOfMonth(value: DateInput): Date | null {
+  const date = toDate(value);
+
+  if (!date) {
+    return null;
+  }
+
+  return new Date(date.getFullYear(), date.getMonth(), 1);
+}
+
+export function endOfMonth(value: DateInput): Date | null {
+  const date = toDate(value);
+
+  if (!date) {
+    return null;
+  }
+
+  return new Date(date.getFullYear(), date.getMonth() + 1, 0, 23, 59, 59, 999);
+}
+
 export function isSameDay(left: DateInput, right: DateInput): boolean {
   const leftDate = toDate(left);
   const rightDate = toDate(right);
@@ -120,6 +175,32 @@ export function isSameDay(left: DateInput, right: DateInput): boolean {
   }
 
   return formatDateOnly(leftDate) === formatDateOnly(rightDate);
+}
+
+export function isToday(value: DateInput): boolean {
+  return isSameDay(value, new Date());
+}
+
+export function isSameMonth(left: DateInput, right: DateInput): boolean {
+  const leftDate = toDate(left);
+  const rightDate = toDate(right);
+
+  if (!leftDate || !rightDate) {
+    return false;
+  }
+
+  return leftDate.getFullYear() === rightDate.getFullYear() && leftDate.getMonth() === rightDate.getMonth();
+}
+
+export function compareDates(left: DateInput, right: DateInput, fallback = 0): number {
+  const leftDate = toDate(left);
+  const rightDate = toDate(right);
+
+  if (!leftDate || !rightDate) {
+    return fallback;
+  }
+
+  return leftDate.getTime() - rightDate.getTime();
 }
 
 export function isDateInRange(value: DateInput, start?: DateInput | null, end?: DateInput | null, inclusive = true): boolean {
@@ -178,6 +259,42 @@ export function diffDays(left: DateInput, right: DateInput): number | null {
   return Math.round((leftStart.getTime() - rightStart.getTime()) / 86_400_000);
 }
 
+export function getMonthCalendarDates(value: DateInput, firstDayOfWeek = 1, weekCount = 6): Date[] {
+  const firstDay = startOfMonth(value);
+
+  if (!firstDay) {
+    return [];
+  }
+
+  const safeFirstDayOfWeek = ((Math.floor(firstDayOfWeek) % 7) + 7) % 7;
+  const safeWeekCount = Math.max(1, Math.floor(weekCount));
+  const offset = (firstDay.getDay() - safeFirstDayOfWeek + 7) % 7;
+  const cursor = new Date(firstDay);
+  cursor.setDate(firstDay.getDate() - offset);
+
+  return Array.from({ length: safeWeekCount * 7 }, (_, index) => {
+    const date = new Date(cursor);
+    date.setDate(cursor.getDate() + index);
+    return date;
+  });
+}
+
+export function getWeekdayLabels(locale = "zh-CN", options: WeekdayLabelOptions = {}): string[] {
+  const firstDayOfWeek = ((Math.floor(options.firstDayOfWeek ?? 1) % 7) + 7) % 7;
+  const stripZhWeekPrefix = options.stripZhWeekPrefix ?? true;
+  const labels = Array.from({ length: 7 }, (_, index) => {
+    const date = new Date(2026, 5, 7 + index);
+    const label = new Intl.DateTimeFormat(locale, { weekday: options.format ?? "short" }).format(date);
+    return stripZhWeekPrefix ? label.replace(/^周/, "") : label;
+  });
+
+  if (firstDayOfWeek === 0) {
+    return labels;
+  }
+
+  return [...labels.slice(firstDayOfWeek), ...labels.slice(0, firstDayOfWeek)];
+}
+
 export function toUnixTimestamp(value: DateInput, unit: "second" | "millisecond" = "second"): number | null {
   const date = toDate(value);
 
@@ -207,6 +324,17 @@ export function normalizeUnixTimestamp(value: number, unit: "second" | "millisec
 export function fromUnixTimestamp(value: number, unit: "second" | "millisecond" = "second"): Date | null {
   const timestamp = unit === "second" ? value * 1000 : value;
   return toDate(timestamp);
+}
+
+export function parseUnixTimestampInput(value: unknown): Date | null {
+  const text = String(value ?? "").trim();
+
+  if (!text) {
+    return null;
+  }
+
+  const timestamp = normalizeUnixTimestamp(Number(text));
+  return timestamp === null ? null : fromUnixTimestamp(timestamp);
 }
 
 export function formatUnixTimestamp(

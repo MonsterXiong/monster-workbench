@@ -2,7 +2,7 @@ import { type App } from "vue";
 import { logger } from "./logger";
 import { useToast } from "../composables/useToast";
 import { useLoading } from "../composables/useLoading";
-import { safeJsonStringify } from "../utils";
+import { includesAnyText, safeJsonStringify } from "../utils";
 
 export type ErrorType =
   | "RUNTIME"     // JS 运行时错误
@@ -90,16 +90,15 @@ export const ErrorHandler = {
       stack = err.stack ?? "";
 
       // 智能识别系统错误类别
-      const msgLower = message.toLowerCase();
-      if (msgLower.includes("network") || msgLower.includes("fetch") || msgLower.includes("timeout")) {
+      if (includesAnyText(message, ["network", "fetch", "timeout"], { ignoreCase: true })) {
         type = "NETWORK";
-      } else if (msgLower.includes("database") || msgLower.includes("sqlite") || msgLower.includes("sql")) {
+      } else if (includesAnyText(message, ["database", "sqlite", "sql"], { ignoreCase: true })) {
         type = "DATABASE";
-      } else if (msgLower.includes("permission") || msgLower.includes("denied") || msgLower.includes("os error 5")) {
+      } else if (includesAnyText(message, ["permission", "denied", "os error 5"], { ignoreCase: true })) {
         type = "PERMISSION";
-      } else if (msgLower.includes("file") || msgLower.includes("directory") || msgLower.includes("write") || msgLower.includes("read")) {
+      } else if (includesAnyText(message, ["file", "directory", "write", "read"], { ignoreCase: true })) {
         type = "FILE";
-      } else if (msgLower.includes("tauri") || msgLower.includes("invoke")) {
+      } else if (includesAnyText(message, ["tauri", "invoke"], { ignoreCase: true })) {
         type = "TAURI";
       }
     } else if (typeof err === "string") {

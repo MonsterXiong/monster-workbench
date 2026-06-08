@@ -23,6 +23,8 @@ interface Props {
   prefixIcon?: string;
   suffixIcon?: string;
   loading?: boolean;
+  showPassword?: boolean;
+  block?: boolean;
   ariaLabel?: string;
 }
 
@@ -40,6 +42,8 @@ const props = withDefaults(defineProps<Props>(), {
   prefixIcon: "",
   suffixIcon: "",
   loading: false,
+  showPassword: false,
+  block: false,
   ariaLabel: "",
 });
 
@@ -94,8 +98,9 @@ const computedValue = computed({
     :clearable="clearable"
     :maxlength="maxlength"
     :show-word-limit="showWordLimit"
+    :show-password="showPassword"
     :autocomplete="autocomplete"
-    :class="{ 'is-error': error }"
+    :class="[`base-input--${size}`, { 'is-error': error, 'base-input--block': block }]"
     @blur="emit('blur', $event as any)"
     @focus="emit('focus', $event as any)"
     @input="emit('input', $event as any)"
@@ -132,6 +137,10 @@ const computedValue = computed({
 </template>
 
 <style scoped>
+.base-input--block {
+  @apply w-full;
+}
+
 :deep(.el-input__wrapper) {
   @apply rounded-xl border border-slate-300 bg-slate-50 px-3 shadow-sm transition-all dark:border-slate-700 dark:bg-slate-950;
   box-shadow: none;
@@ -159,6 +168,11 @@ const computedValue = computed({
 
 :deep(.el-input__count) {
   @apply bg-transparent text-[10px] font-bold text-slate-400 dark:text-slate-500;
+}
+
+:deep(.el-input-group__prepend),
+:deep(.el-input-group__append) {
+  @apply border-slate-300 bg-slate-100 px-3 text-xs font-bold text-slate-500 shadow-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400;
 }
 
 :deep(.el-input.is-disabled .el-input__wrapper) {

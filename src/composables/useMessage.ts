@@ -1,5 +1,5 @@
 import { ref } from "vue";
-import { createTimestampId } from "../utils";
+import { createTimestampId, findIndexByValue } from "../utils";
 
 export type MessageType = "success" | "error" | "warning" | "info";
 
@@ -74,7 +74,7 @@ export function useMessage() {
       timers.delete(id);
     }
 
-    const index = messages.value.findIndex((m) => m.id === id);
+    const index = findIndexByValue(messages.value, (message) => message.id, id);
     if (index !== -1) {
       messages.value.splice(index, 1);
     }

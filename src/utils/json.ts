@@ -62,6 +62,37 @@ export function safeJsonParseObject<T extends AnyRecord = AnyRecord>(value: stri
   return result.ok && result.data !== null ? result.data : fallback;
 }
 
+export function tryJsonParseArray<T = unknown>(value: string): JsonParseResult<T[]> {
+  const result = tryJsonParse<unknown>(value);
+
+  if (!result.ok) {
+    return {
+      ok: false,
+      data: null,
+      error: result.error,
+    };
+  }
+
+  if (!Array.isArray(result.data)) {
+    return {
+      ok: false,
+      data: null,
+      error: new Error("JSON value is not an array"),
+    };
+  }
+
+  return {
+    ok: true,
+    data: result.data as T[],
+    error: null,
+  };
+}
+
+export function safeJsonParseArray<T = unknown>(value: string, fallback: T[]): T[] {
+  const result = tryJsonParseArray<T>(value);
+  return result.ok && result.data !== null ? result.data : fallback;
+}
+
 export function safeJsonStringify(value: unknown, fallback = ""): string {
   try {
     const result = JSON.stringify(value);
