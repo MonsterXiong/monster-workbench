@@ -31,6 +31,17 @@ export interface SplitLinesOptions {
   keepEmpty?: boolean;
 }
 
+export interface SplitOnceResult {
+  before: string;
+  after: string;
+  found: boolean;
+}
+
+export interface IncludesAnyTextOptions {
+  ignoreCase?: boolean;
+  trimKeyword?: boolean;
+}
+
 export function splitLines(value: string, options: SplitLinesOptions = {}): string[] {
   const trim = options.trim ?? false;
   const keepEmpty = options.keepEmpty ?? true;
@@ -41,6 +52,31 @@ export function splitLines(value: string, options: SplitLinesOptions = {}): stri
     .split("\n")
     .map((line) => (trim ? line.trim() : line))
     .filter((line) => keepEmpty || line.trim().length > 0);
+}
+
+export function splitOnce(value: string, marker: string): SplitOnceResult {
+  if (!marker) {
+    return {
+      before: value,
+      after: "",
+      found: false,
+    };
+  }
+
+  const markerIndex = value.indexOf(marker);
+  if (markerIndex < 0) {
+    return {
+      before: value,
+      after: "",
+      found: false,
+    };
+  }
+
+  return {
+    before: value.slice(0, markerIndex),
+    after: value.slice(markerIndex + marker.length),
+    found: true,
+  };
 }
 
 export function joinTextList(values: readonly unknown[], separator = "\u3001"): string {
@@ -124,6 +160,22 @@ export function equalsIgnoreCase(left: string, right: string): boolean {
 
 export function includesIgnoreCase(value: string, keyword: string): boolean {
   return value.toLowerCase().includes(keyword.toLowerCase());
+}
+
+export function includesAnyText(value: string, keywords: readonly string[], options: IncludesAnyTextOptions = {}): boolean {
+  const ignoreCase = options.ignoreCase ?? false;
+  const trimKeyword = options.trimKeyword ?? true;
+  const normalizedValue = ignoreCase ? value.toLowerCase() : value;
+
+  return keywords.some((keyword) => {
+    const normalizedKeyword = trimKeyword ? keyword.trim() : keyword;
+
+    if (!normalizedKeyword) {
+      return false;
+    }
+
+    return normalizedValue.includes(ignoreCase ? normalizedKeyword.toLowerCase() : normalizedKeyword);
+  });
 }
 
 export function maskText(value: string, visibleStart = 3, visibleEnd = 3, mask = "*"): string {

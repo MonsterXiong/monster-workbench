@@ -1,7 +1,14 @@
 import { getFileExtension, getFileName } from "./path";
+import { joinTextList } from "./string";
 
 export type FileKind = "image" | "text" | "document" | "archive" | "audio" | "video" | "code" | "file";
 export type UploadFileType = "image" | "file";
+
+export interface FileNameLike {
+  name: string;
+}
+
+export type FileListInput<T extends FileNameLike = File> = ArrayLike<T> | Iterable<T> | null | undefined;
 
 export const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "ico", "avif"] as const;
 export const TEXT_EXTENSIONS = ["txt", "md", "markdown", "log", "csv", "tsv", "json", "xml", "yaml", "yml"] as const;
@@ -233,4 +240,18 @@ export function matchesAccept(path: string, accept: string | readonly string[] |
 
 export function getSafeFileName(path: string, fallback = "file"): string {
   return getFileName(path) || fallback;
+}
+
+export function toFileArray<T extends FileNameLike = File>(files: FileListInput<T>): T[] {
+  return files ? Array.from(files) : [];
+}
+
+export function getFileNames<T extends FileNameLike = File>(files: FileListInput<T>): string[] {
+  return toFileArray(files)
+    .map((file) => file.name)
+    .filter(Boolean);
+}
+
+export function joinFileNames<T extends FileNameLike = File>(files: FileListInput<T>, separator = "\u3001"): string {
+  return joinTextList(getFileNames(files), separator);
 }

@@ -1,4 +1,4 @@
-import { createStableHashId, safeJsonParseObject, safeJsonStringify } from "../utils";
+import { createStableHashId, getTextAfterLogLevel, hasLogLevel, safeJsonParseObject, safeJsonStringify, splitOnce } from "../utils";
 
 export type ErrorReviewStatus = "pending" | "needs_review" | "resolved";
 
@@ -42,8 +42,8 @@ function writeReviewMap(reviewMap: Record<string, ErrorReviewRecord>) {
 }
 
 function splitSummaryAndDetails(payload: string) {
-  const detailIndex = payload.indexOf(DETAIL_SEPARATOR);
-  if (detailIndex === -1) {
+  const result = splitOnce(payload, DETAIL_SEPARATOR);
+  if (!result.found) {
     return {
       summary: payload.trim(),
       details: "",
@@ -51,8 +51,8 @@ function splitSummaryAndDetails(payload: string) {
   }
 
   return {
-    summary: payload.slice(0, detailIndex).trim(),
-    details: payload.slice(detailIndex + DETAIL_SEPARATOR.length).trim(),
+    summary: result.before.trim(),
+    details: result.after.trim(),
   };
 }
 
@@ -87,14 +87,13 @@ function parseSummary(summary: string) {
 }
 
 function parseErrorLine(line: string): ErrorMonitorEntry | null {
-  if (!line.includes("[ERROR]")) {
+  if (!hasLogLevel(line, "ERROR")) {
     return null;
   }
 
   const timeMatch = line.match(/^\[(.*?)\]/);
   const time = timeMatch ? timeMatch[1] : "";
-  const errorIndex = line.indexOf("[ERROR]");
-  const payload = line.slice(errorIndex + "[ERROR]".length).trim();
+  const payload = getTextAfterLogLevel(line, "ERROR");
   const { summary, details } = splitSummaryAndDetails(payload);
   const { errorCode, errorType, message } = parseSummary(summary);
   const fingerprint = createStableHashId(line, "err");

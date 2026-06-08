@@ -1,8 +1,8 @@
-import { createRouter, createWebHistory } from "vue-router";
+import { createRouter, createWebHashHistory } from "vue-router";
 import { routeLoading } from "./state";
 
 export const router = createRouter({
-  history: createWebHistory(),
+  history: createWebHashHistory(),
   routes: [
     { path: "/", redirect: "/workspace" },
     {
@@ -26,6 +26,11 @@ export const router = createRouter({
       component: () => import("../views/navigation/NavigationPage.vue"),
     },
     {
+      path: "/ai",
+      name: "ai",
+      component: () => import("../views/ai/AiPage.vue"),
+    },
+    {
       path: "/settings",
       name: "settings",
       component: () => import("../views/settings/SettingsPage.vue"),
@@ -34,6 +39,26 @@ export const router = createRouter({
       path: "/file-manager",
       name: "file-manager",
       component: () => import("../views/file-manager/FileManagerPage.vue"),
+    },
+    {
+      path: "/playground",
+      name: "playground",
+      component: () => import("../views/playground/PlaygroundPage.vue"),
+    },
+    {
+      path: "/403",
+      name: "403",
+      component: () => import("../views/error/403Page.vue"),
+    },
+    {
+      path: "/500",
+      name: "500",
+      component: () => import("../views/error/500Page.vue"),
+    },
+    {
+      path: "/:pathMatch(.*)*",
+      name: "404",
+      component: () => import("../views/error/404Page.vue"),
     },
   ],
 });

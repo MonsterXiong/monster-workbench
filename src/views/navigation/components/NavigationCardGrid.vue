@@ -4,17 +4,21 @@ import {
   Trash2,
   Bookmark,
   ExternalLink,
+  GripVertical,
 } from "lucide-vue-next";
-import { isTauriRuntime } from "../../../services/runtime";
-import { useAppStore } from "../../../stores/app";
-import { convertFileSrc } from "@tauri-apps/api/core";
+import { useDragSort } from "../../../composables/useDragSort";
+import { toRef } from "vue";
+import { useI18n } from "../../../composables/useI18n";
+import { formatTemplate } from "../../../utils";
 
-const appStore = useAppStore();
+const { t } = useI18n();
 
-defineProps<{
+const props = defineProps<{
   items: any[];
   isBatchMode: boolean;
+  isSortMode: boolean;
   selectedIds: number[];
+  resolveImageUrl: (relPath: string) => string;
 }>();
 
 const emit = defineEmits<{
@@ -24,42 +28,56 @@ const emit = defineEmits<{
   (e: "delete", id: number, title: string, event: Event): void;
 }>();
 
-// 图片本地绝对路径的 WebView 转换预览
-function getImgUrl(relPath: string) {
-  if (!relPath) return "";
-  if (!isTauriRuntime()) {
-    return "https://api.dicebear.com/7.x/identicon/svg?seed=" + encodeURIComponent(relPath);
-  }
-  const absPath = appStore.localPath + "/" + relPath;
-  return convertFileSrc(absPath);
+const itemsRef = toRef(props, "items");
+const { isDraggingIndex, handleDragStart, handleDragEnter, handleDragEnd } = useDragSort(itemsRef);
+
+function getCategoryName(cat: string): string {
+  if (!cat) return "";
+  const key = `navigation.categories.${cat}`;
+  const val = t(key);
+  return val === key ? cat : val;
 }
 </script>
 
 <template>
-  <div class="flex-1 overflow-y-auto mt-4.5 pr-0.5 min-h-0 relative">
+  <div class="flex-1 overflow-y-auto mt-4.5 pt-2 pr-0.5 min-h-0 relative">
     <!-- 空白占位 -->
     <div v-if="items.length === 0" class="flex flex-col items-center justify-center py-20 gap-3 text-center">
-      <div class="h-14 w-14 rounded-2xl bg-slate-50 flex items-center justify-center text-slate-300 border border-slate-100">
+      <div class="h-14 w-14 rounded-2xl bg-slate-50 dark:bg-slate-800 flex items-center justify-center text-slate-400 border border-slate-200 dark:border-slate-700">
         <Bookmark class="h-7 w-7" />
       </div>
       <div>
-        <h3 class="text-xs font-bold text-slate-700">暂无导航网址数据</h3>
-        <p class="text-[10px] text-slate-400 font-semibold mt-1">您可点击右上方"新增"进行数据填充</p>
+        <h3 class="text-xs font-bold text-slate-800 dark:text-slate-200">{{ t('navigation.noData') }}</h3>
+        <p class="text-[10px] text-slate-400 dark:text-slate-500 font-semibold mt-1">{{ t('navigation.noDataDesc') }}</p>
       </div>
     </div>
 
-    <div v-else class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-5">
+    <transition-group
+      v-else
+      tag="div"
+      name="grid-fade"
+      class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-5"
+    >
       <div
-        v-for="item in items"
+        v-for="(item, index) in items"
         :key="item.id"
         class="nav-card group"
-        :class="{ 'ring-2 ring-blue-500/40 shadow-blue-500/5 bg-blue-50/20': selectedIds.includes(item.id!) }"
+        :class="{
+          'ring-2 ring-blue-500/40 shadow-blue-500/5 bg-blue-50/20': selectedIds.includes(item.id!),
+          'is-sorting opacity-40 scale-95 border-dashed border-blue-400/60 bg-blue-50/10 cursor-grabbing': isSortMode && isDraggingIndex === index,
+          'hover:shadow-none hover:transform-none cursor-grab': isSortMode
+        }"
+        :draggable="isSortMode"
         @click="emit('visit', item)"
+        @dragstart="handleDragStart(index, $event)"
+        @dragover.prevent
+        @dragenter="handleDragEnter(index)"
+        @dragend="handleDragEnd"
       >
         <!-- 背景封面 -->
         <div v-if="item.bg_path" class="-mx-4 -mt-4 mb-3 h-[88px] overflow-hidden shrink-0 relative rounded-t-2xl">
-          <img :src="getImgUrl(item.bg_path)" class="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" />
-          <div class="absolute inset-0 bg-gradient-to-t from-white/60 via-transparent to-transparent"></div>
+          <img :src="resolveImageUrl(item.bg_path)" class="w-full h-full object-cover transition-transform duration-500" :class="{ 'group-hover:scale-110': !isSortMode }" />
+          <div class="absolute inset-0 bg-gradient-to-t from-white/80 dark:from-slate-900/80 via-white/10 dark:via-slate-900/10 to-transparent"></div>
         </div>
 
         <!-- 批量选择框 -->
@@ -74,96 +92,119 @@ function getImgUrl(relPath: string) {
 
         <!-- 卡片头 -->
         <div class="flex items-center justify-between gap-2.5">
-          <div class="flex items-center gap-2.5 flex-1 min-w-0">
+          <div class="flex items-center gap-2 flex-1 min-w-0">
+            <!-- 拖拽手柄 -->
+            <div
+              v-if="isSortMode"
+              class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition shrink-0 mr-1 p-0.5"
+            >
+              <GripVertical class="h-3.5 w-3.5" />
+            </div>
             <div
               v-if="item.logo_path"
-              class="h-7 w-7 rounded-lg bg-white border border-slate-100 flex items-center justify-center overflow-hidden shrink-0 shadow-sm"
+              class="h-7 w-7 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex items-center justify-center overflow-hidden shrink-0 shadow-sm"
             >
-              <img :src="getImgUrl(item.logo_path)" class="h-full w-full object-contain" />
+              <img :src="resolveImageUrl(item.logo_path)" class="h-full w-full object-contain" />
             </div>
             <div v-else class="h-7 w-7 rounded-lg bg-gradient-to-br from-blue-500 to-indigo-500 flex items-center justify-center shrink-0 shadow-sm">
               <span class="text-[10px] font-black text-white">{{ item.title?.charAt(0) || '?' }}</span>
             </div>
-            <h3 class="text-xs font-black text-slate-800 truncate group-hover:text-blue-600 transition">
+            <h3 class="text-xs font-black text-slate-900 dark:text-slate-100 truncate transition" :class="{ 'group-hover:text-primary': !isSortMode }">
               {{ item.title }}
             </h3>
           </div>
           <!-- 属性徽标 -->
           <div class="flex gap-1 shrink-0">
-            <span v-if="item.is_featured === 1" class="badge-feature">精选</span>
-            <span v-if="item.is_hot === 1" class="badge-hot">热门</span>
+            <span v-if="item.is_featured === 1" class="badge-feature">{{ t('navigation.featured') }}</span>
+            <span v-if="item.is_hot === 1" class="badge-hot">{{ t('navigation.hot') }}</span>
           </div>
         </div>
 
         <!-- 网址与描述 -->
         <div class="mt-2.5">
-          <p class="text-[10px] text-slate-400 font-semibold truncate flex items-center gap-1">
+          <p class="text-[10px] text-slate-500 font-semibold truncate flex items-center gap-1">
             <ExternalLink class="h-2.5 w-2.5 shrink-0" />
             {{ item.url }}
           </p>
-          <p class="text-[11px] text-slate-500 leading-normal mt-2 line-clamp-2 h-8.5">
-            {{ item.description || '暂无详细描述文案。' }}
+          <p class="text-[11px] text-slate-600 dark:text-slate-400 leading-normal mt-2 line-clamp-2 h-8.5">
+            {{ item.description || t('navigation.defaultDescription') }}
           </p>
         </div>
 
         <!-- 卡片页脚 -->
-        <div class="mt-3.5 pt-3 border-t border-slate-100/80 flex items-center justify-between text-[10px] text-slate-400">
-          <span class="font-bold bg-slate-100 text-slate-500 px-2 py-0.5 rounded">
-            {{ item.category }}
+        <div class="mt-3.5 pt-3 border-t border-slate-200 dark:border-slate-700 flex items-center justify-between text-[10px] text-slate-400">
+          <span class="font-bold bg-slate-50 dark:bg-slate-800 text-slate-500 px-2 py-0.5 rounded">
+            {{ getCategoryName(item.category) }}
           </span>
           <span class="font-medium">
-            点击量: <strong class="text-slate-700">{{ item.clicks }}</strong>
+            {{ formatTemplate(t('navigation.clicks'), { count: item.clicks || 0 }) }}
           </span>
         </div>
 
         <!-- 操作悬浮 -->
         <div
-          v-if="!isBatchMode"
+          v-if="!isBatchMode && !isSortMode"
           class="absolute right-3.5 top-3.5 flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity duration-150"
           @click.stop
         >
-          <button
-            class="card-action-btn bg-white hover:bg-slate-50 text-slate-500 hover:text-slate-700"
-            title="编辑导航"
+          <div
+            role="button"
+            class="card-action-btn hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-500 hover:text-slate-900 dark:hover:text-slate-100 cursor-pointer shadow-sm"
+            :title="t('navigation.editNav')"
             @click="emit('openEditModal', item, $event)"
           >
             <Edit3 class="h-3 w-3" />
-          </button>
-          <button
-            class="card-action-btn bg-white hover:bg-red-50 text-slate-500 hover:text-red-600 hover:border-red-200"
-            title="删除导航"
+          </div>
+          <div
+            role="button"
+            class="card-action-btn hover:bg-red-500/20 hover:text-red-600 hover:border-red-500/30 text-slate-500 cursor-pointer shadow-sm"
+            :title="t('navigation.deleteNav')"
             @click="emit('delete', item.id!, item.title, $event)"
           >
             <Trash2 class="h-3 w-3" />
-          </button>
+          </div>
         </div>
       </div>
-    </div>
+    </transition-group>
   </div>
 </template>
 
 <style scoped>
 .nav-card {
-  @apply relative rounded-2xl p-4 hover:bg-white cursor-pointer overflow-hidden;
-  border: 1px solid rgba(226, 232, 240, 0.7);
-  background-color: rgba(248, 250, 252, 0.2);
-  transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  @apply relative rounded-2xl p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 cursor-pointer overflow-hidden transition-all duration-300;
+  box-shadow: 0 1px 3px 0 rgba(15, 23, 42, 0.01), 0 8px 30px -4px rgba(15, 23, 42, 0.03);
 }
-.nav-card:hover {
-  border-color: rgba(59, 130, 246, 0.3);
-  box-shadow: 0 16px 24px -4px rgba(226, 232, 240, 0.6), 0 8px 12px -6px rgba(226, 232, 240, 0.6);
-  transform: translateY(-4px);
+:global(.dark) .nav-card {
+  border: 1px solid rgba(255, 255, 255, 0.035) !important;
+  box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.45), inset 0 1px 0 0 rgba(255, 255, 255, 0.045) !important;
+}
+.nav-card:hover:not(.is-sorting) {
+  border-color: rgba(var(--color-primary) / 0.4);
+  box-shadow: 0 20px 40px -10px rgba(15, 23, 42, 0.06), 0 1px 3px 0 rgba(15, 23, 42, 0.01);
+  transform: translateY(-3px);
+}
+:global(.dark) .nav-card:hover:not(.is-sorting) {
+  border-color: rgba(99, 102, 241, 0.25) !important;
+  box-shadow: 0 12px 32px -4px rgba(0, 0, 0, 0.5), inset 0 1px 0 0 rgba(255, 255, 255, 0.06), 0 0 16px 0 rgba(99, 102, 241, 0.08) !important;
 }
 .badge-feature {
-  @apply text-[9px] font-black text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded-md leading-none select-none;
-  border: 1px solid rgba(191, 219, 254, 0.5);
+  @apply text-[9px] font-black px-1.5 py-0.5 rounded-md leading-none select-none;
+  color: rgb(var(--color-primary));
+  background-color: rgba(var(--color-primary), 0.1);
+  border: 1px solid rgba(var(--color-primary), 0.2);
 }
 .badge-hot {
-  @apply text-[9px] font-black text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded-md leading-none select-none;
-  border: 1px solid rgba(253, 230, 138, 0.5);
+  @apply text-[9px] font-black px-1.5 py-0.5 rounded-md leading-none select-none;
+  color: #e6a23c;
+  background-color: rgba(230, 162, 60, 0.1);
+  border: 1px solid rgba(230, 162, 60, 0.2);
 }
 .card-action-btn {
-  @apply flex h-6 w-6 items-center justify-center rounded-md bg-white shadow-sm transition;
-  border: 1px solid rgba(226, 232, 240, 0.6);
+  @apply flex h-6 w-6 items-center justify-center rounded-md bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-sm transition;
+}
+
+/* 列表避让平移动画 */
+.grid-fade-move {
+  transition: transform 0.4s cubic-bezier(0.25, 1, 0.5, 1);
 }
 </style>
