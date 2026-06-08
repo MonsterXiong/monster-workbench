@@ -1,0 +1,27 @@
+/*
+  此文件定义了应用的基础 CSS 变量，主要包括：
+  1. TailwindCSS 使用的主题强调色。
+  2. Element Plus 使用的主题强调色映射与覆盖。
+*/
+
+:root {
+  /* 基础主色调 RGB 分量，默认：蓝色 (37 99 235) */
+  --color-primary: 37 99 235;
+
+  /* Element Plus 主色调覆盖 */
+  --el-color-primary: rgb(var(--color-primary));
+  /* 混合不同透明度，模拟 Element 的浅/深色板 */
+  --el-color-primary-light-3: rgba(var(--color-primary), 0.7);
+  --el-color-primary-light-5: rgba(var(--color-primary), 0.5);
+  --el-color-primary-light-7: rgba(var(--color-primary), 0.3);
+  --el-color-primary-light-8: rgba(var(--color-primary), 0.2);
+  --el-color-primary-light-9: rgba(var(--color-primary), 0.1);
+  --el-color-primary-dark-2: rgba(var(--color-primary), 0.9);
+
+  /* 其他 Tailwind 需要暴露给 CSS 使用的辅助变量可放于此 */
+}
+
+/* 结合暗色模式的微调 (Element Plus 自带 dark 模式，但我们可以在此做微调补充) */
+html.dark {
+  /* --el-text-color-primary: #f1f5f9; */
+}

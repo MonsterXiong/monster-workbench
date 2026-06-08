@@ -1,0 +1,221 @@
+<script setup lang="ts">
+import { computed, useSlots, useAttrs } from "vue";
+import { omit } from "../../utils";
+
+defineOptions({
+  inheritAttrs: false,
+});
+
+interface Props {
+  type?: "primary" | "secondary" | "danger" | "warning" | "success" | "neutral" | "ghost" | "link";
+  size?: "xs" | "sm" | "md" | "lg";
+  nativeType?: "button" | "submit" | "reset";
+  loading?: boolean;
+  disabled?: boolean;
+  block?: boolean;
+  outline?: boolean;
+  round?: boolean;
+  circle?: boolean;
+  autofocus?: boolean;
+  ariaLabel?: string;
+  title?: string;
+}
+
+const props = withDefaults(defineProps<Props>(), {
+  type: "primary",
+  size: "md",
+  nativeType: "button",
+  loading: false,
+  disabled: false,
+  block: false,
+  outline: false,
+  round: false,
+  circle: false,
+  autofocus: false,
+  ariaLabel: "",
+  title: "",
+});
+
+const slots = useSlots();
+const attrs = useAttrs();
+
+// 过滤掉可能冲突的 size 与 type 属性，防止透传到 el-button 上覆盖我们显式绑定的 :size 与 :type
+const filteredAttrs = computed(() => {
+  return omit(attrs, ["size", "type"]);
+});
+
+const elType = computed(() => {
+  if (props.type === "secondary") return "info";
+  if (props.type === "neutral") return "info";
+  if (props.type === "ghost") return "";
+  if (props.type === "link") return "primary";
+  return props.type;
+});
+
+const elSize = computed(() => {
+  if (props.size === "xs") return "small";
+  if (props.size === "sm") return "small";
+  if (props.size === "lg") return "large";
+  return "default";
+});
+
+const isPlain = computed(() => props.outline);
+const isText = computed(() => props.type === "ghost");
+const isLink = computed(() => props.type === "link");
+const hasDefaultSlot = computed(() => Boolean(slots.default));
+const accessibleLabel = computed(() => props.ariaLabel || props.title || "");
+</script>
+
+<template>
+  <el-button
+    v-bind="filteredAttrs"
+    :type="elType"
+    :native-type="nativeType"
+    :size="elSize"
+    :loading="loading"
+    :disabled="disabled || loading"
+    :plain="isPlain"
+    :text="isText"
+    :link="isLink"
+    :round="round"
+    :circle="circle"
+    :autofocus="autofocus"
+    :aria-label="accessibleLabel || undefined"
+    :aria-busy="loading ? 'true' : undefined"
+    :title="title || accessibleLabel || undefined"
+    :class="{
+      'w-full': block,
+      'is-xs': props.size === 'xs',
+      'is-icon-only': circle || (!hasDefaultSlot && slots.icon),
+    }"
+  >
+    <template #icon v-if="slots.icon">
+      <slot name="icon"></slot>
+    </template>
+    <slot></slot>
+  </el-button>
+</template>
+
+<style scoped>
+/*
+  架构已重构:
+  原有的数百行定制 CSS 已被移除。
+  现已全量接入 Element Plus 原生渲染引擎，支持深浅色无缝自适应切换。
+*/
+
+/* 局部覆盖 Element Plus 按钮的悬浮与激活态，防止与全局主题色变量冲突导致文字或背景隐形 */
+.el-button {
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Primary 实底按钮 hover 与 active 态 */
+.el-button--primary:not(.is-plain):not(.is-text):not(.is-link):hover {
+  background-color: #3b82f6 !important; /* blue-500，换用安全的 16 进制颜色防止 WebView 变量解析失败 */
+  border-color: #3b82f6 !important;
+  color: #ffffff !important;
+}
+.el-button--primary:not(.is-plain):not(.is-text):not(.is-link):active {
+  background-color: #1d4ed8 !important; /* blue-700 */
+  border-color: #1d4ed8 !important;
+  color: #ffffff !important;
+}
+
+/* Success 实底按钮 hover 与 active 态 */
+.el-button--success:not(.is-plain):not(.is-text):not(.is-link):hover {
+  background-color: #10b981 !important; /* emerald-500 */
+  border-color: #10b981 !important;
+  color: #ffffff !important;
+}
+.el-button--success:not(.is-plain):not(.is-text):not(.is-link):active {
+  background-color: #047857 !important; /* emerald-700 */
+  border-color: #047857 !important;
+  color: #ffffff !important;
+}
+
+/* Warning 实底按钮 hover 与 active 态 */
+.el-button--warning:not(.is-plain):not(.is-text):not(.is-link):hover {
+  background-color: #f59e0b !important; /* amber-500 */
+  border-color: #f59e0b !important;
+  color: #ffffff !important;
+}
+.el-button--warning:not(.is-plain):not(.is-text):not(.is-link):active {
+  background-color: #b45309 !important; /* amber-700 */
+  border-color: #b45309 !important;
+  color: #ffffff !important;
+}
+
+/* Danger 实底按钮 hover 与 active 态 */
+.el-button--danger:not(.is-plain):not(.is-text):not(.is-link):hover {
+  background-color: #ef4444 !important; /* red-500 */
+  border-color: #ef4444 !important;
+  color: #ffffff !important;
+}
+.el-button--danger:not(.is-plain):not(.is-text):not(.is-link):active {
+  background-color: #b91c1c !important; /* red-700 */
+  border-color: #b91c1c !important;
+  color: #ffffff !important;
+}
+
+/* Info / Neutral / Secondary 实底按钮 hover 与 active 态 */
+.el-button--info:not(.is-plain):not(.is-text):not(.is-link):hover {
+  background-color: #64748b !important; /* slate-500 */
+  border-color: #64748b !important;
+  color: #ffffff !important;
+}
+.el-button--info:not(.is-plain):not(.is-text):not(.is-link):active {
+  background-color: #334155 !important; /* slate-700 */
+  border-color: #334155 !important;
+  color: #ffffff !important;
+}
+
+/* Outline / Plain 按钮 hover 态 */
+.el-button--primary.is-plain:hover {
+  background-color: #2563eb !important; /* blue-600 */
+  border-color: #2563eb !important;
+  color: #ffffff !important;
+}
+.el-button--success.is-plain:hover {
+  background-color: #10b981 !important;
+  border-color: #10b981 !important;
+  color: #ffffff !important;
+}
+.el-button--warning.is-plain:hover {
+  background-color: #f59e0b !important;
+  border-color: #f59e0b !important;
+  color: #ffffff !important;
+}
+.el-button--danger.is-plain:hover {
+  background-color: #ef4444 !important;
+  border-color: #ef4444 !important;
+  color: #ffffff !important;
+}
+.el-button--info.is-plain:hover {
+  background-color: #64748b !important;
+  border-color: #64748b !important;
+  color: #ffffff !important;
+}
+
+/* 自定义 Extra Small (xs) 按钮尺寸样式，使其比 small 更小且精致，防止其隐形 */
+.el-button.is-xs {
+  padding: 2px 6px !important;
+  height: 20px !important;
+  font-size: 10px !important;
+  border-radius: 6px !important;
+}
+
+.el-button.is-icon-only {
+  aspect-ratio: 1 / 1;
+  padding-left: 0 !important;
+  padding-right: 0 !important;
+}
+
+.el-button.is-icon-only.is-xs {
+  width: 20px !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .el-button {
+    transition: none !important;
+  }
+}
+</style>

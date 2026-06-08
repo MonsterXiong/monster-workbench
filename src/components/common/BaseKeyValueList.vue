@@ -1,0 +1,234 @@
+<script setup lang="ts">
+import { computed } from "vue";
+import { useI18n } from "../../composables/useI18n";
+
+export interface KeyValueItem {
+  key: string;
+  label: string;
+  value: string | number;
+  description?: string;
+  icon?: string;
+  status?: "primary" | "success" | "warning" | "danger" | "neutral";
+  span?: 1 | 2 | 3;
+}
+
+interface Props {
+  items: KeyValueItem[];
+  columns?: 1 | 2 | 3;
+  bordered?: boolean;
+  compact?: boolean;
+  surface?: "card" | "muted" | "plain";
+  size?: "sm" | "md" | "lg";
+  loading?: boolean;
+  disabled?: boolean;
+  emptyText?: string;
+  ariaLabel?: string;
+}
+
+const props = withDefaults(defineProps<Props>(), {
+  columns: 2,
+  bordered: true,
+  compact: false,
+  surface: "muted",
+  size: "md",
+  loading: false,
+  disabled: false,
+  emptyText: "",
+  ariaLabel: "",
+});
+
+const { t } = useI18n();
+const resolvedSize = computed(() => (props.compact ? "sm" : props.size));
+const isEmpty = computed(() => !props.loading && props.items.length === 0);
+</script>
+
+<template>
+  <dl
+    class="base-key-value-list"
+    :class="[
+      `base-key-value-list--cols-${columns}`,
+      `base-key-value-list--${resolvedSize}`,
+      `base-key-value-list--${surface}`,
+      {
+        'is-bordered': bordered,
+        'is-loading': loading,
+        'is-disabled': disabled,
+        'is-empty': isEmpty,
+      },
+    ]"
+    :aria-label="ariaLabel || undefined"
+    :aria-busy="loading ? 'true' : undefined"
+    :aria-disabled="disabled ? 'true' : undefined"
+  >
+    <template v-if="loading">
+      <div v-for="index in 3" :key="index" class="base-key-value-list__item base-key-value-list__item--skeleton" aria-hidden="true">
+        <span></span>
+        <strong></strong>
+        <em></em>
+      </div>
+    </template>
+
+    <div v-else-if="isEmpty" class="base-key-value-list__empty" role="status">
+      <BaseIcon name="ListTodo" size="18" aria-hidden="true" />
+      <span>{{ emptyText || t("common.noData") }}</span>
+    </div>
+
+    <div
+      v-else
+      v-for="item in items"
+      :key="item.key"
+      class="base-key-value-list__item"
+      :class="item.span ? `base-key-value-list__item--span-${item.span}` : ''"
+    >
+      <div class="base-key-value-list__label-row">
+        <BaseIcon v-if="item.icon" :name="item.icon" size="14" class="text-slate-400" aria-hidden="true" />
+        <dt class="base-key-value-list__label">{{ item.label }}</dt>
+        <BaseStatusDot v-if="item.status" :type="item.status" size="sm" :aria-label="item.status" />
+      </div>
+      <dd class="base-key-value-list__value" :title="String(item.value)">{{ item.value }}</dd>
+      <dd v-if="item.description" class="base-key-value-list__description" :title="item.description">{{ item.description }}</dd>
+    </div>
+  </dl>
+</template>
+
+<style scoped>
+.base-key-value-list {
+  @apply grid min-w-0 max-w-full gap-3 transition;
+}
+
+.base-key-value-list.is-loading {
+  @apply pointer-events-none;
+}
+
+.base-key-value-list.is-disabled {
+  @apply opacity-70;
+}
+
+.base-key-value-list--cols-1 {
+  @apply grid-cols-1;
+}
+
+.base-key-value-list--cols-2 {
+  @apply grid-cols-1 md:grid-cols-2;
+}
+
+.base-key-value-list--cols-3 {
+  @apply grid-cols-1 md:grid-cols-3;
+}
+
+.base-key-value-list__item {
+  @apply min-w-0 rounded-2xl p-3;
+}
+
+.base-key-value-list--card .base-key-value-list__item {
+  @apply bg-white dark:bg-slate-900;
+}
+
+.base-key-value-list--muted .base-key-value-list__item {
+  @apply bg-slate-50 dark:bg-slate-950;
+}
+
+.base-key-value-list--plain {
+  @apply gap-2;
+}
+
+.base-key-value-list--plain .base-key-value-list__item {
+  @apply rounded-none bg-transparent p-0 dark:bg-transparent;
+}
+
+.base-key-value-list--sm .base-key-value-list__item {
+  @apply rounded-xl p-3;
+}
+
+.base-key-value-list--lg .base-key-value-list__item {
+  @apply p-4;
+}
+
+.base-key-value-list.is-bordered .base-key-value-list__item {
+  @apply border border-slate-200 dark:border-slate-800;
+}
+
+.base-key-value-list--plain.is-bordered .base-key-value-list__item {
+  @apply border-0;
+}
+
+.base-key-value-list__item--span-2 {
+  @apply md:col-span-2;
+}
+
+.base-key-value-list__item--span-3 {
+  @apply md:col-span-3;
+}
+
+.base-key-value-list__label-row {
+  @apply flex min-w-0 items-center gap-1.5;
+}
+
+.base-key-value-list__label {
+  @apply truncate text-[10px] font-bold text-slate-400 dark:text-slate-500;
+}
+
+.base-key-value-list--lg .base-key-value-list__label {
+  @apply text-xs;
+}
+
+.base-key-value-list__value {
+  @apply mt-1 truncate text-sm font-black text-slate-800 dark:text-slate-100;
+}
+
+.base-key-value-list--lg .base-key-value-list__value {
+  @apply text-base;
+}
+
+.base-key-value-list__description {
+  @apply mt-0.5 truncate text-[10px] font-bold text-slate-400 dark:text-slate-500;
+}
+
+.base-key-value-list--lg .base-key-value-list__description {
+  @apply text-xs;
+}
+
+.base-key-value-list__empty {
+  @apply col-span-full flex min-h-[96px] min-w-0 flex-col items-center justify-center gap-2 rounded-2xl bg-slate-50 p-6 text-center text-xs font-bold text-slate-400 dark:bg-slate-950 dark:text-slate-500;
+}
+
+.base-key-value-list.is-bordered .base-key-value-list__empty {
+  @apply border border-slate-200 dark:border-slate-800;
+}
+
+.base-key-value-list--plain .base-key-value-list__empty {
+  @apply rounded-none border-0 bg-transparent p-0 dark:bg-transparent;
+}
+
+.base-key-value-list__empty :deep(.base-icon) {
+  @apply text-slate-300 dark:text-slate-600;
+}
+
+.base-key-value-list__item--skeleton {
+  @apply space-y-2;
+}
+
+.base-key-value-list__item--skeleton span,
+.base-key-value-list__item--skeleton strong,
+.base-key-value-list__item--skeleton em {
+  @apply block rounded-full bg-slate-100 dark:bg-slate-800;
+}
+
+.base-key-value-list__item--skeleton span {
+  @apply h-3 w-16;
+}
+
+.base-key-value-list__item--skeleton strong {
+  @apply h-4 w-24;
+}
+
+.base-key-value-list__item--skeleton em {
+  @apply h-3 w-20;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .base-key-value-list {
+    transition: none !important;
+  }
+}
+</style>

@@ -1,0 +1,191 @@
+<script setup lang="ts">
+import { computed, useAttrs } from "vue";
+import { useI18n } from "../../composables/useI18n";
+import BaseIcon from "./BaseIcon.vue";
+import { omit } from "../../utils";
+
+defineOptions({
+  inheritAttrs: false,
+});
+
+interface Props {
+  modelValue: string | number;
+  placeholder?: string;
+  type?: string;
+  disabled?: boolean;
+  readonly?: boolean;
+  error?: boolean;
+  size?: "xs" | "sm" | "md" | "lg";
+  clearable?: boolean;
+  maxlength?: string | number;
+  showWordLimit?: boolean;
+  autocomplete?: string;
+  prefixIcon?: string;
+  suffixIcon?: string;
+  loading?: boolean;
+  ariaLabel?: string;
+}
+
+const props = withDefaults(defineProps<Props>(), {
+  placeholder: "",
+  type: "text",
+  disabled: false,
+  readonly: false,
+  error: false,
+  size: "md",
+  clearable: false,
+  maxlength: undefined,
+  showWordLimit: false,
+  autocomplete: "off",
+  prefixIcon: "",
+  suffixIcon: "",
+  loading: false,
+  ariaLabel: "",
+});
+
+const emit = defineEmits<{
+  (e: "update:modelValue", val: string | number): void;
+  (e: "blur", val: FocusEvent): void;
+  (e: "focus", val: FocusEvent): void;
+  (e: "input", val: string | number): void;
+  (e: "change", val: string | number): void;
+  (e: "clear"): void;
+  (e: "keydown", val: KeyboardEvent): void;
+  (e: "keyup", val: KeyboardEvent): void;
+  (e: "enter", val: KeyboardEvent): void;
+}>();
+
+const attrs = useAttrs();
+const { t } = useI18n();
+
+const filteredAttrs = computed(() => {
+  return omit(attrs, ["size", "type"]);
+});
+
+const elSize = computed(() => {
+  if (props.size === "xs") return "small";
+  if (props.size === "sm") return "small";
+  if (props.size === "lg") return "large";
+  return "default";
+});
+
+const resolvedAriaLabel = computed(() => props.ariaLabel || props.placeholder || t("common.inputPlaceholder"));
+
+const computedValue = computed({
+  get: () => props.modelValue,
+  set: (val) => {
+    emit("update:modelValue", val);
+  },
+});
+</script>
+
+<template>
+  <el-input
+    v-bind="filteredAttrs"
+    v-model="computedValue"
+    :type="type"
+    :placeholder="placeholder || t('common.inputPlaceholder')"
+    :aria-label="resolvedAriaLabel"
+    :aria-invalid="error ? 'true' : undefined"
+    :aria-busy="loading || undefined"
+    :disabled="disabled"
+    :readonly="readonly"
+    :size="elSize"
+    :clearable="clearable"
+    :maxlength="maxlength"
+    :show-word-limit="showWordLimit"
+    :autocomplete="autocomplete"
+    :class="{ 'is-error': error }"
+    @blur="emit('blur', $event as any)"
+    @focus="emit('focus', $event as any)"
+    @input="emit('input', $event as any)"
+    @change="emit('change', $event as any)"
+    @clear="emit('clear')"
+    @keydown="emit('keydown', $event as KeyboardEvent)"
+    @keyup="emit('keyup', $event as KeyboardEvent)"
+    @keyup.enter="emit('enter', $event as KeyboardEvent)"
+  >
+    <template v-if="$slots.prefix || prefixIcon" #prefix>
+      <slot name="prefix">
+        <BaseIcon :name="prefixIcon" size="14" aria-hidden="true" />
+      </slot>
+    </template>
+    <template v-if="$slots.suffix || suffixIcon || loading" #suffix>
+      <slot name="suffix">
+        <BaseIcon
+          v-if="loading"
+          name="LoaderCircle"
+          size="14"
+          class="base-input__loading"
+          aria-hidden="true"
+        />
+        <BaseIcon v-else-if="suffixIcon" :name="suffixIcon" size="14" aria-hidden="true" />
+      </slot>
+    </template>
+    <template v-if="$slots.prepend" #prepend>
+      <slot name="prepend"></slot>
+    </template>
+    <template v-if="$slots.append" #append>
+      <slot name="append"></slot>
+    </template>
+  </el-input>
+</template>
+
+<style scoped>
+:deep(.el-input__wrapper) {
+  @apply rounded-xl border border-slate-300 bg-slate-50 px-3 shadow-sm transition-all dark:border-slate-700 dark:bg-slate-950;
+  box-shadow: none;
+}
+
+:deep(.el-input__wrapper:hover) {
+  @apply border-slate-400 bg-white dark:border-slate-600 dark:bg-slate-900;
+  box-shadow: none;
+}
+
+:deep(.el-input.is-focus .el-input__wrapper) {
+  border-color: rgb(var(--color-primary));
+  box-shadow: 0 0 0 3px rgba(var(--color-primary), 0.15);
+  @apply bg-white dark:bg-slate-900;
+}
+
+:deep(.el-input__inner) {
+  @apply text-xs font-bold text-slate-700 placeholder:text-slate-400 dark:text-slate-100;
+}
+
+:deep(.el-input__prefix),
+:deep(.el-input__suffix) {
+  @apply text-slate-400 dark:text-slate-500;
+}
+
+:deep(.el-input__count) {
+  @apply bg-transparent text-[10px] font-bold text-slate-400 dark:text-slate-500;
+}
+
+:deep(.el-input.is-disabled .el-input__wrapper) {
+  @apply cursor-not-allowed bg-slate-100 opacity-70 dark:bg-slate-900;
+}
+
+.is-error :deep(.el-input__wrapper) {
+  @apply border-red-400 bg-red-50 dark:border-red-800 dark:bg-red-950;
+}
+
+.is-error :deep(.el-input.is-focus .el-input__wrapper) {
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.14);
+}
+
+.base-input__loading {
+  animation: base-input-spin 0.9s linear infinite;
+}
+
+@keyframes base-input-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .base-input__loading {
+    animation: none !important;
+  }
+}
+</style>
