@@ -1,22 +1,36 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, convertFileSrc } from "@tauri-apps/api/core";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
+import { getVersion } from "@tauri-apps/api/app";
+import { listen as tauriListen } from "@tauri-apps/api/event";
+import type { EventCallback, UnlistenFn } from "@tauri-apps/api/event";
 import { ensureBrowserMessage, isTauriRuntime } from "./runtime";
+import { redactSensitiveObjectDeep } from "../utils";
+
+export type TauriEventCallback<T = unknown> = EventCallback<T>;
+export type TauriUnlistenFn = UnlistenFn;
+export { convertFileSrc, getCurrentWebviewWindow, getVersion };
+export const listen = tauriListen;
 
 export async function callTauri<T = unknown>(
   command: string,
   args: Record<string, unknown> = {}
 ): Promise<T> {
   if (!isTauriRuntime()) {
-    throw new Error(ensureBrowserMessage("原生能力"));
+    if (import.meta.env.DEV) {
+      const { mockCallTauri } = await import("./tauri.mock");
+      return await mockCallTauri<T>(command, args);
+    }
+    throw new Error("[ERR_IPC_BROWSER] " + ensureBrowserMessage("底座原生能力"));
   }
 
   try {
     if (import.meta.env.DEV) {
-      console.log(`[IPC] ${command}`, args);
+      console.log(`[IPC] ${command}`, redactSensitiveObjectDeep(args));
     }
 
     return await invoke<T>(command, args);
   } catch (error) {
-    let message = "原生调用失败";
+    let message = "[ERR_IPC_INVOKE] 底座原生方法调用失败";
 
     if (typeof error === "string") {
       message = error;

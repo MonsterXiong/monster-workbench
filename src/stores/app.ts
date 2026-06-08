@@ -1,6 +1,6 @@
-import { getVersion } from "@tauri-apps/api/app";
 import { defineStore } from "pinia";
-import { systemService } from "../services/system.service";
+import { appService } from "../services/app.service";
+import { safeJsonParse, safeJsonStringify } from "../utils";
 
 export type LayoutPrefs = {
   sidebarCollapsed: boolean;
@@ -13,8 +13,8 @@ const STORAGE_KEY = "monster-workbench-layout-prefs";
 
 export const useAppStore = defineStore("app", {
   state: () => ({
-    version: "开发版",
-    localPath: "加载中...",
+    version: "Development",
+    localPath: "Loading...",
     initialized: false,
     layoutPrefs: {
       sidebarCollapsed: false,
@@ -31,9 +31,9 @@ export const useAppStore = defineStore("app", {
       }
 
       try {
-        this.version = await getVersion();
+        this.version = await appService.getAppVersion();
       } catch {
-        this.version = "开发版";
+        this.version = "Development";
       }
 
       try {
@@ -41,10 +41,10 @@ export const useAppStore = defineStore("app", {
         if (customPath) {
           this.localPath = customPath;
         } else {
-          this.localPath = await systemService.getAppDataDir();
+          this.localPath = await appService.getAppPaths();
         }
       } catch {
-        this.localPath = "加载失败";
+        this.localPath = "Load Failed";
       }
 
       try {
@@ -52,7 +52,7 @@ export const useAppStore = defineStore("app", {
         if (raw) {
           this.layoutPrefs = {
             ...this.layoutPrefs,
-            ...JSON.parse(raw),
+            ...safeJsonParse<Partial<LayoutPrefs>>(raw, {}),
           };
         }
       } catch {
@@ -68,7 +68,7 @@ export const useAppStore = defineStore("app", {
         ...patch,
       };
 
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(this.layoutPrefs));
+      localStorage.setItem(STORAGE_KEY, safeJsonStringify(this.layoutPrefs));
     },
 
     updateLocalPath(path: string) {

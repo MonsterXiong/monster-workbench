@@ -1,0 +1,95 @@
+import { ref } from "vue";
+import { createTimestampId } from "../utils";
+
+export type MessageType = "success" | "error" | "warning" | "info";
+
+export interface MessageItem {
+  id: string;
+  msg: string;
+  type: MessageType;
+  duration: number;
+  title?: string;
+  icon?: string;
+  closable: boolean;
+  actionText?: string;
+  onAction?: () => void;
+}
+
+export interface MessageOptions {
+  duration?: number;
+  title?: string;
+  icon?: string;
+  closable?: boolean;
+  actionText?: string;
+  onAction?: () => void;
+}
+
+/** 全局 Message 队列状态（单例） */
+const messages = ref<MessageItem[]>([]);
+const timers = new Map<string, ReturnType<typeof setTimeout>>();
+
+/**
+ * 全局 Message 提示服务的 composable
+ */
+export function useMessage() {
+  /**
+   * 触发一条顶部 Message 提示
+   * @param msg 提示消息内容
+   * @param type 提示类型，默认为 'success'
+   * @param duration 持续显示时间（毫秒），默认为 3000ms
+   */
+  function triggerMessage(msg: string, type: MessageType = "success", durationOrOptions: number | MessageOptions = 3000) {
+    const options = typeof durationOrOptions === "number" ? { duration: durationOrOptions } : durationOrOptions;
+    const duration = options.duration ?? 3000;
+    const id = createTimestampId("");
+    const item: MessageItem = {
+      id,
+      msg,
+      type,
+      duration,
+      title: options.title,
+      icon: options.icon,
+      closable: options.closable ?? true,
+      actionText: options.actionText,
+      onAction: options.onAction,
+    };
+    messages.value.push(item);
+
+    if (duration > 0) {
+      const timer = setTimeout(() => {
+        removeMessage(id);
+      }, duration);
+      timers.set(id, timer);
+    }
+  }
+
+  /**
+   * 主动或到期移除指定的 Message
+   * @param id 消息 ID
+   */
+  function removeMessage(id: string) {
+    const timer = timers.get(id);
+    if (timer) {
+      clearTimeout(timer);
+      timers.delete(id);
+    }
+
+    const index = messages.value.findIndex((m) => m.id === id);
+    if (index !== -1) {
+      messages.value.splice(index, 1);
+    }
+  }
+
+  function clearMessages() {
+    timers.forEach((timer) => clearTimeout(timer));
+    timers.clear();
+    messages.value = [];
+  }
+
+  return {
+    messages,
+    triggerMessage,
+    removeMessage,
+    clearMessages,
+  };
+}

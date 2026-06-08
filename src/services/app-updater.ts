@@ -1,6 +1,7 @@
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check, Update } from "@tauri-apps/plugin-updater";
 import { ensureBrowserMessage, isTauriRuntime } from "./runtime";
+import { toRangePercent } from "../utils";
 
 export type AppUpdateProgress = {
   downloaded: number;
@@ -30,7 +31,7 @@ export async function downloadAndInstallPendingUpdate(
   onProgress?: (progress: AppUpdateProgress) => void
 ): Promise<void> {
   if (!isTauriRuntime()) {
-    throw new Error(ensureBrowserMessage("安装更新"));
+    throw new Error("[ERR_UPDATER_INSTALL] " + ensureBrowserMessage("安装更新"));
   }
 
   if (!pendingUpdate) {
@@ -39,7 +40,7 @@ export async function downloadAndInstallPendingUpdate(
   }
 
   if (!pendingUpdate) {
-    throw new Error("当前无可用的更新包");
+    throw new Error("[ERR_UPDATER_NO_UPDATE] 当前无可用的更新包");
   }
 
   let downloaded = 0;
@@ -55,7 +56,7 @@ export async function downloadAndInstallPendingUpdate(
       onProgress?.({
         downloaded,
         total,
-        percent: total > 0 ? Math.round((downloaded / total) * 100) : 0,
+        percent: total > 0 ? toRangePercent(downloaded, 0, total, 0) : 0,
       });
     }
   });
@@ -70,7 +71,7 @@ export async function checkAndInstallAppUpdate(
   onProgress?: (progress: AppUpdateProgress) => void
 ) {
   if (!isTauriRuntime()) {
-    throw new Error(ensureBrowserMessage("检查更新"));
+    throw new Error("[ERR_UPDATER_CHECK] " + ensureBrowserMessage("检查更新"));
   }
 
   const update = await checkForAppUpdate();
@@ -83,4 +84,3 @@ export async function checkAndInstallAppUpdate(
 
   return { hasUpdate: true };
 }
-

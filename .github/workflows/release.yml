@@ -45,9 +45,9 @@ jobs:
         id: release_notes
         shell: bash
         run: |
-          if [ -f dist/release-notes.md ]; then
+          if [ -f .github/release-notes.md ]; then
             echo "body<<EOF" >> $GITHUB_OUTPUT
-            cat dist/release-notes.md >> $GITHUB_OUTPUT
+            cat .github/release-notes.md >> $GITHUB_OUTPUT
             echo "EOF" >> $GITHUB_OUTPUT
           else
             echo "body=Monster Tools native desktop release." >> $GITHUB_OUTPUT

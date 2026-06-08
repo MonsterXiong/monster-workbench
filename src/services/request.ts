@@ -1,7 +1,11 @@
+import { useToast } from "../composables/useToast";
+import { buildUrlWithQuery, safeJsonStringify } from "../utils";
+
 export interface RequestOptions extends Omit<RequestInit, "body"> {
   timeout?: number;
   params?: Record<string, string | number | boolean | undefined | null>;
   body?: BodyInit | Record<string, unknown> | null;
+  showToastOnError?: boolean;
 }
 
 export interface ApiResponse<T> {
@@ -11,24 +15,15 @@ export interface ApiResponse<T> {
   message?: string;
 }
 
+import { config } from "../config";
+
 function buildUrl(
   input: string,
   baseURL: string,
   params?: RequestOptions["params"]
 ): string {
-  const url = input.startsWith("http") ? new URL(input) : new URL(input, baseURL || window.location.origin);
-
-  if (params) {
-    Object.entries(params).forEach(([key, value]) => {
-      if (value === undefined || value === null || value === "") {
-        return;
-      }
-
-      url.searchParams.set(key, String(value));
-    });
-  }
-
-  return url.toString();
+  const defaultBase = baseURL || config.apiBaseUrl || window.location.origin;
+  return buildUrlWithQuery(input, { baseUrl: defaultBase, params });
 }
 
 async function parseResponse<T>(response: Response): Promise<T> {
@@ -60,14 +55,14 @@ class RequestClient {
   }
 
   async request<T>(url: string, options: RequestOptions = {}): Promise<ApiResponse<T>> {
-    const { timeout = 15000, params, headers, body, ...rest } = options;
+    const { timeout = 15000, params, headers, body, showToastOnError, ...rest } = options;
     const controller = new AbortController();
     const timer = window.setTimeout(() => controller.abort(), timeout);
     const finalUrl = buildUrl(url, this.baseURL, params);
 
     const finalBody =
       body && typeof body === "object" && !(body instanceof FormData) && !(body instanceof URLSearchParams)
-        ? JSON.stringify(body)
+        ? safeJsonStringify(body)
         : (body ?? null);
 
     try {
@@ -84,11 +79,15 @@ class RequestClient {
       const data = await parseResponse<T>(response);
 
       if (!response.ok) {
+        const errMsg = `[ERR_HTTP_REQUEST] 网络请求失败: ${response.status} ${response.statusText}`.trim();
+        if (showToastOnError) {
+          useToast().triggerToast(errMsg, "error");
+        }
         return {
           success: false,
           data,
           status: response.status,
-          message: `请求失败：${response.status} ${response.statusText}`.trim(),
+          message: errMsg,
         };
       }
 
@@ -98,20 +97,24 @@ class RequestClient {
         status: response.status,
       };
     } catch (error) {
+      let errMsg = "";
+      let status = 0;
       if (error instanceof DOMException && error.name === "AbortError") {
-        return {
-          success: false,
-          data: null as T,
-          status: 408,
-          message: "请求超时，请稍后重试",
-        };
+        errMsg = "[ERR_HTTP_TIMEOUT] 网络请求超时，请稍后再试";
+        status = 408;
+      } else {
+        errMsg = error instanceof Error ? `[ERR_HTTP_FAILED] ${error.message}` : "[ERR_HTTP_NETWORK] 网络连接请求失败";
+      }
+
+      if (showToastOnError) {
+        useToast().triggerToast(errMsg, "error");
       }
 
       return {
         success: false,
         data: null as T,
-        status: 0,
-        message: error instanceof Error ? error.message : "网络请求失败",
+        status,
+        message: errMsg,
       };
     } finally {
       window.clearTimeout(timer);

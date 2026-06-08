@@ -1,117 +1,112 @@
-use crate::services::system_service::SystemService;
+use crate::services::log_service::LogService;
+use crate::services::system_service::{PortProcessInfo, SystemService};
+use std::sync::Mutex;
+use tauri::{State, Window};
 
-type SystemState<'a> = tauri::State<'a, std::sync::Mutex<SystemService>>;
-
-#[tauri::command]
-pub fn get_app_paths(state: SystemState<'_>) -> Result<String, String> {
-    let service = state.lock().unwrap();
-    service.get_app_local_data_dir()
-}
-
-#[tauri::command]
-pub fn write_file_data(content: String, state: SystemState<'_>) -> Result<String, String> {
-    let service = state.lock().unwrap();
-    service.write_test_file(&content)
-}
-
-#[tauri::command]
-pub fn read_file_data(state: SystemState<'_>) -> Result<String, String> {
-    let service = state.lock().unwrap();
-    service.read_test_file()
-}
+type SystemState<'a> = State<'a, Mutex<SystemService>>;
+type LogState<'a> = State<'a, Mutex<LogService>>;
 
 #[tauri::command]
 pub fn open_system_path(path: String, state: SystemState<'_>) -> Result<(), String> {
-    let service = state.lock().unwrap();
-    service.open_path(&path)
+    let service = state.lock().unwrap_or_else(|e| e.into_inner());
+    service.open_system_path(&path).map_err(|e| e.to_json_string())
 }
 
 #[tauri::command]
-pub fn control_window(action: String, window: tauri::Window) -> Result<(), String> {
-    // 采用 Tauri v2 魔术参数接收窗口实例进行原生操控
-    match action.as_str() {
-        "minimize" => {
-            window.minimize().map_err(|e| e.to_string())?;
-        }
-        "maximize" => {
-            let is_max = window.is_maximized().unwrap_or(false);
-            if is_max {
-                window.unmaximize().map_err(|e| e.to_string())?;
-            } else {
-                window.maximize().map_err(|e| e.to_string())?;
-            }
-        }
-        "hide" => {
-            window.hide().map_err(|e| e.to_string())?;
-        }
-        _ => return Err(format!("未识别的窗口控制指令: {}", action)),
-    }
-    Ok(())
+pub fn control_window(
+    action: String,
+    window: Window,
+    state: SystemState<'_>,
+) -> Result<(), String> {
+    let service = state.lock().unwrap_or_else(|e| e.into_inner());
+    service.control_window(&action, window).map_err(|e| e.to_json_string())
 }
 
 #[tauri::command]
-pub fn select_folder(state: SystemState<'_>) -> Result<Option<String>, String> {
-    let service = state.lock().unwrap();
-    service.select_folder()
-}
-
-#[tauri::command]
-pub fn select_file(state: SystemState<'_>) -> Result<Option<String>, String> {
-    let service = state.lock().unwrap();
-    service.select_file()
-}
-
-#[tauri::command]
-pub fn create_directory_structure(root_path: Option<String>, items: Vec<crate::services::system_service::PathItem>, state: SystemState<'_>) -> Result<(), String> {
-    let service = state.lock().unwrap();
-    service.create_directory_structure(root_path, items)
-}
-
-#[tauri::command]
-pub fn find_port_process(port: u16, state: SystemState<'_>) -> Result<Vec<crate::services::system_service::PortProcessInfo>, String> {
-    let service = state.lock().unwrap();
-    service.find_port_process(port)
+pub fn find_port_process(
+    port: u16,
+    state: SystemState<'_>,
+) -> Result<Vec<PortProcessInfo>, String> {
+    let service = state.lock().unwrap_or_else(|e| e.into_inner());
+    service.find_port_process(port).map_err(|e| e.to_json_string())
 }
 
 #[tauri::command]
 pub fn kill_process_by_pid(pid: u32, state: SystemState<'_>) -> Result<(), String> {
-    let service = state.lock().unwrap();
-    service.kill_process_by_pid(pid)
+    let service = state.lock().unwrap_or_else(|e| e.into_inner());
+    service.kill_process_by_pid(pid).map_err(|e| e.to_json_string())
 }
 
 #[tauri::command]
-pub fn read_directory_tree(dir_path: String, skip_dirs: Vec<String>, max_depth: u32, state: SystemState<'_>) -> Result<String, String> {
-    let service = state.lock().unwrap();
-    service.read_directory_tree(&dir_path, skip_dirs, max_depth)
+pub fn kill_process_by_name(name: String, state: SystemState<'_>) -> Result<(), String> {
+    let service = state.lock().unwrap_or_else(|e| e.into_inner());
+    service.kill_process_by_name(&name).map_err(|e| e.to_json_string())
 }
 
 #[tauri::command]
-pub fn upload_file(
-    src_path: String,
-    file_type: String,
-    year_month: String,
-    uuid_name: String,
-    state: SystemState<'_>
-) -> Result<String, String> {
-    let service = state.lock().unwrap();
-    service.upload_file(&src_path, &file_type, &year_month, &uuid_name)
+pub fn is_process_running(name: String, state: SystemState<'_>) -> Result<bool, String> {
+    let service = state.lock().unwrap_or_else(|e| e.into_inner());
+    service.is_process_running(&name).map_err(|e| e.to_json_string())
 }
 
 #[tauri::command]
-pub fn list_uploaded_files(
-    file_type: Option<String>,
-    state: SystemState<'_>
-) -> Result<String, String> {
-    let service = state.lock().unwrap();
-    service.list_uploaded_files(file_type.as_deref())
+pub fn find_process_by_name(name: String, state: SystemState<'_>) -> Result<String, String> {
+    let service = state.lock().unwrap_or_else(|e| e.into_inner());
+    service.find_process_by_name(&name).map_err(|e| e.to_json_string())
 }
 
-#[tauri::command]
-pub fn delete_uploaded_file(
-    rel_path: String,
-    state: SystemState<'_>
+#[tauri::command(rename_all = "camelCase")]
+pub fn write_text_file(
+    path: String,
+    contents: String,
+    state: SystemState<'_>,
 ) -> Result<(), String> {
-    let service = state.lock().unwrap();
-    service.delete_uploaded_file(&rel_path)
+    let service = state.lock().unwrap_or_else(|e| e.into_inner());
+    service.write_text_file(&path, &contents).map_err(|e| e.to_json_string())
 }
 
+#[tauri::command(rename_all = "camelCase")]
+pub fn read_text_file(path: String, state: SystemState<'_>) -> Result<String, String> {
+    let service = state.lock().unwrap_or_else(|e| e.into_inner());
+    service.read_text_file(&path).map_err(|e| e.to_json_string())
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn write_log_entry(file_name: String, line: String, state: LogState<'_>) -> Result<(), String> {
+    let service = state.lock().unwrap_or_else(|e| e.into_inner());
+    service.write_log(&file_name, &line).map_err(|e| e.to_json_string())
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn read_log_file(file_name: String, state: LogState<'_>) -> Result<String, String> {
+    let service = state.lock().unwrap_or_else(|e| e.into_inner());
+    service.read_log(&file_name).map_err(|e| e.to_json_string())
+}
+
+#[tauri::command]
+pub fn clear_all_logs(state: LogState<'_>) -> Result<(), String> {
+    let service = state.lock().unwrap_or_else(|e| e.into_inner());
+    service.clear_logs().map_err(|e| e.to_json_string())
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn export_log_file(
+    file_name: String,
+    target_path: String,
+    state: LogState<'_>,
+) -> Result<(), String> {
+    let service = state.lock().unwrap_or_else(|e| e.into_inner());
+    service.export_log(&file_name, &target_path).map_err(|e| e.to_json_string())
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn export_system_diagnostics(
+    target_path: String,
+    current_time: String,
+    state: SystemState<'_>,
+) -> Result<(), String> {
+    let service = state.lock().unwrap_or_else(|e| e.into_inner());
+    service
+        .export_system_diagnostics(&target_path, &current_time)
+        .map_err(|e| e.to_json_string())
+}

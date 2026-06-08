@@ -4,6 +4,11 @@ import {
   downloadAndInstallPendingUpdate,
   type AppUpdateProgress,
 } from "../services/app-updater";
+import { updaterService } from "../services/updater.service";
+import { getTranslation } from "../locales";
+import { useSettingStore } from "./settings";
+import { useTaskStore } from "./task";
+import { formatTemplate } from "../utils";
 
 let autoCheckInitialized = false;
 
@@ -34,9 +39,12 @@ export const useUpdateStore = defineStore("update", {
     async checkUpdate(silent = false) {
       if (this.updating) return;
 
+      const settingsStore = useSettingStore();
+      const t = (key: string) => getTranslation(key, settingsStore.locale);
+
       this.checking = true;
       if (!silent) {
-        this.message = "正在检查更新...";
+        this.message = t("updater.checking");
       }
 
       try {
@@ -50,19 +58,19 @@ export const useUpdateStore = defineStore("update", {
           };
           this.showModal = true;
           if (!silent) {
-            this.message = `发现新版本 V${update.version}`;
+            this.message = `${t("updater.newVersion")} V${update.version}`;
           }
         } else {
           this.hasUpdate = false;
           this.updateInfo = null;
           if (!silent) {
-            this.message = "当前已是最新版本";
+            this.message = t("updater.upToDate");
           }
         }
       } catch (error: any) {
-        console.error("检查更新失败:", error);
+        console.error("[ERR_UPDATE_CHECK] 检查更新失败:", error);
         if (!silent) {
-          this.message = `检查更新失败: ${error.message || error}`;
+          this.message = `${t("updater.failed")}: ${error.message || error}`;
         }
       } finally {
         this.checking = false;
@@ -75,18 +83,21 @@ export const useUpdateStore = defineStore("update", {
     async confirmUpdate() {
       if (this.updating) return;
 
+      const settingsStore = useSettingStore();
+      const t = (key: string) => getTranslation(key, settingsStore.locale);
+
       this.updating = true;
-      this.message = "准备下载...";
+      this.message = t("updater.preparing");
       this.appProgress = { downloaded: 0, total: 0, percent: 0 };
 
       try {
         await downloadAndInstallPendingUpdate((progress) => {
           this.appProgress = progress;
-          this.message = `正在下载更新: ${progress.percent}%`;
+          this.message = formatTemplate(t("updater.progressMsg"), { percent: progress.percent });
         });
       } catch (error: any) {
-        console.error("升级应用失败:", error);
-        this.message = `升级失败: ${error.message || error}`;
+        console.error("[ERR_UPDATE_INSTALL] 应用更新安装失败:", error);
+        this.message = `${t("common.error")}: ${error.message || error}`;
         this.updating = false;
       }
     },
@@ -97,6 +108,17 @@ export const useUpdateStore = defineStore("update", {
     cancelUpdate() {
       this.showModal = false;
       // 保持 hasUpdate 为 true，以便在侧边栏上保留小红点
+    },
+
+    /**
+     * 触发后台模拟升级包下载（用于开发演示及任务进度联动）
+     */
+    async triggerDummyDownload() {
+      const taskStore = useTaskStore();
+      const taskId = `update-${Date.now()}`;
+      const taskName = "系统更新包下载";
+      taskStore.addTask(taskId, taskName);
+      await updaterService.triggerUpdateDownload(taskId, taskName);
     },
 
     /**
@@ -116,4 +138,3 @@ export const useUpdateStore = defineStore("update", {
     },
   },
 });
-

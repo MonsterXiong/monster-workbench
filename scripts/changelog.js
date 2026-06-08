@@ -93,11 +93,11 @@ fs.writeFileSync(enPath, updatedEn, "utf8");
 console.log("✓ Updated: CHANGELOG.md");
 
 // 输出到临时发布包
-const distDir = path.join(root, "dist");
-if (!fs.existsSync(distDir)) {
-  fs.mkdirSync(distDir, { recursive: true });
+const githubDir = path.join(root, ".github");
+if (!fs.existsSync(githubDir)) {
+  fs.mkdirSync(githubDir, { recursive: true });
 }
-fs.writeFileSync(path.join(distDir, "release-notes.md"), logBody, "utf8");
-fs.writeFileSync(path.join(distDir, "release-notes.zh-CN.md"), logBody, "utf8");
+fs.writeFileSync(path.join(githubDir, "release-notes.md"), logBody, "utf8");
+fs.writeFileSync(path.join(githubDir, "release-notes.zh-CN.md"), logBody, "utf8");
 
 console.log("Changelog auto-generation completed successfully!\n");

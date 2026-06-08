@@ -7,3 +7,6 @@ src-tauri/target
 src-tauri/gen
 *.log
 .env
+.codex-tauri-dev.*.log
+__pycache__/
+*.pyc

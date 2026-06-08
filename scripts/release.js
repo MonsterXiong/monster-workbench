@@ -73,8 +73,8 @@ async function main() {
 
     // 4. Git 自动暂存、提交与打标签
     console.log("\n正在暂存和提交代码...");
-    execSync("git add .", { stdio: "inherit" });
-    execSync(`git commit -m "release: v${newVersion}"`, { stdio: "inherit" });
+    execSync("git add package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml CHANGELOG.md CHANGELOG.zh-CN.md .github/release-notes.md .github/release-notes.zh-CN.md .env", { stdio: "inherit" });
+    execSync(`git commit -m "chore: 发布新版本 v${newVersion}"`, { stdio: "inherit" });
     console.log(`✓ Git 提交成功`);
 
     console.log(`正在创建 Git Tag: v${newVersion}...`);

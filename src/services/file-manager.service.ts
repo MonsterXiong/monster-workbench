@@ -4,7 +4,11 @@
  */
 import { callTauri } from "./tauri";
 import { isTauriRuntime } from "./runtime";
+import { ref } from "vue";
+import { systemService } from "./system.service";
 import { navigationService } from "./navigation.service";
+import { convertFileSrc, getCurrentWebviewWindow } from "./tauri";
+import { getCurrentUnixTimestamp, getUploadFileType, safeJsonParse } from "../utils";
 
 /** 文件元数据类型 */
 export interface UploadedFileInfo {
@@ -15,6 +19,12 @@ export interface UploadedFileInfo {
   modified: number;
 }
 
+// 模块级 Mock 文件存储（浏览器预览端数据闭环自愈资产）
+export const mockFiles = ref<UploadedFileInfo[]>([
+  { rel_path: "uploads/images/2026/06/avatar-placeholder.png", file_name: "avatar-placeholder.png", file_size: 1024 * 45, file_type: "image", modified: getCurrentUnixTimestamp() - 3600 },
+  { rel_path: "uploads/files/2026/06/sample-report.pdf", file_name: "sample-report.pdf", file_size: 1024 * 1024 * 1.5, file_type: "file", modified: getCurrentUnixTimestamp() - 86400 }
+]);
+
 /**
  * 列出已上传的文件
  * @param fileType 筛选类型: 'image' | 'file' | undefined(全部)
@@ -23,13 +33,13 @@ export async function listUploadedFiles(
   fileType?: string
 ): Promise<UploadedFileInfo[]> {
   if (!isTauriRuntime()) {
-    // 浏览器降级：返回空列表
-    return [];
+    if (!fileType) return mockFiles.value;
+    return mockFiles.value.filter(f => f.file_type === fileType);
   }
   const json = await callTauri<string>("list_uploaded_files", {
     fileType: fileType || null,
   });
-  return JSON.parse(json) as UploadedFileInfo[];
+  return safeJsonParse<UploadedFileInfo[]>(json, []);
 }
 
 /**
@@ -38,7 +48,8 @@ export async function listUploadedFiles(
  */
 export async function deleteUploadedFile(relPath: string): Promise<void> {
   if (!isTauriRuntime()) {
-    throw new Error("浏览器环境不支持文件删除操作");
+    mockFiles.value = mockFiles.value.filter(f => f.rel_path !== relPath);
+    return;
   }
   await callTauri<void>("delete_uploaded_file", { relPath });
 }
@@ -56,27 +67,82 @@ export async function isFileReferenced(
     return { referenced: false, usage: [] };
   }
   try {
-    const db = await navigationService.getDb(appDataPath);
-    if (!db) return { referenced: false, usage: [] };
+    const usage = await callTauri<string[]>("check_navigation_file_references", {
+      dbPath: appDataPath,
+      relPath
+    });
 
-    const res = (await db.select(
-      "SELECT title, logo_path, bg_path FROM navigation WHERE logo_path = ? OR bg_path = ?",
-      [relPath, relPath]
-    )) as { title: string; logo_path: string; bg_path: string }[];
-
-    if (res && res.length > 0) {
-      const usage = res.map((r) => {
-        const types: string[] = [];
-        if (r.logo_path === relPath) types.push("Logo");
-        if (r.bg_path === relPath) types.push("封面背景");
-        return `"${r.title}" (${types.join("/")})`;
-      });
-      return { referenced: true, usage };
-    }
+    return {
+      referenced: usage.length > 0,
+      usage
+    };
   } catch (err) {
-    console.error("检测文件引用状态出错:", err);
+    console.error("[ERR_FILEREF_CHECK] 检测文件引用状态出错:", err);
   }
   return { referenced: false, usage: [] };
+}
+
+async function uploadPhysicalFile(path: string): Promise<void> {
+  await systemService.uploadFile(path, getUploadFileType(path));
+}
+
+async function selectAndUploadFile(): Promise<boolean> {
+  const selected = await systemService.selectFile();
+  if (!selected) return false;
+
+  await uploadPhysicalFile(selected);
+  return true;
+}
+
+async function selectAndUploadImage(): Promise<string | null> {
+  const selected = await systemService.selectFile();
+  if (!selected) return null;
+
+  return systemService.uploadFile(selected, "image");
+}
+
+function buildPreviewUrl(appDataPath: string, relPath: string): string {
+  if (!relPath) return "";
+  if (!isTauriRuntime()) {
+    return "https://api.dicebear.com/7.x/identicon/svg?seed=" + encodeURIComponent(relPath);
+  }
+
+  return convertFileSrc(`${appDataPath}/${relPath}`);
+}
+
+async function clearFileReferences(appDataPath: string, relPath: string): Promise<void> {
+  await navigationService.clearFileReferences(appDataPath, relPath);
+}
+
+async function registerWindowFileDrop(
+  handlers: {
+    onEnter: () => void;
+    onLeave: () => void;
+    onDrop: (paths: string[]) => void | Promise<void>;
+  }
+): Promise<(() => void) | null> {
+  if (!isTauriRuntime()) return null;
+
+  const webviewWindow = getCurrentWebviewWindow();
+  return webviewWindow.onDragDropEvent(async (event: any) => {
+    if (event.payload.type === "enter") {
+      handlers.onEnter();
+      return;
+    }
+
+    if (event.payload.type === "leave") {
+      handlers.onLeave();
+      return;
+    }
+
+    if (event.payload.type === "drop") {
+      const paths = event.payload.paths;
+      handlers.onLeave();
+      if (paths && paths.length > 0) {
+        await handlers.onDrop(paths);
+      }
+    }
+  });
 }
 
 /** 文件管理服务对象 */
@@ -84,4 +150,10 @@ export const fileManagerService = {
   listUploadedFiles,
   deleteUploadedFile,
   isFileReferenced,
+  uploadPhysicalFile,
+  selectAndUploadFile,
+  selectAndUploadImage,
+  buildPreviewUrl,
+  clearFileReferences,
+  registerWindowFileDrop,
 };

@@ -5,7 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "check:architecture": "node scripts/check-architecture.js",
+    "test:ai-sidecar": "python src-tauri/sidecars/python/test_ai_provider_tester.py",
+    "test:ai-sidecar:stress": "python src-tauri/sidecars/python/stress_ai_provider_tester.py",
     "typecheck": "vue-tsc --noEmit",
+    "verify": "npm run check:architecture && npm run typecheck",
     "prebuild": "npm run typecheck",
     "build": "npm run sync-version && vue-tsc --noEmit && vite build",
     "preview": "vite preview",
@@ -18,22 +22,22 @@
     "release": "node scripts/release.js"
   },
   "dependencies": {
+    "@element-plus/icons-vue": "^2.3.2",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-dialog": "^2.7.0",
-    "@tauri-apps/plugin-fs": "^2.5.0",
     "@tauri-apps/plugin-opener": "^2.5.3",
     "@tauri-apps/plugin-process": "^2.3.1",
-    "@tauri-apps/plugin-sql": "^2.4.0",
     "@tauri-apps/plugin-updater": "^2.10.0",
     "blueimp-md5": "^2.19.0",
     "clsx": "^2.1.1",
-    "daisyui": "^5.5.14",
     "date-fns": "^4.1.0",
+    "element-plus": "^2.14.1",
     "jsqr": "^1.4.0",
     "lucide-vue-next": "^0.562.0",
     "otpauth": "^9.5.0",
     "otplib": "^13.4.0",
     "pinia": "^3",
+    "splitpanes": "^4.1.2",
     "tailwind-merge": "^3.4.0",
     "vue": "^3",
     "vue-router": "^4.6.4"
@@ -47,6 +51,8 @@
     "postcss": "^8.5.6",
     "tailwindcss": "^3.4.19",
     "typescript": "~5.8.3",
+    "unplugin-auto-import": "^21.0.0",
+    "unplugin-vue-components": "^32.1.0",
     "vite": "^7.0.4",
     "vue-tsc": "^3"
   }

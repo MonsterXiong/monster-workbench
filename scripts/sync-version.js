@@ -17,4 +17,13 @@ let cargo = fs.readFileSync(cargoTomlPath, "utf8");
 cargo = cargo.replace(/^version = "[^"]+"/m, `version = "${pkg.version}"`);
 fs.writeFileSync(cargoTomlPath, cargo);
 
+// 同步更新 .env 中的 VITE_APP_VERSION
+const envPath = path.join(root, ".env");
+if (fs.existsSync(envPath)) {
+  let envContent = fs.readFileSync(envPath, "utf8");
+  envContent = envContent.replace(/^VITE_APP_VERSION=.*/m, `VITE_APP_VERSION=${pkg.version}`);
+  fs.writeFileSync(envPath, envContent, "utf8");
+  console.log(`✓ synced .env VITE_APP_VERSION: ${pkg.version}`);
+}
+
 console.log(`synced Monster Tools version: ${pkg.version}`);

@@ -1,4 +1,6 @@
 import { ref } from 'vue';
+import { useSettingStore } from '../stores/settings';
+import { getTranslation } from '../locales';
 
 /** 确认弹窗配置选项 */
 export interface ConfirmOptions {
@@ -20,8 +22,8 @@ const visible = ref(false);
 const options = ref<ConfirmOptions>({
   title: '',
   message: '',
-  confirmText: '确定',
-  cancelText: '取消',
+  confirmText: '',
+  cancelText: '',
   danger: false,
 });
 
@@ -39,9 +41,13 @@ export function useConfirm() {
    * @returns Promise<boolean> - 用户点击确认返回 true，取消返回 false
    */
   function confirm(opts: ConfirmOptions): Promise<boolean> {
+    const settingsStore = useSettingStore();
+    resolvePromise?.(false);
+    resolvePromise = null;
+
     options.value = {
-      confirmText: '确定',
-      cancelText: '取消',
+      confirmText: getTranslation('common.confirm', settingsStore.locale),
+      cancelText: getTranslation('common.cancel', settingsStore.locale),
       danger: false,
       ...opts,
     };

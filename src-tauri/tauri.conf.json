@@ -16,8 +16,7 @@
       "assetProtocol": {
         "enable": true,
         "scope": [
-          "$HOME/**/*",
-          "$APPDATA/**/*"
+          "$HOME/.monster-tools/**/*"
         ]
       }
     }
@@ -26,6 +25,9 @@
     "active": true,
     "targets": "all",
     "createUpdaterArtifacts": true,
+    "resources": [
+      "sidecars/python/ai_provider_tester.py"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

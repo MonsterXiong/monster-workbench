@@ -1,17 +1,32 @@
 import { ref } from "vue";
+import { useToast } from "./useToast";
+import { useSettingStore } from "../stores/settings";
+import { getTranslation } from "../locales";
 
-export function useAsyncTask() {
+export interface AsyncTaskOptions {
+  autoToast?: boolean;
+}
+
+export function useAsyncTask(options?: AsyncTaskOptions) {
   const loading = ref(false);
   const error = ref("");
+  const { triggerToast } = useToast();
 
   async function run<T>(task: () => Promise<T>): Promise<T | null> {
     loading.value = true;
     error.value = "";
 
     try {
-      return await task();
+      const result = await task();
+      return result;
     } catch (err: unknown) {
-      error.value = err instanceof Error ? err.message : "操作失败";
+      const settingsStore = useSettingStore();
+      const errMsg = err instanceof Error ? err.message : getTranslation("common.error", settingsStore.locale);
+      error.value = errMsg;
+
+      if (options?.autoToast) {
+        triggerToast(errMsg, "error");
+      }
       return null;
     } finally {
       loading.value = false;
