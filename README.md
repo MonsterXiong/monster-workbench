@@ -13,6 +13,11 @@
 
 ## 本地开发
 
+开发前建议先阅读：
+
+- [AGENTS.md](AGENTS.md)：AI / 人类协作的全局红线
+- [快速迭代工程手册](docs/engineering-playbook.md)：架构、目录、分层、质量门禁与完成标准
+
 ### 1. 安装依赖
 
 ```bash
@@ -25,6 +30,21 @@ npm install
 
 ```bash
 npm run tauri:dev
+```
+
+### 3. 提交前校验
+
+```bash
+npm run verify
+```
+
+其中 `npm run check:architecture` 会检查 Tauri / IPC / HTTP / SQLite 是否越层，并防止 SQL/FS 插件、capability 与宽 HOME asset scope 回引；`npm run typecheck` 会执行 TypeScript 类型校验。
+
+涉及 AI sidecar / 模型提供商测试能力时，额外运行：
+
+```bash
+npm run test:ai-sidecar
+npm run test:ai-sidecar:stress
 ```
 
 ---
