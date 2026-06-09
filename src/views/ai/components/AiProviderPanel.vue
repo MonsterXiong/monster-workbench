@@ -4,7 +4,17 @@ import { Bot, CheckCircle2, Gauge, KeyRound, Link, ListChecks, Plus, Save, TestT
 import { useAiStore } from "../../../stores/ai";
 import { useI18n } from "../../../composables/useI18n";
 import type { AiProviderQueueMode, AiProviderTestAction } from "../../../types/ai";
-import { clampNumber, clearIntervalHandle, createInterval, getErrorMessage, takeRightReversed, type IntervalHandle } from "../../../utils";
+import {
+  clampNumber,
+  clearIntervalHandle,
+  createInterval,
+  getErrorMessage,
+  millisecondsToSeconds,
+  roundTo,
+  secondsToMilliseconds,
+  takeRightReversed,
+  type IntervalHandle,
+} from "../../../utils";
 
 const aiStore = useAiStore();
 const { t } = useI18n();
@@ -195,12 +205,12 @@ async function handleDeleteConfig() {
         <label class="field-block">
           <span class="field-label">{{ t("settings.aiProvider.timeoutLabel") }}</span>
           <BaseInput
-            :model-value="Math.round(config.timeoutMs / 1000)"
+            :model-value="roundTo(millisecondsToSeconds(config.timeoutMs))"
             type="number"
             min="3"
-            max="43200"
+            max="900"
             :placeholder="t('settings.aiProvider.timeoutPlaceholder')"
-            @update:model-value="aiStore.patchConfig({ timeoutMs: clampNumber($event, 3, 43200, 43200, 0) * 1000 })"
+            @update:model-value="aiStore.patchConfig({ timeoutMs: secondsToMilliseconds(clampNumber($event, 3, 900, 720, 0)) })"
           />
         </label>
 

@@ -27,6 +27,7 @@ def read_positive_int_env(name, default):
 MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 MAX_IMAGE_RESPONSE_BYTES = read_positive_int_env("AI_PROVIDER_MAX_IMAGE_RESPONSE_BYTES", 192 * 1024 * 1024)
 MAX_DECODED_IMAGE_BYTES = read_positive_int_env("AI_PROVIDER_MAX_DECODED_IMAGE_BYTES", 96 * 1024 * 1024)
+MAX_IMAGE_DOWNLOAD_TIMEOUT_SECONDS = read_positive_int_env("AI_PROVIDER_IMAGE_DOWNLOAD_TIMEOUT_SECONDS", 60)
 MAX_PREVIEW_CHARS = 4096
 MAX_MODELS = 200
 MAX_MODEL_ID_CHARS = 256
@@ -238,7 +239,10 @@ def is_remote_disconnect(error):
     text = str(error).lower()
     return (
         "10054" in text
+        or "10061" in text
         or "forcibly closed" in text
+        or "actively refused" in text
+        or "connection refused" in text
         or "connection reset" in text
         or "econnreset" in text
         or "remote end closed connection" in text
@@ -246,12 +250,65 @@ def is_remote_disconnect(error):
     )
 
 
-def should_retry_image_generation_error(error):
+def is_timeout_error(error):
+    text = str(error).lower()
+    return isinstance(error, TimeoutError) or "timed out" in text or "timeout" in text or "超时" in text
+
+
+def classify_image_http_error(status_code, detail):
+    text = str(detail or "").lower()
+    if status_code in (400, 413, 422) and any(
+        marker in text
+        for marker in (
+            "size",
+            "width",
+            "height",
+            "dimension",
+            "resolution",
+            "unsupported",
+            "invalid",
+            "too large",
+            "尺寸",
+            "宽度",
+            "高度",
+            "分辨率",
+            "不支持",
+            "无效",
+            "过大",
+        )
+    ):
+        return "unsupported_size"
+    if status_code == 429:
+        return "rate_limited"
+    if status_code in (401, 403):
+        return "auth"
+    return "provider_http"
+
+
+def classify_image_exception(error):
+    if is_timeout_error(error):
+        return "timeout"
     if is_remote_disconnect(error):
-        return True
-    if isinstance(error, urllib.error.HTTPError):
-        return error.code in (400, 413, 422)
-    return False
+        return "connection"
+    return "provider_error"
+
+
+def parse_image_size(value):
+    parts = str(value or "").lower().split("x", 1)
+    if len(parts) != 2:
+        return None
+    try:
+        width = int(parts[0])
+        height = int(parts[1])
+    except ValueError:
+        return None
+    if width <= 0 or height <= 0:
+        return None
+    return width, height
+
+
+def resolve_api_image_size(image_size):
+    return str(image_size or "1024x1024")
 
 
 def request_image_generation(base_url, headers, body, timeout):
@@ -264,32 +321,6 @@ def request_image_generation(base_url, headers, body, timeout):
         max_bytes=MAX_IMAGE_RESPONSE_BYTES,
         retries=0
     )
-
-
-def request_image_generation_with_recovery(base_url, headers, body, timeout):
-    primary_body = dict(body)
-    candidates = [primary_body]
-    if primary_body.get("size") != "1024x1024":
-        fallback_body = dict(primary_body)
-        fallback_body["size"] = "1024x1024"
-        candidates.append(fallback_body)
-        candidates.append(dict(fallback_body))
-    else:
-        candidates.append(dict(primary_body))
-
-    last_error = None
-    for index, candidate in enumerate(candidates):
-        if index > 0:
-            time.sleep(2)
-        try:
-            status, parsed = request_image_generation(base_url, headers, candidate, timeout)
-            fallback_size = candidate.get("size") if candidate.get("size") != primary_body.get("size") else None
-            return status, parsed, fallback_size, index + 1
-        except Exception as error:
-            last_error = error
-            if not should_retry_image_generation_error(error):
-                raise
-    raise last_error
 
 
 def ensure_output_dir(output_dir):
@@ -323,6 +354,45 @@ def mime_from_extension(ext):
     return "image/png"
 
 
+def png_dimensions_from_bytes(data):
+    if len(data) >= 24 and data.startswith(b"\x89PNG\r\n\x1a\n"):
+        width = int.from_bytes(data[16:20], "big")
+        height = int.from_bytes(data[20:24], "big")
+        if width > 0 and height > 0:
+            return "{0}x{1}".format(width, height)
+    return ""
+
+
+def jpeg_dimensions_from_bytes(data):
+    if len(data) < 4 or not data.startswith(b"\xff\xd8"):
+        return ""
+    index = 2
+    while index + 9 < len(data):
+        if data[index] != 0xFF:
+            index += 1
+            continue
+        marker = data[index + 1]
+        index += 2
+        if marker in (0xD8, 0xD9):
+            continue
+        if index + 2 > len(data):
+            break
+        segment_length = int.from_bytes(data[index:index + 2], "big")
+        if segment_length < 2 or index + segment_length > len(data):
+            break
+        if marker in (0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF):
+            height = int.from_bytes(data[index + 3:index + 5], "big")
+            width = int.from_bytes(data[index + 5:index + 7], "big")
+            if width > 0 and height > 0:
+                return "{0}x{1}".format(width, height)
+        index += segment_length
+    return ""
+
+
+def image_dimensions_from_bytes(data):
+    return png_dimensions_from_bytes(data) or jpeg_dimensions_from_bytes(data)
+
+
 def save_bytes(output_dir, data, ext, mime_type=None):
     if len(data) > MAX_DECODED_IMAGE_BYTES:
         raise RuntimeError("图片内容超过 {0} MB，请降低图片尺寸".format(MAX_DECODED_IMAGE_BYTES // 1024 // 1024))
@@ -333,10 +403,12 @@ def save_bytes(output_dir, data, ext, mime_type=None):
     target_path = os.path.join(target_dir, file_name)
     with open(target_path, "wb") as file:
         file.write(data)
+    dimensions = image_dimensions_from_bytes(data)
     return {
         "path": target_path,
         "sizeBytes": len(data),
-        "mimeType": mime_type or mime_from_extension(ext)
+        "mimeType": mime_type or mime_from_extension(ext),
+        "dimensions": dimensions or None
     }
 
 
@@ -359,7 +431,7 @@ def save_base64_image(output_dir, value):
 
 def download_image_to_file(output_dir, url, timeout):
     request = urllib.request.Request(url, method="GET")
-    download_timeout = min(max(timeout, 3), 15)
+    download_timeout = min(max(timeout, 3), MAX_IMAGE_DOWNLOAD_TIMEOUT_SECONDS)
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({})) if is_local_url(url) else None
     open_url = opener.open if opener else urllib.request.urlopen
     with open_url(request, timeout=download_timeout) as response:
@@ -446,6 +518,14 @@ def parse_images(payload, output_dir, timeout, provider_base_url):
     return urls, paths, saved_files
 
 
+def first_saved_file_dimensions(saved_files):
+    for item in saved_files or []:
+        dimensions = item.get("dimensions") if isinstance(item, dict) else None
+        if dimensions:
+            return dimensions
+    return ""
+
+
 def main():
     started = time.time()
     raw = sys.stdin.buffer.read().decode("utf-8").strip()
@@ -496,19 +576,22 @@ def main():
                 "rawPreview": raw_preview(parsed)
             }
         elif action == "image":
+            api_image_size = resolve_api_image_size(image_size)
             body = {
                 "model": image_model,
                 "prompt": image_prompt,
                 "n": 1,
-                "size": image_size
+                "size": api_image_size
             }
-            status, parsed, fallback_size, image_attempts = request_image_generation_with_recovery(
+            status, parsed = request_image_generation(
                 base_url,
                 headers,
                 body,
                 timeout,
             )
             image_urls, image_paths, saved_files = parse_images(parsed, output_dir, timeout, base_url)
+            saved_file_dimensions = first_saved_file_dimensions(saved_files)
+            actual_image_size = saved_file_dimensions or api_image_size
             result = {
                 "ok": len(image_urls) > 0 or len(image_paths) > 0,
                 "action": action,
@@ -523,20 +606,19 @@ def main():
                 "imageUrls": image_urls,
                 "imagePaths": image_paths,
                 "savedFiles": saved_files,
+                "apiImageSize": api_image_size,
                 "requestedImageSize": image_size,
-                "actualImageSize": fallback_size or image_size,
-                "fallbackImageSize": fallback_size,
-                "imageAttempts": image_attempts,
+                "actualImageSize": actual_image_size,
+                "fallbackImageSize": None,
+                "imageAttempts": 1,
+                "failureKind": None,
                 "rawPreview": raw_preview(parsed)
             }
-            if fallback_size and (image_paths or image_urls):
-                result["message"] = "生图测试成功，所选尺寸暂不稳定，已自动降级为 {0}".format(fallback_size)
-                if image_paths:
-                    result["message"] += " 并保存 {0} 张图片到本地".format(len(image_paths))
-            elif image_attempts > 1 and (image_paths or image_urls):
-                result["message"] = "生图测试成功，远程服务首次断开后已自动重试"
-                if image_paths:
-                    result["message"] += "并保存 {0} 张图片到本地".format(len(image_paths))
+            if result["ok"] and saved_file_dimensions and saved_file_dimensions != image_size:
+                result["message"] = "生图测试成功，但返回图片尺寸为 {0}，与请求尺寸 {1} 不一致".format(
+                    saved_file_dimensions,
+                    image_size,
+                )
         else:
             body = {
                 "model": model,
@@ -572,6 +654,7 @@ def main():
         support_message_prefix = support_prefix(image_model, image_model_listed) if action == "image" else ""
         message_detail = safe_detail[:240] if safe_detail else "网关返回空响应"
         action_label = "生成图片失败" if action == "image" else "模型对话失败" if action == "chat" else "模型提供商请求失败"
+        failure_kind = classify_image_http_error(error.code, support_detail or message_detail) if action == "image" else None
         result = {
             "ok": False,
             "action": action,
@@ -586,12 +669,19 @@ def main():
             "imageUrls": None,
             "imagePaths": None,
             "savedFiles": None,
+            "apiImageSize": image_size if action == "image" else None,
+            "requestedImageSize": image_size if action == "image" else None,
+            "actualImageSize": None,
+            "fallbackImageSize": None,
+            "imageAttempts": 1 if action == "image" else None,
+            "failureKind": failure_kind,
             "rawPreview": safe_detail[:MAX_PREVIEW_CHARS]
         }
         result["requestId"] = request_id
     except Exception as error:
         support_message_prefix = support_prefix(image_model, image_model_listed) if action == "image" else ""
         action_label = "生成图片失败" if action == "image" else "模型对话失败" if action == "chat" else "模型提供商请求失败"
+        failure_kind = classify_image_exception(error) if action == "image" else None
         result = {
             "ok": False,
             "action": action,
@@ -606,6 +696,12 @@ def main():
             "imageUrls": None,
             "imagePaths": None,
             "savedFiles": None,
+            "apiImageSize": image_size if action == "image" else None,
+            "requestedImageSize": image_size if action == "image" else None,
+            "actualImageSize": None,
+            "fallbackImageSize": None,
+            "imageAttempts": 1 if action == "image" else None,
+            "failureKind": failure_kind,
             "rawPreview": None
         }
         result["requestId"] = request_id

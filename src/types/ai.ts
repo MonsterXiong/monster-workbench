@@ -6,6 +6,14 @@ export type AiPromptType = "chat" | "image";
 export type AiSessionType = AiPromptType;
 export type AiSessionMessageRole = "user" | "assistant" | "error";
 export type AiSessionMessageStatus = "success" | "failed" | "pending";
+export type AiImageFailureKind =
+  | "unsupported_size"
+  | "timeout"
+  | "connection"
+  | "rate_limited"
+  | "auth"
+  | "provider_http"
+  | "provider_error";
 
 export interface AiProviderConfig {
   provider: AiProviderType;
@@ -48,10 +56,12 @@ export interface AiProviderTestResult {
   imageUrls?: string[];
   imagePaths?: string[];
   savedFiles?: AiProviderSavedFile[];
+  apiImageSize?: string | null;
   requestedImageSize?: string | null;
   actualImageSize?: string | null;
   fallbackImageSize?: string | null;
   imageAttempts?: number | null;
+  failureKind?: AiImageFailureKind | null;
   rawPreview?: string;
 }
 
@@ -59,6 +69,7 @@ export interface AiProviderSavedFile {
   path: string;
   sizeBytes: number;
   mimeType: string;
+  dimensions?: string | null;
 }
 
 export interface AiProviderTestQueueItem {
@@ -154,11 +165,16 @@ export interface AiSessionMessage {
   modelConfigId: string;
   model: string;
   error?: string;
+  latencyMs?: number;
+  queueWaitMs?: number | null;
+  totalLatencyMs?: number | null;
   imageSize?: string;
+  apiImageSize?: string;
   requestedImageSize?: string;
   actualImageSize?: string;
   fallbackImageSize?: string;
   imageAttempts?: number;
+  failureKind?: AiImageFailureKind;
   imageUrls?: string[];
   imagePaths?: string[];
   savedFiles?: AiProviderSavedFile[];

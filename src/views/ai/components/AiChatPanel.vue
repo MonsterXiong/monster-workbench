@@ -3,7 +3,7 @@ import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { AlertTriangle, Bot, MessageSquareText, Plus, Send, UserRound } from "lucide-vue-next";
 import { useAiStore } from "../../../stores/ai";
 import { useI18n } from "../../../composables/useI18n";
-import { getErrorMessage, isBlank, joinBy, toTrimmedString } from "../../../utils";
+import { getErrorMessage, isBlank, joinBy, scrollElementToBottom, toTrimmedString } from "../../../utils";
 import type { ActionMenuItem } from "../../../components/common/BaseActionMenu.vue";
 import type { AiConversationSession } from "../../../types/ai";
 
@@ -49,9 +49,7 @@ watch(
   () => scrollAnchor.value,
   async () => {
     await nextTick();
-    if (messageListRef.value) {
-      messageListRef.value.scrollTop = messageListRef.value.scrollHeight;
-    }
+    scrollElementToBottom(messageListRef.value, "auto");
   }
 );
 

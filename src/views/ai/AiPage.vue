@@ -153,4 +153,61 @@ const handleUsePrompt = (type: "chat" | "image") => {
 .ai-page__panel {
   @apply min-h-0 flex-1 overflow-hidden pr-1;
 }
+
+@media (max-width: 1400px) {
+  .ai-page {
+    @apply rounded-2xl p-3;
+  }
+
+  .ai-page__header {
+    @apply gap-2 pb-3;
+  }
+
+  .ai-page__mark {
+    @apply h-9 w-9 rounded-xl;
+  }
+
+  .ai-page__header p {
+    @apply hidden;
+  }
+
+  .ai-page__body {
+    @apply flex-col gap-2 overflow-hidden pt-2;
+  }
+
+  .ai-page__tabs {
+    @apply w-full flex-row gap-1.5 overflow-x-auto border-b border-r-0 border-slate-100 pb-2 pr-0 dark:border-slate-800;
+    scrollbar-width: none;
+  }
+
+  .ai-page__tabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  .ai-tab {
+    @apply h-8 w-auto shrink-0 px-3;
+  }
+
+  .ai-page__panel {
+    @apply pr-0;
+  }
+}
+
+@media (max-width: 720px) {
+  .ai-page {
+    @apply p-3;
+  }
+
+  .ai-page__mark {
+    @apply h-9 w-9 rounded-xl;
+  }
+
+  .ai-page__header p {
+    @apply hidden;
+  }
+
+  .ai-tab {
+    @apply h-8 px-2.5 text-[11px];
+  }
+}
 </style>

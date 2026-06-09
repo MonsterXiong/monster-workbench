@@ -71,12 +71,41 @@ const mockNavigations = [
 ];
 
 let navigationsStore = [...mockNavigations];
-let appConfigStore = {
+const APP_CONFIG_STORE_KEY = "monsterWorkbench.mock.preferenceConfig";
+const defaultAppConfigStore = {
   theme: "light",
   language: "zh-CN",
   logLevel: "info",
   autoUpdate: true
 };
+let appConfigStore = loadMockPreferenceConfig();
+
+function readMockStorageItem(key: string) {
+  try {
+    return typeof localStorage === "undefined" ? "" : localStorage.getItem(key) || "";
+  } catch {
+    return "";
+  }
+}
+
+function writeMockStorageItem(key: string, value: string) {
+  try {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem(key, value);
+    }
+  } catch (error) {
+    console.warn("[WARN_IPC_MOCK_CONFIG] Mock 偏好配置写入浏览器存储失败:", error);
+  }
+}
+
+function loadMockPreferenceConfig() {
+  const raw = readMockStorageItem(APP_CONFIG_STORE_KEY);
+  if (!raw) {
+    return { ...defaultAppConfigStore };
+  }
+  const parsed = tryJsonParseObject(raw);
+  return parsed.ok && parsed.data ? { ...defaultAppConfigStore, ...parsed.data } : { ...defaultAppConfigStore };
+}
 
 const mockLogs = [
   "[2026-06-07 13:00:01] [INFO] [Mock] Monster Workbench 离线预览版引擎挂载成功",
@@ -147,25 +176,44 @@ function createMockAiResult(args: Record<string, unknown>, action: string) {
   if (action === "image") {
     const prompt = String((args.config as any)?.imagePrompt || "").toLowerCase();
     const requestedImageSize = (args.config as any)?.imageSize || "1024x1024";
-    const shouldMockFallback = prompt.includes("fallback") && requestedImageSize !== "1024x1024";
+    const shouldMockUnsupportedSize = prompt.includes("unsupported size");
     const shouldMockMultiImage = prompt.includes("multi");
-    const actualImageSize = shouldMockFallback ? "1024x1024" : requestedImageSize;
+    if (shouldMockUnsupportedSize) {
+      return {
+        ...createMockAiResultBase(args, "image"),
+        ok: false,
+        model: (args.config as any)?.imageModel || "mock-image-1",
+        latencyMs: 260,
+        totalLatencyMs: 260,
+        message: `浏览器 Mock 生图失败：模型不支持尺寸 ${requestedImageSize}`,
+        imageUrls: [],
+        imagePaths: [],
+        savedFiles: [],
+        apiImageSize: requestedImageSize,
+        requestedImageSize,
+        actualImageSize: null,
+        fallbackImageSize: null,
+        imageAttempts: 1,
+        failureKind: "unsupported_size",
+        rawPreview: "{\"error\":{\"message\":\"unsupported image size\"}}"
+      };
+    }
     return {
       ...createMockAiResultBase(args, "image"),
       ok: true,
       model: (args.config as any)?.imageModel || "mock-image-1",
       latencyMs: 260,
       totalLatencyMs: 260,
-      message: shouldMockFallback
-        ? `浏览器 Mock 生图测试成功，所选尺寸暂不稳定，已自动降级为 ${actualImageSize}`
-        : "浏览器 Mock 生图测试成功",
+      message: "浏览器 Mock 生图测试成功",
       imageUrls: shouldMockMultiImage ? [MOCK_IMAGE_DATA_URL, MOCK_IMAGE_DATA_URL_ALT] : [MOCK_IMAGE_DATA_URL],
       imagePaths: [],
       savedFiles: [],
+      apiImageSize: requestedImageSize,
       requestedImageSize,
-      actualImageSize,
-      fallbackImageSize: shouldMockFallback ? actualImageSize : null,
-      imageAttempts: shouldMockFallback ? 2 : 1,
+      actualImageSize: requestedImageSize,
+      fallbackImageSize: null,
+      imageAttempts: 1,
+      failureKind: null,
       rawPreview: "{\"data\":[{\"url\":\"mock://image\"}]}"
     };
   }
@@ -210,6 +258,7 @@ export async function mockCallTauri<T = unknown>(
           throw parsed.error ?? new Error("Invalid config JSON");
         }
         appConfigStore = { ...appConfigStore, ...parsed.data };
+        writeMockStorageItem(APP_CONFIG_STORE_KEY, safeJsonStringify(appConfigStore, "{}"));
       } catch (e) {
         console.error("[ERR_IPC_MOCK_CONFIG] Mock 偏好配置保存失败:", e);
       }

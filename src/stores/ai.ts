@@ -6,7 +6,9 @@ import {
   applyObjectPatch,
   arrayIfArray,
   clampNumber,
+  clearTimeoutHandle,
   countWhere,
+  createTimeout,
   createTimestampId,
   equalsIgnoreCase,
   filterByValue,
@@ -25,6 +27,7 @@ import {
   normalizeTimestampMs,
   objectKeys,
   parseDimensionsText,
+  parseOptionalEnum,
   removeByValue,
   removeByValues,
   replaceByValue,
@@ -39,6 +42,7 @@ import {
   toReversedArray,
   toTrimmedString,
   updateByValue,
+  type TimeoutHandle,
 } from "../utils";
 import type {
   AiActiveConfigIds,
@@ -56,7 +60,10 @@ import type {
   AiProviderTestTask,
   AiProviderType,
   AiProviderQueueMode,
+  AiImageFailureKind,
 } from "../types/ai";
+
+type AiSessionMessage = AiConversationSession["messages"][number];
 
 const CONFIG_KEY = "aiProvider";
 const MODEL_CONFIGS_KEY = "aiModelConfigs";
@@ -64,19 +71,35 @@ const ACTIVE_MODEL_CONFIGS_KEY = "aiActiveModelConfigs";
 const SESSIONS_KEY = "aiConversationSessions";
 const PROMPT_LIBRARY_KEY = "aiPromptLibrary";
 const TASK_POLL_INTERVAL_MS = 600;
+const IMAGE_TASK_POLL_INTERVAL_MS = 300;
 const TASK_POLL_RECOVERY_SLACK_MS = 30_000;
 const LOCAL_FINISHED_TASK_LIMIT = 40;
-const IMAGE_REQUEST_TIMEOUT_MS = 43_200_000;
-const IMAGE_SIDECAR_TIMEOUT_SLACK_MS = 15_000;
-const IMAGE_STALE_TIMEOUT_MS = IMAGE_REQUEST_TIMEOUT_MS + IMAGE_SIDECAR_TIMEOUT_SLACK_MS + TASK_POLL_RECOVERY_SLACK_MS;
+const IMAGE_REQUEST_TIMEOUT_MS = 720_000;
+const IMAGE_REQUEST_TIMEOUT_MAX_MS = 900_000;
+const IMAGE_SIDECAR_TIMEOUT_SLACK_MS = 30_000;
+const IMAGE_QUEUE_POLL_TIMEOUT_MS = 24 * 60 * 60_000;
+const IMAGE_TASK_LOST_AFTER_MS = 30_000;
+const IMAGE_TOTAL_TIMEOUT_MS = IMAGE_QUEUE_POLL_TIMEOUT_MS;
+const IMAGE_STALE_TIMEOUT_MS = IMAGE_TOTAL_TIMEOUT_MS;
+const IMAGE_TASK_LOST_MESSAGE = "生成任务状态已丢失，可能是服务已重启或任务已过期，请重试。";
+const IMAGE_TASK_NO_RESULT_MESSAGE = "生成任务已结束但没有返回图片结果，请重试。";
 const DEFAULT_MAX_CONCURRENCY = 3;
 const MAX_MODEL_CONCURRENCY = 6;
+const AI_IMAGE_FAILURE_KINDS: AiImageFailureKind[] = [
+  "unsupported_size",
+  "timeout",
+  "connection",
+  "rate_limited",
+  "auth",
+  "provider_http",
+  "provider_error",
+];
 const SUPPORTED_IMAGE_SIZES = new Set([
-  "1024x1024",
   "1008x1792",
   "1008x1344",
   "1536x864",
   "1344x1008",
+  "1024x1024",
   "2048x2048",
   "1152x2048",
   "2048x1152",
@@ -90,12 +113,6 @@ const SUPPORTED_IMAGE_SIZES = new Set([
   "1200x2000",
   "2048x1024",
   "1024x2048",
-  "2048x1104",
-  "2048x864",
-  "2048x880",
-  "880x2048",
-  "2048x688",
-  "688x2048",
   "2880x2880",
   "2160x3840",
   "3840x2160",
@@ -109,24 +126,8 @@ const SUPPORTED_IMAGE_SIZES = new Set([
   "2160x3600",
   "3840x1920",
   "1920x3840",
-  "3840x2080",
-  "3840x1616",
-  "3840x1648",
-  "1648x3840",
   "3840x1280",
   "1280x3840",
-  "3840x960",
-  "960x3840",
-  "3840x768",
-  "768x3840",
-  "3840x640",
-  "640x3840",
-  "7680x960",
-  "960x7680",
-  "7680x640",
-  "640x7680",
-  "7680x480",
-  "480x7680",
 ]);
 
 const providerDefaults: Record<AiProviderType, Pick<AiProviderConfig, "displayName" | "baseUrl" | "model">> = {
@@ -263,6 +264,66 @@ const defaultPromptLibrary: AiPromptLibrary = {
       createdAt: 0,
       updatedAt: 0,
     },
+    {
+      id: "image-style-ecommerce-hero",
+      type: "image",
+      categoryId: "image-quality-styles",
+      title: "电商主图",
+      content:
+        "主题：{替换为你的主体}\n风格：高转化电商主图，主体占比清晰，卖点突出，背景干净，适合商品详情页与首屏展示。\n画面：正面或三分之四角度，留出标题和价格信息区域，光线柔和均匀，材质真实，边缘清晰。\n质量：e-commerce hero image, clean product staging, premium lighting, sharp detail, conversion-focused composition。",
+      createdAt: 0,
+      updatedAt: 0,
+    },
+    {
+      id: "image-style-luxury-product",
+      type: "image",
+      categoryId: "image-quality-styles",
+      title: "奢华产品棚拍",
+      content:
+        "主题：{替换为你的主体}\n风格：奢华产品棚拍，黑白灰或深色背景，高级反光材质，强调质感、稀缺感和品牌价值。\n画面：低调布光，精细轮廓光，控制高光不过曝，背景极简，主体像精品广告大片。\n质量：luxury product photography, premium studio lighting, controlled reflections, crisp edges, elegant contrast。",
+      createdAt: 0,
+      updatedAt: 0,
+    },
+    {
+      id: "image-style-architecture-interior",
+      type: "image",
+      categoryId: "image-quality-styles",
+      title: "建筑空间摄影",
+      content:
+        "主题：{替换为你的主体}\n风格：高端建筑与室内空间摄影，真实自然光，空间层次清楚，材质与比例准确。\n画面：广角但不畸变，水平垂直线稳定，前中后景有秩序，避免杂乱陈设，保留呼吸感。\n质量：architectural photography, refined interior styling, natural light, accurate perspective, premium spatial depth。",
+      createdAt: 0,
+      updatedAt: 0,
+    },
+    {
+      id: "image-style-game-concept",
+      type: "image",
+      categoryId: "image-quality-styles",
+      title: "游戏概念设定",
+      content:
+        "主题：{替换为你的主体}\n风格：高质量游戏概念设定，世界观明确，造型有辨识度，适合角色、场景、道具和氛围探索。\n画面：主体轮廓清楚，材质分区明确，适度加入设定细节，避免过度噪点和廉价奇幻滤镜。\n质量：game concept art, production design, strong silhouette, detailed materials, cinematic atmosphere, polished concept sheet。",
+      createdAt: 0,
+      updatedAt: 0,
+    },
+    {
+      id: "image-style-food-commercial",
+      type: "image",
+      categoryId: "image-quality-styles",
+      title: "美食商业摄影",
+      content:
+        "主题：{替换为你的主体}\n风格：高端美食商业摄影，食材新鲜，色泽自然，质感诱人，适合菜单、海报和社媒推广。\n画面：自然侧光，浅景深，餐具和背景克制，突出主体层次，避免油腻或过度饱和。\n质量：premium food photography, appetizing texture, natural color, soft side light, clean plating, editorial food styling。",
+      createdAt: 0,
+      updatedAt: 0,
+    },
+    {
+      id: "image-style-ui-device-mockup",
+      type: "image",
+      categoryId: "image-quality-styles",
+      title: "界面设备展示",
+      content:
+        "主题：{替换为你的主体}\n风格：现代软件产品界面展示，设备与 UI 清晰，科技感克制，适合 SaaS、桌面工具和移动应用宣传图。\n画面：真实设备或窗口置于干净场景中，界面文字不要求可读但层次明确，光影柔和，避免炫光和杂乱装饰。\n质量：software product mockup, clean UI presentation, realistic device render, sharp interface layers, modern workspace lighting。",
+      createdAt: 0,
+      updatedAt: 0,
+    },
   ],
 };
 
@@ -277,6 +338,10 @@ function createId(prefix: string) {
 function normalizeImageSize(value: unknown) {
   const size = toTrimmedString(value);
   return SUPPORTED_IMAGE_SIZES.has(size) ? size : defaultConfig.imageSize;
+}
+
+function normalizeImageFailureKind(value: unknown): AiImageFailureKind | undefined {
+  return parseOptionalEnum(value, AI_IMAGE_FAILURE_KINDS);
 }
 
 function buildImagePromptWithSize(prompt: string, imageSize: string) {
@@ -298,16 +363,16 @@ function normalizeMaxConcurrency(value: unknown) {
   return clampNumber(value, 1, MAX_MODEL_CONCURRENCY, DEFAULT_MAX_CONCURRENCY, 0);
 }
 
-function normalizeMessageStatus(message: Record<string, unknown>) {
+function normalizeMessageStatus(message: Record<string, unknown>, type: AiPromptType = "chat") {
   const createdAt = normalizeTimestampMs(message?.createdAt, currentTime);
-  if (message?.status === "pending" && hasTimeElapsed(createdAt, IMAGE_STALE_TIMEOUT_MS)) {
+  if (type !== "image" && message?.status === "pending" && hasTimeElapsed(createdAt, IMAGE_STALE_TIMEOUT_MS)) {
     return "failed";
   }
   return message?.status === "failed" ? "failed" : message?.status === "pending" ? "pending" : "success";
 }
 
-function normalizeMessageContent(message: Record<string, unknown>) {
-  const status = normalizeMessageStatus(message);
+function normalizeMessageContent(message: Record<string, unknown>, type: AiPromptType = "chat") {
+  const status = normalizeMessageStatus(message, type);
   const content = String(message?.content || "");
   if (status === "failed" && !content && message?.role !== "user") {
     return "上次生成未完成，已自动标记为失败，可以重试。";
@@ -327,7 +392,10 @@ function normalizeConfig(raw: Partial<AiProviderConfig> | null | undefined): AiP
     rawTimeoutMs === 3_600_000 ||
     rawTimeoutMs === 7_200_000 ||
     rawTimeoutMs === 14_400_000 ||
-    rawTimeoutMs === 28_800_000
+    rawTimeoutMs === 28_800_000 ||
+    rawTimeoutMs === 43_200_000 ||
+    rawTimeoutMs === 86_400_000 ||
+    rawTimeoutMs === 172_800_000
       ? defaultConfig.timeoutMs
       : rawTimeoutMs;
 
@@ -339,7 +407,7 @@ function normalizeConfig(raw: Partial<AiProviderConfig> | null | undefined): AiP
     displayName: raw?.displayName || preset.displayName,
     baseUrl: raw?.baseUrl || preset.baseUrl,
     model: raw?.model || preset.model,
-    timeoutMs: clampNumber(timeoutMs, 3000, IMAGE_REQUEST_TIMEOUT_MS, defaultConfig.timeoutMs, 0),
+    timeoutMs: clampNumber(timeoutMs, 3000, IMAGE_REQUEST_TIMEOUT_MAX_MS, defaultConfig.timeoutMs, 0),
     queueMode: normalizeQueueMode(raw?.queueMode),
     maxConcurrency: normalizeMaxConcurrency(raw?.maxConcurrency),
   };
@@ -416,17 +484,22 @@ function normalizeSessions(raw: unknown, configIds: Set<string>, fallbackConfigI
         (message) => ({
           id: String(message?.id || createId("ai-message")),
           role: message?.role === "assistant" || message?.role === "error" ? message.role : "user",
-          status: normalizeMessageStatus(message),
-          content: normalizeMessageContent(message),
+          status: normalizeMessageStatus(message, type),
+          content: normalizeMessageContent(message, type),
           requestId: message?.requestId ? String(message.requestId) : undefined,
           modelConfigId: configIds.has(String(message?.modelConfigId)) ? String(message.modelConfigId) : modelConfigId,
           model: String(message?.model || ""),
           error: message?.error ? String(message.error) : undefined,
+          latencyMs: message?.latencyMs ? clampNumber(message.latencyMs, 0, IMAGE_STALE_TIMEOUT_MS, 0, 0) : undefined,
+          queueWaitMs: message?.queueWaitMs ? clampNumber(message.queueWaitMs, 0, IMAGE_STALE_TIMEOUT_MS, 0, 0) : undefined,
+          totalLatencyMs: message?.totalLatencyMs ? clampNumber(message.totalLatencyMs, 0, IMAGE_STALE_TIMEOUT_MS, 0, 0) : undefined,
           imageSize: message?.imageSize ? normalizeImageSize(message.imageSize) : undefined,
+          apiImageSize: message?.apiImageSize ? normalizeImageSize(message.apiImageSize) : undefined,
           requestedImageSize: message?.requestedImageSize ? normalizeImageSize(message.requestedImageSize) : undefined,
           actualImageSize: message?.actualImageSize ? normalizeImageSize(message.actualImageSize) : undefined,
           fallbackImageSize: message?.fallbackImageSize ? normalizeImageSize(message.fallbackImageSize) : undefined,
           imageAttempts: message?.imageAttempts ? clampNumber(message.imageAttempts, 1, 10, 1, 0) : undefined,
+          failureKind: normalizeImageFailureKind(message?.failureKind),
           imageUrls: mapArrayIfArray(message?.imageUrls, String),
           imagePaths: mapArrayIfArray(message?.imagePaths, String),
           savedFiles: arrayIfArray<AiProviderSavedFile>(message?.savedFiles),
@@ -556,6 +629,10 @@ export const useAiStore = defineStore("ai", () => {
     waitTimeoutMs: 90000,
   });
   let loadConfigPromise: Promise<void> | null = null;
+  let persistAiStatePromise: Promise<void> | null = null;
+  let reconcilePendingImageMessagesPromise: Promise<void> | null = null;
+  let persistAiStateTimer: TimeoutHandle | null = null;
+  let hasPendingPersistAiState = false;
 
   const providerOptions = computed(() =>
     objectKeys(providerDefaults).map((provider) => ({
@@ -595,10 +672,6 @@ export const useAiStore = defineStore("ai", () => {
 
   function createQueueId(action: AiProviderTestAction) {
     return createTimestampId(action);
-  }
-
-  function nextFrame() {
-    return nextAnimationFrame();
   }
 
   function getModelConfig(configId: string) {
@@ -644,15 +717,15 @@ export const useAiStore = defineStore("ai", () => {
     return sessions.value.find((session) => session.id === activeId && session.type === type) ?? null;
   }
 
-  function ensureActiveSession(type: AiPromptType) {
+  function ensureActiveSession(type: AiPromptType, options: { persist?: boolean } = {}) {
     const existing = getActiveSession(type);
     if (existing) {
       return existing;
     }
-    return createSession(type);
+    return createSession(type, options);
   }
 
-  async function persistAiState() {
+  async function writeAiStateSnapshot() {
     const raw = await configService.getPreferenceConfig();
     const parsed = raw ? safeJsonParseObject<Record<string, unknown>>(raw, {}) : {};
     const persistedConfigs = modelConfigs.value.map(toPersistedModelConfig);
@@ -664,7 +737,52 @@ export const useAiStore = defineStore("ai", () => {
     await configService.savePreferenceConfig(safeJsonStringify(parsed, "{}"));
   }
 
-  function createSession(type: AiPromptType) {
+  function logPersistAiStateError(err: unknown) {
+    console.error("[ERR_AI_STATE_SAVE] AI 状态自动保存失败:", err);
+  }
+
+  async function flushPersistAiState() {
+    if (persistAiStatePromise) {
+      return persistAiStatePromise;
+    }
+
+    persistAiStatePromise = (async () => {
+      do {
+        hasPendingPersistAiState = false;
+        await writeAiStateSnapshot();
+      } while (hasPendingPersistAiState);
+    })();
+
+    try {
+      await persistAiStatePromise;
+    } finally {
+      persistAiStatePromise = null;
+      if (hasPendingPersistAiState && !persistAiStateTimer) {
+        schedulePersistAiState();
+      }
+    }
+  }
+
+  async function persistAiState() {
+    hasPendingPersistAiState = true;
+    clearTimeoutHandle(persistAiStateTimer);
+    persistAiStateTimer = null;
+    await flushPersistAiState();
+  }
+
+  function schedulePersistAiState() {
+    hasPendingPersistAiState = true;
+    if (persistAiStateTimer || persistAiStatePromise) {
+      return;
+    }
+
+    persistAiStateTimer = createTimeout(() => {
+      persistAiStateTimer = null;
+      void flushPersistAiState().catch(logPersistAiStateError);
+    }, 0);
+  }
+
+  function createSession(type: AiPromptType, options: { persist?: boolean } = {}) {
     const timestamp = currentTime();
     const activeConfigId = type === "image" ? activeModelConfigIds.value.image : activeModelConfigIds.value.chat;
     const session: AiConversationSession = {
@@ -679,7 +797,9 @@ export const useAiStore = defineStore("ai", () => {
     };
     sessions.value.unshift(session);
     activeSessionIds.value[type] = session.id;
-    void persistAiState();
+    if (options.persist !== false) {
+      schedulePersistAiState();
+    }
     return session;
   }
 
@@ -756,7 +876,7 @@ export const useAiStore = defineStore("ai", () => {
 
   function patchSessionMessage(
     messageId: string,
-    patch: Partial<AiConversationSession["messages"][number]>
+    patch: Partial<AiSessionMessage>
   ) {
     const session = sessions.value.find((item) => hasByValue(item.messages, (message) => message.id, messageId));
     if (!session) {
@@ -767,7 +887,190 @@ export const useAiStore = defineStore("ai", () => {
     return findByValue(session.messages, (message) => message.id, messageId) ?? null;
   }
 
-  async function typewriterMessage(message: AiConversationSession["messages"][number], content: string) {
+  function getImageMessageFallbackSize(message: AiSessionMessage) {
+    return normalizeImageSize(message.requestedImageSize || message.imageSize || imageDraftSize.value);
+  }
+
+  function buildImageResultMessagePatch(
+    result: AiProviderTestResult,
+    modelConfig: AiModelConfig,
+    fallbackImageSize: string,
+    fallbackRequestId = ""
+  ): Partial<AiSessionMessage> {
+    return {
+      role: result.ok ? "assistant" : "error",
+      status: result.ok ? "success" : "failed",
+      content: result.message,
+      requestId: result.requestId || fallbackRequestId || undefined,
+      model: result.model || modelConfig.imageModel || modelConfig.model,
+      error: result.ok ? undefined : result.message,
+      latencyMs: clampNumber(result.latencyMs, 0, IMAGE_STALE_TIMEOUT_MS, 0, 0),
+      queueWaitMs: result.queueWaitMs ? clampNumber(result.queueWaitMs, 0, IMAGE_STALE_TIMEOUT_MS, 0, 0) : undefined,
+      totalLatencyMs: result.totalLatencyMs ? clampNumber(result.totalLatencyMs, 0, IMAGE_STALE_TIMEOUT_MS, 0, 0) : undefined,
+      imageSize: normalizeImageSize(result.actualImageSize || result.fallbackImageSize || fallbackImageSize),
+      apiImageSize: result.apiImageSize ? normalizeImageSize(result.apiImageSize) : undefined,
+      requestedImageSize: normalizeImageSize(result.requestedImageSize || fallbackImageSize),
+      actualImageSize: result.actualImageSize ? normalizeImageSize(result.actualImageSize) : undefined,
+      fallbackImageSize: result.fallbackImageSize ? normalizeImageSize(result.fallbackImageSize) : undefined,
+      imageAttempts: result.imageAttempts ? clampNumber(result.imageAttempts, 1, 10, 1, 0) : undefined,
+      failureKind: result.failureKind || undefined,
+      imageUrls: result.imageUrls,
+      imagePaths: result.imagePaths,
+      savedFiles: result.savedFiles,
+    };
+  }
+
+  function failPendingImageMessage(message: AiSessionMessage, error: string, requestId = message.requestId) {
+    patchSessionMessage(message.id, {
+      role: "error",
+      status: "failed",
+      content: error,
+      error,
+      requestId: requestId || undefined,
+    });
+  }
+
+  function patchImageMessageFromResult(
+    message: AiSessionMessage,
+    result: AiProviderTestResult,
+    fallbackRequestId = message.requestId || ""
+  ) {
+    const modelConfig = getModelConfig(message.modelConfigId || activeModelConfigIds.value.image);
+    patchSessionMessage(message.id, buildImageResultMessagePatch(
+      result,
+      modelConfig,
+      getImageMessageFallbackSize(message),
+      fallbackRequestId
+    ));
+  }
+
+  function patchImageMessageFromTask(message: AiSessionMessage, task: AiProviderTestTask) {
+    if (task.status !== "success" && task.status !== "failed") {
+      return false;
+    }
+
+    if (task.result) {
+      patchImageMessageFromResult(
+        message,
+        {
+          ...task.result,
+          requestId: task.result.requestId || task.requestId,
+          queueWaitMs: task.result.queueWaitMs ?? task.queueWaitMs,
+          totalLatencyMs: task.result.totalLatencyMs ?? task.totalLatencyMs,
+        },
+        task.requestId
+      );
+      return true;
+    }
+
+    failPendingImageMessage(message, task.error || IMAGE_TASK_NO_RESULT_MESSAGE, task.requestId);
+    return true;
+  }
+
+  function patchImageMessageFromLocalQueue(message: AiSessionMessage) {
+    if (!message.requestId) {
+      return false;
+    }
+
+    const queueItem = findByValue(testQueue.value, (item) => item.id, message.requestId);
+    if (!queueItem || (queueItem.status !== "success" && queueItem.status !== "failed")) {
+      return false;
+    }
+
+    if (queueItem.result) {
+      patchImageMessageFromResult(message, queueItem.result, queueItem.id);
+      return true;
+    }
+
+    failPendingImageMessage(message, queueItem.error || IMAGE_TASK_NO_RESULT_MESSAGE, queueItem.id);
+    return true;
+  }
+
+  function isBackendTaskMissingError(message: string) {
+    const normalized = message.toLowerCase();
+    return message.includes("未找到 AI 模型测试任务") || normalized.includes("not found");
+  }
+
+  function getPendingImageMessages() {
+    const pendingMessages: AiSessionMessage[] = [];
+    for (const session of sessions.value) {
+      if (session.type !== "image") {
+        continue;
+      }
+      for (const message of session.messages) {
+        if (message.role !== "user" && message.status === "pending") {
+          pendingMessages.push(message);
+        }
+      }
+    }
+    return pendingMessages;
+  }
+
+  async function reconcilePendingImageMessagesInner(options: { checkBackend?: boolean } = {}) {
+    const checkBackend = options.checkBackend !== false;
+    const backendLookups: AiSessionMessage[] = [];
+    const lookupRequestIds = new Set<string>();
+    let changed = false;
+
+    for (const message of getPendingImageMessages()) {
+      if (patchImageMessageFromLocalQueue(message)) {
+        changed = true;
+        continue;
+      }
+
+      if (checkBackend && message.requestId && !lookupRequestIds.has(message.requestId)) {
+        lookupRequestIds.add(message.requestId);
+        backendLookups.push(message);
+      }
+    }
+
+    if (backendLookups.length) {
+      await runAllSettled(backendLookups, async (message) => {
+        if (!message.requestId) {
+          return;
+        }
+
+        try {
+          const task = await aiService.getProviderTestTask(message.requestId);
+          applyBackendTask(task);
+          if (patchImageMessageFromTask(message, task)) {
+            changed = true;
+          }
+        } catch (err) {
+          const error = stringifyErrorMessage(err);
+          if (isBackendTaskMissingError(error)) {
+            if (hasTimeElapsed(message.createdAt, IMAGE_TASK_LOST_AFTER_MS)) {
+              failPendingImageMessage(message, IMAGE_TASK_LOST_MESSAGE);
+              changed = true;
+            }
+            return;
+          }
+          console.error("[ERR_AI_IMAGE_TASK_RECOVER] AI 生图任务状态恢复失败", err);
+        }
+      });
+    }
+
+    if (changed) {
+      trimLocalTestQueue();
+      updateTestingState();
+      await persistAiState();
+    }
+  }
+
+  async function reconcilePendingImageMessages(options: { checkBackend?: boolean } = {}) {
+    if (reconcilePendingImageMessagesPromise) {
+      return reconcilePendingImageMessagesPromise;
+    }
+
+    reconcilePendingImageMessagesPromise = reconcilePendingImageMessagesInner(options);
+    try {
+      await reconcilePendingImageMessagesPromise;
+    } finally {
+      reconcilePendingImageMessagesPromise = null;
+    }
+  }
+
+  async function typewriterMessage(message: AiSessionMessage, content: string) {
     const text = content || "";
     patchSessionMessage(message.id, { content: "", status: "pending" });
     if (!text) {
@@ -778,7 +1081,7 @@ export const useAiStore = defineStore("ai", () => {
     const chunkSize = Math.max(1, Math.ceil(text.length / 80));
     let visibleLength = 0;
     while (visibleLength < text.length) {
-      await nextFrame();
+      await nextAnimationFrame();
       visibleLength = Math.min(text.length, visibleLength + chunkSize);
       patchSessionMessage(message.id, {
         content: text.slice(0, visibleLength),
@@ -799,7 +1102,7 @@ export const useAiStore = defineStore("ai", () => {
       session.modelConfigId = target.id;
       session.updatedAt = currentTime();
     }
-    void persistAiState();
+    schedulePersistAiState();
   }
 
   function selectModelConfig(configId: string) {
@@ -847,12 +1150,12 @@ export const useAiStore = defineStore("ai", () => {
   function getTaskPollTimeoutMs(action: AiProviderTestAction, configSnapshot: AiProviderConfig) {
     const requestTimeoutMs =
       action === "image"
-        ? clampNumber(configSnapshot.timeoutMs, 3_000, IMAGE_REQUEST_TIMEOUT_MS, defaultConfig.timeoutMs, 0) +
+        ? clampNumber(configSnapshot.timeoutMs, 3_000, IMAGE_REQUEST_TIMEOUT_MAX_MS, defaultConfig.timeoutMs, 0) +
           IMAGE_SIDECAR_TIMEOUT_SLACK_MS
         : clampNumber(configSnapshot.timeoutMs, 3_000, 60_000, defaultConfig.timeoutMs, 0);
     const queueTimeoutMs =
       action === "image"
-        ? (requestTimeoutMs + 30_000) * backendQueueStatus.value.queueLimit
+        ? IMAGE_QUEUE_POLL_TIMEOUT_MS
         : backendQueueStatus.value.waitTimeoutMs;
     return requestTimeoutMs + queueTimeoutMs + TASK_POLL_RECOVERY_SLACK_MS;
   }
@@ -964,6 +1267,8 @@ export const useAiStore = defineStore("ai", () => {
 
   async function waitForBackendTask(requestId: string, item: AiProviderTestQueueItem, pollTimeoutMs: number) {
     const startedAt = currentTime();
+    const pollIntervalMs = item.action === "image" ? IMAGE_TASK_POLL_INTERVAL_MS : TASK_POLL_INTERVAL_MS;
+    let shouldWaitBeforePoll = false;
     for (;;) {
       if (hasTimeElapsed(startedAt, pollTimeoutMs)) {
         item.status = "failed";
@@ -973,7 +1278,11 @@ export const useAiStore = defineStore("ai", () => {
         throw new Error(item.error);
       }
 
-      await sleep(TASK_POLL_INTERVAL_MS);
+      if (shouldWaitBeforePoll) {
+        await sleep(pollIntervalMs);
+      }
+      shouldWaitBeforePoll = true;
+
       let task: AiProviderTestTask;
       try {
         task = await aiService.getProviderTestTask(requestId);
@@ -1005,6 +1314,7 @@ export const useAiStore = defineStore("ai", () => {
         applyBackendTask(task);
       }
       updateTestingState();
+      await reconcilePendingImageMessages({ checkBackend: false });
     } catch (err) {
       console.error("[ERR_AI_QUEUE_STATUS] AI 模型测试队列状态读取失败:", err);
     }
@@ -1129,6 +1439,11 @@ export const useAiStore = defineStore("ai", () => {
       promptLibrary.value = normalizePromptLibrary(defaultPromptLibrary);
     } finally {
       isLoaded.value = true;
+      try {
+        await reconcilePendingImageMessages({ checkBackend: false });
+      } catch (err) {
+        console.error("[ERR_AI_IMAGE_TASK_RECOVER] AI 生图任务状态恢复失败", err);
+      }
     }
   }
 
@@ -1504,7 +1819,7 @@ export const useAiStore = defineStore("ai", () => {
 
     const modelConfig = getModelConfig(configId);
     const normalizedImageSize = normalizeImageSize(imageSize);
-    const session = ensureActiveSession("image");
+    const session = ensureActiveSession("image", { persist: false });
     session.modelConfigId = modelConfig.id;
     session.imageSize = normalizedImageSize;
     imageDraftSize.value = normalizedImageSize;
@@ -1519,7 +1834,6 @@ export const useAiStore = defineStore("ai", () => {
       requestedImageSize: normalizedImageSize,
       createdAt: currentTime(),
     });
-    await persistAiState();
 
     let pendingMessageId = "";
     let pendingRequestId = "";
@@ -1537,36 +1851,23 @@ export const useAiStore = defineStore("ai", () => {
       };
       pendingMessageId = pendingMessage.id;
       appendSessionMessage(session, pendingMessage);
-      await persistAiState();
 
       const result = await testProvider("image", {
         configId: modelConfig.id,
         prompt,
         imageSize: normalizedImageSize,
-        onTask: async (task) => {
+        onTask: (task) => {
           pendingRequestId = task.requestId;
           patchSessionMessage(pendingMessage.id, {
             requestId: task.requestId,
           });
-          await persistAiState();
+          schedulePersistAiState();
         },
       });
-      patchSessionMessage(pendingMessage.id, {
-        role: result.ok ? "assistant" : "error",
-        status: result.ok ? "success" : "failed",
-        content: result.message,
-        requestId: result.requestId || pendingRequestId || undefined,
-        model: result.model || modelConfig.imageModel || modelConfig.model,
-        error: result.ok ? undefined : result.message,
-        imageSize: normalizeImageSize(result.actualImageSize || result.fallbackImageSize || normalizedImageSize),
-        requestedImageSize: normalizeImageSize(result.requestedImageSize || normalizedImageSize),
-        actualImageSize: result.actualImageSize ? normalizeImageSize(result.actualImageSize) : undefined,
-        fallbackImageSize: result.fallbackImageSize ? normalizeImageSize(result.fallbackImageSize) : undefined,
-        imageAttempts: result.imageAttempts ? clampNumber(result.imageAttempts, 1, 10, 1, 0) : undefined,
-        imageUrls: result.imageUrls,
-        imagePaths: result.imagePaths,
-        savedFiles: result.savedFiles,
-      });
+      patchSessionMessage(
+        pendingMessage.id,
+        buildImageResultMessagePatch(result, modelConfig, normalizedImageSize, pendingRequestId)
+      );
       await persistAiState();
       return result;
     } catch (err) {
@@ -1667,6 +1968,7 @@ export const useAiStore = defineStore("ai", () => {
     applyPrompt,
     consumePendingPrompt,
     refreshBackendQueueStatus,
+    reconcilePendingImageMessages,
     cancelBackendQueuedTests,
     cancelBackendQueuedTest,
     cancelImageMessage,

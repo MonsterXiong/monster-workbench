@@ -26,6 +26,41 @@ const AI_PROVIDER_BASE_URL_MAX_CHARS: usize = 2_048;
 const AI_PROVIDER_API_KEY_MAX_CHARS: usize = 4_096;
 const AI_PROVIDER_MODEL_MAX_CHARS: usize = 256;
 const AI_PROVIDER_PROMPT_MAX_CHARS: usize = 8_192;
+const SUPPORTED_IMAGE_SIZES: &[&str] = &[
+    "1008x1792",
+    "1008x1344",
+    "1536x864",
+    "1344x1008",
+    "1024x1024",
+    "2048x2048",
+    "1152x2048",
+    "2048x1152",
+    "1536x2048",
+    "2048x1536",
+    "1344x2016",
+    "2016x1344",
+    "2000x1600",
+    "1600x2000",
+    "2000x1200",
+    "1200x2000",
+    "2048x1024",
+    "1024x2048",
+    "2880x2880",
+    "2160x3840",
+    "3840x2160",
+    "2160x2880",
+    "2880x2160",
+    "2304x3456",
+    "3456x2304",
+    "2880x2304",
+    "2304x2880",
+    "3600x2160",
+    "2160x3600",
+    "3840x1920",
+    "1920x3840",
+    "3840x1280",
+    "1280x3840",
+];
 const PYTHON_SIDECAR_ENV_ALLOWLIST: &[&str] = &[
     "PATH",
     "Path",
@@ -245,8 +280,8 @@ impl AiProviderService {
 
         let request_timeout_ms = if action == "image" {
             config.timeout_ms.clamp(
-                AI_PROVIDER_IMAGE_REQUEST_TIMEOUT_MS,
-                AI_PROVIDER_IMAGE_REQUEST_TIMEOUT_MS,
+                AI_PROVIDER_IMAGE_REQUEST_TIMEOUT_MS_MIN,
+                AI_PROVIDER_IMAGE_REQUEST_TIMEOUT_MS_MAX,
             )
         } else {
             config.timeout_ms.clamp(3_000, 60_000)
@@ -410,10 +445,11 @@ const AI_PROVIDER_TEST_QUEUE_LIMIT: usize = 16;
 const AI_PROVIDER_TEST_RUNNING_LIMIT: usize = 6;
 const AI_PROVIDER_TEST_MAX_CONFIG_CONCURRENCY: usize = 6;
 const AI_PROVIDER_TEST_QUEUE_WAIT_TIMEOUT: Duration = Duration::from_secs(90);
-const AI_PROVIDER_IMAGE_QUEUE_WAIT_SLACK: Duration = Duration::from_secs(30);
 const AI_PROVIDER_FINISHED_TASK_LIMIT: usize = 40;
-const AI_PROVIDER_IMAGE_REQUEST_TIMEOUT_MS: u64 = 43_200_000;
-const AI_PROVIDER_IMAGE_SIDECAR_TIMEOUT_SLACK_MS: u64 = 15_000;
+const AI_PROVIDER_IMAGE_REQUEST_TIMEOUT_MS_MIN: u64 = 60_000;
+const AI_PROVIDER_IMAGE_REQUEST_TIMEOUT_MS_DEFAULT: u64 = 720_000;
+const AI_PROVIDER_IMAGE_REQUEST_TIMEOUT_MS_MAX: u64 = 900_000;
+const AI_PROVIDER_IMAGE_SIDECAR_TIMEOUT_SLACK_MS: u64 = 30_000;
 
 #[derive(Debug, Clone)]
 struct AiProviderQueueConfig {
@@ -612,7 +648,9 @@ impl AiProviderTestQueue {
                 return Err("AI 模型测试排队任务已被取消".to_string());
             }
 
-            if now_ms().saturating_sub(ticket.created_at_ms) > ticket.wait_timeout.as_millis() {
+            if !ticket.wait_timeout.is_zero()
+                && now_ms().saturating_sub(ticket.created_at_ms) > ticket.wait_timeout.as_millis()
+            {
                 if let Some(index) = state.queued.iter().position(|item| item.id == ticket.id) {
                     state.queued.remove(index);
                 }
@@ -807,7 +845,7 @@ fn annotate_queue_item(mut item: AiProviderQueueItem, now_ms: u128) -> AiProvide
         .started_at_ms
         .unwrap_or(now_ms)
         .saturating_sub(item.created_at_ms);
-    item.remaining_wait_ms = if item.started_at_ms.is_some() {
+    item.remaining_wait_ms = if item.started_at_ms.is_some() || item.wait_timeout_ms == 0 {
         0
     } else {
         item.wait_timeout_ms.saturating_sub(item.wait_ms)
@@ -860,16 +898,9 @@ fn normalize_queue_key(action: &str, config: &AiProviderConfig) -> String {
     .collect()
 }
 
-fn provider_test_queue_wait_timeout(action: &str, config: &AiProviderConfig) -> Duration {
+fn provider_test_queue_wait_timeout(action: &str, _config: &AiProviderConfig) -> Duration {
     if action == "image" {
-        let request_timeout_ms = config.timeout_ms.clamp(
-            AI_PROVIDER_IMAGE_REQUEST_TIMEOUT_MS,
-            AI_PROVIDER_IMAGE_REQUEST_TIMEOUT_MS,
-        );
-        let sidecar_timeout =
-            Duration::from_millis(request_timeout_ms + AI_PROVIDER_IMAGE_SIDECAR_TIMEOUT_SLACK_MS);
-        return (sidecar_timeout + AI_PROVIDER_IMAGE_QUEUE_WAIT_SLACK)
-            * AI_PROVIDER_TEST_QUEUE_LIMIT as u32;
+        return Duration::ZERO;
     }
 
     AI_PROVIDER_TEST_QUEUE_WAIT_TIMEOUT
@@ -1159,10 +1190,12 @@ mod queue_tests {
             image_urls: None,
             image_paths: None,
             saved_files: None,
+            api_image_size: None,
             requested_image_size: None,
             actual_image_size: None,
             fallback_image_size: None,
             image_attempts: None,
+            failure_kind: None,
             raw_preview: None,
         }
     }
@@ -1363,18 +1396,11 @@ mod queue_tests {
     }
 
     #[test]
-    fn image_queue_wait_timeout_covers_long_running_image_slots() {
-        let config = test_config(AI_PROVIDER_IMAGE_REQUEST_TIMEOUT_MS);
+    fn image_queue_wait_timeout_does_not_auto_cancel_queueing() {
+        let config = test_config(AI_PROVIDER_IMAGE_REQUEST_TIMEOUT_MS_DEFAULT);
         let wait_timeout = provider_test_queue_wait_timeout("image", &config);
 
-        assert!(wait_timeout > AI_PROVIDER_TEST_QUEUE_WAIT_TIMEOUT);
-        assert_eq!(
-            wait_timeout,
-            (Duration::from_millis(
-                AI_PROVIDER_IMAGE_REQUEST_TIMEOUT_MS + AI_PROVIDER_IMAGE_SIDECAR_TIMEOUT_SLACK_MS
-            ) + AI_PROVIDER_IMAGE_QUEUE_WAIT_SLACK)
-                * AI_PROVIDER_TEST_QUEUE_LIMIT as u32
-        );
+        assert_eq!(wait_timeout, Duration::ZERO);
     }
 
     #[test]
@@ -2093,64 +2119,7 @@ fn validate_provider_config(config: &AiProviderConfig, action: &str) -> AppResul
             return Err(AppError::Config("生图提示词不能为空".to_string()));
         }
 
-        if !matches!(
-            config.image_size.as_str(),
-            "1024x1024"
-                | "1008x1792"
-                | "1008x1344"
-                | "1536x864"
-                | "1344x1008"
-                | "2048x2048"
-                | "1152x2048"
-                | "2048x1152"
-                | "1536x2048"
-                | "2048x1536"
-                | "1344x2016"
-                | "2016x1344"
-                | "2000x1600"
-                | "1600x2000"
-                | "2000x1200"
-                | "1200x2000"
-                | "2048x1024"
-                | "1024x2048"
-                | "2048x1104"
-                | "2048x864"
-                | "2048x880"
-                | "880x2048"
-                | "2048x688"
-                | "688x2048"
-                | "2880x2880"
-                | "2160x3840"
-                | "3840x2160"
-                | "2160x2880"
-                | "2880x2160"
-                | "2304x3456"
-                | "3456x2304"
-                | "2880x2304"
-                | "2304x2880"
-                | "3600x2160"
-                | "2160x3600"
-                | "3840x1920"
-                | "1920x3840"
-                | "3840x2080"
-                | "3840x1616"
-                | "3840x1648"
-                | "1648x3840"
-                | "3840x1280"
-                | "1280x3840"
-                | "3840x960"
-                | "960x3840"
-                | "3840x768"
-                | "768x3840"
-                | "3840x640"
-                | "640x3840"
-                | "7680x960"
-                | "960x7680"
-                | "7680x640"
-                | "640x7680"
-                | "7680x480"
-                | "480x7680"
-        ) {
+        if !SUPPORTED_IMAGE_SIZES.contains(&config.image_size.as_str()) {
             return Err(AppError::Config("不支持的生图尺寸".to_string()));
         }
     }
@@ -2328,10 +2297,12 @@ pub struct AiProviderTestResult {
     pub image_urls: Option<Vec<String>>,
     pub image_paths: Option<Vec<String>>,
     pub saved_files: Option<Vec<AiProviderSavedFile>>,
+    pub api_image_size: Option<String>,
     pub requested_image_size: Option<String>,
     pub actual_image_size: Option<String>,
     pub fallback_image_size: Option<String>,
     pub image_attempts: Option<u32>,
+    pub failure_kind: Option<String>,
     pub raw_preview: Option<String>,
 }
 
@@ -2341,6 +2312,7 @@ pub struct AiProviderSavedFile {
     pub path: String,
     pub size_bytes: u64,
     pub mime_type: String,
+    pub dimensions: Option<String>,
 }
 
 #[cfg(test)]
@@ -2436,10 +2408,12 @@ mod tests {
             image_urls: None,
             image_paths: None,
             saved_files: None,
+            api_image_size: None,
             requested_image_size: None,
             actual_image_size: None,
             fallback_image_size: None,
             image_attempts: None,
+            failure_kind: None,
             raw_preview: Some("{}".to_string()),
         })
         .expect("result should serialize");
@@ -2569,22 +2543,37 @@ mod tests {
     }
 
     #[test]
-    fn validate_provider_config_accepts_extreme_image_sizes() {
+    fn validate_provider_config_accepts_verified_image_sizes() {
+        for size in SUPPORTED_IMAGE_SIZES {
+            let mut config = make_config();
+            config.image_size = (*size).to_string();
+
+            validate_provider_config(&config, "image")
+                .unwrap_or_else(|error| panic!("{size} should be accepted: {error:?}"));
+        }
+    }
+
+    #[test]
+    fn validate_provider_config_rejects_unverified_image_sizes() {
         for size in [
-            "3840x640",
-            "640x3840",
+            "512x512",
+            "1792x1008",
+            "3840x960",
+            "960x3840",
+            "7680x4320",
+            "4320x7680",
             "7680x960",
-            "960x7680",
-            "7680x640",
-            "640x7680",
-            "7680x480",
-            "480x7680",
+            "7680x160",
+            "8192x8192",
+            "bad-size",
         ] {
             let mut config = make_config();
             config.image_size = size.to_string();
 
-            validate_provider_config(&config, "image")
-                .unwrap_or_else(|error| panic!("{size} should be accepted: {error:?}"));
+            assert!(
+                validation_detail(&config, "image").contains("不支持的生图尺寸"),
+                "{size} should be rejected until a real generation run verifies it"
+            );
         }
     }
 
