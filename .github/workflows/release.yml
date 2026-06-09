@@ -39,7 +39,7 @@ jobs:
           cache-dependency-path: package-lock.json
 
       - name: Install frontend dependencies
-        run: npm ci
+        run: npm ci --prefer-offline --no-audit --no-fund
 
       - name: Check frontend boundaries and types
         run: npm run verify
@@ -87,7 +87,63 @@ jobs:
       - name: Test Rust AI service
         run: cargo test --manifest-path src-tauri/Cargo.toml ai_service
 
-  build:
+  dry-run-build:
+    if: ${{ github.event_name == 'workflow_dispatch' && !inputs.publish_release }}
+
+    permissions:
+      contents: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-latest
+            args: ""
+          - platform: macos-latest
+            args: ""
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "lts/*"
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-build-${{ runner.os }}
+          workspaces: |
+            src-tauri -> target
+
+      - name: Install Linux dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf zip
+
+      - name: Install frontend dependencies
+        run: npm ci --prefer-offline --no-audit --no-fund
+
+      - name: Build Tauri app for quick release test
+        if: ${{ !inputs.full_bundle }}
+        run: npx tauri build --no-bundle ${{ matrix.args }}
+
+      - name: Build Tauri app for full release test
+        if: ${{ inputs.full_bundle }}
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: npx tauri build ${{ matrix.args }}
+
+  release-build:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.publish_release }}
+
     permissions:
       contents: write
 
@@ -131,11 +187,10 @@ jobs:
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf zip
 
       - name: Install frontend dependencies
-        run: npm ci
+        run: npm ci --prefer-offline --no-audit --no-fund
 
       - name: Get Release Notes
         id: release_notes
-        if: github.event_name != 'workflow_dispatch' || inputs.publish_release
         shell: bash
         run: |
           if [ -f .github/release-notes.md ]; then
@@ -146,19 +201,7 @@ jobs:
             echo "body=Monster Tools native desktop release." >> $GITHUB_OUTPUT
           fi
 
-      - name: Build Tauri app for quick release test
-        if: github.event_name == 'workflow_dispatch' && !inputs.publish_release && !inputs.full_bundle
-        run: npx tauri build --no-bundle ${{ matrix.args }}
-
-      - name: Build Tauri app for full release test
-        if: github.event_name == 'workflow_dispatch' && !inputs.publish_release && inputs.full_bundle
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: npx tauri build ${{ matrix.args }}
-
       - name: Build Tauri app and upload release
-        if: github.event_name != 'workflow_dispatch' || inputs.publish_release
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
