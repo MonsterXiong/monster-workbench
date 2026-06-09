@@ -196,10 +196,10 @@ export const utilityDocs: UtilityDocEntry[] = [
     title: "dom DOM 工具",
     group: "浏览器能力",
     importPath: "src/utils/dom",
-    sourceFiles: files("dom"),
-    splitStatus: "single",
+    sourceFiles: splitFiles("dom", ["index", "types", "constants", "guards", "events", "query-focus", "css", "element", "viewport", "scroll"]),
+    splitStatus: "split",
     description: "DOM 事件清理、可见区域、焦点和元素尺寸相关工具。",
-    functions: ["addDomEventListener", "mergeDomEventCleanups", "summarizeRectInViewport", "isElementVisibleInViewport"],
+    functions: ["addDomEventListener", "mergeDomEventCleanups", "summarizeRectInViewport", "isElementInViewport"],
     snippets: ["addDomEventListener(window, 'resize', handler)", "summarizeRectInViewport(element.getBoundingClientRect(), window)"],
     examples: [
       { label: "矩形可见性", expression: "summarizeRectInViewport(rect, mockWindow)", value: browserUtilityExamples.rect },
