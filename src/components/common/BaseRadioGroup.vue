@@ -1,6 +1,17 @@
 <script setup lang="ts">
-import { computed, useId } from "vue";
-import { filterByFalsyValue, findNextCircularItem, firstItem, getKeyboardBoundaryPosition, getKeyboardNavigationDirection, lastItem } from "../../utils";
+import { computed, nextTick, onBeforeUpdate, ref, useId } from "vue";
+import type { ComponentPublicInstance } from "vue";
+import {
+  filterByFalsyValue,
+  findIndexByValue,
+  findNextCircularItem,
+  getBoundaryItem,
+  getKeyboardBoundaryPosition,
+  getKeyboardNavigationDirection,
+  isActivationKey,
+  preventAndStopDomEvent,
+  preventDomEventDefault,
+} from "../../utils";
 
 export interface RadioOption {
   label: string;
@@ -14,6 +25,8 @@ export interface RadioOption {
 interface Props {
   modelValue: string | number;
   options: RadioOption[];
+  id?: string;
+  name?: string;
   disabled?: boolean;
   readonly?: boolean;
   compact?: boolean;
@@ -23,9 +36,13 @@ interface Props {
   error?: boolean;
   success?: boolean;
   ariaLabel?: string;
+  ariaLabelledby?: string;
+  ariaDescribedby?: string;
 }
 
 const props = withDefaults(defineProps<Props>(), {
+  id: "",
+  name: "",
   disabled: false,
   readonly: false,
   compact: false,
@@ -35,6 +52,8 @@ const props = withDefaults(defineProps<Props>(), {
   error: false,
   success: false,
   ariaLabel: "",
+  ariaLabelledby: "",
+  ariaDescribedby: "",
 });
 
 const emit = defineEmits<{
@@ -46,61 +65,108 @@ const emit = defineEmits<{
 }>();
 
 const groupId = useId();
+const optionRefs = ref<Array<HTMLElement | null>>([]);
 const isReadonly = computed(() => props.disabled || props.readonly);
 const enabledOptions = computed(() => filterByFalsyValue(props.options, (option) => option.disabled));
-const focusableValue = computed(() => {
-  if (props.disabled || !enabledOptions.value.length) return undefined;
-  return enabledOptions.value.find((option) => option.value === props.modelValue)?.value ?? firstItem(enabledOptions.value)?.value;
+const elementSize = computed(() => {
+  if (props.size === "sm") return "small";
+  if (props.size === "lg") return "large";
+  return "default";
 });
 
-const currentValue = computed({
-  get: () => props.modelValue,
-  set: (value) => {
-    if (isReadonly.value) return;
-    emit("update:modelValue", value);
-    emit("change", value);
-  },
+const currentValue = computed(() => props.modelValue);
+
+onBeforeUpdate(() => {
+  optionRefs.value = [];
 });
 
-const selectOption = (option: RadioOption) => {
-  if (isReadonly.value || option.disabled) return;
-  currentValue.value = option.value;
+const setOptionRef = (element: Element | ComponentPublicInstance | null, index: number) => {
+  if (element instanceof HTMLElement) {
+    optionRefs.value[index] = element;
+    return;
+  }
+
+  optionRefs.value[index] = element?.$el instanceof HTMLElement ? element.$el : null;
+};
+
+const focusOptionByValue = async (value: string | number) => {
+  const optionIndex = findIndexByValue(props.options, (option) => option.value, value);
+  if (optionIndex < 0) return;
+  await nextTick();
+  const optionElement = optionRefs.value[optionIndex];
+  const radioInput = optionElement?.querySelector<HTMLInputElement>("input[type='radio']");
+  (radioInput ?? optionElement)?.focus();
+};
+
+const isRadioValue = (value: unknown): value is string | number => {
+  return typeof value === "string" || typeof value === "number";
+};
+
+const commitValue = (value: unknown) => {
+  if (isReadonly.value || !isRadioValue(value)) return;
+  emit("update:modelValue", value);
+  emit("change", value);
+};
+
+const handleValueUpdate = (value: string | number | boolean | undefined) => {
+  commitValue(value);
 };
 
 const moveSelection = (direction: 1 | -1) => {
   if (isReadonly.value || !enabledOptions.value.length) return;
   const nextOption = findNextCircularItem(enabledOptions.value, (option) => option.value === currentValue.value, direction);
-  if (nextOption) currentValue.value = nextOption.value;
+  if (!nextOption) return;
+  commitValue(nextOption.value);
+  void focusOptionByValue(nextOption.value);
 };
 
 const selectBoundary = (position: "first" | "last") => {
   if (isReadonly.value || !enabledOptions.value.length) return;
-  const nextOption = position === "first" ? firstItem(enabledOptions.value) : lastItem(enabledOptions.value);
-  if (nextOption) currentValue.value = nextOption.value;
+  const nextOption = getBoundaryItem(enabledOptions.value, position);
+  if (!nextOption) return;
+  commitValue(nextOption.value);
+  void focusOptionByValue(nextOption.value);
 };
 
 const handleKeydown = (event: KeyboardEvent) => {
   emit("keydown", event);
+  if (props.disabled) return;
+
+  if (props.readonly) {
+    if (isActivationKey(event) || getKeyboardNavigationDirection(event) || getKeyboardBoundaryPosition(event)) {
+      preventAndStopDomEvent(event);
+    }
+    return;
+  }
+
   const direction = getKeyboardNavigationDirection(event);
   if (direction) {
-    event.preventDefault();
+    preventDomEventDefault(event);
     moveSelection(direction);
     return;
   }
 
   const boundaryPosition = getKeyboardBoundaryPosition(event);
   if (boundaryPosition) {
-    event.preventDefault();
+    preventDomEventDefault(event);
     selectBoundary(boundaryPosition);
   }
 };
 
+const handleClickCapture = (event: MouseEvent) => {
+  if (!props.readonly) return;
+  preventAndStopDomEvent(event);
+};
+
 const optionLabelId = (index: number) => `${groupId}-label-${index}`;
 const optionDescriptionId = (index: number) => `${groupId}-description-${index}`;
+const optionButtonId = (index: number) => `${groupId}-option-${index}`;
 </script>
 
 <template>
-  <div
+  <el-radio-group
+    :id="id || undefined"
+    :model-value="currentValue"
     class="base-radio-group"
     :class="[
       `base-radio-group--cols-${columns}`,
@@ -114,37 +180,40 @@ const optionDescriptionId = (index: number) => `${groupId}-description-${index}`
         'base-radio-group--success': success
       }
     ]"
-    role="radiogroup"
-    :aria-label="ariaLabel || undefined"
+    :name="name || undefined"
+    :size="elementSize"
+    :disabled="disabled"
+    :validate-event="false"
+    :aria-label="ariaLabelledby ? undefined : ariaLabel || undefined"
+    :aria-labelledby="ariaLabelledby || undefined"
+    :aria-describedby="ariaDescribedby || undefined"
     :aria-disabled="disabled ? 'true' : undefined"
     :aria-readonly="readonly ? 'true' : undefined"
-    @keydown="handleKeydown"
+    :aria-invalid="error ? 'true' : undefined"
+    @update:model-value="handleValueUpdate"
+    @click.capture="handleClickCapture"
+    @keydown.capture="handleKeydown"
+    @focusin="emit('focus', $event)"
+    @focusout="emit('blur', $event)"
   >
-    <button
+    <el-radio
       v-for="(option, index) in options"
       :key="option.value"
-      type="button"
-      role="radio"
+      :id="optionButtonId(index)"
+      :ref="(element) => setOptionRef(element, index)"
       class="base-radio-group__option"
       :class="{
         'is-active': currentValue === option.value,
         'is-disabled': disabled || option.disabled,
         'is-readonly': readonly
       }"
+      :value="option.value"
       :disabled="disabled || option.disabled"
-      :aria-checked="currentValue === option.value"
       :aria-disabled="(disabled || option.disabled) ? 'true' : undefined"
       :aria-readonly="readonly ? 'true' : undefined"
       :aria-labelledby="optionLabelId(index)"
       :aria-describedby="option.description ? optionDescriptionId(index) : undefined"
-      :tabindex="focusableValue === option.value ? 0 : -1"
-      @click="selectOption(option)"
-      @focus="emit('focus', $event)"
-      @blur="emit('blur', $event)"
     >
-      <span class="base-radio-group__mark" aria-hidden="true">
-        <span v-if="currentValue === option.value"></span>
-      </span>
       <span class="base-radio-group__text">
         <span class="base-radio-group__label-row">
           <BaseIcon v-if="option.icon" :name="option.icon" size="14" aria-hidden="true" />
@@ -155,8 +224,8 @@ const optionDescriptionId = (index: number) => `${groupId}-description-${index}`
           {{ option.description }}
         </span>
       </span>
-    </button>
-  </div>
+    </el-radio>
+  </el-radio-group>
 </template>
 
 <style scoped>
@@ -200,9 +269,15 @@ const optionDescriptionId = (index: number) => `${groupId}-description-${index}`
   @apply border-slate-300 bg-slate-50 dark:border-slate-700 dark:bg-slate-950;
 }
 
+.base-radio-group__option:focus-visible {
+  border-color: rgb(var(--color-primary));
+  box-shadow: 0 0 0 3px rgb(var(--color-primary) / 0.14);
+  outline: none;
+}
+
 .base-radio-group__option.is-active {
-  border-color: rgba(var(--color-primary), 0.34);
-  background-color: rgba(var(--color-primary), 0.06);
+  border-color: rgb(var(--color-primary) / 0.34);
+  background-color: rgb(var(--color-primary) / 0.06);
 }
 
 .base-radio-group--success .base-radio-group__option.is-active {
@@ -211,6 +286,11 @@ const optionDescriptionId = (index: number) => `${groupId}-description-${index}`
 
 .base-radio-group--error .base-radio-group__option.is-active {
   @apply border-red-300 bg-red-50 dark:border-red-900 dark:bg-red-950;
+}
+
+.base-radio-group--error .base-radio-group__option:focus-visible {
+  @apply border-red-400;
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.14);
 }
 
 .base-radio-group__option.is-disabled {

@@ -81,6 +81,8 @@ const computedValue = computed({
     emit("update:modelValue", val);
   },
 });
+
+const canClear = computed(() => props.clearable && !props.loading && !props.disabled && !props.readonly);
 </script>
 
 <template>
@@ -91,16 +93,25 @@ const computedValue = computed({
     :placeholder="placeholder || t('common.inputPlaceholder')"
     :aria-label="resolvedAriaLabel"
     :aria-invalid="error ? 'true' : undefined"
-    :aria-busy="loading || undefined"
+    :aria-busy="loading ? 'true' : undefined"
     :disabled="disabled"
     :readonly="readonly"
     :size="elSize"
-    :clearable="clearable"
+    :clearable="canClear"
     :maxlength="maxlength"
     :show-word-limit="showWordLimit"
     :show-password="showPassword"
     :autocomplete="autocomplete"
-    :class="[`base-input--${size}`, { 'is-error': error, 'base-input--block': block }]"
+    :class="[
+      'base-input',
+      `base-input--${size}`,
+      {
+        'is-error': error,
+        'is-loading': loading,
+        'is-readonly': readonly,
+        'base-input--block': block,
+      },
+    ]"
     @blur="emit('blur', $event as any)"
     @focus="emit('focus', $event as any)"
     @input="emit('input', $event as any)"
@@ -151,7 +162,7 @@ const computedValue = computed({
   box-shadow: none;
 }
 
-:deep(.el-input.is-focus .el-input__wrapper) {
+.base-input:focus-within :deep(.el-input__wrapper) {
   border-color: rgb(var(--color-primary));
   box-shadow: 0 0 0 3px rgba(var(--color-primary), 0.15);
   @apply bg-white dark:bg-slate-900;
@@ -183,7 +194,12 @@ const computedValue = computed({
   @apply border-red-400 bg-red-50 dark:border-red-800 dark:bg-red-950;
 }
 
-.is-error :deep(.el-input.is-focus .el-input__wrapper) {
+.is-readonly :deep(.el-input__wrapper) {
+  @apply bg-slate-100 dark:bg-slate-900;
+}
+
+.base-input.is-error:focus-within :deep(.el-input__wrapper) {
+  border-color: rgb(248 113 113);
   box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.14);
 }
 

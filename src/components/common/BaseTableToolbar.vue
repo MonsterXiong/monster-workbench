@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, useId } from "vue";
 import { useI18n } from "../../composables/useI18n";
+import { joinAriaIds } from "../../utils";
 
 interface Props {
   title: string;
@@ -15,6 +16,13 @@ interface Props {
   disabled?: boolean;
   divided?: boolean;
   ariaLabel?: string;
+  ariaLabelledby?: string;
+  ariaDescribedby?: string;
+  actionsLabel?: string;
+  contentLabel?: string;
+  wrapTitle?: boolean;
+  wrapDescription?: boolean;
+  loadingText?: string;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -29,14 +37,38 @@ const props = withDefaults(defineProps<Props>(), {
   disabled: false,
   divided: true,
   ariaLabel: "",
+  ariaLabelledby: "",
+  ariaDescribedby: "",
+  actionsLabel: "",
+  contentLabel: "",
+  wrapTitle: false,
+  wrapDescription: false,
+  loadingText: "",
 });
 
 const { t } = useI18n();
 const toolbarId = useId();
 const titleId = `base-table-toolbar-title-${toolbarId}`;
 const descriptionId = `base-table-toolbar-description-${toolbarId}`;
-const describedBy = computed(() => (props.description ? descriptionId : undefined));
+const loadingId = `base-table-toolbar-loading-${toolbarId}`;
+const labelledBy = computed(() => (props.ariaLabel ? undefined : props.ariaLabelledby || titleId));
+const describedBy = computed(() =>
+  joinAriaIds([
+    props.description ? descriptionId : undefined,
+    props.loading ? loadingId : undefined,
+    props.ariaDescribedby,
+  ])
+);
 const resolvedSize = computed(() => (props.compact ? "sm" : props.size));
+const isInteractiveDisabled = computed(() => props.disabled || props.loading);
+const resolvedActionsLabel = computed(() => props.actionsLabel || t("common.actionsRegion"));
+const resolvedContentLabel = computed(() => props.contentLabel || t("common.toolbar"));
+const resolvedLoadingText = computed(() => props.loadingText || t("common.loading"));
+const slotState = computed(() => ({
+  disabled: props.disabled,
+  loading: props.loading,
+  interactiveDisabled: isInteractiveDisabled.value,
+}));
 </script>
 
 <template>
@@ -47,12 +79,14 @@ const resolvedSize = computed(() => (props.compact ? "sm" : props.size));
       `base-table-toolbar--${surface}`,
       {
         'base-table-toolbar--divided': divided,
+        'base-table-toolbar--wrap-title': wrapTitle,
+        'base-table-toolbar--wrap-description': wrapDescription,
         'is-loading': loading,
         'is-disabled': disabled,
       },
     ]"
     :aria-label="ariaLabel || undefined"
-    :aria-labelledby="ariaLabel ? undefined : titleId"
+    :aria-labelledby="labelledBy"
     :aria-describedby="describedBy"
     :aria-busy="loading ? 'true' : undefined"
     :aria-disabled="disabled ? 'true' : undefined"
@@ -69,14 +103,14 @@ const resolvedSize = computed(() => (props.compact ? "sm" : props.size));
             <span v-if="props.count !== null && props.count !== undefined" class="base-table-toolbar__count">
               {{ props.count }} {{ countLabel || t('common.records') }}
             </span>
-            <slot name="meta"></slot>
+            <slot name="meta" v-bind="slotState"></slot>
           </div>
           <p v-if="description" :id="descriptionId">{{ description }}</p>
         </div>
       </div>
 
-      <div v-if="$slots.actions" class="base-table-toolbar__actions">
-        <slot name="actions"></slot>
+      <div v-if="$slots.actions" class="base-table-toolbar__actions" role="group" :aria-label="resolvedActionsLabel">
+        <slot name="actions" v-bind="slotState"></slot>
       </div>
     </div>
 
@@ -85,20 +119,22 @@ const resolvedSize = computed(() => (props.compact ? "sm" : props.size));
       <span></span>
       <span></span>
     </div>
+    <span v-if="loading" :id="loadingId" class="sr-only">{{ resolvedLoadingText }}</span>
 
-    <div v-if="$slots.default" class="base-table-toolbar__content">
-      <slot></slot>
+    <div v-if="$slots.default" class="base-table-toolbar__content" role="group" :aria-label="resolvedContentLabel">
+      <slot v-bind="slotState"></slot>
     </div>
   </section>
 </template>
 
 <style scoped>
 .base-table-toolbar {
-  @apply min-w-0 max-w-full rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition dark:border-slate-800 dark:bg-slate-900;
+  @apply min-w-0 max-w-full rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition dark:border-slate-800 dark:bg-slate-900;
+  container-type: inline-size;
 }
 
 .base-table-toolbar--sm {
-  @apply rounded-xl p-3;
+  @apply rounded-lg p-3;
 }
 
 .base-table-toolbar--lg {
@@ -118,20 +154,16 @@ const resolvedSize = computed(() => (props.compact ? "sm" : props.size));
   @apply opacity-75;
 }
 
-.base-table-toolbar.is-disabled {
-  @apply pointer-events-none;
-}
-
 .base-table-toolbar__header {
   @apply flex min-w-0 flex-wrap items-start justify-between gap-3;
 }
 
 .base-table-toolbar__meta {
-  @apply flex min-w-0 items-start gap-3;
+  @apply flex min-w-0 flex-1 items-start gap-3;
 }
 
 .base-table-toolbar__icon {
-  background-color: rgba(var(--color-primary), 0.1);
+  background-color: rgb(var(--color-primary) / 0.1);
   @apply mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-primary;
 }
 
@@ -144,7 +176,7 @@ const resolvedSize = computed(() => (props.compact ? "sm" : props.size));
 }
 
 .base-table-toolbar__text {
-  @apply min-w-0;
+  @apply min-w-0 flex-1;
 }
 
 .base-table-toolbar__title-row {
@@ -152,7 +184,13 @@ const resolvedSize = computed(() => (props.compact ? "sm" : props.size));
 }
 
 .base-table-toolbar__title-row strong {
-  @apply truncate text-sm font-black text-slate-900 dark:text-slate-100;
+  @apply min-w-0 max-w-full truncate text-sm font-black text-slate-900 dark:text-slate-100;
+}
+
+.base-table-toolbar--wrap-title .base-table-toolbar__title-row strong {
+  @apply whitespace-normal break-words;
+  overflow: visible;
+  text-overflow: clip;
 }
 
 .base-table-toolbar--lg .base-table-toolbar__title-row strong {
@@ -160,7 +198,14 @@ const resolvedSize = computed(() => (props.compact ? "sm" : props.size));
 }
 
 .base-table-toolbar__text p {
-  @apply mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400;
+  @apply mt-1 max-w-full break-words text-xs leading-5 text-slate-500 dark:text-slate-400;
+}
+
+.base-table-toolbar:not(.base-table-toolbar--wrap-description) .base-table-toolbar__text p {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .base-table-toolbar--lg .base-table-toolbar__text p {
@@ -168,12 +213,29 @@ const resolvedSize = computed(() => (props.compact ? "sm" : props.size));
 }
 
 .base-table-toolbar__count {
-  background-color: rgba(var(--color-primary), 0.1);
-  @apply inline-flex items-center rounded-full px-2 py-1 text-[11px] font-bold text-primary;
+  background-color: rgb(var(--color-primary) / 0.1);
+  @apply inline-flex shrink-0 items-center rounded-full px-2 py-1 text-[11px] font-bold text-primary;
 }
 
 .base-table-toolbar__actions {
-  @apply flex min-w-0 flex-wrap items-center justify-end gap-2;
+  @apply flex min-w-0 max-w-full shrink flex-wrap items-center justify-end gap-2;
+}
+
+.base-table-toolbar__actions :deep(.el-button),
+.base-table-toolbar__content :deep(.el-button),
+.base-table-toolbar__title-row :deep(.base-badge),
+.base-table-toolbar__content :deep(.base-badge) {
+  max-width: 100%;
+  min-width: 0;
+}
+
+.base-table-toolbar__actions :deep(.el-button > span),
+.base-table-toolbar__content :deep(.el-button > span),
+.base-table-toolbar__title-row :deep(.base-badge),
+.base-table-toolbar__content :deep(.base-badge) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .base-table-toolbar__loading {
@@ -206,6 +268,17 @@ const resolvedSize = computed(() => (props.compact ? "sm" : props.size));
 
 .base-table-toolbar--sm .base-table-toolbar__content {
   @apply mt-3 pt-3;
+}
+
+@container (max-width: 26rem) {
+  .base-table-toolbar__meta {
+    flex-basis: 100%;
+  }
+
+  .base-table-toolbar__actions {
+    flex: 1 1 9rem;
+    justify-content: flex-start;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

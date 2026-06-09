@@ -1,11 +1,23 @@
 <script setup lang="ts">
-import { computed, useSlots } from "vue";
+import { computed, ref, useSlots } from "vue";
 import { useI18n } from "../../composables/useI18n";
+import {
+  focusElementIntoView,
+  formatCssLengthValue,
+  getBoundaryItem,
+  getKeyboardBoundaryPosition,
+  getKeyboardNavigationDirection,
+  getNextCircularItem,
+  hasArrayLengthAtMost,
+  isEditableEventTarget,
+  queryFocusableElements,
+} from "../../utils";
 
 type ToolbarSize = "sm" | "md" | "lg";
 type ToolbarSurface = "default" | "muted" | "plain";
 type ToolbarJustify = "between" | "start" | "center" | "end";
 type ToolbarMainAlign = "start" | "center" | "end";
+type ToolbarOrientation = "horizontal" | "vertical";
 
 interface Props {
   size?: ToolbarSize;
@@ -22,6 +34,8 @@ interface Props {
   emptyText?: string;
   emptyIcon?: string;
   stickyOffset?: number | string;
+  orientation?: ToolbarOrientation;
+  keyboardNavigation?: boolean;
   role?: string;
   ariaLabel?: string;
   leftLabel?: string;
@@ -44,6 +58,8 @@ const props = withDefaults(defineProps<Props>(), {
   emptyText: "",
   emptyIcon: "Inbox",
   stickyOffset: 0,
+  orientation: "horizontal",
+  keyboardNavigation: true,
   role: "toolbar",
   ariaLabel: "",
   leftLabel: "",
@@ -53,22 +69,56 @@ const props = withDefaults(defineProps<Props>(), {
 
 const { t } = useI18n();
 const slots = useSlots();
+const rootRef = ref<HTMLElement | null>(null);
 const toolbarLabel = computed(() => props.ariaLabel || (props.role === "toolbar" ? t("common.toolbar") : ""));
 const resolvedLoadingText = computed(() => props.loadingText || t("common.loading"));
 const resolvedEmptyText = computed(() => props.emptyText || t("common.noData"));
 const hasToolbarContent = computed(() => Boolean(slots.left || slots.default || slots.right));
-const formatCssSize = (value: number | string) => (typeof value === "number" ? `${value}px` : value);
-const toolbarStyle = computed(() => ({ "--base-toolbar-sticky-top": formatCssSize(props.stickyOffset) } as Record<string, string>));
+const isInteractionDisabled = computed(() => props.disabled || props.loading);
+const toolbarStyle = computed(() => ({ "--base-toolbar-sticky-top": formatCssLengthValue(props.stickyOffset) } as Record<string, string>));
+
+const getToolbarFocusableElements = () => queryFocusableElements(rootRef.value);
+
+const focusToolbarItem = (element?: HTMLElement) => {
+  focusElementIntoView(element);
+};
+
+const handleToolbarKeydown = (event: KeyboardEvent) => {
+  if (!props.keyboardNavigation || props.role !== "toolbar" || isInteractionDisabled.value) return;
+  if (event.altKey || event.ctrlKey || event.metaKey || isEditableEventTarget(event.target)) return;
+
+  const navigationKeys = props.orientation === "vertical"
+    ? { forwardKeys: ["ArrowDown"], backwardKeys: ["ArrowUp"] }
+    : { forwardKeys: ["ArrowRight"], backwardKeys: ["ArrowLeft"] };
+  const direction = getKeyboardNavigationDirection(event, navigationKeys);
+  const boundary = getKeyboardBoundaryPosition(event);
+
+  if (!direction && !boundary) return;
+
+  const items = getToolbarFocusableElements();
+  if (hasArrayLengthAtMost(items, 1)) return;
+
+  event.preventDefault();
+
+  if (boundary) {
+    focusToolbarItem(getBoundaryItem(items, boundary));
+    return;
+  }
+
+  focusToolbarItem(getNextCircularItem(items, items.indexOf(document.activeElement as HTMLElement), direction ?? 1));
+};
 </script>
 
 <template>
   <div
+    ref="rootRef"
     class="base-toolbar"
     :class="[
       `base-toolbar--${size}`,
       `base-toolbar--surface-${surface}`,
       `base-toolbar--justify-${justify}`,
       `base-toolbar--main-${mainAlign}`,
+      `base-toolbar--${orientation}`,
       {
         'base-toolbar--compact': compact,
         'base-toolbar--nowrap': !wrap,
@@ -80,15 +130,19 @@ const toolbarStyle = computed(() => ({ "--base-toolbar-sticky-top": formatCssSiz
     ]"
     :role="role || undefined"
     :aria-label="toolbarLabel || undefined"
-    :aria-disabled="disabled || loading ? 'true' : undefined"
+    :aria-orientation="role === 'toolbar' ? orientation : undefined"
+    :aria-disabled="isInteractionDisabled ? 'true' : undefined"
     :aria-busy="loading ? 'true' : undefined"
+    :inert="disabled"
     :style="toolbarStyle"
+    @keydown="handleToolbarKeydown"
   >
     <div
       v-if="$slots.left"
       class="base-toolbar__group base-toolbar__group--left"
       :role="leftLabel ? 'group' : undefined"
       :aria-label="leftLabel || undefined"
+      :inert="isInteractionDisabled"
     >
       <slot name="left"></slot>
     </div>
@@ -97,6 +151,7 @@ const toolbarStyle = computed(() => ({ "--base-toolbar-sticky-top": formatCssSiz
       class="base-toolbar__group base-toolbar__group--main"
       :role="mainLabel ? 'group' : undefined"
       :aria-label="mainLabel || undefined"
+      :inert="isInteractionDisabled"
     >
       <slot></slot>
     </div>
@@ -105,6 +160,7 @@ const toolbarStyle = computed(() => ({ "--base-toolbar-sticky-top": formatCssSiz
       class="base-toolbar__group base-toolbar__group--right"
       :role="rightLabel ? 'group' : undefined"
       :aria-label="rightLabel || undefined"
+      :inert="isInteractionDisabled"
     >
       <slot name="right"></slot>
     </div>
@@ -166,6 +222,10 @@ const toolbarStyle = computed(() => ({ "--base-toolbar-sticky-top": formatCssSiz
   scrollbar-color: rgb(203 213 225) transparent;
 }
 
+.base-toolbar--vertical {
+  @apply flex-col items-stretch;
+}
+
 .base-toolbar--sticky {
   top: var(--base-toolbar-sticky-top, 0);
   @apply sticky z-20;
@@ -173,6 +233,18 @@ const toolbarStyle = computed(() => ({ "--base-toolbar-sticky-top": formatCssSiz
 
 .base-toolbar--divided {
   @apply border-b-slate-200 dark:border-b-slate-800;
+}
+
+.base-toolbar--divided:not(.base-toolbar--vertical) .base-toolbar__group + .base-toolbar__group {
+  @apply border-l border-slate-200 pl-3 dark:border-slate-800;
+}
+
+.base-toolbar--divided.base-toolbar--compact:not(.base-toolbar--vertical) .base-toolbar__group + .base-toolbar__group {
+  @apply pl-2;
+}
+
+.base-toolbar--divided.base-toolbar--vertical .base-toolbar__group + .base-toolbar__group {
+  @apply border-t border-slate-200 pt-2 dark:border-slate-800;
 }
 
 .base-toolbar.is-disabled {
@@ -185,6 +257,10 @@ const toolbarStyle = computed(() => ({ "--base-toolbar-sticky-top": formatCssSiz
 
 .base-toolbar__group {
   @apply flex min-w-0 max-w-full flex-wrap items-center gap-2;
+}
+
+.base-toolbar--vertical .base-toolbar__group {
+  @apply w-full;
 }
 
 .base-toolbar.is-loading .base-toolbar__group {
@@ -213,6 +289,10 @@ const toolbarStyle = computed(() => ({ "--base-toolbar-sticky-top": formatCssSiz
 
 .base-toolbar__group--right {
   @apply ml-auto justify-end;
+}
+
+.base-toolbar--vertical .base-toolbar__group--right {
+  @apply ml-0;
 }
 
 .base-toolbar--justify-start .base-toolbar__group--right,

@@ -1,7 +1,19 @@
 <script setup lang="ts">
-import { computed, useId } from "vue";
+import { computed, nextTick, onMounted, onUpdated, ref, useId } from "vue";
 import { useI18n } from "../../composables/useI18n";
-import { clampNumber, getNumberPrecision, getEventTargetValue, normalizeNumberStep, normalizeSteppedNumber, toFiniteNumber, toRangePercent } from "../../utils";
+import {
+  clampNumber,
+  compactMap,
+  firstOf,
+  getNumberPrecision,
+  isFiniteNumber,
+  isNonEmptyArray,
+  joinAriaIds,
+  normalizeNumberBounds,
+  normalizeNumberStep,
+  normalizeSteppedNumber,
+  toRangePercent,
+} from "../../utils";
 
 export interface SliderMark {
   value: number;
@@ -9,6 +21,8 @@ export interface SliderMark {
 }
 
 interface Props {
+  id?: string;
+  name?: string;
   modelValue: number;
   min?: number;
   max?: number;
@@ -26,12 +40,16 @@ interface Props {
   marks?: SliderMark[];
   formatValue?: (value: number) => string;
   ariaLabel?: string;
+  ariaLabelledby?: string;
+  ariaDescribedby?: string;
   ariaValueText?: string;
   wrapLabel?: boolean;
   wrapDescription?: boolean;
 }
 
 const props = withDefaults(defineProps<Props>(), {
+  id: "",
+  name: "",
   min: 0,
   max: 100,
   step: 1,
@@ -48,6 +66,8 @@ const props = withDefaults(defineProps<Props>(), {
   marks: () => [],
   formatValue: undefined,
   ariaLabel: "",
+  ariaLabelledby: "",
+  ariaDescribedby: "",
   ariaValueText: "",
   wrapLabel: false,
   wrapDescription: false,
@@ -65,12 +85,16 @@ const emit = defineEmits<{
 
 const { t } = useI18n();
 const sliderId = useId();
+type SliderControlRef = HTMLElement | { $el?: Element | null } | null;
+const sliderControlRef = ref<SliderControlRef>(null);
+const inputId = computed(() => props.id || sliderId);
 const labelId = `${sliderId}-label`;
 const descriptionId = `${sliderId}-description`;
 
 const isReadonly = computed(() => props.disabled || props.readonly);
-const normalizedMin = computed(() => Math.min(toFiniteNumber(props.min), toFiniteNumber(props.max)));
-const normalizedMax = computed(() => Math.max(toFiniteNumber(props.min), toFiniteNumber(props.max)));
+const normalizedBounds = computed(() => normalizeNumberBounds(props.min, props.max));
+const normalizedMin = computed(() => normalizedBounds.value.min);
+const normalizedMax = computed(() => normalizedBounds.value.max);
 const normalizedStep = computed(() => normalizeNumberStep(props.step));
 const stepPrecision = computed(() => getNumberPrecision(normalizedStep.value));
 
@@ -86,17 +110,17 @@ const normalizeValue = (value: unknown) => {
 const currentValue = computed(() => normalizeValue(props.modelValue));
 
 const normalizedMarks = computed(() =>
-  props.marks
-    .filter((mark) => Number.isFinite(mark.value))
-    .map((mark) => ({
-      ...mark,
-      value: clampNumber(mark.value, normalizedMin.value, normalizedMax.value, normalizedMin.value, stepPrecision.value),
-    }))
+  compactMap(props.marks, (mark) =>
+    isFiniteNumber(mark.value)
+      ? {
+          ...mark,
+          value: clampNumber(mark.value, normalizedMin.value, normalizedMax.value, normalizedMin.value, stepPrecision.value),
+        }
+      : undefined
+  )
 );
 
-const percent = computed(() => {
-  return toRangePercent(currentValue.value, normalizedMin.value, normalizedMax.value);
-});
+const hasElementMarks = computed(() => isNonEmptyArray(normalizedMarks.value));
 
 const resolvedValueText = computed(() => {
   if (props.ariaValueText) return props.ariaValueText;
@@ -104,7 +128,11 @@ const resolvedValueText = computed(() => {
   return props.unit ? `${currentValue.value}${props.unit}` : String(currentValue.value);
 });
 
-const describedBy = computed(() => (props.description ? descriptionId : undefined));
+const labelledBy = computed(() => (props.ariaLabel ? undefined : props.ariaLabelledby || (props.label ? labelId : undefined)));
+const groupLabel = computed(() => (labelledBy.value ? undefined : props.ariaLabel || props.label || t("common.slider")));
+const controlLabelledBy = computed(() => (props.ariaLabel ? undefined : labelledBy.value));
+const controlLabel = computed(() => (controlLabelledBy.value ? undefined : props.ariaLabel || props.label || t("common.slider")));
+const describedBy = computed(() => joinAriaIds([props.description ? descriptionId : undefined, props.ariaDescribedby]));
 
 const getMarkPercent = (value: number) => {
   return toRangePercent(value, normalizedMin.value, normalizedMax.value);
@@ -120,23 +148,74 @@ const formatMarkTitle = (mark: SliderMark) => {
   return mark.label ? `${mark.label}: ${valueText}` : String(valueText);
 };
 
-const handleInput = (event: Event) => {
+const handleValueUpdate = (value: number | number[]) => {
   if (isReadonly.value) return;
-  const nextValue = normalizeValue(getEventTargetValue(event));
+  const nextValue = normalizeValue(firstOf(value));
   emit("update:modelValue", nextValue);
-  emit("input", nextValue);
 };
 
-const handleChange = (event: Event) => {
+const handleInput = (value: number | number[]) => {
   if (isReadonly.value) return;
-  emit("change", normalizeValue(getEventTargetValue(event)));
+  emit("input", normalizeValue(firstOf(value)));
+};
+
+const handleChange = (value: number | number[]) => {
+  if (isReadonly.value) return;
+  emit("change", normalizeValue(firstOf(value)));
 };
 
 const handleKeydown = (event: KeyboardEvent) => {
   emit("keydown", event);
-  if (!props.readonly) return;
-  event.preventDefault();
+  if (props.readonly) {
+    event.preventDefault();
+  }
 };
+
+const elementSize = computed(() => (props.size === "sm" ? "small" : "default"));
+
+const formatTooltip = (value: number) => {
+  if (props.formatValue) return props.formatValue(normalizeValue(value));
+  return props.unit ? `${normalizeValue(value)}${props.unit}` : normalizeValue(value);
+};
+
+const formatValueText = () => resolvedValueText.value;
+
+const getSliderElement = () => {
+  const current = sliderControlRef.value;
+  if (!current) return null;
+  if (current instanceof HTMLElement) return current;
+  return current.$el instanceof HTMLElement ? current.$el : null;
+};
+
+const setOptionalAttribute = (element: HTMLElement, name: string, value?: string | null) => {
+  if (value) {
+    element.setAttribute(name, value);
+    return;
+  }
+  element.removeAttribute(name);
+};
+
+const syncSliderAria = async () => {
+  await nextTick();
+  const sliderElement = getSliderElement();
+  const control = sliderElement?.querySelector<HTMLElement>('[role="slider"]');
+  if (!control) return;
+
+  setOptionalAttribute(control, "aria-label", controlLabel.value);
+  setOptionalAttribute(control, "aria-labelledby", controlLabelledBy.value);
+  setOptionalAttribute(control, "aria-describedby", describedBy.value);
+  setOptionalAttribute(control, "aria-invalid", props.error ? "true" : undefined);
+  setOptionalAttribute(control, "aria-readonly", props.readonly ? "true" : undefined);
+  setOptionalAttribute(control, "aria-valuetext", resolvedValueText.value);
+};
+
+onMounted(() => {
+  void syncSliderAria();
+});
+
+onUpdated(() => {
+  void syncSliderAria();
+});
 </script>
 
 <template>
@@ -149,13 +228,14 @@ const handleKeydown = (event: KeyboardEvent) => {
         'is-readonly': readonly,
         'is-error': error,
         'base-slider--compact': compact,
-        'base-slider--with-marks': normalizedMarks.length,
+        'base-slider--with-marks': hasElementMarks,
         'base-slider--wrap-label': wrapLabel,
         'base-slider--wrap-description': wrapDescription
       }
     ]"
     role="group"
-    :aria-labelledby="label ? labelId : undefined"
+    :aria-label="groupLabel"
+    :aria-labelledby="labelledBy"
     :aria-describedby="describedBy"
     :aria-disabled="disabled || readonly ? 'true' : undefined"
   >
@@ -168,33 +248,34 @@ const handleKeydown = (event: KeyboardEvent) => {
     </div>
 
     <div class="base-slider__track-wrap">
-      <div class="base-slider__track">
-        <div class="base-slider__fill" :style="{ width: `${percent}%` }"></div>
-      </div>
-      <input
+      <el-slider
+        :id="inputId"
+        ref="sliderControlRef"
         class="base-slider__control"
-        type="range"
+        :model-value="currentValue"
         :min="normalizedMin"
         :max="normalizedMax"
         :step="normalizedStep"
-        :value="currentValue"
-        :disabled="disabled"
-        :readonly="readonly"
-        :aria-label="ariaLabel || label || t('common.slider')"
-        :aria-labelledby="label ? labelId : undefined"
-        :aria-describedby="describedBy"
-        :aria-invalid="error ? 'true' : undefined"
-        :aria-readonly="readonly ? 'true' : undefined"
-        :aria-valuemin="normalizedMin"
-        :aria-valuemax="normalizedMax"
-        :aria-valuenow="currentValue"
-        :aria-valuetext="resolvedValueText"
+        :disabled="disabled || readonly"
+        :size="elementSize"
+        :show-tooltip="!disabled && !readonly"
+        :format-tooltip="formatTooltip"
+        :format-value-text="formatValueText"
+        :validate-event="false"
+        :aria-label="controlLabel"
+        @update:model-value="handleValueUpdate"
         @input="handleInput"
         @change="handleChange"
-        @focus="emit('focus', $event)"
-        @blur="emit('blur', $event)"
-        @keydown="handleKeydown"
-        @keyup="emit('keyup', $event)"
+        @keydown.capture="handleKeydown"
+        @keyup.capture="emit('keyup', $event)"
+        @focusin="emit('focus', $event as FocusEvent)"
+        @focusout="emit('blur', $event as FocusEvent)"
+      />
+      <input
+        v-if="name"
+        :name="name"
+        type="hidden"
+        :value="currentValue"
       />
       <div v-if="normalizedMarks.length" class="base-slider__marks" aria-hidden="true">
         <span
@@ -225,8 +306,23 @@ const handleKeydown = (event: KeyboardEvent) => {
 <style scoped>
 .base-slider {
   @apply min-w-0 max-w-full;
-  --base-slider-thumb-size: 18px;
+  --base-slider-control-height: 38px;
+  --base-slider-thumb-size: 20px;
   --base-slider-track-height: 8px;
+  --base-slider-track-bg: #e2e8f0;
+  --base-slider-track-hover-bg: #cbd5e1;
+  --base-slider-thumb-bg: #ffffff;
+  --base-slider-thumb-inner-size: 7px;
+  --base-slider-thumb-border: rgb(var(--color-primary));
+  --base-slider-thumb-inner: rgb(var(--color-primary));
+  --base-slider-thumb-inner-ring: rgb(var(--color-primary) / 0.16);
+  --base-slider-thumb-ring: rgb(var(--color-primary) / 0.14);
+  --base-slider-thumb-shadow: 0 2px 8px rgba(15, 23, 42, 0.16);
+  --base-slider-thumb-active-shadow:
+    0 0 0 4px #ffffff,
+    0 0 0 8px var(--base-slider-thumb-ring),
+    0 4px 12px rgba(15, 23, 42, 0.18);
+  --base-slider-wrapper-size: 38px;
 }
 
 .base-slider.is-disabled {
@@ -284,148 +380,144 @@ const handleKeydown = (event: KeyboardEvent) => {
   @apply relative min-w-0;
 }
 
-.base-slider__track {
-  @apply pointer-events-none absolute inset-x-0 top-1/2 -translate-y-1/2 overflow-hidden rounded-full bg-slate-200 ring-1 ring-slate-200 transition-colors dark:bg-slate-800 dark:ring-slate-700;
-  height: var(--base-slider-track-height);
-}
-
 .base-slider--sm {
-  --base-slider-thumb-size: 16px;
+  --base-slider-control-height: 32px;
+  --base-slider-thumb-size: 18px;
+  --base-slider-thumb-inner-size: 6px;
   --base-slider-track-height: 6px;
+  --base-slider-wrapper-size: 36px;
 }
 
 .base-slider--md {
-  --base-slider-thumb-size: 18px;
+  --base-slider-control-height: 38px;
+  --base-slider-thumb-size: 20px;
   --base-slider-track-height: 8px;
-}
-
-.base-slider__fill {
-  @apply h-full rounded-full transition-all duration-150;
-  background:
-    linear-gradient(90deg, rgb(var(--color-primary) / 0.86), rgb(var(--color-primary)));
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28);
+  --base-slider-wrapper-size: 40px;
 }
 
 .base-slider__control {
-  @apply relative z-[2] block h-8 w-full appearance-none bg-transparent;
-  border: 0;
-  color: transparent;
-  cursor: pointer;
+  @apply w-full;
+  height: var(--base-slider-control-height);
+  --el-slider-main-bg-color: rgb(var(--color-primary));
+  --el-slider-runway-bg-color: var(--base-slider-track-bg);
+  --el-slider-height: var(--base-slider-track-height);
+  --el-slider-button-size: var(--base-slider-thumb-size);
+  --el-slider-button-wrapper-size: var(--base-slider-wrapper-size);
+  --el-slider-button-wrapper-offset: calc((var(--base-slider-track-height) - var(--el-slider-button-wrapper-size)) / 2);
+  --el-slider-border-radius: 999px;
+}
+
+.base-slider__control :deep(.el-slider__button-wrapper) {
+  line-height: normal;
   outline: none;
-  -webkit-appearance: none;
 }
 
-.base-slider__control:disabled {
-  cursor: not-allowed;
+.base-slider__control :deep(.el-slider__button-wrapper::after) {
+  content: "";
+  display: inline-block;
+  height: 100%;
+  vertical-align: middle;
 }
 
-.base-slider.is-readonly .base-slider__control {
-  cursor: default;
-  pointer-events: none;
-}
-
-.base-slider:not(.is-disabled):not(.is-readonly):hover .base-slider__track {
-  @apply bg-slate-300 ring-slate-300 dark:bg-slate-700 dark:ring-slate-600;
-}
-
-.base-slider__control:focus-visible {
-  @apply outline-none;
-}
-
-.base-slider__control::-webkit-slider-runnable-track {
-  width: 100%;
-  height: 32px;
-  border: 0;
-  background: transparent;
-  color: transparent;
-  box-shadow: none;
-}
-
-.base-slider__control::-moz-range-track {
-  width: 100%;
-  height: 32px;
-  border: 0;
-  background: transparent;
-  color: transparent;
-  box-shadow: none;
-}
-
-.base-slider__control::-moz-range-progress {
-  border: 0;
-  background: transparent;
-  box-shadow: none;
-}
-
-.base-slider:focus-within .base-slider__track {
+.base-slider__control :deep(.el-slider__runway) {
+  @apply transition-colors;
   box-shadow:
-    0 0 0 3px rgba(var(--color-primary), 0.14),
-    0 6px 14px rgba(15, 23, 42, 0.08);
+    inset 0 1px 2px rgba(15, 23, 42, 0.08),
+    0 0 0 1px rgba(148, 163, 184, 0.32);
 }
 
-.base-slider.is-error .base-slider__track {
-  @apply bg-red-100 ring-red-300 dark:bg-red-950 dark:ring-red-800;
+.base-slider:not(.is-disabled):not(.is-readonly):hover .base-slider__control :deep(.el-slider__runway) {
+  background-color: var(--base-slider-track-hover-bg);
 }
 
-.base-slider.is-error .base-slider__fill {
+.base-slider__control :deep(.el-slider__bar) {
+  background:
+    linear-gradient(90deg, rgb(var(--color-primary) / 0.86), rgb(var(--color-primary)));
+  border-radius: 999px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28);
+}
+
+.base-slider__control :deep(.el-slider__button) {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: var(--base-slider-thumb-size);
+  height: var(--base-slider-thumb-size);
+  margin: 0;
+  vertical-align: middle;
+  background: var(--base-slider-thumb-bg);
+  border: 2px solid var(--base-slider-thumb-border);
+  border-radius: 999px;
+  box-shadow:
+    0 0 0 3px #ffffff,
+    var(--base-slider-thumb-shadow);
+  transform: none;
+  transform-origin: center;
+  transition:
+    box-shadow 0.15s ease,
+    border-color 0.15s ease,
+    background-color 0.15s ease;
+}
+
+.base-slider__control :deep(.el-slider__button::before) {
+  content: "";
+  width: var(--base-slider-thumb-inner-size);
+  height: var(--base-slider-thumb-inner-size);
+  border-radius: inherit;
+  background-color: var(--base-slider-thumb-inner);
+  box-shadow: 0 0 0 3px var(--base-slider-thumb-inner-ring);
+}
+
+.base-slider:not(.is-disabled):not(.is-readonly) .base-slider__control :deep(.el-slider__button-wrapper:hover .el-slider__button),
+.base-slider:not(.is-disabled):not(.is-readonly) .base-slider__control :deep(.el-slider__button-wrapper.hover .el-slider__button),
+.base-slider:not(.is-disabled):not(.is-readonly) .base-slider__control :deep(.el-slider__button-wrapper.dragging .el-slider__button),
+.base-slider:not(.is-disabled):not(.is-readonly) .base-slider__control :deep(.el-slider__button:hover),
+.base-slider:not(.is-disabled):not(.is-readonly) .base-slider__control :deep(.el-slider__button.hover),
+.base-slider:not(.is-disabled):not(.is-readonly) .base-slider__control :deep(.el-slider__button.dragging) {
+  transform: none;
+  box-shadow: var(--base-slider-thumb-active-shadow);
+}
+
+.base-slider__control :deep(.el-slider__button-wrapper:focus-visible .el-slider__button) {
+  box-shadow: var(--base-slider-thumb-active-shadow);
+}
+
+.base-slider.is-error .base-slider__control :deep(.el-slider__runway) {
+  @apply bg-red-100 dark:bg-red-950;
+  box-shadow:
+    inset 0 1px 2px rgba(127, 29, 29, 0.08),
+    0 0 0 1px rgba(248, 113, 113, 0.52);
+}
+
+.base-slider.is-error .base-slider__control :deep(.el-slider__bar) {
   background: rgb(239 68 68);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2);
 }
 
-.base-slider__control::-webkit-slider-thumb {
-  appearance: none;
-  -webkit-appearance: none;
-  width: var(--base-slider-thumb-size);
-  height: var(--base-slider-thumb-size);
-  border-radius: 999px;
-  background: rgb(var(--color-primary));
-  border: 3px solid #ffffff;
-  box-shadow:
-    0 0 0 1px rgb(var(--color-primary) / 0.18),
-    0 4px 12px rgba(15, 23, 42, 0.22);
-  cursor: pointer;
-  transition:
-    transform 0.15s ease,
-    box-shadow 0.15s ease,
-    background-color 0.15s ease;
+.base-slider.is-error .base-slider__control :deep(.el-slider__button) {
+  --base-slider-thumb-inner: rgb(239 68 68);
+  border-color: rgb(239 68 68);
 }
 
-.base-slider__control::-moz-range-thumb {
-  width: var(--base-slider-thumb-size);
-  height: var(--base-slider-thumb-size);
-  border-radius: 999px;
-  background: rgb(var(--color-primary));
-  border: 3px solid #ffffff;
-  box-shadow:
-    0 0 0 1px rgb(var(--color-primary) / 0.18),
-    0 4px 12px rgba(15, 23, 42, 0.22);
-  cursor: pointer;
-  transition:
-    transform 0.15s ease,
-    box-shadow 0.15s ease,
-    background-color 0.15s ease;
+.base-slider.is-disabled .base-slider__control :deep(.el-slider__button),
+.base-slider.is-readonly .base-slider__control :deep(.el-slider__button) {
+  --base-slider-thumb-inner: #94a3b8;
+  @apply border-slate-400 bg-white dark:bg-slate-900;
 }
 
-.base-slider:not(.is-disabled):not(.is-readonly) .base-slider__control:hover::-webkit-slider-thumb,
-.base-slider:not(.is-disabled):not(.is-readonly) .base-slider__control:focus-visible::-webkit-slider-thumb {
-  transform: scale(1.12);
-  box-shadow:
-    0 0 0 6px rgba(var(--color-primary), 0.14),
-    0 6px 16px rgba(15, 23, 42, 0.22);
-}
-
-.base-slider:not(.is-disabled):not(.is-readonly) .base-slider__control:hover::-moz-range-thumb,
-.base-slider:not(.is-disabled):not(.is-readonly) .base-slider__control:focus-visible::-moz-range-thumb {
-  transform: scale(1.12);
-  box-shadow:
-    0 0 0 6px rgba(var(--color-primary), 0.14),
-    0 6px 16px rgba(15, 23, 42, 0.22);
-}
-
-.base-slider.is-readonly .base-slider__control::-webkit-slider-thumb,
-.base-slider.is-disabled .base-slider__control::-webkit-slider-thumb,
-.base-slider.is-readonly .base-slider__control::-moz-range-thumb,
-.base-slider.is-disabled .base-slider__control::-moz-range-thumb {
+.base-slider.is-disabled .base-slider__control :deep(.el-slider__bar),
+.base-slider.is-readonly .base-slider__control :deep(.el-slider__bar) {
   @apply bg-slate-400;
+}
+
+:global(.dark) .base-slider {
+  --base-slider-track-bg: #1e293b;
+  --base-slider-track-hover-bg: #334155;
+  --base-slider-thumb-bg: #0f172a;
+  --base-slider-thumb-shadow: 0 2px 8px rgba(0, 0, 0, 0.34);
+  --base-slider-thumb-active-shadow:
+    0 0 0 4px #0f172a,
+    0 0 0 8px var(--base-slider-thumb-ring),
+    0 4px 14px rgba(0, 0, 0, 0.34);
 }
 
 .base-slider__range {
@@ -470,10 +562,9 @@ const handleKeydown = (event: KeyboardEvent) => {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .base-slider__fill,
-  .base-slider__track,
-  .base-slider__control::-webkit-slider-thumb,
-  .base-slider__control::-moz-range-thumb {
+  .base-slider__control :deep(.el-slider__runway),
+  .base-slider__control :deep(.el-slider__bar),
+  .base-slider__control :deep(.el-slider__button) {
     transition: none !important;
   }
 }

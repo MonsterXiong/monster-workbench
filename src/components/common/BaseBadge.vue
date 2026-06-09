@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { isActivationKey, preventDomEventDefault, stopDomEventPropagation } from "../../utils";
+import { handleActivationKeydown, stopDomEventPropagation } from "../../utils";
 
 interface Props {
   type?: "primary" | "success" | "warning" | "danger" | "neutral";
@@ -42,9 +42,8 @@ const handleClick = (event: MouseEvent | KeyboardEvent) => {
 };
 
 const handleKeydown = (event: KeyboardEvent) => {
-  if (!isInteractive.value || !isActivationKey(event)) return;
-  preventDomEventDefault(event);
-  emit("click", event);
+  if (!isInteractive.value) return;
+  handleActivationKeydown(event, () => emit("click", event));
 };
 
 const handleClose = (event: MouseEvent) => {

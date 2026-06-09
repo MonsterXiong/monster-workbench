@@ -2,7 +2,19 @@
 import { computed, ref, useId } from "vue";
 import { LoaderCircle, Plus, X } from "lucide-vue-next";
 import { useI18n } from "../../composables/useI18n";
-import { hasItem, includesAnyText, isKeyboardKey, lastItem, mergeLimitedUniqueItems, removeByValue, splitBySeparators } from "../../utils";
+import {
+  getLastIndex,
+  hasItem,
+  includesAnyText,
+  isEmptyArray,
+  isKeyboardKey,
+  isNonEmptyArray,
+  lastItem,
+  mergeLimitedUniqueItems,
+  removeAt,
+  removeByValue,
+  splitBySeparators,
+} from "../../utils";
 
 type TagInputSize = "sm" | "md" | "lg";
 
@@ -69,7 +81,7 @@ const countId = `${inputId}-count`;
 const isLocked = computed(() => props.disabled || props.readonly || props.loading);
 const canAdd = computed(() => !isLocked.value && props.modelValue.length < props.max);
 const canRemove = computed(() => !isLocked.value);
-const canClear = computed(() => props.clearable && canRemove.value && props.modelValue.length > 0);
+const canClear = computed(() => props.clearable && canRemove.value && isNonEmptyArray(props.modelValue));
 const tagInputLabel = computed(() => props.inputAriaLabel || props.placeholder || t("common.tagInputPlaceholder"));
 const rootLabel = computed(() => props.ariaLabel || tagInputLabel.value);
 const countText = computed(() => `${props.modelValue.length}/${props.max}`);
@@ -88,7 +100,7 @@ const mergeTags = (nextTags: string[]) => {
     allowDuplicates: props.allowDuplicates,
   });
 
-  if (!addedTags.length) return false;
+  if (isEmptyArray(addedTags)) return false;
   emit("update:modelValue", mergedTags);
   emit("change", mergedTags);
   addedTags.forEach((tag) => emit("add", tag));
@@ -98,7 +110,7 @@ const mergeTags = (nextTags: string[]) => {
 const addTag = () => {
   if (!canAdd.value) return;
   const nextTags = splitDraft(draft.value);
-  if (!nextTags.length) {
+  if (isEmptyArray(nextTags)) {
     draft.value = "";
     return;
   }
@@ -108,7 +120,7 @@ const addTag = () => {
 
 const removeTag = (tag: string, index: number) => {
   if (!canRemove.value) return;
-  const nextTags = props.allowDuplicates ? props.modelValue.filter((_, itemIndex) => itemIndex !== index) : removeByValue(props.modelValue, (item) => item, tag);
+  const nextTags = props.allowDuplicates ? removeAt(props.modelValue, index) : removeByValue(props.modelValue, (item) => item, tag);
   emit("update:modelValue", nextTags);
   emit("change", nextTags);
   emit("remove", tag);
@@ -126,9 +138,9 @@ const handleKeydown = (event: KeyboardEvent) => {
     event.preventDefault();
     addTag();
   }
-  if (isKeyboardKey(event, "Backspace") && !draft.value && props.modelValue.length > 0) {
+  if (isKeyboardKey(event, "Backspace") && !draft.value && isNonEmptyArray(props.modelValue)) {
     const tag = lastItem(props.modelValue);
-    if (tag) removeTag(tag, props.modelValue.length - 1);
+    if (tag) removeTag(tag, getLastIndex(props.modelValue));
   }
 };
 

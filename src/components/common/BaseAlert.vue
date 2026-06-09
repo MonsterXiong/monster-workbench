@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, useId, watch } from "vue";
 import { useI18n } from "../../composables/useI18n";
+import { createLineClampStyle } from "../../utils";
 
 type AlertType = "info" | "success" | "warning" | "danger";
 type AlertVariant = "soft" | "solid" | "plain" | "outline";
@@ -77,12 +78,17 @@ const resolvedSize = computed(() => (props.compact ? "sm" : props.size));
 const labelledBy = computed(() => (!props.ariaLabel && props.title ? titleId.value : undefined));
 const describedBy = computed(() => (props.description ? descriptionId.value : undefined));
 const resolvedRole = computed(() => props.role || (props.type === "danger" || props.type === "warning" ? "alert" : "status"));
+const liveMode = computed(() => {
+  if (resolvedRole.value === "alert") return "assertive";
+  if (resolvedRole.value === "status") return "polite";
+  return undefined;
+});
 const headingTag = computed(() => `h${props.level}`);
 const isActionsBottom = computed(() => props.actionsPlacement === "bottom");
 const resolvedActionsLabel = computed(() => props.actionsLabel || `${props.title || props.ariaLabel || "提示"} 操作`);
 const descriptionStyle = computed(() => {
   if (!props.wrapDescription || props.maxDescriptionLines <= 0) return undefined;
-  return { WebkitLineClamp: `${props.maxDescriptionLines}` };
+  return createLineClampStyle(props.maxDescriptionLines);
 });
 
 watch(
@@ -132,6 +138,8 @@ const close = () => {
       :aria-label="ariaLabel || undefined"
       :aria-labelledby="labelledBy"
       :aria-describedby="describedBy"
+      :aria-live="liveMode"
+      :aria-atomic="liveMode ? 'true' : undefined"
       :aria-disabled="disabled ? 'true' : undefined"
     >
       <div v-if="showIcon || $slots.icon" class="base-alert__icon" aria-hidden="true">
@@ -145,11 +153,23 @@ const close = () => {
         <div v-if="$slots.default" class="base-alert__content">
           <slot></slot>
         </div>
-        <div v-if="$slots.actions && isActionsBottom" class="base-alert__actions base-alert__actions--bottom" :aria-label="resolvedActionsLabel">
+        <div
+          v-if="$slots.actions && isActionsBottom"
+          class="base-alert__actions base-alert__actions--bottom"
+          role="group"
+          :aria-label="resolvedActionsLabel"
+          data-ignore-container-click
+        >
           <slot name="actions"></slot>
         </div>
       </div>
-      <div v-if="$slots.actions && !isActionsBottom" class="base-alert__actions" :aria-label="resolvedActionsLabel">
+      <div
+        v-if="$slots.actions && !isActionsBottom"
+        class="base-alert__actions"
+        role="group"
+        :aria-label="resolvedActionsLabel"
+        data-ignore-container-click
+      >
         <slot name="actions"></slot>
       </div>
       <button
@@ -159,7 +179,9 @@ const close = () => {
         :aria-label="resolvedCloseLabel"
         :title="resolvedCloseLabel"
         :disabled="disabled"
-        @click="close"
+        data-ignore-container-click
+        @click.stop="close"
+        @keydown.stop
       >
         <BaseIcon name="X" size="14" aria-hidden="true" />
       </button>
@@ -169,7 +191,7 @@ const close = () => {
 
 <style scoped>
 .base-alert {
-  @apply flex min-w-0 items-start gap-3 border shadow-sm transition;
+  @apply flex min-w-0 max-w-full items-start gap-3 border shadow-sm transition;
   background-color: var(--alert-bg);
   border-color: var(--alert-border);
   color: var(--alert-fg);
@@ -223,6 +245,7 @@ const close = () => {
 
 .base-alert__title {
   @apply text-xs font-black;
+  overflow-wrap: anywhere;
 }
 
 .base-alert--wrap-title .base-alert__title {
@@ -233,6 +256,7 @@ const close = () => {
 .base-alert__content {
   @apply mt-0.5 text-[11px] font-bold leading-5;
   color: var(--alert-muted);
+  overflow-wrap: anywhere;
 }
 
 .base-alert--wrap-description .base-alert__description,
@@ -256,15 +280,42 @@ const close = () => {
 }
 
 .base-alert__actions {
-  @apply flex shrink-0 flex-wrap items-center justify-end gap-2;
+  @apply ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2;
+  flex: 0 1 auto;
+  max-width: 100%;
 }
 
 .base-alert__actions--bottom {
-  @apply mt-3 justify-start;
+  @apply ml-0 mt-3 w-full justify-start;
+}
+
+.base-alert__actions :deep(.el-button) {
+  min-width: 0;
+  max-width: 100%;
+  white-space: normal;
+}
+
+.base-alert__actions :deep(.el-button > span) {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .base-alert__close {
-  @apply flex h-6 w-6 shrink-0 items-center justify-center rounded-lg transition hover:bg-black/5 dark:hover:bg-white/10;
+  @apply flex h-6 w-6 shrink-0 items-center justify-center rounded-lg transition;
+}
+
+.base-alert__close:hover {
+  background-color: rgba(15, 23, 42, 0.06);
+}
+
+:global(.dark) .base-alert__close:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.base-alert__close:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(var(--color-primary), 0.18);
 }
 
 .base-alert__close:disabled {
@@ -292,6 +343,10 @@ const close = () => {
 .base-alert--solid .base-alert__description,
 .base-alert--solid .base-alert__content {
   color: var(--alert-solid-muted);
+}
+
+.base-alert--solid .base-alert__close:hover {
+  background-color: rgba(255, 255, 255, 0.16);
 }
 
 .base-alert--banner {
@@ -391,6 +446,20 @@ const close = () => {
   .base-alert-enter-active,
   .base-alert-leave-active {
     transition: none !important;
+  }
+}
+
+@media (max-width: 640px) {
+  .base-alert {
+    @apply flex-wrap gap-2;
+  }
+
+  .base-alert__actions:not(.base-alert__actions--bottom) {
+    @apply order-last ml-0 w-full justify-start;
+  }
+
+  .base-alert__close {
+    @apply ml-auto;
   }
 }
 </style>

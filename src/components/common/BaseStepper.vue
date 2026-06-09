@@ -2,7 +2,16 @@
 import { computed } from "vue";
 import { AlertCircle, CheckCircle2, Circle } from "lucide-vue-next";
 import { useI18n } from "../../composables/useI18n";
-import { clampNumber, createLineClampStyle, findNextCircularItem, getKeyboardNavigationDirection } from "../../utils";
+import {
+  clampNumber,
+  compactMap,
+  createLineClampStyle,
+  findNextCircularItem,
+  getKeyboardNavigationDirection,
+  getLastIndex,
+  isEmptyArray,
+  isNonEmptyArray,
+} from "../../utils";
 import BaseIcon from "./BaseIcon.vue";
 
 type StepperState = "done" | "current" | "pending" | "error" | "disabled";
@@ -62,8 +71,8 @@ const emit = defineEmits<{
 }>();
 
 const { t } = useI18n();
-const hasSteps = computed(() => props.steps.length > 0);
-const normalizedCurrent = computed(() => (hasSteps.value ? clampNumber(props.current, 0, props.steps.length - 1, 0, 0) : 0));
+const hasSteps = computed(() => isNonEmptyArray(props.steps));
+const normalizedCurrent = computed(() => (hasSteps.value ? clampNumber(props.current, 0, getLastIndex(props.steps), 0, 0) : 0));
 const resolvedLoadingText = computed(() => props.loadingText || t("common.loading"));
 const resolvedEmptyText = computed(() => props.emptyText || t("common.noData"));
 const gridColumns = computed(() => {
@@ -101,10 +110,8 @@ const handleSelect = (step: StepperItem, index: number) => {
 
 const moveStep = (direction: 1 | -1) => {
   if (!props.clickable) return;
-  const enabledSteps = props.steps
-    .map((step, index) => ({ step, index }))
-    .filter((item) => canSelect(item.step, item.index));
-  if (!enabledSteps.length) return;
+  const enabledSteps = compactMap(props.steps, (step, index) => (canSelect(step, index) ? { step, index } : undefined));
+  if (isEmptyArray(enabledSteps)) return;
   const nextStep = findNextCircularItem(enabledSteps, (item) => item.index === normalizedCurrent.value, direction);
   if (nextStep) emit("select", nextStep);
 };

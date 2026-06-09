@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref } from "vue";
 import type { ComponentPublicInstance } from "vue";
-import { filterByFalsyValue, findByValue, findNextCircularItem, firstItem, getKeyboardBoundaryPosition, getKeyboardNavigationDirection, lastItem } from "../../utils";
+import { filterByFalsyValue, findByValue, findNextCircularItem, firstItem, focusElementPreventScroll, getBoundaryItem, getKeyboardBoundaryPosition, getKeyboardNavigationDirection } from "../../utils";
 import BaseIcon from "./BaseIcon.vue";
 
 interface TabItem {
@@ -86,7 +86,7 @@ const setTabButtonRef = (key: TabItem["key"], element: Element | ComponentPublic
 
 const focusTab = (key: TabItem["key"]) => {
   void nextTick(() => {
-    tabButtonRefs.value.get(key)?.focus({ preventScroll: true });
+    focusElementPreventScroll(tabButtonRefs.value.get(key));
   });
 };
 
@@ -117,17 +117,10 @@ const handleKeydown = (event: KeyboardEvent) => {
   }
 
   const boundaryPosition = getKeyboardBoundaryPosition(event);
-  if (boundaryPosition === "first") {
+  if (boundaryPosition) {
     event.preventDefault();
-    const firstTab = firstItem(enabledTabs.value);
-    if (firstTab) selectTab(firstTab, { focus: true });
-    return;
-  }
-
-  if (boundaryPosition === "last") {
-    event.preventDefault();
-    const lastTab = lastItem(enabledTabs.value);
-    if (lastTab) selectTab(lastTab, { focus: true });
+    const targetTab = getBoundaryItem(enabledTabs.value, boundaryPosition);
+    if (targetTab) selectTab(targetTab, { focus: true });
   }
 };
 </script>

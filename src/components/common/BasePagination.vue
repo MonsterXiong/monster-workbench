@@ -1,17 +1,15 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { ChevronLeft, ChevronRight } from "lucide-vue-next";
 import { useI18n } from "../../composables/useI18n";
 import {
   clampNumber,
   formatTemplate,
   getEventTargetValue,
   getTotalPages,
-  getVisiblePageNumbers,
   normalizePage,
+  normalizePageSizeOptions,
   toIntegerAtLeast,
   toNonNegativeInteger,
-  uniqueArray,
 } from "../../utils";
 
 interface Props {
@@ -61,48 +59,53 @@ const safeTotal = computed(() => toNonNegativeInteger(props.total));
 const safePageSize = computed(() => toIntegerAtLeast(props.pageSize, 1, 1));
 const safeSiblingCount = computed(() => toNonNegativeInteger(props.siblingCount, 1));
 const totalPages = computed(() => getTotalPages(safeTotal.value, safePageSize.value));
-const currentPage = computed(() => normalizePage(props.page, totalPages.value));
+const hasRecords = computed(() => safeTotal.value > 0);
+const displayTotalPages = computed(() => (hasRecords.value ? totalPages.value : 0));
+const currentPage = computed(() => (hasRecords.value ? normalizePage(props.page, totalPages.value) : 0));
 const resolvedSize = computed(() => (props.compact ? "sm" : props.size));
 const isDisabled = computed(() => props.disabled || props.loading);
 const start = computed(() => (safeTotal.value === 0 ? 0 : (currentPage.value - 1) * safePageSize.value + 1));
 const end = computed(() => clampNumber(currentPage.value * safePageSize.value, 0, safeTotal.value));
-const normalizedPageSizeOptions = computed(() =>
-  uniqueArray([safePageSize.value, ...props.pageSizeOptions.map((option) => toIntegerAtLeast(option, 1, safePageSize.value))]).sort(
-    (left, right) => left - right
-  )
-);
+const normalizedPageSizeOptions = computed(() => normalizePageSizeOptions(safePageSize.value, props.pageSizeOptions));
 const pageSizeText = (size: number) => formatTemplate(t("common.pagination.pageSize"), { size });
-const pageAriaText = (page: number) => formatTemplate(t("common.pagination.page"), { page });
 const resolvedLoadingText = computed(() => props.loadingText || t("common.loading"));
-
-const visiblePages = computed(() => {
-  const pages = getVisiblePageNumbers(currentPage.value, totalPages.value, safeSiblingCount.value, !props.showEdges);
-
-  if (!props.showEdges || totalPages.value <= 1) {
-    return pages;
-  }
-
-  return pages.filter((page) => page !== 1 && page !== totalPages.value);
-});
-const showEdgeButtons = computed(() => props.showEdges && !props.simple && totalPages.value > 1);
-const hasLeadingEllipsis = computed(() => showEdgeButtons.value && visiblePages.value.length > 0 && visiblePages.value[0] > 2);
-const hasTrailingEllipsis = computed(
-  () => showEdgeButtons.value && visiblePages.value.length > 0 && visiblePages.value[visiblePages.value.length - 1] < totalPages.value - 1
+const summaryAriaText = computed(() =>
+  hasRecords.value
+    ? `显示 ${start.value}-${end.value}，共 ${safeTotal.value} 条`
+    : `显示 0-0，共 0 条`
 );
+const elementCurrentPage = computed(() => (hasRecords.value ? currentPage.value : 1));
+const elementSize = computed(() => {
+  if (resolvedSize.value === "sm") return "small";
+  if (resolvedSize.value === "lg") return "large";
+  return "default";
+});
+const pagerCount = computed(() => {
+  const rawCount = safeSiblingCount.value * 2 + (props.showEdges ? 5 : 3);
+  const oddCount = rawCount % 2 === 0 ? rawCount + 1 : rawCount;
+  return clampNumber(oddCount, 5, 21);
+});
+const paginationLayout = computed(() => (props.simple || !hasRecords.value ? "prev, next" : "prev, pager, next"));
 
 const emitPage = (page: number) => {
-  if (isDisabled.value) return;
+  if (isDisabled.value || !hasRecords.value) return;
   const nextPage = normalizePage(page, totalPages.value);
+  if (nextPage === currentPage.value) return;
   emit("update:page", nextPage);
   emit("change", { page: nextPage, pageSize: safePageSize.value });
+};
+
+const handleCurrentPageUpdate = (page: number) => {
+  emitPage(page);
 };
 
 const emitPageSize = (event: Event) => {
   if (isDisabled.value) return;
   const nextPageSize = toIntegerAtLeast(getEventTargetValue(event), 1, safePageSize.value);
+  const nextPage = hasRecords.value ? 1 : 0;
   emit("update:pageSize", nextPageSize);
-  emit("update:page", 1);
-  emit("change", { page: 1, pageSize: nextPageSize });
+  emit("update:page", nextPage);
+  emit("change", { page: nextPage, pageSize: nextPageSize });
 };
 </script>
 
@@ -127,82 +130,30 @@ const emitPageSize = (event: Event) => {
     </span>
 
     <div v-if="showSummary" class="base-pagination__summary" role="status" aria-live="polite">
+      <span class="sr-only">{{ summaryAriaText }}</span>
       <span>{{ start }}-{{ end }}</span>
       <span>/</span>
       <strong>{{ safeTotal }}</strong>
     </div>
 
     <div class="base-pagination__controls">
-      <button
-        type="button"
-        class="base-pagination__button"
-        :disabled="isDisabled || currentPage <= 1"
-        :aria-label="t('common.pagination.previous')"
-        @click="emitPage(currentPage - 1)"
-      >
-        <ChevronLeft class="h-4 w-4" aria-hidden="true" />
-      </button>
-
       <span v-if="simple" class="base-pagination__simple" aria-live="polite">
-        {{ currentPage }} / {{ totalPages }}
+        {{ currentPage }} / {{ displayTotalPages }}
       </span>
-
-      <template v-else>
-        <button
-          v-if="showEdgeButtons"
-          type="button"
-          class="base-pagination__page"
-          :class="{ 'is-active': currentPage === 1 }"
-          :disabled="isDisabled"
-          :aria-current="currentPage === 1 ? 'page' : undefined"
-          :aria-label="pageAriaText(1)"
-          @click="emitPage(1)"
-        >
-          1
-        </button>
-
-        <span v-if="hasLeadingEllipsis" class="base-pagination__ellipsis" aria-hidden="true">...</span>
-
-        <template v-for="(pageItem, index) in visiblePages" :key="pageItem">
-          <span v-if="index > 0 && pageItem - visiblePages[index - 1] > 1" class="base-pagination__ellipsis" aria-hidden="true">...</span>
-          <button
-            type="button"
-            class="base-pagination__page"
-            :class="{ 'is-active': pageItem === currentPage }"
-            :disabled="isDisabled"
-            :aria-current="pageItem === currentPage ? 'page' : undefined"
-            :aria-label="pageAriaText(pageItem)"
-            @click="emitPage(pageItem)"
-          >
-            {{ pageItem }}
-          </button>
-        </template>
-
-        <span v-if="hasTrailingEllipsis" class="base-pagination__ellipsis" aria-hidden="true">...</span>
-
-        <button
-          v-if="showEdgeButtons"
-          type="button"
-          class="base-pagination__page"
-          :class="{ 'is-active': currentPage === totalPages }"
-          :disabled="isDisabled"
-          :aria-current="currentPage === totalPages ? 'page' : undefined"
-          :aria-label="pageAriaText(totalPages)"
-          @click="emitPage(totalPages)"
-        >
-          {{ totalPages }}
-        </button>
-      </template>
-
-      <button
-        type="button"
-        class="base-pagination__button"
-        :disabled="isDisabled || currentPage >= totalPages"
-        :aria-label="t('common.pagination.next')"
-        @click="emitPage(currentPage + 1)"
-      >
-        <ChevronRight class="h-4 w-4" aria-hidden="true" />
-      </button>
+      <el-pagination
+        class="base-pagination__pager"
+        :current-page="elementCurrentPage"
+        :page-size="safePageSize"
+        :total="safeTotal"
+        :pager-count="pagerCount"
+        :layout="paginationLayout"
+        :size="elementSize"
+        :disabled="isDisabled || !hasRecords"
+        :hide-on-single-page="false"
+        :prev-text="simple ? t('common.pagination.previous') : ''"
+        :next-text="simple ? t('common.pagination.next') : ''"
+        @update:current-page="handleCurrentPageUpdate"
+      />
     </div>
 
     <select
@@ -265,30 +216,73 @@ const emitPageSize = (event: Event) => {
   @apply flex-1 justify-end;
 }
 
-.base-pagination__button,
-.base-pagination__page {
-  @apply inline-flex h-7 min-w-7 items-center justify-center rounded-lg border border-slate-200 bg-slate-50 px-2 text-[11px] font-black text-slate-600 transition hover:border-slate-300 hover:bg-white hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-opacity-25 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-300 dark:hover:border-slate-700 dark:hover:bg-slate-900 dark:hover:text-slate-100;
+:deep(.base-pagination__pager) {
+  @apply m-0 flex min-w-0 flex-wrap items-center justify-center gap-1 p-0;
+  --el-pagination-button-width: 28px;
+  --el-pagination-button-height: 28px;
+  --el-pagination-button-disabled-bg-color: rgb(248 250 252);
+  --el-pagination-bg-color: transparent;
+  --el-pagination-text-color: rgb(71 85 105);
+  --el-pagination-hover-color: rgb(var(--color-primary));
+  --el-pagination-button-color: rgb(71 85 105);
+  --el-pagination-button-bg-color: transparent;
+  --el-pagination-button-disabled-color: rgb(148 163 184);
 }
 
-.base-pagination--lg .base-pagination__button,
-.base-pagination--lg .base-pagination__page {
+.base-pagination--sm :deep(.base-pagination__pager) {
+  --el-pagination-button-width: 28px;
+  --el-pagination-button-height: 28px;
+}
+
+.base-pagination--lg :deep(.base-pagination__pager) {
+  --el-pagination-button-width: 32px;
+  --el-pagination-button-height: 32px;
+}
+
+:deep(.base-pagination__pager .btn-prev),
+:deep(.base-pagination__pager .btn-next),
+:deep(.base-pagination__pager .el-pager li) {
+  @apply inline-flex h-7 min-w-7 items-center justify-center rounded-lg border border-slate-200 bg-slate-50 px-2 text-[11px] font-black text-slate-600 transition hover:border-slate-300 hover:bg-white hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-opacity-25 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-300 dark:hover:border-slate-700 dark:hover:bg-slate-900 dark:hover:text-slate-100;
+  margin: 0;
+  line-height: 1;
+}
+
+:deep(.base-pagination__pager .btn-prev span),
+:deep(.base-pagination__pager .btn-next span) {
+  @apply px-1;
+}
+
+:deep(.base-pagination__pager .el-pager) {
+  @apply m-0 flex min-w-0 flex-wrap items-center justify-center gap-1 p-0;
+}
+
+:deep(.base-pagination__pager .el-pager li.more) {
+  @apply border-transparent bg-transparent px-1 text-slate-300 dark:text-slate-600;
+}
+
+.base-pagination--lg :deep(.base-pagination__pager .btn-prev),
+.base-pagination--lg :deep(.base-pagination__pager .btn-next),
+.base-pagination--lg :deep(.base-pagination__pager .el-pager li) {
   @apply h-8 min-w-8 text-xs;
 }
 
-.base-pagination__button:disabled,
-.base-pagination__page:disabled {
+.base-pagination--sm :deep(.base-pagination__pager .btn-prev),
+.base-pagination--sm :deep(.base-pagination__pager .btn-next),
+.base-pagination--sm :deep(.base-pagination__pager .el-pager li) {
+  @apply h-7 min-w-7 text-[11px];
+}
+
+:deep(.base-pagination__pager .btn-prev:disabled),
+:deep(.base-pagination__pager .btn-next:disabled),
+:deep(.base-pagination__pager .el-pager li.is-disabled) {
   @apply hover:border-slate-200 hover:bg-slate-50 hover:text-slate-600 dark:hover:border-slate-800 dark:hover:bg-slate-950 dark:hover:text-slate-300;
 }
 
-.base-pagination__page.is-active {
+:deep(.base-pagination__pager .el-pager li.is-active) {
   border-color: rgba(var(--color-primary), 0.4);
   background-color: rgba(var(--color-primary), 0.1);
   box-shadow: inset 0 0 0 1px rgba(var(--color-primary), 0.12);
   @apply text-primary;
-}
-
-.base-pagination__ellipsis {
-  @apply px-1 text-[11px] font-black text-slate-300 dark:text-slate-600;
 }
 
 .base-pagination__simple {
@@ -305,8 +299,9 @@ const emitPageSize = (event: Event) => {
 
 @media (prefers-reduced-motion: reduce) {
   .base-pagination,
-  .base-pagination__button,
-  .base-pagination__page,
+  :deep(.base-pagination__pager .btn-prev),
+  :deep(.base-pagination__pager .btn-next),
+  :deep(.base-pagination__pager .el-pager li),
   .base-pagination__select {
     transition: none !important;
   }

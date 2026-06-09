@@ -2,7 +2,7 @@
 import { computed, ref, watch } from "vue";
 import { ArrowLeft, ChevronRight, MoreHorizontal } from "lucide-vue-next";
 import { useI18n } from "../../composables/useI18n";
-import { collapseMiddleItems, dropRight, findLastItem, joinBy, preventAndStopDomEvent } from "../../utils";
+import { collapseMiddleItems, dropRight, findLastItem, hasNextIndex, isLastIndex, joinBy, preventAndStopDomEvent } from "../../utils";
 
 type BreadcrumbSize = "sm" | "md" | "lg";
 type BreadcrumbSurface = "plain" | "muted" | "card";
@@ -73,7 +73,7 @@ const fullItems = computed<RenderedCrumb[]>(() =>
     type: "item",
     item,
     index,
-    isLast: index === props.items.length - 1,
+    isLast: isLastIndex(props.items, index),
   })),
 );
 
@@ -211,7 +211,7 @@ const handleBack = () => {
             <BaseBadge v-if="crumb.item.badge" :type="crumb.item.badgeType || 'neutral'" size="xs">{{ crumb.item.badge }}</BaseBadge>
           </slot>
         </a>
-        <span v-if="visibleIndex < renderedItems.length - 1" class="base-breadcrumb__separator" aria-hidden="true">
+        <span v-if="hasNextIndex(renderedItems, visibleIndex)" class="base-breadcrumb__separator" aria-hidden="true">
           <ChevronRight v-if="separator === 'chevron'" class="base-breadcrumb__separator-icon" aria-hidden="true" />
           <span v-else>{{ separatorLabel }}</span>
         </span>

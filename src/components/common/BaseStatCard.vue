@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, useId } from "vue";
-import { isActivationKey } from "../../utils";
+import { createDomIdMap, createLineClampStyle, handleActivationKeydown, isEventFromInteractiveElement, joinAriaIds } from "../../utils";
 
 interface Props {
   label: string;
@@ -8,6 +8,7 @@ interface Props {
   description?: string;
   icon?: string;
   trend?: string;
+  trendLabel?: string;
   trendDirection?: "up" | "down" | "flat";
   type?: "primary" | "success" | "warning" | "danger" | "neutral";
   unit?: string;
@@ -17,15 +18,22 @@ interface Props {
   size?: "sm" | "md" | "lg";
   surface?: "card" | "muted" | "plain";
   loading?: boolean;
+  loadingText?: string;
   disabled?: boolean;
   clickable?: boolean;
+  wrapLabel?: boolean;
+  wrapValue?: boolean;
+  wrapDescription?: boolean;
+  maxDescriptionLines?: number;
   ariaLabel?: string;
+  ariaDescribedby?: string;
 }
 
 const props = withDefaults(defineProps<Props>(), {
   description: "",
   icon: "",
   trend: "",
+  trendLabel: "",
   trendDirection: "flat",
   type: "primary",
   unit: "",
@@ -35,9 +43,15 @@ const props = withDefaults(defineProps<Props>(), {
   size: "md",
   surface: "card",
   loading: false,
+  loadingText: "",
   disabled: false,
   clickable: false,
+  wrapLabel: false,
+  wrapValue: false,
+  wrapDescription: false,
+  maxDescriptionLines: 2,
   ariaLabel: "",
+  ariaDescribedby: "",
 });
 
 const emit = defineEmits<{
@@ -46,23 +60,44 @@ const emit = defineEmits<{
 }>();
 
 const statId = useId();
-const labelId = `${statId}-label`;
-const valueId = `${statId}-value`;
-const descriptionId = `${statId}-description`;
-const describedBy = computed(() => (props.description ? descriptionId : undefined));
-const displayValue = computed(() => `${props.prefix}${props.value}${props.unit || props.suffix}`);
+const statIds = createDomIdMap(statId, ["label", "value", "description"]);
+const labelId = statIds.label;
+const valueId = statIds.value;
+const descriptionId = statIds.description;
+const loadingId = `${statId}-loading`;
+const trendId = `${statId}-trend`;
+const hasTrend = computed(() => Boolean(props.trend));
+const hasDescription = computed(() => Boolean(props.description));
+const labelledBy = computed(() => {
+  if (props.ariaLabel) return undefined;
+  return `${labelId} ${valueId}`;
+});
+const describedBy = computed(() =>
+  joinAriaIds([
+    hasDescription.value ? descriptionId : undefined,
+    hasTrend.value ? trendId : undefined,
+    props.loading && props.loadingText ? loadingId : undefined,
+    props.ariaDescribedby,
+  ])
+);
+const displayValue = computed(() => `${props.prefix}${props.value}${props.unit}${props.suffix}`);
 const isInteractive = computed(() => props.clickable && !props.disabled && !props.loading);
+const descriptionStyle = computed(() => {
+  if (props.wrapDescription) return undefined;
+  return createLineClampStyle(props.maxDescriptionLines);
+});
 
 const handleClick = (event: MouseEvent) => {
   if (!isInteractive.value) return;
+  if (isEventFromInteractiveElement(event)) return;
   emit("click", event);
 };
 
 const handleKeydown = (event: KeyboardEvent) => {
   emit("keydown", event);
-  if (!isInteractive.value || !isActivationKey(event)) return;
-  event.preventDefault();
-  emit("click", event);
+  if (!isInteractive.value) return;
+  if (isEventFromInteractiveElement(event)) return;
+  handleActivationKeydown(event, () => emit("click", event));
 };
 </script>
 
@@ -77,15 +112,18 @@ const handleKeydown = (event: KeyboardEvent) => {
         'base-stat-card--compact': compact,
         'base-stat-card--muted': surface === 'muted',
         'base-stat-card--plain': surface === 'plain',
+        'base-stat-card--wrap-label': wrapLabel,
+        'base-stat-card--wrap-value': wrapValue,
+        'base-stat-card--wrap-description': wrapDescription,
         'is-loading': loading,
         'is-disabled': disabled,
         'is-clickable': clickable
       }
     ]"
     :role="clickable ? 'button' : undefined"
-    :tabindex="clickable && !disabled ? 0 : undefined"
+    :tabindex="isInteractive ? 0 : undefined"
     :aria-label="ariaLabel || undefined"
-    :aria-labelledby="labelId"
+    :aria-labelledby="labelledBy"
     :aria-describedby="describedBy"
     :aria-busy="loading ? 'true' : undefined"
     :aria-disabled="disabled ? 'true' : undefined"
@@ -96,7 +134,7 @@ const handleKeydown = (event: KeyboardEvent) => {
       <div v-if="icon" class="base-stat-card__icon" aria-hidden="true">
         <BaseIcon :name="icon" size="16" aria-hidden="true" />
       </div>
-      <span v-if="trend" class="base-stat-card__trend">
+      <span v-if="hasTrend" :id="trendId" class="base-stat-card__trend" :aria-label="trendLabel || undefined">
         <BaseIcon
           v-if="trendDirection !== 'flat'"
           :name="trendDirection === 'up' ? 'TrendingUp' : 'TrendingDown'"
@@ -109,7 +147,8 @@ const handleKeydown = (event: KeyboardEvent) => {
     <div class="base-stat-card__body">
       <span :id="labelId" class="base-stat-card__label">{{ label }}</span>
       <strong :id="valueId" class="base-stat-card__value" aria-live="polite">{{ displayValue }}</strong>
-      <span v-if="description" :id="descriptionId" class="base-stat-card__description">{{ description }}</span>
+      <span v-if="description" :id="descriptionId" class="base-stat-card__description" :style="descriptionStyle">{{ description }}</span>
+      <span v-if="loading && loadingText" :id="loadingId" class="sr-only">{{ loadingText }}</span>
     </div>
   </section>
 </template>
@@ -173,9 +212,13 @@ const handleKeydown = (event: KeyboardEvent) => {
 }
 
 .base-stat-card__trend {
-  @apply inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-1 text-[10px] font-black;
+  @apply inline-flex min-w-0 shrink-0 items-center gap-1 overflow-hidden whitespace-nowrap rounded-full px-2 py-1 text-[10px] font-black;
   background-color: var(--stat-soft-bg);
   color: var(--stat-color);
+}
+
+.base-stat-card__trend {
+  max-width: 100%;
 }
 
 .base-stat-card--trend-up .base-stat-card__trend {
@@ -196,8 +239,16 @@ const handleKeydown = (event: KeyboardEvent) => {
   @apply block truncate text-[10px] font-bold text-slate-400 dark:text-slate-500;
 }
 
+.base-stat-card--wrap-label .base-stat-card__label {
+  @apply whitespace-normal break-words;
+}
+
 .base-stat-card__value {
   @apply mt-1 block truncate text-xl font-black text-slate-800 dark:text-slate-100;
+}
+
+.base-stat-card--wrap-value .base-stat-card__value {
+  @apply whitespace-normal break-words;
 }
 
 .base-stat-card--sm .base-stat-card__value,
@@ -210,7 +261,14 @@ const handleKeydown = (event: KeyboardEvent) => {
 }
 
 .base-stat-card__description {
-  @apply mt-1 block truncate text-[10px] font-bold text-slate-400 dark:text-slate-500;
+  @apply mt-1 block overflow-hidden text-[10px] font-bold text-slate-400 dark:text-slate-500;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+}
+
+.base-stat-card--wrap-description .base-stat-card__description {
+  @apply whitespace-normal break-words;
+  display: block;
 }
 
 .base-stat-card--primary {

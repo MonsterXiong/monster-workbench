@@ -108,6 +108,36 @@ const accessibleLabel = computed(() => props.ariaLabel || props.title || "");
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
+.el-button.is-icon-only {
+  width: var(--el-button-size, 32px) !important;
+  min-width: var(--el-button-size, 32px) !important;
+  height: var(--el-button-size, 32px) !important;
+  padding: 0 !important;
+  aspect-ratio: 1 / 1;
+}
+
+.el-button.is-icon-only :deep(span),
+.el-button.is-icon-only :deep(.el-icon) {
+  display: grid !important;
+  place-items: center !important;
+  width: 100%;
+  height: 100%;
+  line-height: 1;
+}
+
+.el-button.is-icon-only :deep(span:empty) {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+  margin-left: 0 !important;
+}
+
+.el-button.is-icon-only :deep(svg) {
+  display: block;
+  margin: auto;
+  flex-shrink: 0;
+}
+
 /* Primary 实底按钮 hover 与 active 态 */
 .el-button--primary:not(.is-plain):not(.is-text):not(.is-link):hover {
   background-color: #3b82f6 !important; /* blue-500，换用安全的 16 进制颜色防止 WebView 变量解析失败 */
@@ -203,14 +233,12 @@ const accessibleLabel = computed(() => props.ariaLabel || props.title || "");
   border-radius: 6px !important;
 }
 
-.el-button.is-icon-only {
-  aspect-ratio: 1 / 1;
-  padding-left: 0 !important;
-  padding-right: 0 !important;
+.el-button.is-icon-only:not(.el-button--small):not(.el-button--large):not(.is-xs) {
+  --el-button-size: 32px;
 }
 
 .el-button.is-icon-only.is-xs {
-  width: 20px !important;
+  --el-button-size: 20px;
 }
 
 @media (prefers-reduced-motion: reduce) {

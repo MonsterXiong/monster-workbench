@@ -6,15 +6,25 @@ import {
   addDays,
   addDomEventListener,
   applyObjectPatch,
+  compareDateOnlyValues,
+  compactArray,
+  filterByFalsyValue,
+  findIndexByValue,
   firstItem,
   formatMonthYear,
+  getArrayChunkAtIndex,
+  getBoundaryItem,
   getKeyboardBoundaryPosition,
   getCurrentDate,
   getMonthCalendarDates,
   getEventTargetValue,
+  hasByValue,
   getTodayString,
   getWeekdayLabels,
+  isEmptyArray,
   isActivationKey,
+  isDateOnlyRangeOrdered,
+  isDateOnlyValueInRange,
   isEventTargetInsideElement,
   isEscapeKey,
   isKeyboardKey,
@@ -22,6 +32,8 @@ import {
   isSameMonth,
   joinAriaIds,
   mergeDomEventCleanups,
+  normalizeDateOnlyValue,
+  parseDateOnlyValue,
   startOfMonth,
   type DomEventCleanup,
 } from "../../utils";
@@ -123,66 +135,11 @@ const endLabel = computed(() => `${props.label ? `${props.label} ` : ""}${props.
 const clearLabel = computed(() => `${t("common.clear")} ${props.label || t("common.dateRange")}`);
 const isReadonly = computed(() => props.disabled || props.readonly);
 const todayValue = computed(() => getTodayString());
-const strictDateRegExp = /^(\d{4})-(\d{1,2})-(\d{1,2})$/;
-
-function formatDateValue(date: Date): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
-function parseDateValue(value: Date | string | number | null | undefined): Date | null {
-  if (value === undefined || value === null || value === "") return null;
-  if (value instanceof Date) {
-    return Number.isNaN(value.getTime()) ? null : new Date(value.getFullYear(), value.getMonth(), value.getDate());
-  }
-
-  if (typeof value === "number") {
-    const date = new Date(value);
-    return Number.isNaN(date.getTime()) ? null : new Date(date.getFullYear(), date.getMonth(), date.getDate());
-  }
-
-  const normalizedText = value.trim().replace(/[\\/]+/g, "-");
-  const match = strictDateRegExp.exec(normalizedText);
-  if (!match) return null;
-
-  const year = Number(match[1]);
-  const month = Number(match[2]);
-  const day = Number(match[3]);
-  const date = new Date(year, month - 1, day);
-
-  return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day ? date : null;
-}
-
-function normalizeDateValue(value: Date | string | number | null | undefined, fallback = ""): string {
-  if (value === undefined || value === null || value === "") return fallback;
-  const date = parseDateValue(value);
-  return date ? formatDateValue(date) : String(value).trim();
-}
-
-function compareDateValues(left: Date | string | number | null | undefined, right: Date | string | number | null | undefined, fallback = 0): number {
-  const leftDate = parseDateValue(left);
-  const rightDate = parseDateValue(right);
-  return leftDate && rightDate ? leftDate.getTime() - rightDate.getTime() : fallback;
-}
-
-function isDateValueInRange(value: Date | string | number | null | undefined, start?: string | null, end?: string | null): boolean {
-  const date = parseDateValue(value);
-  if (!date) return false;
-
-  if (start && compareDateValues(date, start) < 0) return false;
-  if (end && compareDateValues(date, end) > 0) return false;
-
-  return true;
-}
-
-function isDateRangeValueOrdered(range: DateRangeValue): boolean {
-  if (!range.start || !range.end) return true;
-  const startDate = parseDateValue(range.start);
-  const endDate = parseDateValue(range.end);
-  return Boolean(startDate && endDate && startDate.getTime() <= endDate.getTime());
-}
+const parseDateValue = parseDateOnlyValue;
+const normalizeDateValue = normalizeDateOnlyValue;
+const compareDateValues = compareDateOnlyValues;
+const isDateValueInRange = isDateOnlyValueInRange;
+const isDateRangeValueOrdered = (range: DateRangeValue) => isDateOnlyRangeOrdered(range);
 
 const normalizedStart = computed(() => normalizeDateValue(inputValue.value.start));
 const normalizedEnd = computed(() => normalizeDateValue(inputValue.value.end));
@@ -206,8 +163,8 @@ const validMax = computed(() => (parseDateValue(rawMax.value) ? rawMax.value : "
 const boundaryMin = computed(() => (validMin.value && validMax.value && compareDateValues(validMin.value, validMax.value) > 0 ? validMax.value : validMin.value));
 const boundaryMax = computed(() => (validMin.value && validMax.value && compareDateValues(validMin.value, validMax.value) > 0 ? validMin.value : validMax.value));
 const boundaryError = computed(() => {
-  const values = [normalizedStart.value, normalizedEnd.value].filter(Boolean);
-  if (!values.length || (!boundaryMin.value && !boundaryMax.value)) return "";
+  const values = compactArray([normalizedStart.value, normalizedEnd.value]);
+  if (isEmptyArray(values) || (!boundaryMin.value && !boundaryMax.value)) return "";
   return values.every((value) => isDateValueInRange(value, boundaryMin.value || null, boundaryMax.value || null)) ? "" : t("common.dateRangeOutOfRange");
 });
 const resolvedError = computed(() => props.error || invalidInputError.value || orderError.value || boundaryError.value);
@@ -249,7 +206,7 @@ function buildDay(date: Date): CalendarDay {
 const calendarDays = computed(() => {
   return getMonthCalendarDates(viewMonth.value, props.firstDayOfWeek).map(buildDay);
 });
-const enabledCalendarDays = computed(() => calendarDays.value.filter((day) => !day.disabled));
+const enabledCalendarDays = computed(() => filterByFalsyValue(calendarDays.value, (day) => day.disabled));
 const canSelectToday = computed(() => isDateValueInRange(todayValue.value, boundaryMin.value || null, boundaryMax.value || null));
 const canGoToMonth = (offset: number) => {
   const nextMonth = startOfMonth(addMonths(viewMonth.value, offset) ?? viewMonth.value) ?? viewMonth.value;
@@ -258,8 +215,8 @@ const canGoToMonth = (offset: number) => {
 
 const getFocusableDayValue = (preferredValue = "") => {
   const activeValue = activeField.value === "end" ? normalizedEnd.value : normalizedStart.value;
-  const candidates = [preferredValue, activeValue, normalizedStart.value, normalizedEnd.value, todayValue.value].filter(Boolean);
-  const matchedCandidate = candidates.find((value) => enabledCalendarDays.value.some((day) => day.value === value));
+  const candidates = compactArray([preferredValue, activeValue, normalizedStart.value, normalizedEnd.value, todayValue.value]);
+  const matchedCandidate = candidates.find((value) => hasByValue(enabledCalendarDays.value, (day) => day.value, value));
   return matchedCandidate || firstItem(enabledCalendarDays.value)?.value || "";
 };
 
@@ -476,11 +433,9 @@ const handleDayKeydown = (day: CalendarDay, event: KeyboardEvent) => {
   const boundaryPosition = getKeyboardBoundaryPosition(event);
   if (boundaryPosition) {
     event.preventDefault();
-    const index = calendarDays.value.findIndex((item) => item.value === day.value);
-    const weekStart = Math.max(0, index - (index % 7));
-    const weekEnd = Math.min(calendarDays.value.length - 1, weekStart + 6);
-    const weekDays = calendarDays.value.slice(weekStart, weekEnd + 1).filter((item) => !item.disabled);
-    const nextDay = boundaryPosition === "first" ? firstItem(weekDays) : weekDays[weekDays.length - 1];
+    const index = findIndexByValue(calendarDays.value, (item) => item.value, day.value);
+    const weekDays = getArrayChunkAtIndex(calendarDays.value, index, 7).items.filter((item) => !item.disabled);
+    const nextDay = getBoundaryItem(weekDays, boundaryPosition);
     if (!nextDay) return;
     focusedDayValue.value = nextDay.value;
     focusDayButton();
@@ -496,9 +451,9 @@ const isPresetAllowed = (preset: DateRangePreset) => {
 
   if (!isDateRangeValueOrdered(normalizedPreset)) return false;
 
-  return [normalizedPreset.start, normalizedPreset.end]
-    .filter(Boolean)
-    .every((value) => isDateValueInRange(value, boundaryMin.value || null, boundaryMax.value || null));
+  return compactArray([normalizedPreset.start, normalizedPreset.end]).every((value) =>
+    isDateValueInRange(value, boundaryMin.value || null, boundaryMax.value || null)
+  );
 };
 
 watch(
@@ -804,15 +759,17 @@ onBeforeUnmount(() => {
 }
 
 .base-date-range__calendar {
-  @apply mt-3 overflow-hidden rounded-2xl border border-slate-200 bg-white p-0 shadow-lg shadow-slate-900/10 dark:border-slate-800 dark:bg-slate-900 dark:shadow-black/30;
+  @apply relative z-10 mt-3 overflow-hidden rounded-xl border border-slate-200 bg-white p-0 shadow-md ring-1 dark:border-slate-800 dark:bg-slate-900;
   background-image:
-    linear-gradient(135deg, rgb(var(--color-primary) / 0.055), transparent 32%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.96));
+    linear-gradient(135deg, rgb(var(--color-primary) / 0.035), transparent 30%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.99), rgba(248, 250, 252, 0.96));
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.08);
+  --tw-ring-color: rgba(255, 255, 255, 0.8);
 }
 
 .base-date-range__calendar-header {
-  @apply grid grid-cols-[2rem_minmax(0,1fr)_2rem] items-center gap-2 border-b border-slate-100 px-3 py-3 dark:border-slate-800;
-  background-color: rgba(248, 250, 252, 0.72);
+  @apply grid grid-cols-[2rem_minmax(0,1fr)_2rem] items-center gap-2 border-b border-slate-100 px-3 py-2.5 dark:border-slate-800;
+  background-color: rgba(248, 250, 252, 0.82);
 }
 
 .base-date-range__calendar-header button,
@@ -833,7 +790,7 @@ onBeforeUnmount(() => {
 }
 
 .base-date-range__calendar-meta {
-  @apply m-3 flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-100 bg-white p-2 shadow-sm dark:border-slate-800 dark:bg-slate-950;
+  @apply mx-3 my-2.5 flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-100 bg-white p-2 shadow-sm dark:border-slate-800 dark:bg-slate-950;
 }
 
 .base-date-range__calendar-range {
@@ -846,15 +803,15 @@ onBeforeUnmount(() => {
 }
 
 .base-date-range__weekdays span {
-  @apply pb-1 text-center text-[10px] font-black text-slate-400 dark:text-slate-500;
+  @apply pb-1.5 text-center text-[10px] font-black text-slate-400 dark:text-slate-500;
 }
 
 .base-date-range__days {
-  @apply mb-3 overflow-hidden rounded-xl border border-slate-100 bg-slate-50 p-1 dark:border-slate-800 dark:bg-slate-950;
+  @apply mb-3 overflow-hidden rounded-lg border border-slate-100 bg-slate-50 p-1 dark:border-slate-800 dark:bg-slate-950;
 }
 
 .base-date-range__days button {
-  @apply relative flex h-9 min-h-9 items-center justify-center text-xs font-black text-slate-600 transition focus:outline-none focus:ring-2 focus:ring-primary focus:ring-opacity-20 disabled:cursor-not-allowed disabled:text-slate-300 disabled:opacity-50 dark:text-slate-300 dark:disabled:text-slate-700;
+  @apply relative flex h-8 min-h-8 items-center justify-center text-xs font-black text-slate-600 transition focus:outline-none focus:ring-2 focus:ring-primary focus:ring-opacity-20 disabled:cursor-not-allowed disabled:text-slate-300 disabled:opacity-50 dark:text-slate-300 dark:disabled:text-slate-700;
 }
 
 .base-date-range__days button::before {
@@ -871,7 +828,7 @@ onBeforeUnmount(() => {
 }
 
 .base-date-range__days button > span {
-  @apply relative z-10 flex h-7 w-7 items-center justify-center rounded-lg transition;
+  @apply relative z-10 flex h-6 w-6 items-center justify-center rounded-md transition;
 }
 
 .base-date-range__days button:not(.is-start):not(.is-end):not(:disabled):hover > span {
@@ -971,6 +928,8 @@ onBeforeUnmount(() => {
   background-image:
     linear-gradient(135deg, rgb(var(--color-primary) / 0.1), transparent 32%),
     linear-gradient(180deg, rgba(15, 23, 42, 0.98), rgba(2, 6, 23, 0.94));
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.25);
+  --tw-ring-color: rgba(51, 65, 85, 0.3);
 }
 
 :global(.dark) .base-date-range__calendar-header {

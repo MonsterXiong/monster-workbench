@@ -4,12 +4,12 @@ import type { ComponentPublicInstance } from "vue";
 import {
   filterByFalsyValue,
   findIndexByValue,
-  firstItem,
+  focusElementPreventScroll,
+  getBoundaryItem,
   getKeyboardBoundaryPosition,
   getKeyboardNavigationDirection,
   getNextCircularIndex,
   hasItem,
-  lastItem,
   sanitizeDomIdSegment,
   toggleSelectionKeyByMode,
 } from "../../utils";
@@ -107,7 +107,7 @@ const setTriggerRef = (key: string, element: Element | ComponentPublicInstance |
 
 const focusTrigger = (key: string) => {
   void nextTick(() => {
-    triggerRefs.value.get(key)?.focus({ preventScroll: true });
+    focusElementPreventScroll(triggerRefs.value.get(key));
   });
 };
 
@@ -149,17 +149,10 @@ const handleTriggerKeydown = (event: KeyboardEvent, item: AccordionItem) => {
   }
 
   const boundaryPosition = getKeyboardBoundaryPosition(event);
-  if (boundaryPosition === "first") {
+  if (boundaryPosition) {
     event.preventDefault();
-    const firstEnabledItem = firstItem(enabledItems.value);
-    if (firstEnabledItem) focusTrigger(firstEnabledItem.key);
-    return;
-  }
-
-  if (boundaryPosition === "last") {
-    event.preventDefault();
-    const lastEnabledItem = lastItem(enabledItems.value);
-    if (lastEnabledItem) focusTrigger(lastEnabledItem.key);
+    const targetItem = getBoundaryItem(enabledItems.value, boundaryPosition);
+    if (targetItem) focusTrigger(targetItem.key);
   }
 };
 </script>

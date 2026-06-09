@@ -1,7 +1,16 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, useId } from "vue";
 import { useI18n } from "../../composables/useI18n";
-import { createLineClampStyle, isActivationKey, toReversedArray } from "../../utils";
+import {
+  createDomIdFromParts,
+  createLineClampStyle,
+  handleActivationKeydown,
+  indexItems,
+  isEventFromInteractiveElement,
+  isNonEmptyArray,
+  joinAriaIds,
+  toReversedArray,
+} from "../../utils";
 
 type TimelineType = "primary" | "success" | "warning" | "danger" | "neutral";
 type TimelineSize = "sm" | "md" | "lg";
@@ -30,6 +39,7 @@ interface Props {
   reverse?: boolean;
   marker?: TimelineMarker;
   selectedKey?: string;
+  disabled?: boolean;
   loading?: boolean;
   loadingText?: string;
   emptyText?: string;
@@ -37,6 +47,9 @@ interface Props {
   wrapDescription?: boolean;
   maxDescriptionLines?: number;
   ariaLabel?: string;
+  ariaLabelledby?: string;
+  ariaDescribedby?: string;
+  actionsLabel?: string;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -48,6 +61,7 @@ const props = withDefaults(defineProps<Props>(), {
   reverse: false,
   marker: "icon",
   selectedKey: "",
+  disabled: false,
   loading: false,
   loadingText: "",
   emptyText: "",
@@ -55,43 +69,98 @@ const props = withDefaults(defineProps<Props>(), {
   wrapDescription: false,
   maxDescriptionLines: 2,
   ariaLabel: "",
+  ariaLabelledby: "",
+  ariaDescribedby: "",
+  actionsLabel: "",
 });
 
 const emit = defineEmits<{
   (e: "select", payload: { item: TimelineItem; index: number }): void;
 }>();
 
+interface TimelineSlotState {
+  item: TimelineItem;
+  index: number;
+  selected: boolean;
+  disabled: boolean;
+  loading: boolean;
+  clickable: boolean;
+  interactiveDisabled: boolean;
+}
+
 defineSlots<{
-  default?: (props: { item: TimelineItem; index: number }) => any;
-  actions?: (props: { item: TimelineItem; index: number }) => any;
+  default?: (props: TimelineSlotState) => any;
+  actions?: (props: TimelineSlotState) => any;
 }>();
 
 const { t } = useI18n();
+const timelineId = useId();
+const loadingId = createDomIdFromParts([timelineId, "loading"]);
+const emptyId = createDomIdFromParts([timelineId, "empty"]);
 const renderedEntries = computed(() => {
-  const entries = props.items.map((item, index) => ({ item, index }));
+  const entries = indexItems(props.items);
   return props.reverse ? toReversedArray(entries) : entries;
 });
-const hasItems = computed(() => renderedEntries.value.length > 0);
+const hasItems = computed(() => isNonEmptyArray(renderedEntries.value));
 const resolvedLoadingText = computed(() => props.loadingText || t("common.loading"));
 const resolvedEmptyText = computed(() => props.emptyText || t("common.noData"));
+const labelledBy = computed(() => (props.ariaLabel ? undefined : props.ariaLabelledby || undefined));
+const describedBy = computed(() =>
+  joinAriaIds([
+    props.loading ? loadingId : undefined,
+    !props.loading && !hasItems.value ? emptyId : undefined,
+    props.ariaDescribedby,
+  ])
+);
+const resolvedActionsLabel = computed(() => props.actionsLabel || t("common.actionsRegion"));
 const descriptionStyle = computed(() => {
   if (props.wrapDescription) return undefined;
 
   return createLineClampStyle(props.maxDescriptionLines);
 });
 
-const canSelect = (item: TimelineItem) => props.clickable && !item.disabled;
+const isItemDisabled = (item: TimelineItem) => props.disabled || props.loading || Boolean(item.disabled);
+const canSelect = (item: TimelineItem) => props.clickable && !isItemDisabled(item);
+const isItemSelected = (item: TimelineItem) => props.selectedKey === item.key;
 
 const handleSelect = (item: TimelineItem, index: number) => {
   if (!canSelect(item)) return;
   emit("select", { item, index });
 };
 
-const handleKeydown = (event: KeyboardEvent, item: TimelineItem, index: number) => {
-  if (!isActivationKey(event)) return;
-  event.preventDefault();
+const handleClick = (event: MouseEvent, item: TimelineItem, index: number) => {
+  if (isEventFromInteractiveElement(event)) return;
   handleSelect(item, index);
 };
+
+const handleKeydown = (event: KeyboardEvent, item: TimelineItem, index: number) => {
+  if (!canSelect(item)) return;
+  if (isEventFromInteractiveElement(event)) return;
+  handleActivationKeydown(event, () => handleSelect(item, index));
+};
+
+const getItemBaseId = (item: TimelineItem, index: number) => createDomIdFromParts([timelineId, item.key || index]);
+const getItemTitleId = (item: TimelineItem, index: number) => createDomIdFromParts([getItemBaseId(item, index), "title"]);
+const getItemTimeId = (item: TimelineItem, index: number) => createDomIdFromParts([getItemBaseId(item, index), "time"]);
+const getItemDescriptionId = (item: TimelineItem, index: number) => createDomIdFromParts([getItemBaseId(item, index), "description"]);
+const getItemMetaId = (item: TimelineItem, index: number) => createDomIdFromParts([getItemBaseId(item, index), "meta"]);
+const getItemTagId = (item: TimelineItem, index: number) => createDomIdFromParts([getItemBaseId(item, index), "tag"]);
+const getItemDescribedBy = (item: TimelineItem, index: number) =>
+  joinAriaIds([
+    item.time ? getItemTimeId(item, index) : undefined,
+    item.description ? getItemDescriptionId(item, index) : undefined,
+    item.meta ? getItemMetaId(item, index) : undefined,
+    item.tag ? getItemTagId(item, index) : undefined,
+  ]);
+const getSlotState = (item: TimelineItem, index: number): TimelineSlotState => ({
+  item,
+  index,
+  selected: isItemSelected(item),
+  disabled: props.disabled || Boolean(item.disabled),
+  loading: props.loading,
+  clickable: props.clickable,
+  interactiveDisabled: isItemDisabled(item),
+});
 </script>
 
 <template>
@@ -107,11 +176,15 @@ const handleKeydown = (event: KeyboardEvent, item: TimelineItem, index: number) 
         'base-timeline--clickable': clickable,
         'base-timeline--wrap-title': wrapTitle,
         'base-timeline--wrap-description': wrapDescription,
+        'is-disabled': disabled,
         'is-loading': loading,
       },
     ]"
     :aria-label="ariaLabel || undefined"
+    :aria-labelledby="labelledBy"
+    :aria-describedby="describedBy"
     :aria-busy="loading ? 'true' : undefined"
+    :aria-disabled="disabled ? 'true' : undefined"
   >
     <li
       v-if="loading"
@@ -122,7 +195,7 @@ const handleKeydown = (event: KeyboardEvent, item: TimelineItem, index: number) 
         <BaseIcon name="LoaderCircle" size="13" aria-hidden="true" />
       </span>
       <div class="base-timeline__content">
-        <span class="base-timeline__state-text">{{ resolvedLoadingText }}</span>
+        <span :id="loadingId" class="base-timeline__state-text">{{ resolvedLoadingText }}</span>
       </div>
     </li>
     <li
@@ -133,7 +206,7 @@ const handleKeydown = (event: KeyboardEvent, item: TimelineItem, index: number) 
         <BaseIcon name="Inbox" size="13" aria-hidden="true" />
       </span>
       <div class="base-timeline__content">
-        <span class="base-timeline__state-text">{{ resolvedEmptyText }}</span>
+        <span :id="emptyId" class="base-timeline__state-text">{{ resolvedEmptyText }}</span>
       </div>
     </li>
     <template v-else>
@@ -145,16 +218,12 @@ const handleKeydown = (event: KeyboardEvent, item: TimelineItem, index: number) 
           `base-timeline__item--${entry.item.type || 'neutral'}`,
           {
             'is-clickable': canSelect(entry.item),
-            'is-disabled': entry.item.disabled,
-            'is-selected': selectedKey === entry.item.key,
+            'is-disabled': isItemDisabled(entry.item),
+            'is-selected': isItemSelected(entry.item),
           },
         ]"
-        :role="clickable ? 'button' : undefined"
-        :tabindex="canSelect(entry.item) ? 0 : undefined"
-        :aria-disabled="entry.item.disabled ? 'true' : undefined"
-        :aria-current="selectedKey === entry.item.key ? 'step' : undefined"
-        @click="handleSelect(entry.item, entry.index)"
-        @keydown="handleKeydown($event, entry.item, entry.index)"
+        :aria-disabled="isItemDisabled(entry.item) ? 'true' : undefined"
+        :aria-current="isItemSelected(entry.item) ? 'step' : undefined"
       >
         <span class="base-timeline__line" aria-hidden="true"></span>
         <span class="base-timeline__marker" aria-hidden="true">
@@ -162,22 +231,33 @@ const handleKeydown = (event: KeyboardEvent, item: TimelineItem, index: number) 
           <span v-else-if="marker === 'number'" class="base-timeline__number">{{ visualIndex + 1 }}</span>
         </span>
         <div class="base-timeline__content">
-          <slot :item="entry.item" :index="entry.index">
-            <div class="base-timeline__header">
-              <div class="base-timeline__title-group">
-                <strong>{{ entry.item.title }}</strong>
-                <span v-if="entry.item.meta" class="base-timeline__meta">{{ entry.item.meta }}</span>
+          <div
+            class="base-timeline__main"
+            :role="clickable ? 'button' : undefined"
+            :tabindex="canSelect(entry.item) ? 0 : undefined"
+            :aria-labelledby="clickable && !$slots.default ? getItemTitleId(entry.item, entry.index) : undefined"
+            :aria-describedby="clickable && !$slots.default ? getItemDescribedBy(entry.item, entry.index) : undefined"
+            :aria-disabled="clickable && isItemDisabled(entry.item) ? 'true' : undefined"
+            @click="handleClick($event, entry.item, entry.index)"
+            @keydown="handleKeydown($event, entry.item, entry.index)"
+          >
+            <slot v-bind="getSlotState(entry.item, entry.index)">
+              <div class="base-timeline__header">
+                <div class="base-timeline__title-group">
+                  <strong :id="getItemTitleId(entry.item, entry.index)">{{ entry.item.title }}</strong>
+                  <span v-if="entry.item.meta" :id="getItemMetaId(entry.item, entry.index)" class="base-timeline__meta">{{ entry.item.meta }}</span>
+                </div>
+                <time v-if="entry.item.time" :id="getItemTimeId(entry.item, entry.index)">{{ entry.item.time }}</time>
               </div>
-              <time v-if="entry.item.time">{{ entry.item.time }}</time>
-            </div>
-            <p v-if="entry.item.description" :style="descriptionStyle">{{ entry.item.description }}</p>
-            <div v-if="entry.item.tag || $slots.actions" class="base-timeline__footer">
-              <span v-if="entry.item.tag" class="base-timeline__tag">{{ entry.item.tag }}</span>
-              <div v-if="$slots.actions" class="base-timeline__actions">
-                <slot name="actions" :item="entry.item" :index="entry.index"></slot>
+              <p v-if="entry.item.description" :id="getItemDescriptionId(entry.item, entry.index)" :style="descriptionStyle">{{ entry.item.description }}</p>
+              <div v-if="entry.item.tag" class="base-timeline__footer">
+                <span :id="getItemTagId(entry.item, entry.index)" class="base-timeline__tag">{{ entry.item.tag }}</span>
               </div>
-            </div>
-          </slot>
+            </slot>
+          </div>
+          <div v-if="$slots.actions" class="base-timeline__actions" role="group" :aria-label="resolvedActionsLabel">
+            <slot name="actions" v-bind="getSlotState(entry.item, entry.index)"></slot>
+          </div>
         </div>
       </li>
     </template>
@@ -201,15 +281,12 @@ const handleKeydown = (event: KeyboardEvent, item: TimelineItem, index: number) 
   @apply opacity-60;
 }
 
-.base-timeline__item.is-clickable {
+.base-timeline__item.is-clickable .base-timeline__main {
   @apply cursor-pointer;
 }
 
-.base-timeline__item.is-clickable:focus-visible {
+.base-timeline__item.is-clickable .base-timeline__main:focus-visible {
   outline: none;
-}
-
-.base-timeline__item.is-clickable:focus-visible .base-timeline__content {
   border-color: rgb(var(--color-primary));
   box-shadow: 0 0 0 3px rgba(var(--color-primary), 0.14);
 }
@@ -258,7 +335,8 @@ const handleKeydown = (event: KeyboardEvent, item: TimelineItem, index: number) 
 }
 
 .base-timeline__content {
-  @apply min-w-0 rounded-2xl bg-white p-3 shadow-sm transition-colors dark:bg-slate-900;
+  @apply flex min-w-0 flex-wrap items-start gap-2 rounded-2xl bg-white p-3 shadow-sm transition-colors dark:bg-slate-900;
+  container-type: inline-size;
 }
 
 .base-timeline--bordered .base-timeline__content {
@@ -290,6 +368,10 @@ const handleKeydown = (event: KeyboardEvent, item: TimelineItem, index: number) 
   @apply block text-xs font-black text-slate-500 dark:text-slate-400;
 }
 
+.base-timeline__main {
+  @apply min-w-0 flex-1 rounded-xl;
+}
+
 .base-timeline__header {
   @apply flex min-w-0 items-start justify-between gap-3;
 }
@@ -304,14 +386,21 @@ const handleKeydown = (event: KeyboardEvent, item: TimelineItem, index: number) 
 
 .base-timeline--wrap-title .base-timeline__header strong {
   @apply whitespace-normal break-words;
+  overflow-wrap: anywhere;
 }
 
 .base-timeline__header time {
-  @apply shrink-0 pt-0.5 text-[10px] font-bold text-slate-400 dark:text-slate-500;
+  @apply max-w-full shrink-0 pt-0.5 text-[10px] font-bold text-slate-400 dark:text-slate-500;
+  overflow-wrap: anywhere;
 }
 
 .base-timeline__meta {
   @apply mt-0.5 block truncate text-[10px] font-bold text-slate-400 dark:text-slate-500;
+}
+
+.base-timeline--wrap-title .base-timeline__meta {
+  @apply whitespace-normal break-words;
+  overflow-wrap: anywhere;
 }
 
 .base-timeline__content p {
@@ -324,6 +413,7 @@ const handleKeydown = (event: KeyboardEvent, item: TimelineItem, index: number) 
 .base-timeline--wrap-description .base-timeline__content p {
   display: block;
   overflow: visible;
+  overflow-wrap: anywhere;
 }
 
 .base-timeline__footer {
@@ -335,7 +425,15 @@ const handleKeydown = (event: KeyboardEvent, item: TimelineItem, index: number) 
 }
 
 .base-timeline__actions {
-  @apply shrink-0;
+  @apply flex min-w-0 shrink-0 flex-wrap items-center justify-end gap-2;
+}
+
+.base-timeline__actions :deep(.el-button) {
+  @apply min-w-0;
+}
+
+.base-timeline__actions :deep(.el-button span) {
+  @apply min-w-0 truncate;
 }
 
 .base-timeline--sm .base-timeline__item {
@@ -356,6 +454,21 @@ const handleKeydown = (event: KeyboardEvent, item: TimelineItem, index: number) 
 
 .base-timeline--sm.base-timeline--plain .base-timeline__content {
   @apply p-0;
+}
+
+@container (max-width: 360px) {
+  .base-timeline__main,
+  .base-timeline__actions {
+    @apply w-full basis-full;
+  }
+
+  .base-timeline__actions {
+    @apply justify-start;
+  }
+
+  .base-timeline__header {
+    @apply flex-wrap;
+  }
 }
 
 .base-timeline--lg .base-timeline__item {

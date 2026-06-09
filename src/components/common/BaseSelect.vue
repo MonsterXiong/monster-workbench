@@ -1,12 +1,17 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, nextTick, ref, useId, watchEffect } from "vue";
 import { useI18n } from "../../composables/useI18n";
-import { compactArray } from "../../utils";
+import { getValueIdentity, isSameValueIdentity, joinAriaIds, joinNonEmptyStrings, normalizeStringKey } from "../../utils";
+
+type SelectValue = string | number | boolean | Record<string, unknown> | null | undefined;
+type SelectClearValue = SelectValue | SelectValue[] | (() => SelectValue | SelectValue[]);
 
 interface Option {
   label: string;
   selectedLabel?: string;
-  value: any;
+  value: SelectValue;
+  key?: string | number;
+  filterText?: string;
   description?: string;
   meta?: string;
   icon?: string;
@@ -14,8 +19,10 @@ interface Option {
 }
 
 interface Props {
-  modelValue: any;
+  modelValue: SelectValue | SelectValue[];
   options: Option[];
+  id?: string;
+  name?: string;
   placeholder?: string;
   disabled?: boolean;
   clearable?: boolean;
@@ -34,10 +41,17 @@ interface Props {
   popperClass?: string;
   size?: "xs" | "sm" | "md" | "lg";
   error?: boolean;
+  errorMessage?: string;
+  valueKey?: string;
+  valueOnClear?: SelectClearValue;
+  emptyValues?: Array<SelectValue | SelectValue[]>;
   ariaLabel?: string;
+  ariaDescribedby?: string;
 }
 
 const props = withDefaults(defineProps<Props>(), {
+  id: "",
+  name: "",
   placeholder: "",
   disabled: false,
   clearable: false,
@@ -56,24 +70,40 @@ const props = withDefaults(defineProps<Props>(), {
   popperClass: "",
   size: "md",
   error: false,
+  errorMessage: "",
+  valueKey: "value",
+  valueOnClear: undefined,
+  emptyValues: () => ["", null, undefined, []],
   ariaLabel: "",
+  ariaDescribedby: "",
 });
 
 const emit = defineEmits<{
-  (e: "update:modelValue", val: any): void;
-  (e: "change", val: any): void;
+  (e: "update:modelValue", val: SelectValue | SelectValue[]): void;
+  (e: "change", val: SelectValue | SelectValue[]): void;
   (e: "clear"): void;
   (e: "visible-change", val: boolean): void;
-  (e: "remove-tag", val: any): void;
+  (e: "remove-tag", val: SelectValue): void;
   (e: "focus", event: FocusEvent): void;
   (e: "blur", event: FocusEvent): void;
 }>();
 
 const { t } = useI18n();
+const selectId = useId();
+const rootRef = ref<HTMLElement | null>(null);
+const errorId = `${selectId}-error`;
 
 const resolvedAriaLabel = computed(() => props.ariaLabel || props.placeholder || t("common.selectPlaceholder"));
+const resolvedErrorMessage = computed(() => props.errorMessage);
+const describedBy = computed(() => joinAriaIds([props.ariaDescribedby, resolvedErrorMessage.value ? errorId : undefined]));
 
-const resolvedPopperClass = computed(() => compactArray(["base-select-popper", props.popperClass]).join(" "));
+const resolvedPopperClass = computed(() => joinNonEmptyStrings(["base-select-popper", props.popperClass]));
+
+const resolvedValueOnClear = computed(() => {
+  if (props.multiple) return [];
+  if (props.valueOnClear !== undefined) return props.valueOnClear;
+  return "";
+});
 
 const elSize = computed(() => {
   if (props.size === "xs") return "small";
@@ -89,61 +119,149 @@ const computedValue = computed({
     emit("change", val);
   },
 });
+
+const getSelectValueIdentity = (value: unknown) => getValueIdentity(value, props.valueKey);
+
+const isSameValue = (left: unknown, right: unknown) => {
+  return isSameValueIdentity(left, right, props.valueKey);
+};
+
+const getOptionKey = (option: Option, index: number) => {
+  const identity = getSelectValueIdentity(option.value);
+
+  if (option.key !== undefined) return option.key;
+  if (typeof identity === "string" && identity) return identity;
+  if (typeof identity === "number") return identity;
+  if (typeof identity === "boolean") return String(identity);
+
+  return `${normalizeStringKey(option.label) || "option"}-${index}`;
+};
+
+const getOptionFilterLabel = (option: Option) => {
+  return joinNonEmptyStrings([option.label, option.selectedLabel, option.description, option.meta, option.filterText]);
+};
+
+const getSelectedLabel = (label: string | number | undefined, value: unknown) => {
+  const selectedOption = props.options.find((option) => isSameValue(option.value, value));
+  return selectedOption?.selectedLabel || selectedOption?.label || String(label ?? "");
+};
+
+const syncComboboxAria = async () => {
+  await nextTick();
+  const input = rootRef.value?.querySelector<HTMLInputElement>('input[role="combobox"]');
+  if (!input) return;
+
+  input.setAttribute("aria-label", resolvedAriaLabel.value);
+
+  if (describedBy.value) {
+    input.setAttribute("aria-describedby", describedBy.value);
+  } else {
+    input.removeAttribute("aria-describedby");
+  }
+
+  if (props.error) {
+    input.setAttribute("aria-invalid", "true");
+  } else {
+    input.removeAttribute("aria-invalid");
+  }
+
+  if (resolvedErrorMessage.value) {
+    input.setAttribute("aria-errormessage", errorId);
+  } else {
+    input.removeAttribute("aria-errormessage");
+  }
+
+  if (props.loading) {
+    input.setAttribute("aria-busy", "true");
+  } else {
+    input.removeAttribute("aria-busy");
+  }
+};
+
+watchEffect(() => {
+  void props.modelValue;
+  void props.disabled;
+  void props.loading;
+  void props.error;
+  void resolvedAriaLabel.value;
+  void describedBy.value;
+  void resolvedErrorMessage.value;
+  void syncComboboxAria();
+});
+
 </script>
 
 <template>
-  <el-select
-    v-model="computedValue"
-    :disabled="disabled"
-    :placeholder="placeholder || t('common.selectPlaceholder')"
-    :clearable="clearable"
-    :filterable="filterable"
-    :multiple="multiple"
-    :collapse-tags="collapseTags"
-    :collapse-tags-tooltip="collapseTagsTooltip"
-    :max-collapse-tags="maxCollapseTags"
-    :multiple-limit="multipleLimit"
-    :loading="loading"
-    :loading-text="loadingText || t('common.loading')"
-    :no-data-text="emptyText || t('common.noData')"
-    :no-match-text="noMatchText || emptyText || t('common.noData')"
-    :teleported="teleported"
-    :fit-input-width="fitInputWidth"
-    :popper-class="resolvedPopperClass"
-    :size="elSize"
-    :aria-label="resolvedAriaLabel"
-    :aria-disabled="disabled || undefined"
-    :aria-invalid="error || undefined"
-    class="base-select"
-    :class="[`base-select--${size}`, { 'is-disabled': disabled, 'is-error': error }]"
-    @clear="emit('clear')"
-    @visible-change="emit('visible-change', $event)"
-    @remove-tag="emit('remove-tag', $event)"
-    @focus="emit('focus', $event)"
-    @blur="emit('blur', $event)"
-  >
-    <el-option
-      v-for="opt in options"
-      :key="opt.value"
-      :label="opt.selectedLabel || opt.label"
-      :value="opt.value"
-      :disabled="opt.disabled"
+  <div ref="rootRef" class="base-select-shell">
+    <el-select
+      v-model="computedValue"
+      :id="id || undefined"
+      :name="name || undefined"
+      :disabled="disabled"
+      :placeholder="placeholder || t('common.selectPlaceholder')"
+      :clearable="clearable"
+      :filterable="filterable"
+      :multiple="multiple"
+      :collapse-tags="collapseTags"
+      :collapse-tags-tooltip="collapseTagsTooltip"
+      :max-collapse-tags="maxCollapseTags"
+      :multiple-limit="multipleLimit"
+      :loading="loading"
+      :loading-text="loadingText || t('common.loading')"
+      :no-data-text="emptyText || t('common.noData')"
+      :no-match-text="noMatchText || emptyText || t('common.noData')"
+      :teleported="teleported"
+      :fit-input-width="fitInputWidth"
+      :popper-class="resolvedPopperClass"
+      :value-key="valueKey"
+      :value-on-clear="resolvedValueOnClear"
+      :empty-values="emptyValues"
+      :size="elSize"
+      :aria-label="resolvedAriaLabel"
+      :aria-describedby="describedBy"
+      :aria-disabled="disabled ? 'true' : undefined"
+      :aria-invalid="error ? 'true' : undefined"
+      :aria-errormessage="resolvedErrorMessage ? errorId : undefined"
+      :aria-busy="loading ? 'true' : undefined"
+      class="base-select"
+      :class="[`base-select--${size}`, { 'is-disabled': disabled, 'is-error': error }]"
+      @clear="emit('clear')"
+      @visible-change="emit('visible-change', $event); syncComboboxAria()"
+      @remove-tag="emit('remove-tag', $event)"
+      @focus="emit('focus', $event); syncComboboxAria()"
+      @blur="emit('blur', $event)"
     >
-      <span class="base-select__option">
-        <span class="base-select__option-main">
-          <BaseIcon v-if="opt.icon" :name="opt.icon" size="14" aria-hidden="true" />
-          <span class="base-select__option-text">
-            <span class="base-select__option-label">{{ opt.label }}</span>
-            <small v-if="opt.description">{{ opt.description }}</small>
+      <template #label="{ label, value }">
+        <span class="base-select__selected-label">{{ getSelectedLabel(label, value) }}</span>
+      </template>
+      <el-option
+        v-for="(opt, index) in options"
+        :key="getOptionKey(opt, index)"
+        :label="getOptionFilterLabel(opt)"
+        :value="opt.value"
+        :disabled="opt.disabled"
+      >
+        <span class="base-select__option">
+          <span class="base-select__option-main">
+            <BaseIcon v-if="opt.icon" :name="opt.icon" size="14" aria-hidden="true" />
+            <span class="base-select__option-text">
+              <span class="base-select__option-label">{{ opt.label }}</span>
+              <small v-if="opt.description">{{ opt.description }}</small>
+            </span>
           </span>
+          <span v-if="opt.meta" class="base-select__option-meta">{{ opt.meta }}</span>
         </span>
-        <span v-if="opt.meta" class="base-select__option-meta">{{ opt.meta }}</span>
-      </span>
-    </el-option>
-  </el-select>
+      </el-option>
+    </el-select>
+    <p v-if="resolvedErrorMessage" :id="errorId" class="base-select__error" role="alert">{{ resolvedErrorMessage }}</p>
+  </div>
 </template>
 
 <style scoped>
+.base-select-shell {
+  @apply min-w-0;
+}
+
 .base-select {
   @apply w-full;
 }
@@ -188,16 +306,20 @@ const computedValue = computed({
   @apply text-[11px] font-bold;
 }
 
+.base-select__selected-label {
+  @apply block min-w-0 max-w-full truncate;
+}
+
 :deep(.el-tag) {
   @apply rounded-lg border-slate-200 bg-white text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200;
 }
 
 .base-select__option {
-  @apply flex min-w-0 items-center justify-between gap-3 py-1;
+  @apply flex min-w-0 items-center justify-between gap-3 overflow-hidden py-1;
 }
 
 .base-select__option-main {
-  @apply flex min-w-0 items-center gap-2;
+  @apply flex min-w-0 flex-1 items-center gap-2;
 }
 
 .base-select__option-main :deep(svg) {
@@ -205,7 +327,7 @@ const computedValue = computed({
 }
 
 .base-select__option-text {
-  @apply flex min-w-0 flex-col;
+  @apply flex min-w-0 flex-1 flex-col;
 }
 
 .base-select__option-label {
@@ -217,7 +339,7 @@ const computedValue = computed({
 }
 
 .base-select__option-meta {
-  @apply shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-black text-slate-500 dark:bg-slate-800 dark:text-slate-300;
+  @apply min-w-0 max-w-28 shrink-0 truncate rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-black text-slate-500 dark:bg-slate-800 dark:text-slate-300;
 }
 
 .base-select.is-disabled :deep(.el-select__wrapper) {
@@ -230,6 +352,10 @@ const computedValue = computed({
 
 .is-error :deep(.el-select__wrapper.is-focused) {
   box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.14);
+}
+
+.base-select__error {
+  @apply mt-1.5 text-[10px] font-bold leading-4 text-red-500 dark:text-red-300;
 }
 
 :global(.base-select-popper.el-popper) {
@@ -257,6 +383,7 @@ const computedValue = computed({
   padding: 0 10px;
   color: #334155;
   line-height: 1.25;
+  overflow: hidden;
   transition:
     background-color 0.16s ease,
     color 0.16s ease;

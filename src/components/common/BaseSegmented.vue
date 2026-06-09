@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, useId } from "vue";
-import { filterByFalsyValue, findNextCircularItem, firstItem, getKeyboardBoundaryPosition, getKeyboardNavigationDirection, lastItem } from "../../utils";
+import { computed, nextTick, onBeforeUpdate, ref, useId } from "vue";
+import type { ComponentPublicInstance } from "vue";
+import { filterByFalsyValue, findByValue, findIndexByValue, findNextCircularItem, firstItem, getBoundaryItem, getKeyboardBoundaryPosition, getKeyboardNavigationDirection } from "../../utils";
 import BaseIcon from "./BaseIcon.vue";
 
 export interface SegmentedOption {
@@ -15,10 +16,12 @@ export interface SegmentedOption {
 interface Props {
   modelValue: string | number;
   options: SegmentedOption[];
+  id?: string;
   size?: "sm" | "md" | "lg";
   disabled?: boolean;
   readonly?: boolean;
   loading?: boolean;
+  compact?: boolean;
   block?: boolean;
   wrap?: boolean;
   detailed?: boolean;
@@ -26,13 +29,17 @@ interface Props {
   success?: boolean;
   loadingText?: string;
   ariaLabel?: string;
+  ariaLabelledby?: string;
+  ariaDescribedby?: string;
 }
 
 const props = withDefaults(defineProps<Props>(), {
+  id: "",
   size: "md",
   disabled: false,
   readonly: false,
   loading: false,
+  compact: false,
   block: false,
   wrap: false,
   detailed: false,
@@ -40,6 +47,8 @@ const props = withDefaults(defineProps<Props>(), {
   success: false,
   loadingText: "",
   ariaLabel: "",
+  ariaLabelledby: "",
+  ariaDescribedby: "",
 });
 
 const emit = defineEmits<{
@@ -51,29 +60,57 @@ const emit = defineEmits<{
 }>();
 
 const groupId = useId();
+const optionRefs = ref<Array<HTMLButtonElement | null>>([]);
 const isReadonly = computed(() => props.disabled || props.readonly || props.loading);
 const enabledOptions = computed(() => filterByFalsyValue(props.options, (option) => option.disabled));
 const focusableValue = computed(() => {
   if (props.disabled || props.loading || !enabledOptions.value.length) return undefined;
-  return enabledOptions.value.find((option) => option.value === props.modelValue)?.value ?? firstItem(enabledOptions.value)?.value;
+  return findByValue(enabledOptions.value, (option) => option.value, props.modelValue)?.value ?? firstItem(enabledOptions.value)?.value;
 });
+
+const currentValue = computed({
+  get: () => props.modelValue,
+  set: (value) => {
+    if (isReadonly.value) return;
+    emit("update:modelValue", value);
+    emit("change", value);
+  },
+});
+
+onBeforeUpdate(() => {
+  optionRefs.value = [];
+});
+
+const setOptionRef = (element: Element | ComponentPublicInstance | null, index: number) => {
+  optionRefs.value[index] = element instanceof HTMLButtonElement ? element : null;
+};
+
+const focusOptionByValue = async (value: string | number) => {
+  const optionIndex = findIndexByValue(props.options, (option) => option.value, value);
+  if (optionIndex < 0) return;
+  await nextTick();
+  optionRefs.value[optionIndex]?.focus();
+};
 
 const selectOption = (option: SegmentedOption) => {
   if (isReadonly.value || option.disabled) return;
-  emit("update:modelValue", option.value);
-  emit("change", option.value);
+  currentValue.value = option.value;
 };
 
 const moveSelection = (direction: 1 | -1) => {
   if (isReadonly.value || !enabledOptions.value.length) return;
-  const nextOption = findNextCircularItem(enabledOptions.value, (option) => option.value === props.modelValue, direction);
-  if (nextOption) selectOption(nextOption);
+  const nextOption = findNextCircularItem(enabledOptions.value, (option) => option.value === currentValue.value, direction);
+  if (!nextOption) return;
+  currentValue.value = nextOption.value;
+  void focusOptionByValue(nextOption.value);
 };
 
 const selectBoundary = (position: "first" | "last") => {
   if (isReadonly.value || !enabledOptions.value.length) return;
-  const option = position === "first" ? firstItem(enabledOptions.value) : lastItem(enabledOptions.value);
-  if (option) selectOption(option);
+  const option = getBoundaryItem(enabledOptions.value, position);
+  if (!option) return;
+  currentValue.value = option.value;
+  void focusOptionByValue(option.value);
 };
 
 const handleKeydown = (event: KeyboardEvent) => {
@@ -100,10 +137,12 @@ const iconSize = computed(() => {
 
 const optionLabelId = (index: number) => `${groupId}-label-${index}`;
 const optionDescriptionId = (index: number) => `${groupId}-description-${index}`;
+const optionButtonId = (index: number) => `${groupId}-option-${index}`;
 </script>
 
 <template>
   <div
+    :id="id || undefined"
     class="base-segmented"
     :class="[
       `base-segmented--${size}`,
@@ -111,6 +150,7 @@ const optionDescriptionId = (index: number) => `${groupId}-description-${index}`
         'base-segmented--disabled': disabled,
         'base-segmented--readonly': readonly,
         'base-segmented--loading': loading,
+        'base-segmented--compact': compact,
         'base-segmented--block': block,
         'base-segmented--wrap': wrap,
         'base-segmented--detailed': detailed,
@@ -119,26 +159,31 @@ const optionDescriptionId = (index: number) => `${groupId}-description-${index}`
       }
     ]"
     role="radiogroup"
-    :aria-label="ariaLabel || undefined"
-    :aria-disabled="disabled ? 'true' : undefined"
+    :aria-label="ariaLabelledby ? undefined : ariaLabel || undefined"
+    :aria-labelledby="ariaLabelledby || undefined"
+    :aria-describedby="ariaDescribedby || undefined"
+    :aria-disabled="(disabled || loading) ? 'true' : undefined"
     :aria-readonly="readonly ? 'true' : undefined"
     :aria-busy="loading ? 'true' : undefined"
+    :aria-invalid="error ? 'true' : undefined"
     @keydown="handleKeydown"
   >
     <span v-if="loading && loadingText" class="sr-only">{{ loadingText }}</span>
     <button
       v-for="(option, index) in options"
       :key="option.value"
+      :id="optionButtonId(index)"
+      :ref="(element) => setOptionRef(element, index)"
       type="button"
       role="radio"
       class="base-segmented__item"
       :class="{
-        'is-active': modelValue === option.value,
+        'is-active': currentValue === option.value,
         'is-disabled': disabled || loading || option.disabled,
         'is-readonly': readonly
       }"
       :disabled="disabled || loading || option.disabled"
-      :aria-checked="modelValue === option.value"
+      :aria-checked="currentValue === option.value"
       :aria-disabled="(disabled || loading || option.disabled) ? 'true' : undefined"
       :aria-readonly="readonly ? 'true' : undefined"
       :aria-labelledby="optionLabelId(index)"
@@ -149,7 +194,7 @@ const optionDescriptionId = (index: number) => `${groupId}-description-${index}`
       @blur="emit('blur', $event)"
     >
       <BaseIcon
-        v-if="loading && modelValue === option.value"
+        v-if="loading && currentValue === option.value"
         name="LoaderCircle"
         :size="iconSize"
         class="base-segmented__spinner"
@@ -182,6 +227,10 @@ const optionDescriptionId = (index: number) => `${groupId}-description-${index}`
   @apply flex-wrap;
 }
 
+.base-segmented--compact {
+  @apply rounded-xl p-0.5;
+}
+
 .base-segmented--disabled {
   @apply opacity-60;
 }
@@ -192,7 +241,7 @@ const optionDescriptionId = (index: number) => `${groupId}-description-${index}`
 }
 
 .base-segmented__item {
-  @apply inline-flex shrink-0 items-center justify-center gap-1.5 rounded-xl font-black text-slate-500 transition-colors disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-400;
+  @apply inline-flex shrink-0 items-center justify-center gap-1.5 rounded-xl border border-transparent font-black text-slate-500 transition-colors disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-400;
 }
 
 .base-segmented--block .base-segmented__item {
@@ -207,6 +256,10 @@ const optionDescriptionId = (index: number) => `${groupId}-description-${index}`
   @apply px-2.5 py-1.5 text-[10px];
 }
 
+.base-segmented--compact .base-segmented__item {
+  @apply rounded-lg px-2.5 py-1.5 text-[10px];
+}
+
 .base-segmented--md .base-segmented__item {
   @apply px-3 py-2 text-xs;
 }
@@ -217,6 +270,12 @@ const optionDescriptionId = (index: number) => `${groupId}-description-${index}`
 
 .base-segmented__item:hover:not(:disabled):not(.is-readonly) {
   @apply text-slate-800 dark:text-slate-100;
+}
+
+.base-segmented__item:focus-visible {
+  border-color: rgb(var(--color-primary));
+  box-shadow: 0 0 0 3px rgb(var(--color-primary) / 0.14);
+  outline: none;
 }
 
 .base-segmented__item.is-disabled {
@@ -235,8 +294,18 @@ const optionDescriptionId = (index: number) => `${groupId}-description-${index}`
   @apply bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300;
 }
 
+.base-segmented--success .base-segmented__item:focus-visible {
+  @apply border-emerald-400;
+  box-shadow: 0 0 0 3px rgb(16 185 129 / 0.14);
+}
+
 .base-segmented--error .base-segmented__item.is-active {
   @apply bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-300;
+}
+
+.base-segmented--error .base-segmented__item:focus-visible {
+  @apply border-red-400;
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.14);
 }
 
 .base-segmented__text {
@@ -262,6 +331,14 @@ const optionDescriptionId = (index: number) => `${groupId}-description-${index}`
 .base-segmented__item.is-active .base-segmented__meta {
   background-color: rgb(var(--color-primary) / 0.12);
   @apply text-primary;
+}
+
+.base-segmented--success .base-segmented__item.is-active .base-segmented__meta {
+  @apply bg-emerald-100 text-emerald-700 dark:bg-emerald-900 dark:text-emerald-200;
+}
+
+.base-segmented--error .base-segmented__item.is-active .base-segmented__meta {
+  @apply bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-200;
 }
 
 .base-segmented__description {

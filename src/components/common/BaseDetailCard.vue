@@ -1,15 +1,19 @@
 <script setup lang="ts">
 import { computed, useId } from "vue";
 import type { DescriptionListItem } from "./BaseDescriptionList.vue";
-import { isActivationKey } from "../../utils";
+import { createDomIdMap, createLineClampStyle, handleActivationKeydown, isEventFromInteractiveElement, joinAriaIds } from "../../utils";
+
+type DetailCardLevel = 2 | 3 | 4 | 5 | 6;
 
 interface Props {
   title: string;
   description?: string;
   icon?: string;
   status?: string;
+  statusLabel?: string;
   statusType?: "primary" | "success" | "warning" | "danger" | "neutral";
   meta?: string;
+  metaLabel?: string;
   items?: DescriptionListItem[];
   columns?: 1 | 2 | 3;
   compact?: boolean;
@@ -17,17 +21,34 @@ interface Props {
   surface?: "card" | "muted" | "plain";
   size?: "sm" | "md" | "lg";
   loading?: boolean;
+  loadingText?: string;
   disabled?: boolean;
   clickable?: boolean;
+  level?: DetailCardLevel;
+  wrapTitle?: boolean;
+  wrapDescription?: boolean;
+  wrapMeta?: boolean;
+  maxDescriptionLines?: number;
+  wrapListLabel?: boolean;
+  wrapListValue?: boolean;
+  wrapListDescription?: boolean;
+  ariaDescribedby?: string;
   ariaLabel?: string;
+  actionsLabel?: string;
+  tagsLabel?: string;
+  listLabel?: string;
+  bodyLabel?: string;
+  footerLabel?: string;
 }
 
 const props = withDefaults(defineProps<Props>(), {
   description: "",
   icon: "",
   status: "",
+  statusLabel: "",
   statusType: "primary",
   meta: "",
+  metaLabel: "",
   items: () => [],
   columns: 2,
   compact: false,
@@ -35,9 +56,24 @@ const props = withDefaults(defineProps<Props>(), {
   surface: "card",
   size: "md",
   loading: false,
+  loadingText: "",
   disabled: false,
   clickable: false,
+  level: 3,
+  wrapTitle: false,
+  wrapDescription: false,
+  wrapMeta: false,
+  maxDescriptionLines: 2,
+  wrapListLabel: false,
+  wrapListValue: false,
+  wrapListDescription: false,
+  ariaDescribedby: "",
   ariaLabel: "",
+  actionsLabel: "",
+  tagsLabel: "",
+  listLabel: "",
+  bodyLabel: "",
+  footerLabel: "",
 });
 
 const emit = defineEmits<{
@@ -46,22 +82,44 @@ const emit = defineEmits<{
 }>();
 
 const detailId = useId();
-const titleId = `${detailId}-title`;
-const descriptionId = `${detailId}-description`;
-const describedBy = computed(() => (props.description ? descriptionId : undefined));
+const detailIds = createDomIdMap(detailId, ["title", "description"]);
+const titleId = detailIds.title;
+const descriptionId = detailIds.description;
+const statusId = `${detailId}-status`;
+const metaId = `${detailId}-meta`;
+const loadingId = `${detailId}-loading`;
+const hasDescription = computed(() => Boolean(props.description));
+const hasStatus = computed(() => Boolean(props.status));
+const hasMeta = computed(() => Boolean(props.meta));
+const headingTag = computed(() => `h${props.level}`);
+const labelledBy = computed(() => (props.ariaLabel ? undefined : titleId));
+const describedBy = computed(() =>
+  joinAriaIds([
+    hasDescription.value ? descriptionId : undefined,
+    hasStatus.value ? statusId : undefined,
+    hasMeta.value && props.metaLabel ? metaId : undefined,
+    props.loading && props.loadingText ? loadingId : undefined,
+    props.ariaDescribedby,
+  ])
+);
 const resolvedSurface = computed(() => (props.muted ? "muted" : props.surface));
 const isInteractive = computed(() => props.clickable && !props.disabled && !props.loading);
+const descriptionStyle = computed(() => {
+  if (props.wrapDescription) return undefined;
+  return createLineClampStyle(props.maxDescriptionLines);
+});
 
 const handleClick = (event: MouseEvent) => {
   if (!isInteractive.value) return;
+  if (isEventFromInteractiveElement(event)) return;
   emit("click", event);
 };
 
 const handleKeydown = (event: KeyboardEvent) => {
   emit("keydown", event);
-  if (!isInteractive.value || !isActivationKey(event)) return;
-  event.preventDefault();
-  emit("click", event);
+  if (!isInteractive.value) return;
+  if (isEventFromInteractiveElement(event)) return;
+  handleActivationKeydown(event, () => emit("click", event));
 };
 </script>
 
@@ -74,15 +132,18 @@ const handleKeydown = (event: KeyboardEvent) => {
         'base-detail-card--compact': compact,
         'base-detail-card--muted': resolvedSurface === 'muted',
         'base-detail-card--plain': resolvedSurface === 'plain',
+        'base-detail-card--wrap-title': wrapTitle,
+        'base-detail-card--wrap-description': wrapDescription,
+        'base-detail-card--wrap-meta': wrapMeta,
         'is-loading': loading,
         'is-disabled': disabled,
         'is-clickable': clickable
       }
     ]"
     :role="clickable ? 'button' : undefined"
-    :tabindex="clickable && !disabled ? 0 : undefined"
+    :tabindex="isInteractive ? 0 : undefined"
     :aria-label="ariaLabel || undefined"
-    :aria-labelledby="titleId"
+    :aria-labelledby="labelledBy"
     :aria-describedby="describedBy"
     :aria-busy="loading ? 'true' : undefined"
     :aria-disabled="disabled ? 'true' : undefined"
@@ -96,20 +157,26 @@ const handleKeydown = (event: KeyboardEvent) => {
         </div>
         <div class="base-detail-card__text">
           <div class="base-detail-card__title-row">
-            <h3 :id="titleId">{{ title }}</h3>
-            <BaseBadge v-if="status" :type="statusType" variant="outline">{{ status }}</BaseBadge>
+            <component :is="headingTag" :id="titleId">{{ title }}</component>
+            <BaseBadge v-if="status" :id="statusId" :type="statusType" variant="outline" :aria-label="statusLabel || undefined">{{ status }}</BaseBadge>
           </div>
-          <p v-if="description" :id="descriptionId">{{ description }}</p>
-          <span v-if="meta" class="base-detail-card__meta">{{ meta }}</span>
+          <p v-if="description" :id="descriptionId" :style="descriptionStyle">{{ description }}</p>
+          <span v-if="meta" :id="metaLabel ? metaId : undefined" class="base-detail-card__meta" :aria-label="metaLabel || undefined">{{ meta }}</span>
+          <span v-if="loading && loadingText" :id="loadingId" class="sr-only">{{ loadingText }}</span>
         </div>
       </div>
 
-      <div v-if="$slots.actions" class="base-detail-card__actions">
+      <div
+        v-if="$slots.actions"
+        class="base-detail-card__actions"
+        :role="actionsLabel ? 'group' : undefined"
+        :aria-label="actionsLabel || undefined"
+      >
         <slot name="actions"></slot>
       </div>
     </header>
 
-    <div v-if="$slots.tags" class="base-detail-card__tags">
+    <div v-if="$slots.tags" class="base-detail-card__tags" :role="tagsLabel ? 'group' : undefined" :aria-label="tagsLabel || undefined">
       <slot name="tags"></slot>
     </div>
 
@@ -120,13 +187,20 @@ const handleKeydown = (event: KeyboardEvent) => {
       :columns="columns"
       :bordered="false"
       :compact="compact"
+      :loading="loading"
+      :disabled="disabled"
+      :loading-text="loadingText"
+      :wrap-label="wrapListLabel"
+      :wrap-value="wrapListValue"
+      :wrap-description="wrapListDescription"
+      :aria-label="listLabel"
     />
 
-    <div v-if="$slots.default" class="base-detail-card__body">
+    <div v-if="$slots.default" class="base-detail-card__body" :role="bodyLabel ? 'group' : undefined" :aria-label="bodyLabel || undefined">
       <slot></slot>
     </div>
 
-    <footer v-if="$slots.footer" class="base-detail-card__footer">
+    <footer v-if="$slots.footer" class="base-detail-card__footer" :aria-label="footerLabel || undefined">
       <slot name="footer"></slot>
     </footer>
   </article>
@@ -206,20 +280,37 @@ const handleKeydown = (event: KeyboardEvent) => {
   @apply flex min-w-0 flex-wrap items-center gap-2;
 }
 
-.base-detail-card__title-row h3 {
+.base-detail-card__title-row :is(h2, h3, h4, h5, h6) {
   @apply min-w-0 truncate text-sm font-black text-slate-900 dark:text-slate-100;
 }
 
-.base-detail-card--lg .base-detail-card__title-row h3 {
+.base-detail-card--lg .base-detail-card__title-row :is(h2, h3, h4, h5, h6) {
   @apply text-base;
 }
 
+.base-detail-card--wrap-title .base-detail-card__title-row :is(h2, h3, h4, h5, h6) {
+  @apply whitespace-normal break-words;
+}
+
 .base-detail-card__text p {
-  @apply mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400;
+  @apply mt-1 overflow-hidden text-xs leading-5 text-slate-500 dark:text-slate-400;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+}
+
+.base-detail-card--wrap-description .base-detail-card__text p {
+  @apply whitespace-normal break-words;
+  display: block;
 }
 
 .base-detail-card__meta {
-  @apply mt-1 inline-flex text-[10px] font-black uppercase tracking-wide text-slate-400 dark:text-slate-500;
+  @apply mt-1 inline-flex max-w-full overflow-hidden truncate text-[10px] font-black uppercase tracking-wide text-slate-400 dark:text-slate-500;
+}
+
+.base-detail-card--wrap-meta .base-detail-card__meta {
+  @apply whitespace-normal break-words;
+  overflow: visible;
+  text-overflow: clip;
 }
 
 .base-detail-card__actions {

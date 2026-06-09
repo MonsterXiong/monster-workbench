@@ -1,33 +1,37 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
-import { Minus, Plus } from "lucide-vue-next";
+import { computed, nextTick, onMounted, onUpdated, ref } from "vue";
+import { LoaderCircle } from "lucide-vue-next";
 import { useI18n } from "../../composables/useI18n";
 import {
   clampNumber,
   formatNumber,
-  getEventTargetValue,
   getKeyboardBoundaryPosition,
-  getKeyboardNavigationDirection,
-  isEscapeKey,
+  getNumberPrecision,
   isFiniteNumber,
-  isKeyboardKey,
-  isNaNNumber,
+  normalizeNumberStep,
   parseFormattedNumber,
 } from "../../utils";
 
 interface Props {
   modelValue: number;
+  id?: string;
+  name?: string;
   min?: number;
   max?: number;
   step?: number;
   precision?: number;
   disabled?: boolean;
   readonly?: boolean;
+  loading?: boolean;
   error?: boolean;
+  success?: boolean;
   placeholder?: string;
   unit?: string;
   formatValue?: boolean;
+  autocomplete?: string;
   ariaLabel?: string;
+  ariaLabelledby?: string;
+  ariaDescribedby?: string;
   decrementLabel?: string;
   incrementLabel?: string;
   size?: "sm" | "md" | "lg";
@@ -35,17 +39,24 @@ interface Props {
 }
 
 const props = withDefaults(defineProps<Props>(), {
+  id: "",
+  name: "",
   min: Number.NEGATIVE_INFINITY,
   max: Number.POSITIVE_INFINITY,
   step: 1,
   precision: 0,
   disabled: false,
   readonly: false,
+  loading: false,
   error: false,
+  success: false,
   placeholder: "",
   unit: "",
   formatValue: false,
+  autocomplete: "off",
   ariaLabel: "",
+  ariaLabelledby: "",
+  ariaDescribedby: "",
   decrementLabel: "",
   incrementLabel: "",
   size: "md",
@@ -63,21 +74,34 @@ const emit = defineEmits<{
 }>();
 
 const { t } = useI18n();
-const inputText = ref("");
+type NumberControlRef = HTMLElement | { $el?: Element | null } | null;
+const numberControlRef = ref<NumberControlRef>(null);
 
-const isReadonly = computed(() => props.readonly || props.disabled);
+const isReadonly = computed(() => props.readonly || props.disabled || props.loading);
 const resolvedAriaLabel = computed(() => props.ariaLabel || props.placeholder || t("common.inputPlaceholder"));
+const resolvedAriaDisabled = computed(() => (props.disabled || props.loading ? "true" : undefined));
+const resolvedAriaReadonly = computed(() => (props.readonly || props.loading ? "true" : undefined));
+const rawMin = computed(() => (isFiniteNumber(props.min) ? props.min : Number.MIN_SAFE_INTEGER));
+const rawMax = computed(() => (isFiniteNumber(props.max) ? props.max : Number.MAX_SAFE_INTEGER));
+const normalizedMin = computed(() => Math.min(rawMin.value, rawMax.value));
+const normalizedMax = computed(() => Math.max(rawMin.value, rawMax.value));
+const normalizedStep = computed(() => normalizeNumberStep(props.step));
+const normalizedPrecision = computed(() => Math.max(props.precision, getNumberPrecision(normalizedStep.value)));
+const elementSize = computed(() => {
+  if (props.size === "sm") return "small";
+  if (props.size === "lg") return "large";
+  return "default";
+});
 
 const clamp = (nextValue: number) => {
-  return clampNumber(nextValue, props.min, props.max, 0, props.precision);
+  return clampNumber(nextValue, normalizedMin.value, normalizedMax.value, 0, normalizedPrecision.value);
 };
 
 const currentValue = computed(() => clamp(props.modelValue));
-const canDecrease = computed(() => !isReadonly.value && currentValue.value > props.min);
-const canIncrease = computed(() => !isReadonly.value && currentValue.value < props.max);
 
-const formatText = (value: number) => {
-  const normalizedValue = clamp(value);
+const formatText = (value: number | string) => {
+  const parsedValue = typeof value === "number" ? value : parseFormattedNumber(value, props.unit);
+  const normalizedValue = clamp(parsedValue);
   return props.formatValue ? formatNumber(normalizedValue) : String(normalizedValue);
 };
 
@@ -86,44 +110,36 @@ const resolvedValueText = computed(() => {
   return props.unit ? `${valueText} ${props.unit}` : valueText;
 });
 
-const syncInputText = () => {
-  inputText.value = formatText(currentValue.value);
-};
-
 const parseInput = (nextValue: string) => {
-  return parseFormattedNumber(nextValue, props.unit);
+  const parsedValue = parseFormattedNumber(nextValue, props.unit);
+  return isFiniteNumber(parsedValue) ? String(parsedValue) : String(currentValue.value);
 };
 
-const commitValue = (nextValue: number) => {
+const normalizeInputNumberValue = (value: number | null | undefined) => {
+  return isFiniteNumber(value) ? clamp(value) : currentValue.value;
+};
+
+const commitValue = (nextValue: number | null | undefined) => {
   if (isReadonly.value) return;
-  const normalizedValue = clamp(nextValue);
+  const normalizedValue = normalizeInputNumberValue(nextValue);
   emit("update:modelValue", normalizedValue);
   emit("change", normalizedValue);
-  inputText.value = formatText(normalizedValue);
 };
 
-const commitInputText = () => {
-  const parsedValue = parseInput(inputText.value);
-  if (isNaNNumber(parsedValue)) {
-    syncInputText();
-    return;
-  }
-
-  commitValue(parsedValue);
+const handleValueUpdate = (value: number | null | undefined) => {
+  if (isReadonly.value) return;
+  emit("update:modelValue", normalizeInputNumberValue(value));
 };
 
-const stepValue = (direction: 1 | -1) => {
-  commitValue(currentValue.value + props.step * direction);
+const handleInput = (value: number | null | undefined) => {
+  emit("input", value === null || value === undefined ? "" : String(value));
 };
 
-const handleInput = (event: Event) => {
-  const nextValue = getEventTargetValue(event);
-  inputText.value = nextValue;
-  emit("input", nextValue);
+const handleChange = (value: number | null | undefined) => {
+  commitValue(value);
 };
 
 const handleBlur = (event: FocusEvent) => {
-  commitInputText();
   emit("blur", event);
 };
 
@@ -131,46 +147,72 @@ const handleKeydown = (event: KeyboardEvent) => {
   emit("keydown", event);
   if (isReadonly.value) return;
 
-  if (isKeyboardKey(event, "Enter")) {
-    event.preventDefault();
-    commitInputText();
-    return;
-  }
-
-  if (isEscapeKey(event)) {
-    event.preventDefault();
-    syncInputText();
-    return;
-  }
-
-  const direction = getKeyboardNavigationDirection(event, {
-    forwardKeys: ["ArrowUp"],
-    backwardKeys: ["ArrowDown"],
-  });
-  if (direction) {
-    event.preventDefault();
-    stepValue(direction);
-    return;
-  }
-
   const boundaryPosition = getKeyboardBoundaryPosition(event);
-  if (boundaryPosition === "first" && isFiniteNumber(props.min)) {
+  if (boundaryPosition === "first" && isFiniteNumber(normalizedMin.value)) {
     event.preventDefault();
-    commitValue(props.min);
+    commitValue(normalizedMin.value);
     return;
   }
 
-  if (boundaryPosition === "last" && isFiniteNumber(props.max)) {
+  if (boundaryPosition === "last" && isFiniteNumber(normalizedMax.value)) {
     event.preventDefault();
-    commitValue(props.max);
+    commitValue(normalizedMax.value);
   }
 };
 
-watch(
-  () => [props.modelValue, props.precision, props.unit, props.formatValue] as const,
-  syncInputText,
-  { immediate: true }
-);
+const getNumberElement = () => {
+  const current = numberControlRef.value;
+  if (!current) return null;
+  if (current instanceof HTMLElement) return current;
+  return current.$el instanceof HTMLElement ? current.$el : null;
+};
+
+const setOptionalAttribute = (element: HTMLElement, name: string, value?: string | null) => {
+  if (value) {
+    element.setAttribute(name, value);
+    return;
+  }
+  element.removeAttribute(name);
+};
+
+const setOptionalElementAttribute = (element: HTMLElement | null | undefined, name: string, value?: string | null) => {
+  if (!element) return;
+  setOptionalAttribute(element, name, value);
+};
+
+const syncNumberInputDom = async () => {
+  await nextTick();
+  const numberElement = getNumberElement();
+  const input = numberElement?.querySelector<HTMLInputElement>("input");
+  if (input) {
+    setOptionalAttribute(input, "autocomplete", props.autocomplete);
+    setOptionalAttribute(input, "aria-label", props.ariaLabelledby ? undefined : resolvedAriaLabel.value);
+    setOptionalAttribute(input, "aria-labelledby", props.ariaLabelledby);
+    setOptionalAttribute(input, "aria-describedby", props.ariaDescribedby);
+    setOptionalAttribute(input, "aria-invalid", props.error ? "true" : undefined);
+    setOptionalAttribute(input, "aria-busy", props.loading ? "true" : undefined);
+    setOptionalAttribute(input, "aria-disabled", props.loading ? "true" : undefined);
+    setOptionalAttribute(input, "aria-readonly", resolvedAriaReadonly.value);
+    setOptionalAttribute(input, "aria-valuemin", isFiniteNumber(props.min) ? String(normalizedMin.value) : undefined);
+    setOptionalAttribute(input, "aria-valuemax", isFiniteNumber(props.max) ? String(normalizedMax.value) : undefined);
+    setOptionalAttribute(input, "aria-valuetext", resolvedValueText.value);
+  }
+
+  const decrease = numberElement?.querySelector<HTMLElement>(".el-input-number__decrease");
+  const increase = numberElement?.querySelector<HTMLElement>(".el-input-number__increase");
+  setOptionalElementAttribute(decrease, "aria-label", props.decrementLabel || t("common.decrease"));
+  setOptionalElementAttribute(decrease, "title", props.decrementLabel || t("common.decrease"));
+  setOptionalElementAttribute(increase, "aria-label", props.incrementLabel || t("common.increase"));
+  setOptionalElementAttribute(increase, "title", props.incrementLabel || t("common.increase"));
+};
+
+onMounted(() => {
+  void syncNumberInputDom();
+});
+
+onUpdated(() => {
+  void syncNumberInputDom();
+});
 </script>
 
 <template>
@@ -178,54 +220,58 @@ watch(
     class="base-number-input"
     :class="[
       `base-number-input--${size}`,
-      { 'is-disabled': disabled, 'is-readonly': readonly, 'is-error': error, 'has-unit': unit, 'base-number-input--block': block }
+      {
+        'is-disabled': disabled,
+        'is-readonly': readonly,
+        'is-loading': loading,
+        'is-error': error,
+        'is-success': success,
+        'has-unit': unit,
+        'base-number-input--block': block
+      }
     ]"
     role="group"
-    :aria-disabled="disabled || readonly ? 'true' : undefined"
+    :aria-disabled="resolvedAriaDisabled"
+    :aria-readonly="resolvedAriaReadonly"
+    :aria-busy="loading ? 'true' : undefined"
   >
-    <button
-      type="button"
-      class="base-number-input__stepper"
-      :disabled="!canDecrease"
-      :aria-label="decrementLabel || t('common.decrease')"
-      :title="decrementLabel || t('common.decrease')"
-      @click="stepValue(-1)"
-    >
-      <Minus class="h-3.5 w-3.5" aria-hidden="true" />
-    </button>
-    <input
-      :value="inputText"
+    <el-input-number
+      :id="id || undefined"
+      ref="numberControlRef"
+      :name="name || undefined"
       class="base-number-input__control"
-      type="text"
-      role="spinbutton"
-      inputmode="decimal"
-      :placeholder="placeholder || t('common.inputPlaceholder')"
-      :disabled="disabled"
+      :model-value="currentValue"
+      :min="normalizedMin"
+      :max="normalizedMax"
+      :step="normalizedStep"
+      :precision="normalizedPrecision"
+      :disabled="disabled || loading"
       :readonly="readonly"
-      :aria-label="resolvedAriaLabel"
-      :aria-invalid="error ? 'true' : undefined"
-      :aria-readonly="readonly ? 'true' : undefined"
-      :aria-valuemin="isFiniteNumber(min) ? min : undefined"
-      :aria-valuemax="isFiniteNumber(max) ? max : undefined"
-      :aria-valuenow="currentValue"
-      :aria-valuetext="resolvedValueText"
+      :size="elementSize"
+      :controls="true"
+      controls-position=""
+      align="center"
+      inputmode="decimal"
+      disabled-scientific
+      :formatter="formatText"
+      :parser="parseInput"
+      :placeholder="placeholder || t('common.inputPlaceholder')"
+      :validate-event="false"
+      :aria-label="ariaLabelledby ? undefined : resolvedAriaLabel"
+      :tabindex="0"
+      @update:model-value="handleValueUpdate"
       @input="handleInput"
+      @change="handleChange"
       @blur="handleBlur"
       @focus="emit('focus', $event)"
-      @keydown="handleKeydown"
-      @keyup="emit('keyup', $event)"
-    />
-    <span v-if="unit" class="base-number-input__unit" aria-hidden="true">{{ unit }}</span>
-    <button
-      type="button"
-      class="base-number-input__stepper"
-      :disabled="!canIncrease"
-      :aria-label="incrementLabel || t('common.increase')"
-      :title="incrementLabel || t('common.increase')"
-      @click="stepValue(1)"
+      @keydown.capture="handleKeydown"
+      @keyup.capture="emit('keyup', $event)"
     >
-      <Plus class="h-3.5 w-3.5" aria-hidden="true" />
-    </button>
+      <template v-if="loading || unit" #suffix>
+        <LoaderCircle v-if="loading" class="base-number-input__loading" aria-hidden="true" />
+        <span v-if="unit" class="base-number-input__unit" aria-hidden="true">{{ unit }}</span>
+      </template>
+    </el-input-number>
   </div>
 </template>
 
@@ -260,62 +306,137 @@ watch(
 .base-number-input:focus-within {
   border-color: rgb(var(--color-primary));
   box-shadow:
-    0 0 0 3px rgba(var(--color-primary), 0.15),
+    0 0 0 3px rgb(var(--color-primary) / 0.15),
     0 8px 18px rgba(15, 23, 42, 0.06);
   @apply bg-white dark:bg-slate-900;
+}
+
+.base-number-input.is-success {
+  @apply border-emerald-300 bg-emerald-50 dark:border-emerald-900 dark:bg-emerald-950;
+}
+
+.base-number-input.is-success:focus-within {
+  @apply border-emerald-400;
+  box-shadow:
+    0 0 0 3px rgb(16 185 129 / 0.14),
+    0 8px 18px rgba(15, 23, 42, 0.06);
 }
 
 .base-number-input.is-error {
   @apply border-red-400 bg-red-50 dark:border-red-800 dark:bg-red-950;
 }
 
+.base-number-input.is-error:focus-within {
+  @apply border-red-400;
+  box-shadow:
+    0 0 0 3px rgba(239, 68, 68, 0.14),
+    0 8px 18px rgba(15, 23, 42, 0.06);
+}
+
 .base-number-input.is-disabled {
   @apply opacity-60;
 }
 
-.base-number-input.is-readonly {
+.base-number-input.is-readonly,
+.base-number-input.is-loading {
   @apply bg-slate-100 dark:bg-slate-900;
 }
 
-.base-number-input__stepper {
-  @apply flex h-full w-8 shrink-0 items-center justify-center bg-slate-50 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset focus-visible:ring-opacity-30 disabled:cursor-not-allowed disabled:opacity-45 dark:bg-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100;
-}
-
-.base-number-input__stepper:first-child {
-  @apply border-r border-slate-200 dark:border-slate-800;
-}
-
-.base-number-input__stepper:last-child {
-  @apply border-l border-slate-200 dark:border-slate-800;
-}
-
-.base-number-input--sm .base-number-input__stepper {
-  @apply w-7;
-}
-
-.base-number-input--lg .base-number-input__stepper {
-  @apply w-9;
-}
-
 .base-number-input__control {
-  @apply h-full min-w-0 flex-1 bg-transparent px-2 text-center text-xs font-black text-slate-700 outline-none disabled:cursor-not-allowed dark:text-slate-100;
-  font-variant-numeric: tabular-nums;
+  @apply h-full min-w-0 flex-1;
 }
 
-.base-number-input__control::placeholder {
+.base-number-input--block .base-number-input__control {
+  @apply w-full;
+}
+
+:deep(.el-input-number) {
+  width: 100%;
+  height: 100%;
+}
+
+:deep(.el-input-number .el-input) {
+  height: 100%;
+}
+
+:deep(.el-input-number .el-input__wrapper) {
+  @apply h-full rounded-none border-0 bg-transparent px-8 shadow-none transition-none dark:bg-transparent;
+  box-shadow: none !important;
+}
+
+:deep(.el-input-number .el-input__wrapper:hover),
+:deep(.el-input-number .el-input__wrapper.is-focus),
+:deep(.el-input-number .el-input__wrapper:focus-within),
+:deep(.el-input-number__decrease:hover ~ .el-input:not(.is-disabled) .el-input__wrapper),
+:deep(.el-input-number__increase:hover ~ .el-input:not(.is-disabled) .el-input__wrapper) {
+  box-shadow: none !important;
+}
+
+:deep(.el-input-number .el-input__inner) {
+  @apply h-full min-w-0 bg-transparent px-0 text-center text-xs font-black text-slate-700 outline-none dark:text-slate-100;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+:deep(.el-input-number .el-input__inner::placeholder) {
   @apply text-slate-400 dark:text-slate-500;
 }
 
-.base-number-input--lg .base-number-input__control {
+.base-number-input--lg :deep(.el-input-number .el-input__inner) {
   @apply text-sm;
 }
 
-.base-number-input.has-unit .base-number-input__control {
-  @apply pr-1;
+:deep(.el-input-number__decrease),
+:deep(.el-input-number__increase) {
+  @apply top-0 flex h-full w-8 items-center justify-center rounded-none border-0 bg-slate-50 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset focus-visible:ring-opacity-30 dark:bg-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100;
+}
+
+:deep(.el-input-number__decrease) {
+  @apply left-0 border-r border-slate-200 dark:border-slate-800;
+}
+
+:deep(.el-input-number__increase) {
+  @apply right-0 border-l border-slate-200 dark:border-slate-800;
+}
+
+:deep(.el-input-number__decrease.is-disabled),
+:deep(.el-input-number__increase.is-disabled),
+.base-number-input.is-readonly :deep(.el-input-number__decrease),
+.base-number-input.is-readonly :deep(.el-input-number__increase),
+.base-number-input.is-loading :deep(.el-input-number__decrease),
+.base-number-input.is-loading :deep(.el-input-number__increase) {
+  @apply cursor-not-allowed opacity-45;
+}
+
+.base-number-input--sm :deep(.el-input-number .el-input__wrapper) {
+  @apply px-7;
+}
+
+.base-number-input--sm :deep(.el-input-number__decrease),
+.base-number-input--sm :deep(.el-input-number__increase) {
+  @apply w-7;
+}
+
+.base-number-input--lg :deep(.el-input-number .el-input__wrapper) {
+  @apply px-9;
+}
+
+.base-number-input--lg :deep(.el-input-number__decrease),
+.base-number-input--lg :deep(.el-input-number__increase) {
+  @apply w-9;
+}
+
+.base-number-input__loading {
+  @apply mr-1 h-3.5 w-3.5 shrink-0 text-slate-400 dark:text-slate-500;
+  animation: base-number-input-spin 0.9s linear infinite;
 }
 
 .base-number-input__unit {
   @apply mr-1 inline-flex h-5 shrink-0 items-center rounded-md bg-slate-100 px-1.5 text-[10px] font-black text-slate-500 dark:bg-slate-800 dark:text-slate-400;
+}
+
+.base-number-input.is-success .base-number-input__unit {
+  @apply bg-emerald-100 text-emerald-700 dark:bg-emerald-900 dark:text-emerald-300;
 }
 
 .base-number-input.is-error .base-number-input__unit {
@@ -324,8 +445,17 @@ watch(
 
 @media (prefers-reduced-motion: reduce) {
   .base-number-input,
-  .base-number-input__stepper {
+  :deep(.el-input-number__decrease),
+  :deep(.el-input-number__increase),
+  .base-number-input__loading {
     transition: none !important;
+    animation: none !important;
+  }
+}
+
+@keyframes base-number-input-spin {
+  to {
+    transform: rotate(360deg);
   }
 }
 </style>

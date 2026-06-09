@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from "vue";
-import { filterTreeNodeKeys, getFirstTruthyRecordValue, getKeyboardBoundaryPosition, getKeyboardNavigationDirection, getNextClampedIndex, hasItem, isHTMLElement, isKeyboardKey, queryVisibleElements, setSelectionKey, uniqueArray } from "../../utils";
+import { filterTreeNodeKeys, findIndexByValue, focusElementPreventScroll, getFirstTruthyRecordValue, getKeyboardBoundaryPosition, getKeyboardNavigationDirection, getLastIndex, getNextClampedIndex, hasItem, isHTMLElement, isKeyboardKey, queryVisibleElements, setSelectionKey, uniqueArray } from "../../utils";
 
 type TreeSize = "sm" | "md" | "lg";
 type TreeSurface = "card" | "muted" | "plain";
@@ -147,13 +147,16 @@ const focusTreeItem = (items: HTMLButtonElement[], index: number) => {
   if (!target) return;
 
   void nextTick(() => {
-    target.focus({ preventScroll: true });
+    focusElementPreventScroll(target);
   });
 };
 
 const focusSibling = (event: KeyboardEvent, offset: 1 | -1) => {
   const items = getVisibleTreeItems(event.currentTarget);
-  const currentIndex = items.findIndex((item) => item === event.currentTarget);
+  const currentTarget = event.currentTarget;
+  if (!isHTMLElement(currentTarget)) return;
+
+  const currentIndex = findIndexByValue(items, (item) => item, currentTarget);
   if (currentIndex === -1) return;
 
   const nextIndex = getNextClampedIndex(items.length, currentIndex, offset);
@@ -183,7 +186,7 @@ const handleNodeKeydown = (event: KeyboardEvent, node: TreeNode) => {
   if (boundaryPosition === "last") {
     event.preventDefault();
     const items = getVisibleTreeItems(event.currentTarget);
-    focusTreeItem(items, items.length - 1);
+    focusTreeItem(items, getLastIndex(items));
     return;
   }
 

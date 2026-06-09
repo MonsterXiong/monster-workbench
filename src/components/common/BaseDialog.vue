@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { computed, useId } from "vue";
+import { computed, useId, useSlots } from "vue";
 import { useI18n } from "../../composables/useI18n";
+import { joinAriaIds, resolveCssSizeAlias } from "../../utils";
 
 type DialogSize = "sm" | "md" | "lg" | "xl";
 type DialogLevel = 2 | 3 | 4 | 5 | 6;
 type DialogFooterAlign = "start" | "end" | "between";
+type DialogRole = "dialog" | "alertdialog";
 
 interface Props {
   modelValue: boolean;
@@ -28,9 +30,13 @@ interface Props {
   confirmLoading?: boolean;
   confirmLoadingText?: string;
   footerAlign?: DialogFooterAlign;
+  role?: DialogRole;
   wrapTitle?: boolean;
   wrapDescription?: boolean;
   ariaLabel?: string;
+  ariaDescribedby?: string;
+  actionsLabel?: string;
+  closeLabel?: string;
   bodyLabel?: string;
   footerLabel?: string;
 }
@@ -56,14 +62,19 @@ const props = withDefaults(defineProps<Props>(), {
   confirmLoading: false,
   confirmLoadingText: "",
   footerAlign: "end",
+  role: "dialog",
   wrapTitle: false,
   wrapDescription: false,
   ariaLabel: "",
+  ariaDescribedby: "",
+  actionsLabel: "",
+  closeLabel: "",
   bodyLabel: "",
   footerLabel: "",
 });
 
 const { t } = useI18n();
+const slots = useSlots();
 const dialogId = useId();
 
 const emit = defineEmits<{
@@ -86,18 +97,21 @@ const headingTag = computed(() => `h${props.level}`);
 const resolvedLoadingText = computed(() => props.loadingText || t("common.loading"));
 const resolvedConfirmLoadingText = computed(() => props.confirmLoadingText || "处理中");
 const isCloseDisabled = computed(() => props.closeDisabled || (props.lockCloseOnLoading && (props.loading || props.confirmLoading)));
+const hasCustomHeader = computed(() => Boolean(slots.header));
+const resolvedCloseLabel = computed(() => props.closeLabel || t("common.close"));
+const resolvedDialogLabel = computed(() => {
+  if (props.ariaLabel) return props.ariaLabel;
+  if (hasCustomHeader.value) return props.title || t("common.dialog");
+  return "";
+});
+const labelledBy = computed(() => (resolvedDialogLabel.value ? undefined : titleId.value));
+const describedBy = computed(() =>
+  joinAriaIds([!hasCustomHeader.value && props.description ? descriptionId.value : undefined, props.ariaDescribedby])
+);
+const resolvedActionsLabel = computed(() => props.actionsLabel || `${props.title || props.ariaLabel || t("common.dialog")} 操作`);
 const resolvedWidth = computed(() => {
   if (props.width) {
-    const widthMap: Record<string, string> = {
-      "max-w-sm": "384px",
-      "max-w-md": "448px",
-      "max-w-lg": "512px",
-      "max-w-xl": "576px",
-      "max-w-2xl": "672px",
-      "max-w-3xl": "768px",
-      "max-w-4xl": "896px",
-    };
-    return widthMap[props.width] ?? props.width;
+    return resolveCssSizeAlias(props.width);
   }
 
   const sizeMap: Record<DialogSize, string> = {
@@ -140,9 +154,11 @@ const handleBeforeClose = (done: () => void) => {
     :fullscreen="fullscreen"
     :top="top"
     :before-close="handleBeforeClose"
-    :aria-label="ariaLabel || (!title ? t('common.dialog') : undefined)"
-    :aria-labelledby="title ? titleId : undefined"
-    :aria-describedby="description ? descriptionId : undefined"
+    :role="role"
+    aria-modal="true"
+    :aria-label="resolvedDialogLabel || undefined"
+    :aria-labelledby="labelledBy"
+    :aria-describedby="describedBy"
     :aria-busy="loading || confirmLoading ? 'true' : undefined"
     @closed="handleClose"
   >
@@ -161,16 +177,17 @@ const handleBeforeClose = (done: () => void) => {
             </div>
           </slot>
         </div>
-        <div v-if="$slots.actions || showClose" class="base-dialog__header-actions">
+        <div v-if="$slots.actions || showClose" class="base-dialog__header-actions" role="group" :aria-label="resolvedActionsLabel">
           <slot name="actions"></slot>
           <button
             v-if="showClose"
             type="button"
             class="base-dialog__close"
             :disabled="isCloseDisabled"
-            :aria-label="t('common.close')"
-            :title="t('common.close')"
-            @click="close"
+            :aria-label="resolvedCloseLabel"
+            :title="resolvedCloseLabel"
+            data-ignore-container-click
+            @click.stop="close"
           >
             <BaseIcon name="X" size="16" aria-hidden="true" />
           </button>
@@ -182,7 +199,13 @@ const handleBeforeClose = (done: () => void) => {
       <slot></slot>
     </div>
     <template #footer v-if="$slots.footer">
-      <div :id="footerId" class="dialog-footer" :class="`dialog-footer--${footerAlign}`" :aria-label="footerLabel || undefined">
+      <div
+        :id="footerId"
+        class="dialog-footer"
+        :class="`dialog-footer--${footerAlign}`"
+        :role="footerLabel ? 'group' : undefined"
+        :aria-label="footerLabel || undefined"
+      >
         <BaseLoading v-if="confirmLoading" type="spinner" size="sm" :text="resolvedConfirmLoadingText" direction="horizontal" compact />
         <slot name="footer"></slot>
       </div>
@@ -210,7 +233,8 @@ const handleBeforeClose = (done: () => void) => {
 }
 
 .base-dialog__header-actions {
-  @apply flex shrink-0 flex-wrap items-center justify-end gap-2;
+  @apply ml-auto flex min-w-0 shrink-0 flex-wrap items-center justify-end gap-2;
+  max-width: 100%;
 }
 
 .base-dialog__title {
@@ -224,6 +248,7 @@ const handleBeforeClose = (done: () => void) => {
 
 .base-dialog__description {
   @apply mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400;
+  overflow-wrap: anywhere;
 }
 
 .base-dialog--wrap-description .base-dialog__description {
@@ -232,6 +257,11 @@ const handleBeforeClose = (done: () => void) => {
 
 .base-dialog__close {
   @apply flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200;
+}
+
+.base-dialog__close:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(var(--color-primary), 0.18);
 }
 
 .base-dialog__close:disabled {
@@ -244,6 +274,20 @@ const handleBeforeClose = (done: () => void) => {
 
 .dialog-footer {
   @apply flex min-w-0 flex-wrap items-center justify-end gap-2;
+}
+
+.base-dialog__header-actions :deep(.el-button),
+.dialog-footer :deep(.el-button) {
+  min-width: 0;
+  max-width: 100%;
+  white-space: normal;
+}
+
+.base-dialog__header-actions :deep(.el-button > span),
+.dialog-footer :deep(.el-button > span) {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .dialog-footer--start {
@@ -272,6 +316,21 @@ const handleBeforeClose = (done: () => void) => {
 
 :deep(.base-dialog.is-fullscreen .el-dialog__body) {
   @apply max-h-none;
+}
+
+@media (max-width: 640px) {
+  .base-dialog__header {
+    @apply gap-2;
+  }
+
+  .base-dialog__header-actions {
+    @apply gap-1.5;
+  }
+
+  .dialog-footer,
+  .dialog-footer--between {
+    @apply justify-start;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

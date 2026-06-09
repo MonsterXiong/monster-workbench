@@ -2,7 +2,7 @@
 import { computed } from "vue";
 import BaseIcon from "./BaseIcon.vue";
 import { useI18n } from "../../composables/useI18n";
-import { getByPath, hasItem, toIntegerAtLeast } from "../../utils";
+import { getByPath, hasSelectionKey, toIntegerAtLeast } from "../../utils";
 
 export interface BaseTableColumn {
   key: string;
@@ -72,7 +72,7 @@ const getRowKey = (row: any, index: number) => {
   return index;
 };
 
-const isRowSelected = (row: any, index: number) => hasItem(props.selectedKeys, getRowKey(row, index));
+const isRowSelected = (row: any, index: number) => hasSelectionKey(props.selectedKeys, getRowKey(row, index));
 const getCellValue = (row: any, key: string) => getByPath(row, key, "");
 </script>
 
@@ -241,6 +241,19 @@ const getCellValue = (row: any, key: string) => getByPath(row, key, "");
 .base-table__cell {
   @apply min-w-0 truncate px-4 py-3 text-sm text-slate-800 dark:text-slate-200;
   vertical-align: top;
+}
+
+.base-table__cell :deep(.el-button),
+.base-table__cell :deep(.base-badge) {
+  max-width: 100%;
+  min-width: 0;
+}
+
+.base-table__cell :deep(.el-button > span),
+.base-table__cell :deep(.base-badge) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .base-table--wrap-cells .base-table__cell,

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref } from "vue";
 import type { ComponentPublicInstance } from "vue";
-import { filterByFalsyValue, findIndexByValue, firstItem, getFirstRecordValue, getKeyboardBoundaryPosition, getKeyboardNavigationDirection, getNextClampedIndex, lastItem } from "../../utils";
+import { compactMap, findIndexByValue, focusElementPreventScroll, getBoundaryItem, getFirstRecordValue, getKeyboardBoundaryPosition, getKeyboardNavigationDirection, getNextClampedIndex, handleActivationKeydown, isEventFromInteractiveElement, isHTMLElement } from "../../utils";
 
 type ListVariant = "card" | "plain" | "row";
 type ListSize = "xs" | "sm" | "md" | "lg";
@@ -92,10 +92,7 @@ const isDisabled = (item: any) => Boolean(props.disabled || item?.[props.disable
 const isActive = (item: any, index: number) => props.activeKey !== null && getItemKey(item, index) === props.activeKey;
 const isInteractive = computed(() => props.clickable && !props.disabled && !props.loading);
 const enabledEntries = computed(() =>
-  filterByFalsyValue(
-    props.items.map((item, index) => ({ item, index, key: getItemKey(item, index) })),
-    ({ item }) => isDisabled(item)
-  ),
+  compactMap(props.items, (item, index) => (isDisabled(item) ? undefined : { item, index, key: getItemKey(item, index) })),
 );
 
 const setItemRef = (key: string | number, element: Element | ComponentPublicInstance | null) => {
@@ -104,20 +101,25 @@ const setItemRef = (key: string | number, element: Element | ComponentPublicInst
     return;
   }
 
-  if (element instanceof HTMLElement) {
+  if (isHTMLElement(element)) {
     itemRefs.value.set(key, element);
   }
 };
 
-const handleItemClick = (item: any, index: number) => {
+const selectItem = (item: any, index: number) => {
   if (!isInteractive.value || isDisabled(item)) return;
   emit("item-click", item, index);
   emit("select", item, index);
 };
 
+const handleItemClick = (event: MouseEvent, item: any, index: number) => {
+  if (isEventFromInteractiveElement(event)) return;
+  selectItem(item, index);
+};
+
 const focusItem = (key: string | number) => {
   void nextTick(() => {
-    itemRefs.value.get(key)?.focus({ preventScroll: true });
+    focusElementPreventScroll(itemRefs.value.get(key));
   });
 };
 
@@ -131,6 +133,11 @@ const moveFocus = (item: any, index: number, offset: 1 | -1) => {
 
 const handleItemKeydown = (event: KeyboardEvent, item: any, index: number) => {
   if (!isInteractive.value || isDisabled(item)) return;
+  if (isEventFromInteractiveElement(event)) return;
+
+  if (handleActivationKeydown(event, () => selectItem(item, index))) {
+    return;
+  }
 
   const direction = getKeyboardNavigationDirection(event);
   if (direction) {
@@ -140,17 +147,10 @@ const handleItemKeydown = (event: KeyboardEvent, item: any, index: number) => {
   }
 
   const boundaryPosition = getKeyboardBoundaryPosition(event);
-  if (boundaryPosition === "first") {
+  if (boundaryPosition) {
     event.preventDefault();
-    const firstEntry = firstItem(enabledEntries.value);
-    if (firstEntry) focusItem(firstEntry.key);
-    return;
-  }
-
-  if (boundaryPosition === "last") {
-    event.preventDefault();
-    const lastEntry = lastItem(enabledEntries.value);
-    if (lastEntry) focusItem(lastEntry.key);
+    const targetEntry = getBoundaryItem(enabledEntries.value, boundaryPosition);
+    if (targetEntry) focusItem(targetEntry.key);
   }
 };
 </script>
@@ -211,9 +211,7 @@ const handleItemKeydown = (event: KeyboardEvent, item: any, index: number) => {
         :aria-current="isInteractive && isActive(item, idx) ? 'page' : undefined"
         :aria-disabled="isDisabled(item) ? 'true' : undefined"
         :aria-label="isInteractive ? getItemLabel(item) : undefined"
-        @click="handleItemClick(item, idx)"
-        @keydown.enter="handleItemClick(item, idx)"
-        @keydown.space.prevent="handleItemClick(item, idx)"
+        @click="handleItemClick($event, item, idx)"
         @keydown="handleItemKeydown($event, item, idx)"
       >
         <slot :item="item" :index="idx" :active="isActive(item, idx)" :disabled="isDisabled(item)">

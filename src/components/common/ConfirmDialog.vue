@@ -1,26 +1,38 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from "vue";
 import { useConfirm } from "../../composables/useConfirm";
-import { addDomEventListener, firstItem, focusElement, getActiveHTMLElement, isEscapeKey, isKeyboardKey, lastItem, queryElements, type DomEventCleanup } from "../../utils";
+import { useI18n } from "../../composables/useI18n";
+import { addDomEventListener, focusElement, getActiveHTMLElement, getBoundaryItems, isEscapeKey, isKeyboardKey, joinAriaIds, queryFocusableElements, toTrimmedString, type DomEventCleanup } from "../../utils";
 import BaseIcon from "./BaseIcon.vue";
 
 const { visible, options, handleConfirm, handleCancel } = useConfirm();
+const { t } = useI18n();
 const confirmDialogId = useId();
 const titleId = `${confirmDialogId}-title`;
 const messageId = `${confirmDialogId}-message`;
+const keywordHintId = `${confirmDialogId}-keyword-hint`;
+const keywordErrorId = `${confirmDialogId}-keyword-error`;
 const panelRef = ref<HTMLElement | null>(null);
+const keywordInputRef = ref<HTMLInputElement | null>(null);
+const keywordInputValue = ref("");
+const keywordInputTouched = ref(false);
 let previousActiveElement: HTMLElement | null = null;
 let stopKeydownListener: DomEventCleanup | null = null;
 
 const isDanger = computed(() => Boolean(options.value.danger));
 const dialogRole = computed(() => (isDanger.value ? "alertdialog" : "dialog"));
 const dialogIcon = computed(() => (isDanger.value ? "AlertTriangle" : "Info"));
+const normalizedConfirmKeyword = computed(() => toTrimmedString(options.value.confirmKeyword));
+const hasConfirmKeyword = computed(() => normalizedConfirmKeyword.value.length > 0);
+const isConfirmKeywordMatched = computed(() => !hasConfirmKeyword.value || toTrimmedString(keywordInputValue.value) === normalizedConfirmKeyword.value);
+const resolvedConfirmInputLabel = computed(() => options.value.confirmInputLabel || t("common.confirmKeywordLabel"));
+const resolvedConfirmInputPlaceholder = computed(() => options.value.confirmInputPlaceholder || t("common.confirmKeywordPlaceholder"));
+const resolvedConfirmInputHint = computed(() => options.value.confirmInputHint || `${t("common.confirmKeywordHint")} ${normalizedConfirmKeyword.value}`);
+const resolvedConfirmMismatchText = computed(() => options.value.confirmMismatchText || t("common.confirmKeywordMismatch"));
+const showConfirmKeywordError = computed(() => keywordInputTouched.value && !isConfirmKeywordMatched.value);
+const confirmKeywordDescribedBy = computed(() => joinAriaIds([keywordHintId, showConfirmKeywordError.value ? keywordErrorId : undefined]));
 
-const getFocusableElements = () =>
-  queryElements<HTMLElement>(
-    panelRef.value,
-    'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])'
-  );
+const getFocusableElements = () => queryFocusableElements(panelRef.value);
 
 const handleKeydown = (event: KeyboardEvent) => {
   if (!visible.value) return;
@@ -39,8 +51,7 @@ const handleKeydown = (event: KeyboardEvent) => {
       return;
     }
 
-    const firstElement = firstItem(focusableElements);
-    const lastElement = lastItem(focusableElements);
+    const { first: firstElement, last: lastElement } = getBoundaryItems(focusableElements);
 
     if (event.shiftKey && document.activeElement === firstElement) {
       event.preventDefault();
@@ -50,6 +61,20 @@ const handleKeydown = (event: KeyboardEvent) => {
       focusElement(firstElement);
     }
   }
+};
+
+const handleConfirmClick = () => {
+  if (!isConfirmKeywordMatched.value) {
+    keywordInputTouched.value = true;
+    focusElement(keywordInputRef.value);
+    return;
+  }
+
+  handleConfirm();
+};
+
+const handleKeywordInput = () => {
+  keywordInputTouched.value = true;
 };
 
 onMounted(() => {
@@ -66,8 +91,10 @@ watch(
   (nextVisible) => {
     if (nextVisible) {
       previousActiveElement = getActiveHTMLElement();
+      keywordInputValue.value = "";
+      keywordInputTouched.value = false;
       nextTick(() => {
-        focusElement(panelRef.value);
+        focusElement(hasConfirmKeyword.value ? keywordInputRef.value : panelRef.value);
       });
     } else {
       nextTick(() => {
@@ -127,6 +154,27 @@ watch(
             {{ options.message }}
           </p>
 
+          <label v-if="hasConfirmKeyword" class="confirm-dialog__keyword">
+            <span class="confirm-dialog__keyword-label">{{ resolvedConfirmInputLabel }}</span>
+            <input
+              ref="keywordInputRef"
+              v-model="keywordInputValue"
+              class="confirm-dialog__keyword-input"
+              type="text"
+              autocomplete="off"
+              spellcheck="false"
+              :placeholder="resolvedConfirmInputPlaceholder"
+              :aria-invalid="showConfirmKeywordError"
+              :aria-describedby="confirmKeywordDescribedBy"
+              @input="handleKeywordInput"
+              @blur="keywordInputTouched = true"
+            />
+            <span :id="keywordHintId" class="confirm-dialog__keyword-hint">{{ resolvedConfirmInputHint }}</span>
+            <span v-if="showConfirmKeywordError" :id="keywordErrorId" class="confirm-dialog__keyword-error" role="status">
+              {{ resolvedConfirmMismatchText }}
+            </span>
+          </label>
+
           <!-- 操作按钮 -->
           <div class="confirm-dialog__actions">
             <button
@@ -142,9 +190,10 @@ watch(
               type="button"
               class="confirm-dialog__button confirm-dialog__button--confirm"
               :class="options.danger ? 'confirm-dialog__button--danger' : 'confirm-dialog__button--primary'"
+              :disabled="!isConfirmKeywordMatched"
               :aria-label="options.confirmText"
               :title="options.confirmText"
-              @click="handleConfirm"
+              @click="handleConfirmClick"
             >
               {{ options.confirmText }}
             </button>
@@ -179,6 +228,31 @@ watch(
   overflow-wrap: anywhere;
 }
 
+.confirm-dialog__keyword {
+  @apply mt-4 grid min-w-0 gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950;
+}
+
+.confirm-dialog__keyword-label {
+  @apply text-[11px] font-black text-slate-700 dark:text-slate-200;
+}
+
+.confirm-dialog__keyword-input {
+  @apply h-9 min-w-0 rounded-xl border border-slate-300 bg-white px-3 text-xs font-bold text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-primary focus:ring-2 focus:ring-primary focus:ring-opacity-20 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-500;
+}
+
+.confirm-dialog__keyword-input[aria-invalid="true"] {
+  @apply border-red-300 focus:border-red-500 focus:ring-red-500 dark:border-red-800 dark:focus:border-red-500;
+}
+
+.confirm-dialog__keyword-hint {
+  @apply text-[11px] leading-4 text-slate-500 dark:text-slate-400;
+  overflow-wrap: anywhere;
+}
+
+.confirm-dialog__keyword-error {
+  @apply text-[11px] font-bold leading-4 text-red-600 dark:text-red-400;
+}
+
 .confirm-dialog__actions {
   @apply mt-6 flex flex-wrap items-center justify-end gap-2.5;
 }
@@ -203,6 +277,10 @@ watch(
 .confirm-dialog__button--danger {
   @apply bg-red-600 hover:bg-red-700;
   box-shadow: 0 10px 18px rgba(239, 68, 68, 0.12);
+}
+
+.confirm-dialog__button:disabled {
+  @apply cursor-not-allowed opacity-50 shadow-none hover:scale-100 active:scale-100;
 }
 
 @media (max-width: 480px) {

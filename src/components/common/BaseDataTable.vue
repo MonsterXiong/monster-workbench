@@ -1,11 +1,16 @@
 <script setup lang="ts">
+import { computed, useId } from "vue";
 import { useI18n } from "../../composables/useI18n";
+import { joinAriaIds } from "../../utils";
 
 export interface DataTableColumn {
   key: string;
   title: string;
   width?: string;
   align?: "left" | "center" | "right";
+  headerAlign?: "left" | "center" | "right";
+  wrap?: boolean;
+  ariaLabel?: string;
 }
 
 interface Props {
@@ -38,9 +43,21 @@ interface Props {
   showPagination?: boolean;
   hidePaginationWhenEmpty?: boolean;
   compact?: boolean;
+  ariaLabel?: string;
+  ariaLabelledby?: string;
+  ariaDescribedby?: string;
+  actionsLabel?: string;
+  filtersLabel?: string;
+  bodyLabel?: string;
+  paginationLabel?: string;
+  loadingText?: string;
+  wrapTitle?: boolean;
+  wrapDescription?: boolean;
+  wrapCells?: boolean;
+  tableMinWidth?: string;
 }
 
-withDefaults(defineProps<Props>(), {
+const props = withDefaults(defineProps<Props>(), {
   description: "",
   loading: false,
   disabled: false,
@@ -67,9 +84,38 @@ withDefaults(defineProps<Props>(), {
   showPagination: true,
   hidePaginationWhenEmpty: false,
   compact: false,
+  ariaLabel: "",
+  ariaLabelledby: "",
+  ariaDescribedby: "",
+  actionsLabel: "",
+  filtersLabel: "",
+  bodyLabel: "",
+  paginationLabel: "",
+  loadingText: "",
+  wrapTitle: false,
+  wrapDescription: false,
+  wrapCells: false,
+  tableMinWidth: "100%",
 });
 
 const { t } = useI18n();
+const dataTableId = useId();
+const titleId = `base-data-table-title-${dataTableId}`;
+const descriptionId = `base-data-table-description-${dataTableId}`;
+const labelledBy = computed(() => (props.ariaLabel ? undefined : props.ariaLabelledby || titleId));
+const describedBy = computed(() => joinAriaIds([props.description ? descriptionId : undefined, props.ariaDescribedby]));
+const isEmpty = computed(() => props.data.length === 0);
+const isInteractiveDisabled = computed(() => props.disabled || props.loading);
+const resolvedLoadingText = computed(() => props.loadingText || t("common.loading"));
+const resolvedBodyLabel = computed(() => props.bodyLabel || props.tableAriaLabel || props.tableCaption || props.title);
+const resolvedPaginationLabel = computed(() => props.paginationLabel || `${props.title} ${t("common.pagination.label")}`);
+const resolvedFiltersLabel = computed(() => props.filtersLabel || t("common.toolbar"));
+const slotState = computed(() => ({
+  disabled: props.disabled,
+  loading: props.loading,
+  empty: isEmpty.value,
+  interactiveDisabled: isInteractiveDisabled.value,
+}));
 
 const emit = defineEmits<{
   (e: "update:page", value: number): void;
@@ -87,13 +133,19 @@ const handlePageChange = (payload: { page: number; pageSize: number }) => {
     class="base-data-table"
     :class="{
       'base-data-table--compact': compact,
+      'is-loading': loading,
       'is-disabled': disabled,
     }"
     role="region"
-    :aria-label="title"
-    :aria-busy="loading ? 'true' : 'false'"
+    :aria-label="ariaLabel || undefined"
+    :aria-labelledby="labelledBy"
+    :aria-describedby="describedBy"
+    :aria-busy="loading ? 'true' : undefined"
     :aria-disabled="disabled ? 'true' : undefined"
   >
+    <span :id="titleId" class="sr-only">{{ title }}</span>
+    <span v-if="description" :id="descriptionId" class="sr-only">{{ description }}</span>
+
     <BaseTableToolbar
       :title="title"
       :description="description"
@@ -103,19 +155,26 @@ const handlePageChange = (payload: { page: number; pageSize: number }) => {
       :compact="compact"
       :loading="loading"
       :disabled="disabled"
+      :actions-label="actionsLabel || undefined"
+      :content-label="resolvedFiltersLabel"
+      :wrap-title="wrapTitle"
+      :wrap-description="wrapDescription"
+      :loading-text="resolvedLoadingText"
     >
       <template v-if="$slots.meta" #meta>
-        <slot name="meta"></slot>
+        <slot name="meta" v-bind="slotState"></slot>
       </template>
 
       <template v-if="$slots.actions" #actions>
-        <slot name="actions"></slot>
+        <slot name="actions" v-bind="slotState"></slot>
       </template>
 
-      <slot name="filters"></slot>
+      <template v-if="$slots.filters" #default>
+        <slot name="filters" v-bind="slotState"></slot>
+      </template>
     </BaseTableToolbar>
 
-    <div class="base-data-table__body">
+    <div class="base-data-table__body" role="group" :aria-label="resolvedBodyLabel">
       <BaseTable
         :columns="columns"
         :data="data"
@@ -134,6 +193,9 @@ const handlePageChange = (payload: { page: number; pageSize: number }) => {
         :skeleton-rows="skeletonRows"
         :caption="tableCaption"
         :aria-label="tableAriaLabel || title"
+        :loading-text="resolvedLoadingText"
+        :wrap-cells="wrapCells"
+        :min-width="tableMinWidth"
       >
         <template v-for="column in columns" :key="column.key" #[column.key]="slotProps">
           <slot :name="column.key" v-bind="slotProps">
@@ -143,14 +205,22 @@ const handlePageChange = (payload: { page: number; pageSize: number }) => {
       </BaseTable>
     </div>
 
-    <footer v-if="showPagination && !(hidePaginationWhenEmpty && !loading && data.length === 0)" class="base-data-table__footer">
+    <footer
+      v-if="showPagination && !(hidePaginationWhenEmpty && !loading && data.length === 0)"
+      class="base-data-table__footer"
+      role="group"
+      :aria-label="resolvedPaginationLabel"
+    >
       <BasePagination
         :page="page"
         :page-size="pageSize"
         :total="total"
         :page-size-options="pageSizeOptions"
-        :disabled="loading || disabled"
+        :loading="loading"
+        :disabled="disabled"
         :compact="compact"
+        :loading-text="resolvedLoadingText"
+        :aria-label="resolvedPaginationLabel"
         @update:page="emit('update:page', $event)"
         @update:page-size="emit('update:pageSize', $event)"
         @change="handlePageChange"
@@ -162,6 +232,11 @@ const handlePageChange = (payload: { page: number; pageSize: number }) => {
 <style scoped>
 .base-data-table {
   @apply min-w-0 space-y-3;
+}
+
+.base-data-table.is-disabled,
+.base-data-table.is-loading {
+  @apply opacity-75;
 }
 
 .base-data-table--compact {

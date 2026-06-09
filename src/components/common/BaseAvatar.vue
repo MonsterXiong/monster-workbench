@@ -1,13 +1,22 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref, watch } from "vue";
 import { useI18n } from "../../composables/useI18n";
-import { getInitials } from "../../utils";
+import { getInitials, joinNonEmptyStrings } from "../../utils";
 
 interface Props {
   name?: string;
   src?: string;
-  size?: "sm" | "md" | "lg";
+  size?: "xs" | "sm" | "md" | "lg" | "xl";
   status?: "online" | "busy" | "offline" | "none";
+  shape?: "circle" | "rounded";
+  fallback?: string;
+  icon?: string;
+  alt?: string;
+  ariaLabel?: string;
+  statusLabel?: string;
+  clickable?: boolean;
+  disabled?: boolean;
+  loading?: boolean;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -15,30 +24,129 @@ const props = withDefaults(defineProps<Props>(), {
   src: "",
   size: "md",
   status: "none",
+  shape: "circle",
+  fallback: "?",
+  icon: "",
+  alt: "",
+  ariaLabel: "",
+  statusLabel: "",
+  clickable: false,
+  disabled: false,
+  loading: false,
 });
 
-const initials = computed(() => getInitials(props.name));
+const emit = defineEmits<{
+  (e: "click", event: MouseEvent): void;
+}>();
 
 const { t } = useI18n();
+const imageFailed = ref(false);
+const initials = computed(() => getInitials(props.name, props.fallback));
+const canShowImage = computed(() => Boolean(props.src && !imageFailed.value && !props.loading));
+const canShowIcon = computed(() => Boolean(props.icon && !canShowImage.value && !props.loading));
+const isInteractive = computed(() => props.clickable && !props.disabled && !props.loading);
 
 const ariaLabel = computed(() => {
+  if (props.ariaLabel) return props.ariaLabel;
   const displayName = props.name || t("common.avatar");
-  if (props.status === "none") return displayName;
-  return `${displayName}, ${t(`common.avatarStatus.${props.status}`)}`;
+  const statusLabel = props.statusLabel || (props.status === "none" ? "" : t(`common.avatarStatus.${props.status}`));
+  const loadingLabel = props.loading ? t("common.loading") : "";
+  return joinNonEmptyStrings([displayName, statusLabel, loadingLabel], ", ");
 });
+
+const handleImageError = () => {
+  imageFailed.value = true;
+};
+
+const handleClick = (event: MouseEvent) => {
+  if (!isInteractive.value) return;
+  emit("click", event);
+};
+
+watch(
+  () => props.src,
+  () => {
+    imageFailed.value = false;
+  }
+);
 </script>
 
 <template>
-  <span class="base-avatar" :class="[`base-avatar--${size}`, `base-avatar--${status}`]" role="img" :aria-label="ariaLabel">
-    <img v-if="src" :src="src" alt="" aria-hidden="true" />
-    <span v-else aria-hidden="true">{{ initials }}</span>
+  <button
+    v-if="clickable"
+    type="button"
+    class="base-avatar"
+    :class="[
+      `base-avatar--${size}`,
+      `base-avatar--${status}`,
+      `base-avatar--${shape}`,
+      {
+        'is-disabled': disabled,
+        'is-loading': loading,
+        'is-clickable': isInteractive,
+      },
+    ]"
+    :disabled="disabled || loading"
+    :aria-label="ariaLabel"
+    :aria-busy="loading ? 'true' : undefined"
+    :aria-disabled="disabled || loading ? 'true' : undefined"
+    @click="handleClick"
+  >
+    <span v-if="loading" class="base-avatar__spinner" aria-hidden="true">
+      <BaseIcon name="LoaderCircle" size="14" />
+    </span>
+    <img v-else-if="canShowImage" :src="src" :alt="alt" :aria-hidden="alt ? undefined : 'true'" @error="handleImageError" />
+    <BaseIcon v-else-if="canShowIcon" :name="icon" size="16" aria-hidden="true" />
+    <span v-else class="base-avatar__initials" aria-hidden="true">{{ initials }}</span>
+    <i v-if="status !== 'none'" class="base-avatar__status" aria-hidden="true"></i>
+  </button>
+
+  <span
+    v-else
+    class="base-avatar"
+    :class="[
+      `base-avatar--${size}`,
+      `base-avatar--${status}`,
+      `base-avatar--${shape}`,
+      {
+        'is-disabled': disabled,
+        'is-loading': loading,
+      },
+    ]"
+    role="img"
+    :aria-label="ariaLabel"
+    :aria-busy="loading ? 'true' : undefined"
+    :aria-disabled="disabled || loading ? 'true' : undefined"
+  >
+    <span v-if="loading" class="base-avatar__spinner" aria-hidden="true">
+      <BaseIcon name="LoaderCircle" size="14" />
+    </span>
+    <img v-else-if="canShowImage" :src="src" :alt="alt" :aria-hidden="alt ? undefined : 'true'" @error="handleImageError" />
+    <BaseIcon v-else-if="canShowIcon" :name="icon" size="16" aria-hidden="true" />
+    <span v-else class="base-avatar__initials" aria-hidden="true">{{ initials }}</span>
     <i v-if="status !== 'none'" class="base-avatar__status" aria-hidden="true"></i>
   </span>
 </template>
 
 <style scoped>
 .base-avatar {
-  @apply relative inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full border border-slate-200 bg-slate-100 font-black text-slate-600 shadow-sm dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200;
+  @apply relative inline-flex shrink-0 items-center justify-center overflow-hidden border border-slate-200 bg-slate-100 p-0 font-black text-slate-600 shadow-sm outline-none transition dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200;
+}
+
+button.base-avatar {
+  @apply cursor-pointer hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 focus:ring-2 focus:ring-primary focus:ring-opacity-20 disabled:cursor-not-allowed dark:hover:border-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-100;
+}
+
+.base-avatar--circle {
+  @apply rounded-full;
+}
+
+.base-avatar--rounded {
+  @apply rounded-xl;
+}
+
+.base-avatar--xs {
+  @apply h-6 w-6 text-[9px];
 }
 
 .base-avatar--sm {
@@ -53,13 +161,33 @@ const ariaLabel = computed(() => {
   @apply h-12 w-12 text-sm;
 }
 
+.base-avatar--xl {
+  @apply h-16 w-16 text-base;
+}
+
 .base-avatar img {
   @apply h-full w-full object-cover;
+}
+
+.base-avatar__initials {
+  @apply max-w-full truncate px-1;
+}
+
+.base-avatar__spinner {
+  @apply inline-flex items-center justify-center text-primary;
+}
+
+.base-avatar__spinner :deep(svg) {
+  animation: base-avatar-spin 0.9s linear infinite;
 }
 
 .base-avatar__status {
   @apply absolute bottom-0 right-0 rounded-full border-2 border-white dark:border-slate-900;
   background-color: var(--avatar-status-color);
+}
+
+.base-avatar--xs .base-avatar__status {
+  @apply h-2 w-2 border;
 }
 
 .base-avatar--sm .base-avatar__status {
@@ -74,6 +202,15 @@ const ariaLabel = computed(() => {
   @apply h-3.5 w-3.5;
 }
 
+.base-avatar--xl .base-avatar__status {
+  @apply h-4 w-4;
+}
+
+.base-avatar.is-disabled,
+.base-avatar.is-loading {
+  @apply opacity-70;
+}
+
 .base-avatar--online {
   --avatar-status-color: #10b981;
 }
@@ -84,5 +221,19 @@ const ariaLabel = computed(() => {
 
 .base-avatar--offline {
   --avatar-status-color: #94a3b8;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .base-avatar,
+  .base-avatar__spinner :deep(svg) {
+    transition: none !important;
+    animation: none !important;
+  }
+}
+
+@keyframes base-avatar-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 </style>

@@ -22,6 +22,11 @@ interface Props {
   block?: boolean;
   ariaLabel?: string;
   buttonTitle?: string;
+  confirmKeyword?: string;
+  confirmInputLabel?: string;
+  confirmInputPlaceholder?: string;
+  confirmInputHint?: string;
+  confirmMismatchText?: string;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -38,6 +43,11 @@ const props = withDefaults(defineProps<Props>(), {
   block: false,
   ariaLabel: "",
   buttonTitle: "",
+  confirmKeyword: "",
+  confirmInputLabel: "",
+  confirmInputPlaceholder: "",
+  confirmInputHint: "",
+  confirmMismatchText: "",
 });
 
 const emit = defineEmits<{
@@ -70,6 +80,11 @@ const handleClick = async () => {
       confirmText: resolvedConfirmText.value,
       cancelText: resolvedCancelText.value,
       danger: isDanger.value,
+      confirmKeyword: props.confirmKeyword,
+      confirmInputLabel: props.confirmInputLabel,
+      confirmInputPlaceholder: props.confirmInputPlaceholder,
+      confirmInputHint: props.confirmInputHint,
+      confirmMismatchText: props.confirmMismatchText,
     });
 
     if (confirmed) {

@@ -378,17 +378,17 @@ watch(
 }
 
 .base-field-group__footer {
-  @apply mt-5 border-t pt-4 pb-1;
+  @apply mt-5 border-t pt-4 pb-4;
   border-color: rgb(226 232 240 / 0.72);
 }
 
 .base-field-group--compact .base-field-group__footer,
 .base-field-group--sm .base-field-group__footer {
-  @apply mt-4 pt-3 pb-0.5;
+  @apply mt-4 pt-3 pb-3;
 }
 
 .base-field-group--lg .base-field-group__footer {
-  @apply mt-6 pt-4 pb-1.5;
+  @apply mt-6 pt-4 pb-4;
 }
 
 .base-field-group--plain .base-field-group__footer,

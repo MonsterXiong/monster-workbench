@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, useId } from "vue";
 import { useI18n } from "../../composables/useI18n";
+import { joinAriaIds } from "../../utils";
 
 interface Props {
   count: number;
@@ -17,6 +18,12 @@ interface Props {
   sticky?: boolean;
   icon?: string;
   ariaLabel?: string;
+  ariaLabelledby?: string;
+  ariaDescribedby?: string;
+  actionsLabel?: string;
+  loadingText?: string;
+  wrapLabel?: boolean;
+  wrapDescription?: boolean;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -33,6 +40,12 @@ const props = withDefaults(defineProps<Props>(), {
   sticky: false,
   icon: "CheckCheck",
   ariaLabel: "",
+  ariaLabelledby: "",
+  ariaDescribedby: "",
+  actionsLabel: "",
+  loadingText: "",
+  wrapLabel: false,
+  wrapDescription: false,
 });
 
 const emit = defineEmits<{
@@ -43,9 +56,27 @@ const { t } = useI18n();
 const barId = useId();
 const labelId = `base-selection-bar-label-${barId}`;
 const descriptionId = `base-selection-bar-description-${barId}`;
-const describedBy = computed(() => (props.description ? descriptionId : undefined));
+const loadingId = `base-selection-bar-loading-${barId}`;
+const labelledBy = computed(() => (props.ariaLabel ? undefined : props.ariaLabelledby || labelId));
+const describedBy = computed(() =>
+  joinAriaIds([
+    props.description ? descriptionId : undefined,
+    props.loading ? loadingId : undefined,
+    props.ariaDescribedby,
+  ])
+);
 const resolvedSize = computed(() => (props.compact ? "sm" : props.size));
 const isActionDisabled = computed(() => props.disabled || props.loading || props.count === 0);
+const resolvedActionsLabel = computed(() => props.actionsLabel || t("common.actionsRegion"));
+const resolvedLoadingText = computed(() => props.loadingText || t("common.loading"));
+const resolvedClearText = computed(() => props.clearText || t("common.clearSelection"));
+const slotState = computed(() => ({
+  disabled: props.disabled,
+  loading: props.loading,
+  empty: props.count === 0,
+  actionDisabled: isActionDisabled.value,
+  interactiveDisabled: isActionDisabled.value,
+}));
 
 const handleClear = () => {
   if (isActionDisabled.value) return;
@@ -61,14 +92,17 @@ const handleClear = () => {
       `base-selection-bar--${surface}`,
       {
         'base-selection-bar--sticky': sticky,
+        'base-selection-bar--wrap-label': wrapLabel,
+        'base-selection-bar--wrap-description': wrapDescription,
         'is-loading': loading,
         'is-disabled': disabled,
       },
     ]"
     role="status"
     aria-live="polite"
+    aria-atomic="true"
     :aria-label="ariaLabel || undefined"
-    :aria-labelledby="ariaLabel ? undefined : labelId"
+    :aria-labelledby="labelledBy"
     :aria-describedby="describedBy"
     :aria-busy="loading ? 'true' : undefined"
     :aria-disabled="disabled ? 'true' : undefined"
@@ -87,9 +121,10 @@ const handleClear = () => {
       <span></span>
       <span></span>
     </div>
+    <span v-if="loading" :id="loadingId" class="sr-only">{{ resolvedLoadingText }}</span>
 
-    <div v-if="$slots.default" class="base-selection-bar__actions">
-      <slot></slot>
+    <div v-if="$slots.default" class="base-selection-bar__actions" role="group" :aria-label="resolvedActionsLabel">
+      <slot v-bind="slotState"></slot>
     </div>
 
     <button
@@ -97,22 +132,23 @@ const handleClear = () => {
       type="button"
       class="base-selection-bar__clear"
       :disabled="isActionDisabled"
-      :aria-label="clearText || t('common.clearSelection')"
-      :title="clearText || t('common.clearSelection')"
+      :aria-label="resolvedClearText"
+      :title="resolvedClearText"
       @click="handleClear"
     >
-      {{ clearText || t("common.clearSelection") }}
+      {{ resolvedClearText }}
     </button>
   </section>
 </template>
 
 <style scoped>
 .base-selection-bar {
-  @apply flex min-w-0 max-w-full flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm transition dark:border-slate-800 dark:bg-slate-900;
+  @apply flex min-w-0 max-w-full flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm transition dark:border-slate-800 dark:bg-slate-900;
+  container-type: inline-size;
 }
 
 .base-selection-bar--sm {
-  @apply rounded-xl p-2.5;
+  @apply rounded-lg p-2.5;
 }
 
 .base-selection-bar--lg {
@@ -133,15 +169,15 @@ const handleClear = () => {
 
 .base-selection-bar.is-disabled,
 .base-selection-bar.is-loading {
-  @apply opacity-60;
+  @apply opacity-75;
 }
 
 .base-selection-bar__meta {
-  @apply flex min-w-0 items-center gap-3;
+  @apply flex min-w-0 flex-1 items-center gap-3;
 }
 
 .base-selection-bar__icon {
-  background-color: rgba(var(--color-primary), 0.1);
+  background-color: rgb(var(--color-primary) / 0.1);
   @apply flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-primary;
 }
 
@@ -150,11 +186,17 @@ const handleClear = () => {
 }
 
 .base-selection-bar__text {
-  @apply min-w-0;
+  @apply min-w-0 flex-1;
 }
 
 .base-selection-bar__text strong {
-  @apply block truncate text-xs font-black text-slate-800 dark:text-slate-100;
+  @apply block min-w-0 max-w-full truncate text-xs font-black text-slate-800 dark:text-slate-100;
+}
+
+.base-selection-bar--wrap-label .base-selection-bar__text strong {
+  @apply whitespace-normal break-words;
+  overflow: visible;
+  text-overflow: clip;
 }
 
 .base-selection-bar--lg .base-selection-bar__text strong {
@@ -162,7 +204,13 @@ const handleClear = () => {
 }
 
 .base-selection-bar__text small {
-  @apply mt-0.5 block truncate text-[10px] font-bold text-slate-400 dark:text-slate-500;
+  @apply mt-0.5 block min-w-0 max-w-full truncate text-[10px] font-bold text-slate-400 dark:text-slate-500;
+}
+
+.base-selection-bar--wrap-description .base-selection-bar__text small {
+  @apply whitespace-normal break-words leading-4;
+  overflow: visible;
+  text-overflow: clip;
 }
 
 .base-selection-bar--lg .base-selection-bar__text small {
@@ -170,7 +218,10 @@ const handleClear = () => {
 }
 
 .base-selection-bar__loading {
-  @apply flex min-w-[120px] flex-1 flex-col gap-2;
+  @apply flex flex-col gap-2;
+  flex: 1 1 8rem;
+  min-width: min(100%, 8rem);
+  max-width: min(100%, 20rem);
 }
 
 .base-selection-bar__loading span {
@@ -186,11 +237,36 @@ const handleClear = () => {
 }
 
 .base-selection-bar__actions {
-  @apply flex min-w-0 flex-1 flex-wrap items-center justify-end gap-2;
+  @apply flex min-w-0 max-w-full shrink flex-wrap items-center justify-end gap-2;
+}
+
+.base-selection-bar__actions :deep(.el-button),
+.base-selection-bar__actions :deep(.base-badge) {
+  max-width: 100%;
+  min-width: 0;
+}
+
+.base-selection-bar__actions :deep(.el-button > span),
+.base-selection-bar__actions :deep(.base-badge) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .base-selection-bar__clear {
-  @apply rounded-full px-2 py-1 text-[10px] font-black text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-45 dark:hover:bg-slate-800 dark:hover:text-slate-100;
+  @apply min-w-0 max-w-full truncate rounded-full px-2 py-1 text-[10px] font-black text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-opacity-20 disabled:cursor-not-allowed disabled:opacity-45 dark:hover:bg-slate-800 dark:hover:text-slate-100;
+  max-width: min(100%, 14rem);
+}
+
+@container (max-width: 26rem) {
+  .base-selection-bar__meta {
+    flex-basis: 100%;
+  }
+
+  .base-selection-bar__actions {
+    flex: 1 1 9rem;
+    justify-content: flex-start;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

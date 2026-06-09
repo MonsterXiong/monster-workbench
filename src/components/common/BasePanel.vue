@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, useId } from "vue";
 import { useI18n } from "../../composables/useI18n";
-import { isActivationKey } from "../../utils";
+import { handleActivationKeydown, isEventFromInteractiveElement } from "../../utils";
 
 type PanelSize = "sm" | "md" | "lg";
 type PanelLevel = 2 | 3 | 4 | 5 | 6;
@@ -81,23 +81,17 @@ const headingTag = computed(() => `h${props.level}`);
 const resolvedActionsLabel = computed(() => props.actionsLabel || `${props.title || props.ariaLabel || "面板"} 操作`);
 const resolvedLoadingText = computed(() => props.loadingText || t("common.loading"));
 
-const shouldIgnorePanelClick = (event: Event) => {
-  if (!(event.target instanceof Element) || event.target === event.currentTarget) return false;
-  return Boolean(event.target.closest("button,a,input,textarea,select,label,[role='button'],[role='menuitem'],[tabindex]"));
-};
-
 const handleClick = (event: MouseEvent) => {
   if (!isInteractive.value) return;
-  if (shouldIgnorePanelClick(event)) return;
+  if (isEventFromInteractiveElement(event)) return;
   emit("click", event);
 };
 
 const handleKeydown = (event: KeyboardEvent) => {
   emit("keydown", event);
-  if (!isInteractive.value || !isActivationKey(event)) return;
-  if (shouldIgnorePanelClick(event)) return;
-  event.preventDefault();
-  emit("click", event as unknown as MouseEvent);
+  if (!isInteractive.value) return;
+  if (isEventFromInteractiveElement(event)) return;
+  handleActivationKeydown(event, () => emit("click", event as unknown as MouseEvent));
 };
 </script>
 

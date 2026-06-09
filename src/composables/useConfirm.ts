@@ -14,6 +14,16 @@ export interface ConfirmOptions {
   cancelText?: string;
   /** 是否为危险操作（红色警告风格） */
   danger?: boolean;
+  /** 输入后才允许确认的确认词 */
+  confirmKeyword?: string;
+  /** 确认词输入框标签 */
+  confirmInputLabel?: string;
+  /** 确认词输入框占位 */
+  confirmInputPlaceholder?: string;
+  /** 确认词辅助说明 */
+  confirmInputHint?: string;
+  /** 确认词不匹配提示 */
+  confirmMismatchText?: string;
 }
 
 /** 全局弹窗可见状态 */
@@ -25,6 +35,11 @@ const options = ref<ConfirmOptions>({
   confirmText: '',
   cancelText: '',
   danger: false,
+  confirmKeyword: '',
+  confirmInputLabel: '',
+  confirmInputPlaceholder: '',
+  confirmInputHint: '',
+  confirmMismatchText: '',
 });
 
 /** Promise resolve 回调句柄 */

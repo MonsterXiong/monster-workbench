@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, useId } from "vue";
 import { useI18n } from "../../composables/useI18n";
-import { hasItem, splitLines } from "../../utils";
+import { joinAriaIds, normalizeDomIdSegment, splitLines, toSet } from "../../utils";
 import BaseCopyButton from "./BaseCopyButton.vue";
 import BaseIcon from "./BaseIcon.vue";
 
@@ -20,11 +20,14 @@ interface Props {
   copyable?: boolean;
   copyLabel?: string;
   copiedLabel?: string;
+  copyErrorLabel?: string;
+  copyText?: string;
   loading?: boolean;
   loadingText?: string;
   emptyText?: string;
   size?: CodeBlockSize;
   ariaLabel?: string;
+  ariaDescribedby?: string;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -39,11 +42,14 @@ const props = withDefaults(defineProps<Props>(), {
   copyable: false,
   copyLabel: "",
   copiedLabel: "",
+  copyErrorLabel: "",
+  copyText: "",
   loading: false,
   loadingText: "",
   emptyText: "",
   size: "md",
   ariaLabel: "",
+  ariaDescribedby: "",
 });
 
 const emit = defineEmits<{
@@ -55,11 +61,25 @@ const { t } = useI18n();
 const blockId = useId();
 const titleId = `base-code-block-title-${blockId}`;
 const descriptionId = `base-code-block-description-${blockId}`;
+const loadingId = `base-code-block-loading-${blockId}`;
+const emptyId = `base-code-block-empty-${blockId}`;
 const codeLabel = computed(() => props.title || props.language || t("common.codeBlock"));
 const resolvedLoadingText = computed(() => props.loadingText || t("common.loading"));
 const resolvedEmptyText = computed(() => props.emptyText || t("common.codeBlockEmpty"));
 const hasCode = computed(() => props.code.length > 0);
 const hasHeader = computed(() => props.title || props.description || props.language || props.copyable || props.loading);
+const copyValue = computed(() => props.copyText || props.code);
+const hasCopyValue = computed(() => copyValue.value.length > 0);
+const languageClass = computed(() => (props.language ? `language-${normalizeDomIdSegment(props.language, "code")}` : undefined));
+const highlightedLineSet = computed(() => toSet(props.highlightLines));
+const describedBy = computed(() =>
+  joinAriaIds([
+    props.description ? descriptionId : undefined,
+    props.loading ? loadingId : undefined,
+    !hasCode.value ? emptyId : undefined,
+    props.ariaDescribedby,
+  ])
+);
 const lines = computed(() => {
   if (!hasCode.value) return [];
 
@@ -69,7 +89,7 @@ const lines = computed(() => {
       key: `${number}-${line}`,
       number,
       text: line || " ",
-      highlighted: hasItem(props.highlightLines, number),
+      highlighted: highlightedLineSet.value.has(number),
     };
   });
 });
@@ -87,7 +107,7 @@ const lines = computed(() => {
       },
     ]"
     :aria-labelledby="title ? titleId : undefined"
-    :aria-describedby="description ? descriptionId : undefined"
+    :aria-describedby="describedBy"
     :aria-label="title ? undefined : ariaLabel || codeLabel"
     :aria-busy="loading ? 'true' : undefined"
   >
@@ -98,17 +118,18 @@ const lines = computed(() => {
       </div>
       <div class="base-code-block__meta">
         <span v-if="language" class="base-code-block__language" aria-hidden="true">{{ language }}</span>
-        <span v-if="loading" class="base-code-block__loading" role="status" aria-live="polite">
+        <span v-if="loading" :id="loadingId" class="base-code-block__loading" role="status" aria-live="polite">
           <BaseIcon name="LoaderCircle" size="13" aria-hidden="true" />
           {{ resolvedLoadingText }}
         </span>
         <slot name="actions"></slot>
         <BaseCopyButton
           v-if="copyable"
-          :text="code"
+          :text="copyValue"
           :label="copyLabel"
           :copied-label="copiedLabel"
-          :disabled="loading || !hasCode"
+          :error-label="copyErrorLabel"
+          :disabled="loading || !hasCopyValue"
           size="xs"
           @copied="emit('copied', $event)"
           @error="emit('copy-error', $event)"
@@ -122,13 +143,14 @@ const lines = computed(() => {
         class="base-code-block__body"
         :style="{ maxHeight }"
         tabindex="0"
-      ><code><span
+        :aria-label="codeLabel"
+      ><code :class="languageClass" :data-language="language || undefined"><span
         v-for="line in lines"
         :key="line.key"
         class="base-code-block__line"
         :class="{ 'is-highlighted': line.highlighted }"
       ><span v-if="showLineNumbers" class="base-code-block__number" aria-hidden="true">{{ line.number }}</span><span class="base-code-block__text">{{ line.text }}</span></span></code></pre>
-      <div v-else class="base-code-block__empty" :style="{ minHeight: maxHeight }">
+      <div v-else :id="emptyId" class="base-code-block__empty" :style="{ minHeight: maxHeight }" role="status">
         {{ resolvedEmptyText }}
       </div>
       <div v-if="loading" class="base-code-block__overlay" aria-hidden="true">

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { useI18n } from "../../composables/useI18n";
-import { toIntegerAtLeast } from "../../utils";
+import { isEmptyArray, toIntegerAtLeast } from "../../utils";
 
 export interface KeyValueItem {
   key: string;
@@ -52,7 +52,7 @@ const props = withDefaults(defineProps<Props>(), {
 
 const { t } = useI18n();
 const resolvedSize = computed(() => (props.compact ? "sm" : props.size));
-const isEmpty = computed(() => !props.loading && props.items.length === 0);
+const isEmpty = computed(() => !props.loading && isEmptyArray(props.items));
 const skeletonCount = computed(() => toIntegerAtLeast(props.skeletonRows, 1, 3));
 const resolvedLoadingText = computed(() => props.loadingText || t("common.loading"));
 </script>

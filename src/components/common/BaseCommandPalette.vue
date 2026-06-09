@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from "vue";
 import { useI18n } from "../../composables/useI18n";
-import { createRandomId, filterByFalsyValue, filterBySearchFields, getNextCircularIndex, groupByEntries, isEscapeKey, isKeyboardKey, normalizeSearchText } from "../../utils";
+import { createRandomId, filterByFalsyValue, filterBySearchFields, groupByEntries, handleKeyboardIndexNavigation, isEscapeKey, isKeyboardKey, normalizeSearchText } from "../../utils";
 
 export interface CommandPaletteItem {
   key: string;
@@ -59,7 +59,7 @@ const filteredItems = computed(() => {
       (command) => command.description,
       (command) => command.group,
       (command) => command.shortcut,
-      (command) => command.keywords?.join(" "),
+      (command) => command.keywords,
     ]);
 });
 
@@ -78,25 +78,25 @@ const handleSelect = (item: CommandPaletteItem) => {
   close();
 };
 
-const moveActive = (step: number) => {
-  if (!enabledItems.value.length) return;
-  activeIndex.value = getNextCircularIndex(enabledItems.value.length, activeIndex.value, step);
-};
-
 const handleKeydown = (event: KeyboardEvent) => {
   if (isEscapeKey(event)) {
     event.preventDefault();
     close();
     return;
   }
-  if (isKeyboardKey(event, "ArrowDown")) {
-    event.preventDefault();
-    moveActive(1);
-    return;
-  }
-  if (isKeyboardKey(event, "ArrowUp")) {
-    event.preventDefault();
-    moveActive(-1);
+  if (handleKeyboardIndexNavigation(
+    event,
+    enabledItems.value.length,
+    activeIndex.value,
+    (nextIndex) => {
+      activeIndex.value = nextIndex;
+    },
+    {
+      forwardKeys: ["ArrowDown"],
+      backwardKeys: ["ArrowUp"],
+      includeBoundary: false,
+    }
+  )) {
     return;
   }
   if (isKeyboardKey(event, "Enter") && activeItem.value) {
