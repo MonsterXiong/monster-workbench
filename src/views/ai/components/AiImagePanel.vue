@@ -20,7 +20,6 @@ import {
   filterBySearchTextFields,
   firstItem,
   formatAspectRatio,
-  formatBytes,
   formatDuration,
   formatPositiveDuration,
   formatReducedAspectRatio,
@@ -32,7 +31,6 @@ import {
   getCurrentTimestampMs,
   getErrorMessage,
   getElapsedMs,
-  getSafeFileName,
   getItemAtOrOnly,
   getLastIndex,
   getScrollDistanceToBottom,
@@ -897,22 +895,6 @@ const previewInspectorItems = computed<PreviewInspectorItem[]>(() => {
     });
   }
 
-  if (previewSavedFile.value) {
-    items.push({
-      key: "saved-file",
-      label: t("aiPage.image.previewSavedFile"),
-      value: joinBy([getSavedFileName(previewSavedFile.value.path), formatBytes(previewSavedFile.value.sizeBytes)], (item) => item, " · "),
-      tone: "success",
-    });
-  } else if (previewItems.value.length) {
-    items.push({
-      key: "saved-file",
-      label: t("aiPage.image.previewSavedFile"),
-      value: t("aiPage.image.previewNotSaved"),
-      tone: "warning",
-    });
-  }
-
   return items;
 });
 const previewInfoText = computed(() => {
@@ -1056,10 +1038,6 @@ function scrollPreviewThumbnailIntoView(index = previewImageIndex.value) {
       inline: "center",
     });
   });
-}
-
-function getSavedFileName(path: string) {
-  return getSafeFileName(path, path);
 }
 
 function findImageTaskItem(message: ImageMessage) {
@@ -1212,7 +1190,6 @@ function getImageResultSummaryItems(message: ImageMessage): ImageResultSummaryIt
 
   const items: ImageResultSummaryItem[] = [];
   const imageCount = getPreviewItems(message).length;
-  const savedCount = message.savedFiles?.length || 0;
   const latency = getMessageLatencyLabel(message);
   const queueWait = getMessageQueueWaitLabel(message);
   const apiSize = getMessageApiSize(message);
@@ -1229,13 +1206,6 @@ function getImageResultSummaryItems(message: ImageMessage): ImageResultSummaryIt
     items.push({
       key: "images",
       label: formatTemplate(t("aiPage.image.resultImageCount"), { count: imageCount }),
-      tone: "success",
-    });
-  }
-  if (savedCount > 0) {
-    items.push({
-      key: "saved",
-      label: formatTemplate(t("aiPage.image.resultSavedCount"), { count: savedCount }),
       tone: "success",
     });
   }
@@ -1611,7 +1581,8 @@ function getSessionSizeLabel(target: AiConversationSession) {
                       </BaseButton>
                       <BaseButton
                         v-if="canRegenerateImageMessage(message)"
-                        type="success"
+                        type="neutral"
+                        outline
                         size="xs"
                         :title="t('aiPage.image.regenerate')"
                         @click.stop="regenerateImageMessage(message)"
@@ -1621,11 +1592,17 @@ function getSessionSizeLabel(target: AiConversationSession) {
                       </BaseButton>
                     </div>
                     <div class="generated-frame__secondary-actions">
-                      <BaseCopyButton :text="url" :label="t('aiPage.image.copyImageUrl')" size="xs" />
+                      <BaseCopyButton
+                        :text="url"
+                        :label="t('aiPage.image.copyImageUrlShort')"
+                        :aria-label="t('aiPage.image.copyImageUrl')"
+                        size="xs"
+                      />
                       <BaseCopyButton
                         v-if="hasGeneratedImageSavedFile(message, index)"
                         :text="getGeneratedImageSavedFilePath(message, index)"
-                        :label="t('aiPage.image.copyPath')"
+                        :label="t('aiPage.image.copyPathShort')"
+                        :aria-label="t('aiPage.image.copyPath')"
                         size="xs"
                       />
                       <BaseButton
@@ -1971,7 +1948,8 @@ function getSessionSizeLabel(target: AiConversationSession) {
               </BaseButton>
               <BaseButton
                 v-if="canRegenerateImageMessage(previewMessage)"
-                type="success"
+                type="neutral"
+                outline
                 size="xs"
                 @click="regeneratePreviewImage"
               >
@@ -1980,7 +1958,8 @@ function getSessionSizeLabel(target: AiConversationSession) {
               </BaseButton>
               <BaseCopyButton
                 :text="previewImageUrl"
-                :label="t('aiPage.image.copyImageUrl')"
+                :label="t('aiPage.image.copyImageUrlShort')"
+                :aria-label="t('aiPage.image.copyImageUrl')"
                 size="xs"
               />
               <BaseButton
@@ -1994,11 +1973,6 @@ function getSessionSizeLabel(target: AiConversationSession) {
                 <template #icon><FolderOpen class="h-3 w-3" /></template>
                 {{ t("aiPage.image.openFileLocationShort") }}
               </BaseButton>
-              <BaseCopyButton
-                :text="previewInfoText"
-                :label="t('aiPage.image.copyImageInfo')"
-                size="xs"
-              />
             </div>
           </div>
 
@@ -2010,10 +1984,6 @@ function getSessionSizeLabel(target: AiConversationSession) {
             <div class="preview-meta-item">
               <span>{{ t("aiPage.image.latency") }}</span>
               <strong>{{ getMessageLatencyLabel(previewMessage) || "-" }}</strong>
-            </div>
-            <div class="preview-meta-item">
-              <span>{{ t("aiPage.image.previewSaveStatus") }}</span>
-              <strong>{{ previewSavedFile ? t("aiPage.image.savedFileBadge") : t("aiPage.image.previewNotSaved") }}</strong>
             </div>
             <div class="preview-meta-item">
               <span>{{ t("aiPage.image.requestedSize") }}</span>
@@ -2037,13 +2007,19 @@ function getSessionSizeLabel(target: AiConversationSession) {
             <p>{{ previewPrompt }}</p>
           </div>
 
-          <div v-if="previewSavedFile" class="preview-section preview-section--compact">
-            <div class="preview-section__head">
-              <span>{{ t("aiPage.image.previewSavedFile") }}</span>
-              <BaseCopyButton :text="previewSavedFile.path" :label="t('aiPage.image.copyPath')" size="xs" />
-            </div>
-            <code :title="previewSavedFile.path">{{ getSavedFileName(previewSavedFile.path) }}</code>
-            <small>{{ previewSavedFile.mimeType }} · {{ formatBytes(previewSavedFile.sizeBytes) }}</small>
+          <div v-if="previewSavedFile" class="preview-file-actions">
+            <BaseCopyButton
+              :text="previewSavedFile.path"
+              :label="t('aiPage.image.copyPathShort')"
+              :aria-label="t('aiPage.image.copyPath')"
+              size="xs"
+            />
+            <BaseCopyButton
+              :text="previewInfoText"
+              :label="t('aiPage.image.copyImageInfoShort')"
+              :aria-label="t('aiPage.image.copyImageInfo')"
+              size="xs"
+            />
           </div>
         </aside>
       </div>
@@ -2404,16 +2380,17 @@ function getSessionSizeLabel(target: AiConversationSession) {
   @apply flex shrink-0 flex-wrap items-center justify-end gap-1.5;
 }
 .generated-frame {
-  @apply relative flex min-w-0 flex-col overflow-hidden rounded-xl bg-white text-left shadow-sm ring-1 ring-slate-200/80 transition hover:shadow-md hover:ring-emerald-300 focus-within:ring-2 focus-within:ring-emerald-500 dark:bg-slate-950 dark:ring-slate-800;
+  @apply relative flex min-w-0 flex-col overflow-hidden rounded-2xl bg-white text-left shadow-sm ring-1 ring-slate-200/70 transition hover:-translate-y-0.5 hover:shadow-lg hover:shadow-slate-900/5 hover:ring-emerald-300 focus-within:ring-2 focus-within:ring-emerald-500 dark:bg-slate-950 dark:ring-slate-800 dark:hover:shadow-black/20;
   width: 100%;
 }
 .generated-frame__media {
-  @apply relative min-w-0 overflow-hidden bg-slate-100 dark:bg-slate-900;
+  @apply relative min-w-0 overflow-hidden bg-[conic-gradient(from_90deg_at_1px_1px,#e2e8f0_90deg,transparent_0)] dark:bg-[conic-gradient(from_90deg_at_1px_1px,#1e293b_90deg,transparent_0)];
+  background-size: 18px 18px;
   max-height: min(340px, 42vh);
   min-height: 164px;
 }
 .generated-preview-button {
-  @apply relative flex h-full w-full items-center justify-center bg-white p-0 text-left dark:bg-slate-950;
+  @apply relative flex h-full w-full items-center justify-center bg-white/70 p-0 text-left dark:bg-slate-950/70;
   min-height: 164px;
 }
 .generated-image {
@@ -2426,20 +2403,28 @@ function getSessionSizeLabel(target: AiConversationSession) {
   @apply pointer-events-none absolute left-1/2 top-2 z-10 inline-flex -translate-x-1/2 items-center rounded-full border border-white/20 bg-slate-950/85 px-2.5 py-1 text-[10px] font-black text-white shadow-lg backdrop-blur;
 }
 .generated-frame__footer {
-  @apply flex min-w-0 flex-wrap items-center justify-between gap-2 border-t border-slate-200 bg-slate-50/95 px-2.5 py-2 dark:border-slate-800 dark:bg-slate-900/95;
+  @apply flex min-w-0 flex-wrap items-center justify-between gap-2 border-t border-slate-200 bg-white/95 px-2.5 py-2.5 dark:border-slate-800 dark:bg-slate-950/95;
 }
 .generated-frame__primary-actions,
 .generated-frame__secondary-actions {
   @apply flex min-w-0 max-w-full flex-wrap items-center gap-1.5;
 }
 .generated-frame__secondary-actions {
-  @apply justify-end;
+  @apply ml-auto justify-end;
+}
+.generated-frame__primary-actions :deep(.el-button) {
+  @apply border-slate-200 bg-slate-50 text-slate-700 hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:border-emerald-800 dark:hover:bg-emerald-950/40 dark:hover:text-emerald-200;
+}
+.generated-frame__secondary-actions :deep(.el-button),
+.generated-frame__secondary-actions :deep(.base-copy-button) {
+  @apply border-slate-200 bg-slate-50 text-slate-500 hover:border-slate-300 hover:bg-white hover:text-slate-800 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-slate-600 dark:hover:bg-slate-950 dark:hover:text-slate-100;
 }
 .generated-frame__primary-actions :deep(.el-button),
 .generated-frame__secondary-actions :deep(.el-button),
 .generated-frame__secondary-actions :deep(.base-copy-button) {
-  height: 26px !important;
-  border-radius: 8px !important;
+  height: 28px !important;
+  min-width: 0 !important;
+  border-radius: 999px !important;
   font-size: 10px !important;
   font-weight: 900 !important;
   box-shadow: none !important;
@@ -2900,6 +2885,15 @@ function getSessionSizeLabel(target: AiConversationSession) {
 .preview-dialog__actions :deep(.base-copy-button) {
   height: 24px;
   font-size: 10px;
+}
+.preview-file-actions {
+  @apply flex min-w-0 flex-wrap items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 p-2 dark:border-slate-800 dark:bg-slate-900;
+}
+.preview-file-actions :deep(.base-copy-button) {
+  height: 26px;
+  border-radius: 999px;
+  font-size: 10px;
+  box-shadow: none;
 }
 .preview-dialog__eyebrow {
   @apply mb-0.5 block text-[10px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500;
