@@ -105,7 +105,24 @@ const accessibleLabel = computed(() => props.ariaLabel || props.title || "");
 
 /* 局部覆盖 Element Plus 按钮的悬浮与激活态，防止与全局主题色变量冲突导致文字或背景隐形 */
 .el-button {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.el-button :deep(> span) {
+  display: inline-flex !important;
+  min-width: 0;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 6px;
+  line-height: 1;
+}
+
+.el-button :deep(.el-icon),
+.el-button :deep(svg) {
+  flex-shrink: 0;
 }
 
 .el-button.is-icon-only {
@@ -118,8 +135,9 @@ const accessibleLabel = computed(() => props.ariaLabel || props.title || "");
 
 .el-button.is-icon-only :deep(span),
 .el-button.is-icon-only :deep(.el-icon) {
-  display: grid !important;
-  place-items: center !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
   width: 100%;
   height: 100%;
   line-height: 1;
@@ -134,8 +152,8 @@ const accessibleLabel = computed(() => props.ariaLabel || props.title || "");
 
 .el-button.is-icon-only :deep(svg) {
   display: block;
-  margin: auto;
   flex-shrink: 0;
+  margin: auto;
 }
 
 /* Primary 实底按钮 hover 与 active 态 */

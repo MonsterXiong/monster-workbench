@@ -823,16 +823,6 @@ function hasGeneratedImageSavedFile(message: ImageMessage, index: number) {
   return Boolean(getGeneratedImageSavedFilePath(message, index));
 }
 
-function getGeneratedImageSavedFileName(message: ImageMessage, index: number) {
-  const path = getGeneratedImageSavedFilePath(message, index);
-  return path ? getSavedFileName(path) : "";
-}
-
-function getGeneratedImageSavedFileMeta(message: ImageMessage, index: number) {
-  const file = getGeneratedImageSavedFile(message, index);
-  return file ? `${file.mimeType} · ${formatBytes(file.sizeBytes)}` : "";
-}
-
 async function openGeneratedImageLocation(message: ImageMessage, index: number) {
   const path = getGeneratedImageSavedFilePath(message, index);
   if (!path) {
@@ -1589,24 +1579,25 @@ function getSessionSizeLabel(target: AiConversationSession) {
                   v-for="(url, index) in getPreviewItems(message)"
                   :key="url"
                   class="generated-frame"
-                  :style="getImagePreviewStyle(message)"
                 >
-                  <button
-                    type="button"
-                    class="generated-preview-button"
-                    @click="openImagePreview(url, message, index)"
-                  >
-                    <img :src="url" alt="AI generated preview" class="generated-image" />
-                    <span v-if="hasMultiplePreviewItems(message)" class="generated-frame__index">
-                      {{ formatTemplate(t("aiPage.image.previewCount"), { current: index + 1, total: getPreviewItems(message).length }) }}
-                    </span>
-                    <span class="generated-frame__action">
-                      <Maximize2 class="h-3.5 w-3.5" />
-                      {{ t("aiPage.image.preview") }}
-                    </span>
-                  </button>
-                  <div class="generated-frame__tools">
-                    <div class="generated-frame__quick-actions">
+                  <div class="generated-frame__media" :style="getImagePreviewStyle(message)">
+                    <button
+                      type="button"
+                      class="generated-preview-button"
+                      @click="openImagePreview(url, message, index)"
+                    >
+                      <img :src="url" alt="AI generated preview" class="generated-image" />
+                      <span v-if="hasMultiplePreviewItems(message)" class="generated-frame__index">
+                        {{ formatTemplate(t("aiPage.image.previewCount"), { current: index + 1, total: getPreviewItems(message).length }) }}
+                      </span>
+                      <span class="generated-frame__action">
+                        <Maximize2 class="h-3.5 w-3.5" />
+                        {{ t("aiPage.image.preview") }}
+                      </span>
+                    </button>
+                  </div>
+                  <div class="generated-frame__footer">
+                    <div class="generated-frame__primary-actions">
                       <BaseButton
                         v-if="canUsePromptFromMessage(message)"
                         type="neutral"
@@ -1629,7 +1620,7 @@ function getSessionSizeLabel(target: AiConversationSession) {
                         {{ t("aiPage.image.regenerate") }}
                       </BaseButton>
                     </div>
-                    <div class="generated-frame__copy-tools">
+                    <div class="generated-frame__secondary-actions">
                       <BaseCopyButton :text="url" :label="t('aiPage.image.copyImageUrl')" size="xs" />
                       <BaseCopyButton
                         v-if="hasGeneratedImageSavedFile(message, index)"
@@ -1649,15 +1640,6 @@ function getSessionSizeLabel(target: AiConversationSession) {
                         {{ t("aiPage.image.openFileLocationShort") }}
                       </BaseButton>
                     </div>
-                  </div>
-                  <div
-                    v-if="getGeneratedImageSavedFilePath(message, index)"
-                    class="generated-frame__file-badge"
-                    :title="getGeneratedImageSavedFilePath(message, index)"
-                  >
-                    <strong>{{ t("aiPage.image.savedFileBadge") }}</strong>
-                    <span>{{ getGeneratedImageSavedFileName(message, index) }}</span>
-                    <small>{{ getGeneratedImageSavedFileMeta(message, index) }}</small>
                   </div>
                 </div>
               </div>
@@ -2422,12 +2404,16 @@ function getSessionSizeLabel(target: AiConversationSession) {
   @apply flex shrink-0 flex-wrap items-center justify-end gap-1.5;
 }
 .generated-frame {
-  @apply relative min-w-0 overflow-hidden rounded-2xl bg-slate-100 text-left shadow-sm ring-1 ring-slate-200/80 transition hover:shadow-lg hover:ring-emerald-400 focus-within:ring-2 focus-within:ring-emerald-500 dark:bg-slate-900 dark:ring-slate-800;
+  @apply relative flex min-w-0 flex-col overflow-hidden rounded-xl bg-white text-left shadow-sm ring-1 ring-slate-200/80 transition hover:shadow-md hover:ring-emerald-300 focus-within:ring-2 focus-within:ring-emerald-500 dark:bg-slate-950 dark:ring-slate-800;
   width: 100%;
-  max-height: min(320px, 42vh);
+}
+.generated-frame__media {
+  @apply relative min-w-0 overflow-hidden bg-slate-100 dark:bg-slate-900;
+  max-height: min(340px, 42vh);
+  min-height: 164px;
 }
 .generated-preview-button {
-  @apply flex h-full w-full items-center justify-center bg-white p-0 text-left dark:bg-slate-950;
+  @apply relative flex h-full w-full items-center justify-center bg-white p-0 text-left dark:bg-slate-950;
   min-height: 164px;
 }
 .generated-image {
@@ -2439,68 +2425,27 @@ function getSessionSizeLabel(target: AiConversationSession) {
 .generated-frame__index {
   @apply pointer-events-none absolute left-1/2 top-2 z-10 inline-flex -translate-x-1/2 items-center rounded-full border border-white/20 bg-slate-950/85 px-2.5 py-1 text-[10px] font-black text-white shadow-lg backdrop-blur;
 }
-.generated-frame__tools {
-  @apply pointer-events-none absolute inset-x-0 bottom-0 z-10 flex items-end justify-between gap-2 bg-gradient-to-t from-slate-950/75 via-slate-950/25 to-transparent p-2 pt-10 opacity-0 transition;
+.generated-frame__footer {
+  @apply flex min-w-0 flex-wrap items-center justify-between gap-2 border-t border-slate-200 bg-slate-50/95 px-2.5 py-2 dark:border-slate-800 dark:bg-slate-900/95;
 }
-.generated-frame__quick-actions,
-.generated-frame__copy-tools {
-  @apply flex max-w-full flex-wrap gap-1;
-  pointer-events: auto;
+.generated-frame__primary-actions,
+.generated-frame__secondary-actions {
+  @apply flex min-w-0 max-w-full flex-wrap items-center gap-1.5;
 }
-.generated-frame__copy-tools {
+.generated-frame__secondary-actions {
   @apply justify-end;
 }
-.generated-frame__quick-actions :deep(.el-button) {
-  height: 24px !important;
-  border-color: rgba(255, 255, 255, 0.25) !important;
-  background: rgba(15, 23, 42, 0.86) !important;
-  color: #ffffff !important;
+.generated-frame__primary-actions :deep(.el-button),
+.generated-frame__secondary-actions :deep(.el-button),
+.generated-frame__secondary-actions :deep(.base-copy-button) {
+  height: 26px !important;
+  border-radius: 8px !important;
   font-size: 10px !important;
   font-weight: 900 !important;
-  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.24) !important;
-}
-.generated-frame__quick-actions :deep(.el-button:hover),
-.generated-frame__quick-actions :deep(.el-button:focus) {
-  border-color: rgba(255, 255, 255, 0.42) !important;
-  background: rgba(4, 120, 87, 0.92) !important;
-  color: #ffffff !important;
-}
-.generated-frame__copy-tools :deep(.base-copy-button) {
-  @apply border-white/25 bg-slate-950/85 text-white shadow-lg hover:border-white/40 hover:bg-slate-900 hover:text-white dark:border-white/20 dark:bg-slate-950/90 dark:text-white dark:hover:border-white/40 dark:hover:bg-slate-900;
-}
-.generated-frame__copy-tools :deep(.el-button) {
-  height: 24px !important;
-  border-color: rgba(255, 255, 255, 0.25) !important;
-  background: rgba(15, 23, 42, 0.86) !important;
-  color: #ffffff !important;
-  font-size: 10px !important;
-  font-weight: 900 !important;
-  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.24) !important;
-}
-.generated-frame__copy-tools :deep(.el-button:hover),
-.generated-frame__copy-tools :deep(.el-button:focus) {
-  border-color: rgba(255, 255, 255, 0.42) !important;
-  background: rgba(30, 41, 59, 0.92) !important;
-  color: #ffffff !important;
-}
-.generated-frame__file-badge {
-  @apply absolute left-2 top-2 z-10 flex max-w-[calc(100%-72px)] min-w-0 items-center gap-1 rounded-full bg-white/90 px-2.5 py-1 text-[10px] font-bold text-slate-700 shadow-sm backdrop-blur dark:bg-slate-950/90 dark:text-slate-200;
-}
-.generated-frame__file-badge strong {
-  @apply shrink-0 text-emerald-700 dark:text-emerald-300;
-}
-.generated-frame__file-badge span {
-  @apply min-w-0 truncate;
-}
-.generated-frame__file-badge small {
-  @apply hidden shrink-0 text-[10px] font-semibold text-slate-500 dark:text-slate-400 md:inline;
+  box-shadow: none !important;
 }
 .generated-frame:hover .generated-frame__action,
 .generated-frame:focus-within .generated-frame__action {
-  opacity: 1;
-}
-.generated-frame:hover .generated-frame__tools,
-.generated-frame:focus-within .generated-frame__tools {
   opacity: 1;
 }
 .image-message__actions {
@@ -2795,11 +2740,10 @@ function getSessionSizeLabel(target: AiConversationSession) {
     @apply grid-cols-1;
   }
 
-  .generated-frame {
+  .generated-frame__media {
     max-height: min(300px, 38vh);
   }
 
-  .generated-frame__tools,
   .generated-frame__action {
     opacity: 1;
   }

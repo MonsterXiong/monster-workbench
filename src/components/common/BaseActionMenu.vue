@@ -1,31 +1,13 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { useI18n } from "../../composables/useI18n";
 import {
   addDomEventListener,
-  clampNumberToBounds,
-  clearAnimationFrameHandle,
-  createAnimationFrame,
   createRandomId,
   dispatchWindowCustomEvent,
-  focusElementIntoView,
-  focusElementPreventScroll,
-  formatCssPixelValue,
-  formatRoundedCssPixelValue,
-  getBoundaryItem,
-  getViewportAvailableHeight,
-  getViewportAvailableWidth,
-  getNextCircularItem,
-  isEventTargetInsideAnyPath,
-  isActivationKey,
   isEmptyArray,
-  isEscapeKey,
-  isKeyboardKey,
-  mergeDomEventCleanups,
-  queryFocusableElements,
   toAriaKeyShortcuts,
   toNonNegativeNumber,
-  type AnimationFrameHandle,
   type DomEventCleanup,
 } from "../../utils";
 
@@ -62,6 +44,12 @@ interface Props {
   exposeAriaShortcuts?: boolean;
 }
 
+type DropdownPlacement = "bottom" | "bottom-start" | "bottom-end" | "top" | "top-start" | "top-end";
+type DropdownControlRef = {
+  handleClose?: () => void;
+  handleOpen?: () => void;
+} | null;
+
 const props = withDefaults(defineProps<Props>(), {
   label: "",
   icon: "MoreHorizontal",
@@ -83,229 +71,75 @@ const emit = defineEmits<{
   (e: "select", action: ActionMenuItem): void;
 }>();
 
-const rootRef = ref<HTMLElement | null>(null);
-const triggerRef = ref<HTMLButtonElement | null>(null);
-const panelRef = ref<HTMLElement | null>(null);
+const dropdownRef = ref<DropdownControlRef>(null);
 const open = ref(false);
-const activeActionKey = ref<string | null>(null);
-const panelStyle = ref<Record<string, string>>({});
-const resolvedPlacement = ref<"bottom" | "top">(props.placement === "top" ? "top" : "bottom");
 const { t } = useI18n();
 const menuId = createRandomId("base-action-menu");
 const triggerId = createRandomId("base-action-menu-trigger");
 const resolvedMenuLabel = computed(() => props.ariaLabel || props.label || t("common.moreActions"));
 const resolvedEmptyText = computed(() => props.emptyText || t("common.noData"));
-let positionFrame: AnimationFrameHandle | null = null;
 let stopGlobalListeners: DomEventCleanup | null = null;
 
-const getViewportPadding = () => toNonNegativeNumber(props.viewportPadding);
+const normalizedMinWidth = computed(() => Math.max(120, toNonNegativeNumber(props.minWidth)));
+const normalizedMaxWidth = computed(() => Math.max(normalizedMinWidth.value, toNonNegativeNumber(props.maxWidth) || normalizedMinWidth.value));
+const normalizedMaxHeight = computed(() => Math.max(96, toNonNegativeNumber(props.maxHeight)));
+const viewportPadding = computed(() => Math.max(4, toNonNegativeNumber(props.viewportPadding)));
+const resolvedPlacement = computed<DropdownPlacement>(() => {
+  const side = props.placement === "top" ? "top" : "bottom";
+  if (props.align === "left") return `${side}-start` as DropdownPlacement;
+  if (props.align === "center") return side;
+  return `${side}-end` as DropdownPlacement;
+});
+const resolvedPopperClass = computed(() =>
+  [
+    "base-action-menu-popper",
+    `base-action-menu-popper--${props.align}`,
+    props.wrapText ? "base-action-menu-popper--wrap-text" : "",
+  ]
+    .filter(Boolean)
+    .join(" ")
+);
+const popperStyle = computed(() => ({
+  minWidth: `${normalizedMinWidth.value}px`,
+  maxWidth: `${normalizedMaxWidth.value}px`,
+}));
+const popperOptions = computed(() => ({
+  modifiers: [
+    { name: "offset", options: { offset: [0, 8] } },
+    { name: "preventOverflow", options: { padding: viewportPadding.value } },
+    { name: "flip", options: { padding: viewportPadding.value } },
+  ],
+}));
+
 const getActionAriaKeyshortcuts = (action: ActionMenuItem) => {
   const shortcut = action.ariaShortcut || (props.exposeAriaShortcuts ? action.shortcut : "");
   return shortcut ? toAriaKeyShortcuts(shortcut) : undefined;
 };
-const getActionIconName = (action: ActionMenuItem) => action.loading ? "LoaderCircle" : action.icon ?? "";
-
-const getEnabledItems = () => queryFocusableElements<HTMLButtonElement>(panelRef.value, { selector: ".base-action-menu__item" });
+const getActionIconName = (action: ActionMenuItem) => (action.loading ? "LoaderCircle" : action.icon ?? "");
 const isActionDisabled = (action: ActionMenuItem) => Boolean(action.disabled || action.loading);
 const getActionRole = (action: ActionMenuItem) => (action.selected ? "menuitemcheckbox" : "menuitem");
-const focusActionItem = (item?: HTMLButtonElement) => {
-  focusElementIntoView(item);
-  activeActionKey.value = item?.dataset.actionKey ?? null;
-};
 
-const getFocusableElements = () => queryFocusableElements(document, { exclude: panelRef.value });
-
-const focusAdjacentTriggerElement = (direction: 1 | -1) => {
-  const trigger = triggerRef.value;
-  if (!trigger) return;
-  const items = getFocusableElements();
-  const currentIndex = items.indexOf(trigger);
-  const target = items[currentIndex + direction];
-  void nextTick(() => focusElementPreventScroll(target));
-};
-
-const isEventInsideMenu = (event: Event) => {
-  return isEventTargetInsideAnyPath(event, [rootRef.value, panelRef.value]);
-};
-
-const isTriggerAnchorVisible = () => {
-  const root = rootRef.value;
-  if (!root) return false;
-
-  const rect = root.getBoundingClientRect();
-  if (rect.width <= 0 || rect.height <= 0) return false;
-  if (rect.bottom <= 0 || rect.right <= 0 || rect.top >= window.innerHeight || rect.left >= window.innerWidth) return false;
-
-  const x = clampNumberToBounds(rect.left + rect.width / 2, 0, window.innerWidth - 1);
-  const y = clampNumberToBounds(rect.top + rect.height / 2, 0, window.innerHeight - 1);
-  const elementAtAnchor = document.elementFromPoint(x, y);
-  return Boolean(elementAtAnchor && root.contains(elementAtAnchor));
-};
-
-const focusMenuItem = (target: "first" | "last") => {
-  const items = getEnabledItems();
-  if (isEmptyArray(items)) {
-    focusElementPreventScroll(panelRef.value);
-    return;
-  }
-
-  const item = getBoundaryItem(items, target);
-  focusActionItem(item);
-};
-
-const updatePanelPosition = () => {
-  const root = rootRef.value;
-  const panel = panelRef.value;
-  if (!root) return;
-  if (!isTriggerAnchorVisible()) {
-    closeMenu();
-    return;
-  }
-
-  const rect = root.getBoundingClientRect();
-  const gap = 8;
-  const viewportPadding = getViewportPadding();
-  const availableWidth = getViewportAvailableWidth(viewportPadding, 160);
-  const minWidth = clampNumberToBounds(rect.width, props.minWidth, availableWidth, props.minWidth);
-  const maxWidth = clampNumberToBounds(props.maxWidth, minWidth, availableWidth, minWidth);
-  const panelWidth = panel ? clampNumberToBounds(panel.offsetWidth, minWidth, maxWidth, minWidth) : minWidth;
-  const spaceBelow = toNonNegativeNumber(window.innerHeight - rect.bottom - viewportPadding - gap);
-  const spaceAbove = toNonNegativeNumber(rect.top - viewportPadding - gap);
-  const shouldOpenTop = props.placement === "top" || (props.placement === "auto" && spaceBelow < Math.min(props.maxHeight, 220) && spaceAbove > spaceBelow);
-  const placement = shouldOpenTop ? "top" : "bottom";
-  const viewportHeight = getViewportAvailableHeight(viewportPadding, 48);
-  const preferredHeight = Math.min(placement === "top" ? spaceAbove : spaceBelow, viewportHeight);
-  const availableHeight = Math.max(Math.min(120, viewportHeight), preferredHeight);
-  const maxHeight = Math.min(props.maxHeight, availableHeight);
-  const panelHeight = panel ? Math.min(panel.offsetHeight, maxHeight) : maxHeight;
-  let left = rect.right - panelWidth;
-
-  if (props.align === "left") {
-    left = rect.left;
-  } else if (props.align === "center") {
-    left = rect.left + rect.width / 2 - panelWidth / 2;
-  }
-
-  left = clampNumberToBounds(left, viewportPadding, window.innerWidth - viewportPadding - panelWidth, viewportPadding);
-
-  let top = placement === "top" ? rect.top - gap - panelHeight : rect.bottom + gap;
-  top = clampNumberToBounds(top, viewportPadding, window.innerHeight - viewportPadding - panelHeight, viewportPadding);
-
-  const nextStyle: Record<string, string> = {
-    minWidth: formatCssPixelValue(minWidth),
-    maxWidth: formatCssPixelValue(maxWidth),
-    maxHeight: formatCssPixelValue(maxHeight),
-    left: formatRoundedCssPixelValue(left),
-    top: formatRoundedCssPixelValue(top),
-    transformOrigin: placement === "top" ? "bottom center" : "top center",
-  };
-
-  resolvedPlacement.value = placement;
-  panelStyle.value = nextStyle;
-};
-
-const schedulePanelPosition = () => {
-  if (!open.value) return;
-  clearAnimationFrameHandle(positionFrame);
-  positionFrame = createAnimationFrame(() => {
-    positionFrame = null;
-    updatePanelPosition();
-  });
-};
-
-const openMenu = async (focusTarget: "first" | "last" = "first") => {
-  if (props.disabled) return;
-  dispatchWindowCustomEvent("base-action-menu:close-all", menuId);
-  open.value = true;
-  await nextTick();
-  updatePanelPosition();
-  await nextTick();
-  updatePanelPosition();
-  focusMenuItem(focusTarget);
-};
-
-const toggle = () => {
-  if (props.disabled) return;
-  if (open.value) {
-    closeMenu();
-    return;
-  }
-  void openMenu();
-};
-
-const closeMenu = (restoreFocus = false) => {
-  if (!open.value) return;
+const closeMenu = () => {
+  dropdownRef.value?.handleClose?.();
   open.value = false;
-  activeActionKey.value = null;
-  if (restoreFocus) {
-    void nextTick(() => triggerRef.value?.focus());
-  }
 };
 
-const handleSelect = (action: ActionMenuItem) => {
-  if (isActionDisabled(action)) return;
-  emit("select", action);
-  if (props.closeOnSelect) closeMenu(true);
-};
-
-const handleItemFocus = (action: ActionMenuItem) => {
-  activeActionKey.value = action.key;
-};
-
-const handleItemBlur = (action: ActionMenuItem) => {
-  if (activeActionKey.value === action.key) activeActionKey.value = null;
-};
-
-const handleDocumentPointerdown = (event: PointerEvent) => {
-  if (!isEventInsideMenu(event)) {
-    closeMenu();
-  }
-};
-
-const handleDocumentFocusin = (event: FocusEvent) => {
-  if (!isEventInsideMenu(event)) {
-    closeMenu();
-  }
-};
-
-const handleKeydown = (event: KeyboardEvent) => {
-  if (isEscapeKey(event)) closeMenu(true);
-};
-
-const handleTriggerKeydown = (event: KeyboardEvent) => {
-  if (isKeyboardKey(event, "ArrowDown") || isActivationKey(event)) {
-    event.preventDefault();
-    void openMenu();
-  } else if (isKeyboardKey(event, "ArrowUp")) {
-    event.preventDefault();
-    void openMenu("last");
-  }
-};
-
-const handlePanelKeydown = (event: KeyboardEvent) => {
-  if (isKeyboardKey(event, "Tab")) {
-    event.preventDefault();
-    focusAdjacentTriggerElement(event.shiftKey ? -1 : 1);
+const handleVisibleChange = (visible: boolean) => {
+  if (props.disabled) {
     closeMenu();
     return;
   }
 
-  const items = getEnabledItems();
-  if (isEmptyArray(items)) return;
-
-  const currentIndex = items.indexOf(document.activeElement as HTMLButtonElement);
-
-  if (isKeyboardKey(event, ["ArrowDown", "ArrowUp"])) {
-    event.preventDefault();
-    const offset = isKeyboardKey(event, "ArrowDown") ? 1 : -1;
-    focusActionItem(getNextCircularItem(items, currentIndex, offset) ?? undefined);
-  } else if (isKeyboardKey(event, "Home")) {
-    event.preventDefault();
-    focusActionItem(getBoundaryItem(items, "first"));
-  } else if (isKeyboardKey(event, "End")) {
-    event.preventDefault();
-    focusActionItem(getBoundaryItem(items, "last"));
+  open.value = visible;
+  if (visible) {
+    dispatchWindowCustomEvent("base-action-menu:close-all", menuId);
   }
+};
+
+const handleCommand = (command: unknown) => {
+  const action = command as ActionMenuItem;
+  if (!action || typeof action !== "object" || !("key" in action) || isActionDisabled(action)) return;
+  emit("select", action);
 };
 
 const handleGlobalClose = (event: Event) => {
@@ -314,109 +148,79 @@ const handleGlobalClose = (event: Event) => {
 };
 
 onMounted(() => {
-  stopGlobalListeners = mergeDomEventCleanups([
-    addDomEventListener(document, "pointerdown", handleDocumentPointerdown, { capture: true }),
-    addDomEventListener(document, "focusin", handleDocumentFocusin, { capture: true }),
-    addDomEventListener(document, "keydown", handleKeydown),
-    addDomEventListener(window, "base-action-menu:close-all", handleGlobalClose),
-    addDomEventListener(window, "resize", schedulePanelPosition),
-    addDomEventListener(window, "scroll", schedulePanelPosition, true),
-  ]);
+  stopGlobalListeners = addDomEventListener(window, "base-action-menu:close-all", handleGlobalClose);
 });
 
 onBeforeUnmount(() => {
-  clearAnimationFrameHandle(positionFrame);
-  positionFrame = null;
   stopGlobalListeners?.();
   stopGlobalListeners = null;
 });
-
-watch(
-  () => props.disabled,
-  (disabled) => {
-    if (disabled) closeMenu();
-  },
-);
-
-watch(
-  () => [props.align, props.placement, props.minWidth, props.maxWidth, props.maxHeight, props.viewportPadding],
-  schedulePanelPosition,
-);
-
-watch(
-  () => props.actions,
-  () => {
-    void nextTick(schedulePanelPosition);
-  },
-  { deep: true },
-);
 </script>
 
 <template>
-  <div ref="rootRef" class="base-action-menu">
+  <el-dropdown
+    ref="dropdownRef"
+    class="base-action-menu"
+    trigger="click"
+    :disabled="disabled"
+    :placement="resolvedPlacement"
+    :hide-on-click="closeOnSelect"
+    :max-height="normalizedMaxHeight"
+    :popper-class="resolvedPopperClass"
+    :popper-style="popperStyle"
+    :popper-options="popperOptions"
+    :show-arrow="false"
+    :teleported="true"
+    role="menu"
+    @command="handleCommand"
+    @visible-change="handleVisibleChange"
+  >
     <button
       :id="triggerId"
-      ref="triggerRef"
       type="button"
       class="base-action-menu__trigger"
       :class="{ 'is-open': open }"
       :disabled="disabled"
       aria-haspopup="menu"
       :aria-expanded="open"
-      :aria-controls="open ? menuId : undefined"
       :aria-label="resolvedMenuLabel"
-      @click.stop="toggle"
-      @keydown="handleTriggerKeydown"
     >
       <BaseIcon :name="icon" size="15" aria-hidden="true" />
       <span v-if="label">{{ label }}</span>
     </button>
 
-    <Teleport to="body">
-      <div
-        v-if="open"
-        ref="panelRef"
-        class="base-action-menu__panel"
-        :class="[`base-action-menu__panel--${resolvedPlacement}`, { 'base-action-menu__panel--wrap-text': wrapText }]"
-        :style="panelStyle"
+    <template #dropdown>
+      <el-dropdown-menu
         :id="menuId"
-        role="menu"
-        aria-orientation="vertical"
+        class="base-action-menu__menu"
+        :class="{ 'base-action-menu__menu--wrap-text': wrapText }"
         :aria-label="resolvedMenuLabel"
         :aria-labelledby="triggerId"
-        :data-placement="resolvedPlacement"
-        :data-align="align"
-        tabindex="-1"
-        @keydown="handlePanelKeydown"
       >
         <div v-if="isEmptyArray(actions)" class="base-action-menu__empty" role="status">
           <BaseIcon name="Inbox" size="14" aria-hidden="true" />
           <span>{{ resolvedEmptyText }}</span>
         </div>
 
-        <button
+        <el-dropdown-item
           v-for="action in actions"
           :key="action.key"
-          type="button"
           class="base-action-menu__item"
           :class="{
             'is-danger': action.type === 'danger',
             'is-disabled': isActionDisabled(action),
             'is-selected': action.selected,
-            'is-loading': action.loading,
-            'is-keyboard-active': activeActionKey === action.key,
-            'is-divided': action.divided
+            'is-loading': action.loading
           }"
-          :data-action-key="action.key"
+          :command="action"
           :disabled="isActionDisabled(action)"
+          :divided="action.divided"
+          :text-value="action.label"
           :role="getActionRole(action)"
           :aria-checked="action.selected ? 'true' : undefined"
           :aria-disabled="isActionDisabled(action) ? 'true' : undefined"
           :aria-busy="action.loading ? 'true' : undefined"
           :aria-keyshortcuts="getActionAriaKeyshortcuts(action)"
-          @click="handleSelect(action)"
-          @focus="handleItemFocus(action)"
-          @blur="handleItemBlur(action)"
         >
           <BaseIcon
             v-if="action.icon || action.loading"
@@ -434,19 +238,19 @@ watch(
             <kbd v-if="action.shortcut">{{ action.shortcut }}</kbd>
             <BaseIcon v-if="action.selected" name="Check" size="14" class="base-action-menu__item-check" aria-hidden="true" />
           </span>
-        </button>
-      </div>
-    </Teleport>
-  </div>
+        </el-dropdown-item>
+      </el-dropdown-menu>
+    </template>
+  </el-dropdown>
 </template>
 
 <style scoped>
 .base-action-menu {
-  @apply relative inline-flex;
+  @apply inline-flex;
 }
 
 .base-action-menu__trigger {
-  @apply inline-flex h-8 items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-black text-slate-600 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-opacity-20 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-slate-700 dark:hover:bg-slate-950 dark:hover:text-slate-100;
+  @apply inline-flex h-8 min-w-0 items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-black text-slate-600 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-opacity-20 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-slate-700 dark:hover:bg-slate-950 dark:hover:text-slate-100;
 }
 
 .base-action-menu__trigger.is-open {
@@ -454,110 +258,220 @@ watch(
   @apply text-primary;
 }
 
-.base-action-menu__panel {
-  @apply fixed z-[1200] overflow-y-auto rounded-lg border border-slate-200 bg-white p-1.5 shadow-xl shadow-slate-900/10 outline-none dark:border-slate-800 dark:bg-slate-900 dark:shadow-black/30;
-  overscroll-behavior: contain;
-  scrollbar-width: thin;
-  scrollbar-color: rgb(203 213 225) transparent;
-  max-width: calc(100vw - 20px);
+:global(.base-action-menu-popper.el-popper) {
+  --el-dropdown-menuItem-hover-fill: #f1f5f9;
+  --el-dropdown-menuItem-hover-color: #0f172a;
+  --el-color-primary: rgb(var(--color-primary));
 }
 
-.base-action-menu__panel:focus-visible {
+:global(.base-action-menu-popper .el-popper__arrow) {
+  display: none;
+}
+
+:global(.base-action-menu-popper .el-dropdown-menu) {
+  overflow: hidden;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #ffffff;
+  padding: 6px;
   box-shadow:
     0 18px 42px rgba(15, 23, 42, 0.14),
-    0 0 0 3px rgba(var(--color-primary), 0.16);
+    inset 0 1px 0 rgba(255, 255, 255, 0.82);
 }
 
-.base-action-menu__item {
-  @apply flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-[11px] font-bold text-slate-600 transition hover:bg-slate-100 hover:text-slate-900 focus:bg-slate-100 focus:text-slate-900 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-slate-100 dark:focus:bg-slate-800 dark:focus:text-slate-100;
+:global(.base-action-menu-popper .base-action-menu__item.el-dropdown-menu__item) {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  border-radius: 7px;
+  padding: 8px 10px;
+  color: #475569;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.25;
 }
 
-.base-action-menu__item.is-selected {
-  background-color: rgb(var(--color-primary) / 0.08);
-  @apply text-primary;
+:global(.base-action-menu-popper .base-action-menu__item.el-dropdown-menu__item:not(.is-disabled):hover),
+:global(.base-action-menu-popper .base-action-menu__item.el-dropdown-menu__item:not(.is-disabled):focus) {
+  background: #f1f5f9;
+  color: #0f172a;
 }
 
-.base-action-menu__item.is-keyboard-active {
-  @apply bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-slate-100;
+:global(.base-action-menu-popper .base-action-menu__item.is-selected.el-dropdown-menu__item) {
+  background: rgb(var(--color-primary) / 0.08);
+  color: rgb(var(--color-primary));
 }
 
-.base-action-menu__item.is-loading {
-  @apply cursor-progress;
+:global(.base-action-menu-popper .base-action-menu__item.is-loading.el-dropdown-menu__item) {
+  cursor: progress;
 }
 
-.base-action-menu__item-text {
-  @apply flex min-w-0 flex-1 flex-col gap-0.5;
+:global(.base-action-menu-popper .base-action-menu__item-text) {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
 }
 
-.base-action-menu__item-text span,
-.base-action-menu__item-text small {
-  @apply truncate;
+:global(.base-action-menu-popper .base-action-menu__item-text span),
+:global(.base-action-menu-popper .base-action-menu__item-text small) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.base-action-menu__panel--wrap-text .base-action-menu__item-text span,
-.base-action-menu__panel--wrap-text .base-action-menu__item-text small {
+:global(.base-action-menu-popper--wrap-text .base-action-menu__item-text span),
+:global(.base-action-menu-popper--wrap-text .base-action-menu__item-text small) {
   overflow: visible;
   overflow-wrap: anywhere;
   text-overflow: clip;
   white-space: normal;
 }
 
-.base-action-menu__item-text small {
-  @apply text-[10px] font-bold text-slate-400 dark:text-slate-500;
+:global(.base-action-menu-popper .base-action-menu__item-text small) {
+  color: #94a3b8;
+  font-size: 10px;
+  font-weight: 700;
 }
 
-.base-action-menu__item-trailing {
-  @apply ml-auto flex min-w-0 max-w-[45%] shrink-0 items-center justify-end gap-1.5;
+:global(.base-action-menu-popper .base-action-menu__item-trailing) {
+  margin-left: auto;
+  display: flex;
+  min-width: 0;
+  max-width: 45%;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
 }
 
-.base-action-menu__item-meta {
-  @apply min-w-0 max-w-24 truncate rounded-full bg-slate-100 px-1.5 py-0.5 text-[9px] font-black text-slate-500 dark:bg-slate-800 dark:text-slate-300;
+:global(.base-action-menu-popper .base-action-menu__item-meta) {
+  min-width: 0;
+  max-width: 96px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #f1f5f9;
+  padding: 2px 6px;
+  color: #64748b;
+  font-size: 9px;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.base-action-menu__item kbd {
-  @apply min-w-0 max-w-28 truncate rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[9px] font-black text-slate-400 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-500;
+:global(.base-action-menu-popper .base-action-menu__item kbd) {
+  min-width: 0;
+  max-width: 112px;
+  overflow: hidden;
+  border: 1px solid #e2e8f0;
+  border-radius: 4px;
+  background: #f8fafc;
+  padding: 2px 6px;
+  color: #94a3b8;
+  font-size: 9px;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.base-action-menu__item-check {
-  @apply shrink-0 text-primary;
+:global(.base-action-menu-popper .base-action-menu__item-check) {
+  flex-shrink: 0;
+  color: rgb(var(--color-primary));
 }
 
-.base-action-menu__item-spinner {
+:global(.base-action-menu-popper .base-action-menu__item-spinner) {
   animation: base-action-menu-spin 0.9s linear infinite;
 }
 
-.base-action-menu__item.is-danger {
-  @apply text-red-600 hover:bg-red-50 hover:text-red-700 focus:bg-red-50 focus:text-red-700 dark:text-red-400 dark:hover:bg-red-950 dark:focus:bg-red-950 dark:focus:text-red-300;
+:global(.base-action-menu-popper .base-action-menu__item.is-danger.el-dropdown-menu__item) {
+  color: #dc2626;
 }
 
-.base-action-menu__item.is-danger:hover,
-.base-action-menu__item.is-danger:focus,
-.base-action-menu__item.is-danger:focus-visible,
-.base-action-menu__item.is-danger.is-keyboard-active {
-  background-color: rgb(254 242 242);
-  color: rgb(185 28 28);
+:global(.base-action-menu-popper .base-action-menu__item.is-danger.el-dropdown-menu__item:not(.is-disabled):hover),
+:global(.base-action-menu-popper .base-action-menu__item.is-danger.el-dropdown-menu__item:not(.is-disabled):focus) {
+  background: #fef2f2;
+  color: #b91c1c;
 }
 
-.dark .base-action-menu__item.is-danger:hover,
-.dark .base-action-menu__item.is-danger:focus,
-.dark .base-action-menu__item.is-danger:focus-visible,
-.dark .base-action-menu__item.is-danger.is-keyboard-active {
-  background-color: rgb(69 10 10);
-  color: rgb(252 165 165);
+:global(.base-action-menu-popper .el-dropdown-menu__item--divided) {
+  margin-top: 6px;
+  border-top: 1px solid #f1f5f9;
+  padding-top: 10px;
 }
 
-.base-action-menu__item.is-divided {
-  @apply mt-1 border-t border-slate-100 pt-2 dark:border-slate-800;
+:global(.base-action-menu-popper .el-dropdown-menu__item--divided::before) {
+  display: none;
 }
 
-.base-action-menu__empty {
-  @apply flex min-h-20 flex-col items-center justify-center gap-2 rounded-md px-3 py-4 text-center text-[11px] font-bold text-slate-400 dark:text-slate-500;
+:global(.base-action-menu-popper .base-action-menu__empty) {
+  display: flex;
+  min-height: 80px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: 7px;
+  padding: 16px 12px;
+  text-align: center;
+  color: #94a3b8;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+:global(.dark .base-action-menu-popper.el-popper) {
+  --el-dropdown-menuItem-hover-fill: #1e293b;
+  --el-dropdown-menuItem-hover-color: #f8fafc;
+}
+
+:global(.dark .base-action-menu-popper .el-dropdown-menu) {
+  border-color: #1e293b;
+  background: #0f172a;
+  box-shadow:
+    0 18px 42px rgba(0, 0, 0, 0.34),
+    inset 0 1px 0 rgba(148, 163, 184, 0.08);
+}
+
+:global(.dark .base-action-menu-popper .base-action-menu__item.el-dropdown-menu__item) {
+  color: #cbd5e1;
+}
+
+:global(.dark .base-action-menu-popper .base-action-menu__item.el-dropdown-menu__item:not(.is-disabled):hover),
+:global(.dark .base-action-menu-popper .base-action-menu__item.el-dropdown-menu__item:not(.is-disabled):focus) {
+  background: #1e293b;
+  color: #f8fafc;
+}
+
+:global(.dark .base-action-menu-popper .base-action-menu__item-text small) {
+  color: #64748b;
+}
+
+:global(.dark .base-action-menu-popper .base-action-menu__item-meta) {
+  background: #1e293b;
+  color: #cbd5e1;
+}
+
+:global(.dark .base-action-menu-popper .base-action-menu__item kbd) {
+  border-color: #334155;
+  background: #020617;
+  color: #64748b;
+}
+
+:global(.dark .base-action-menu-popper .base-action-menu__item.is-danger.el-dropdown-menu__item:not(.is-disabled):hover),
+:global(.dark .base-action-menu-popper .base-action-menu__item.is-danger.el-dropdown-menu__item:not(.is-disabled):focus) {
+  background: #450a0a;
+  color: #fca5a5;
+}
+
+:global(.dark .base-action-menu-popper .el-dropdown-menu__item--divided) {
+  border-top-color: #1e293b;
 }
 
 @media (prefers-reduced-motion: reduce) {
   .base-action-menu__trigger,
-  .base-action-menu__item,
-  .base-action-menu__item-spinner {
+  :global(.base-action-menu-popper .base-action-menu__item.el-dropdown-menu__item),
+  :global(.base-action-menu-popper .base-action-menu__item-spinner) {
     transition: none !important;
     animation: none !important;
   }

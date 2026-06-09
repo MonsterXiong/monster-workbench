@@ -403,23 +403,20 @@ onUpdated(() => {
   --el-slider-height: var(--base-slider-track-height);
   --el-slider-button-size: var(--base-slider-thumb-size);
   --el-slider-button-wrapper-size: var(--base-slider-wrapper-size);
-  --el-slider-button-wrapper-offset: calc((var(--base-slider-track-height) - var(--el-slider-button-wrapper-size)) / 2);
+  --el-slider-button-wrapper-offset: calc((var(--base-slider-control-height) - var(--el-slider-button-wrapper-size)) / 2);
   --el-slider-border-radius: 999px;
 }
 
 .base-slider__control :deep(.el-slider__button-wrapper) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   line-height: normal;
   outline: none;
 }
 
-.base-slider__control :deep(.el-slider__button-wrapper::after) {
-  content: "";
-  display: inline-block;
-  height: 100%;
-  vertical-align: middle;
-}
-
 .base-slider__control :deep(.el-slider__runway) {
+  margin: calc((var(--base-slider-control-height) - var(--base-slider-track-height)) / 2) 0;
   @apply transition-colors;
   box-shadow:
     inset 0 1px 2px rgba(15, 23, 42, 0.08),

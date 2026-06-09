@@ -1,41 +1,22 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from "vue";
+import { computed, nextTick, ref, useId, watch, watchEffect } from "vue";
+import en from "element-plus/es/locale/lang/en";
+import zhCn from "element-plus/es/locale/lang/zh-cn";
 import { useI18n } from "../../composables/useI18n";
 import {
-  addMonths,
-  addDays,
-  addDomEventListener,
   applyObjectPatch,
   compareDateOnlyValues,
   compactArray,
-  filterByFalsyValue,
-  findIndexByValue,
-  firstItem,
-  formatMonthYear,
-  getArrayChunkAtIndex,
-  getBoundaryItem,
-  getKeyboardBoundaryPosition,
-  getCurrentDate,
-  getMonthCalendarDates,
   getEventTargetValue,
-  hasByValue,
-  getTodayString,
-  getWeekdayLabels,
-  isEmptyArray,
-  isActivationKey,
   isDateOnlyRangeOrdered,
   isDateOnlyValueInRange,
-  isEventTargetInsideElement,
+  isEmptyArray,
   isEscapeKey,
   isKeyboardKey,
   isSameDateRange,
-  isSameMonth,
   joinAriaIds,
-  mergeDomEventCleanups,
   normalizeDateOnlyValue,
   parseDateOnlyValue,
-  startOfMonth,
-  type DomEventCleanup,
 } from "../../utils";
 
 export interface DateRangeValue {
@@ -53,18 +34,7 @@ export interface DateRangePreset {
 type DateRangeField = "start" | "end";
 type DateRangeSize = "sm" | "md" | "lg";
 type DateRangeSurface = "card" | "muted" | "plain";
-
-interface CalendarDay {
-  key: string;
-  label: string;
-  value: string;
-  inMonth: boolean;
-  disabled: boolean;
-  isToday: boolean;
-  isStart: boolean;
-  isEnd: boolean;
-  isInRange: boolean;
-}
+type DatePickerModelValue = string[] | Date[] | string | Date | number | null | undefined;
 
 interface Props {
   modelValue: DateRangeValue;
@@ -122,29 +92,34 @@ const rangeId = useId();
 const labelId = `${rangeId}-label`;
 const errorId = `${rangeId}-error`;
 const hintId = `${rangeId}-hint`;
-const panelId = `${rangeId}-calendar`;
-const rootRef = ref<HTMLElement | null>(null);
-const startInputRef = ref<HTMLInputElement | null>(null);
-const endInputRef = ref<HTMLInputElement | null>(null);
-const activeField = ref<DateRangeField | null>(null);
-const viewMonth = ref<Date>(getCurrentDate());
-const focusedDayValue = ref("");
+const pickerRef = ref<HTMLElement | { $el?: Element | null } | null>(null);
 const inputValue = ref<DateRangeValue>({ start: props.modelValue.start, end: props.modelValue.end });
-const startLabel = computed(() => `${props.label ? `${props.label} ` : ""}${props.startPlaceholder || t("common.startDate")}`);
-const endLabel = computed(() => `${props.label ? `${props.label} ` : ""}${props.endPlaceholder || t("common.endDate")}`);
-const clearLabel = computed(() => `${t("common.clear")} ${props.label || t("common.dateRange")}`);
-const isReadonly = computed(() => props.disabled || props.readonly);
-const todayValue = computed(() => getTodayString());
+
 const parseDateValue = parseDateOnlyValue;
 const normalizeDateValue = normalizeDateOnlyValue;
 const compareDateValues = compareDateOnlyValues;
 const isDateValueInRange = isDateOnlyValueInRange;
 const isDateRangeValueOrdered = (range: DateRangeValue) => isDateOnlyRangeOrdered(range);
 
+const isReadonly = computed(() => props.disabled || props.readonly);
+const startLabel = computed(() => `${props.label ? `${props.label} ` : ""}${props.startPlaceholder || t("common.startDate")}`);
+const endLabel = computed(() => `${props.label ? `${props.label} ` : ""}${props.endPlaceholder || t("common.endDate")}`);
+const clearLabel = computed(() => `${t("common.clear")} ${props.label || t("common.dateRange")}`);
+const panelLabelText = computed(() => props.panelLabel || props.label || t("common.dateRange"));
+const elementLocale = computed(() => (locale.value === "en-US" ? en : zhCn));
+const elementSize = computed(() => {
+  if (props.size === "sm") return "small";
+  if (props.size === "lg") return "large";
+  return "default";
+});
+
 const normalizedStart = computed(() => normalizeDateValue(inputValue.value.start));
 const normalizedEnd = computed(() => normalizeDateValue(inputValue.value.end));
 const rangeStartDate = computed(() => parseDateValue(inputValue.value.start));
 const rangeEndDate = computed(() => parseDateValue(inputValue.value.end));
+const validPickerStart = computed(() => (rangeStartDate.value ? normalizeDateValue(inputValue.value.start) : ""));
+const validPickerEnd = computed(() => (rangeEndDate.value ? normalizeDateValue(inputValue.value.end) : ""));
+
 const invalidInputError = computed(() => {
   if ((inputValue.value.start && !rangeStartDate.value) || (inputValue.value.end && !rangeEndDate.value)) {
     return t("common.dateRangeInvalidFormat");
@@ -163,113 +138,61 @@ const validMax = computed(() => (parseDateValue(rawMax.value) ? rawMax.value : "
 const boundaryMin = computed(() => (validMin.value && validMax.value && compareDateValues(validMin.value, validMax.value) > 0 ? validMax.value : validMin.value));
 const boundaryMax = computed(() => (validMin.value && validMax.value && compareDateValues(validMin.value, validMax.value) > 0 ? validMin.value : validMax.value));
 const boundaryError = computed(() => {
-  const values = compactArray([normalizedStart.value, normalizedEnd.value]);
+  const values = compactArray([rangeStartDate.value ? normalizedStart.value : "", rangeEndDate.value ? normalizedEnd.value : ""]);
   if (isEmptyArray(values) || (!boundaryMin.value && !boundaryMax.value)) return "";
   return values.every((value) => isDateValueInRange(value, boundaryMin.value || null, boundaryMax.value || null)) ? "" : t("common.dateRangeOutOfRange");
 });
 const resolvedError = computed(() => props.error || invalidInputError.value || orderError.value || boundaryError.value);
-const describedBy = computed(() => {
-  return joinAriaIds([resolvedError.value ? errorId : undefined, boundaryMin.value || boundaryMax.value ? hintId : undefined]);
+const describedBy = computed(() => joinAriaIds([resolvedError.value ? errorId : undefined, boundaryMin.value || boundaryMax.value ? hintId : undefined]));
+
+const pickerModelValue = computed(() => {
+  return validPickerStart.value && validPickerEnd.value ? [validPickerStart.value, validPickerEnd.value] : [];
 });
-const calendarPanelOpen = computed(() => props.showCalendar && activeField.value !== null && !isReadonly.value);
-const panelLabelText = computed(() => props.panelLabel || `${props.label || t("common.dateRange")} ${activeField.value === "end" ? t("common.endDate") : t("common.startDate")}`);
-const monthLabel = computed(() => formatMonthYear(viewMonth.value, locale.value));
-const previousMonthLabel = computed(() => (locale.value === "en-US" ? "Previous month" : "上个月"));
-const nextMonthLabel = computed(() => (locale.value === "en-US" ? "Next month" : "下个月"));
-const todayLabel = computed(() => (locale.value === "en-US" ? "Today" : "今天"));
-const weekdayLabels = computed(() => getWeekdayLabels(locale.value, { firstDayOfWeek: props.firstDayOfWeek }));
-let stopDocumentListeners: DomEventCleanup | null = null;
+const resolvedPopperClass = computed(() => `base-date-range-popper base-date-range-popper--${props.size}`);
+const datePickerIds = computed(() => [`${rangeId}-start`, `${rangeId}-end`]);
+const datePickerNames = computed(() => [`${rangeId}-start`, `${rangeId}-end`]);
 
-function syncViewMonth(field: DateRangeField | null = activeField.value) {
-  const currentValue = field ? inputValue.value[field] : inputValue.value.start || inputValue.value.end;
-  const currentDate = parseDateValue(currentValue) || rangeStartDate.value || rangeEndDate.value || parseDateValue(todayValue.value) || getCurrentDate();
-  viewMonth.value = startOfMonth(currentDate) ?? currentDate;
-}
-
-function buildDay(date: Date): CalendarDay {
-  const value = normalizeDateValue(date);
-  const inMonth = isSameMonth(date, viewMonth.value);
-  const hasOrderedRange = Boolean(normalizedStart.value && normalizedEnd.value && compareDateValues(normalizedStart.value, normalizedEnd.value) <= 0);
-  return {
-    key: value,
-    label: String(date.getDate()),
-    value,
-    inMonth,
-    disabled: !isDateValueInRange(value, boundaryMin.value || null, boundaryMax.value || null),
-    isToday: value === todayValue.value,
-    isStart: value === normalizedStart.value,
-    isEnd: value === normalizedEnd.value,
-    isInRange: hasOrderedRange && compareDateValues(value, normalizedStart.value) >= 0 && compareDateValues(value, normalizedEnd.value) <= 0,
-  };
-}
-
-const calendarDays = computed(() => {
-  return getMonthCalendarDates(viewMonth.value, props.firstDayOfWeek).map(buildDay);
-});
-const enabledCalendarDays = computed(() => filterByFalsyValue(calendarDays.value, (day) => day.disabled));
-const canSelectToday = computed(() => isDateValueInRange(todayValue.value, boundaryMin.value || null, boundaryMax.value || null));
-const canGoToMonth = (offset: number) => {
-  const nextMonth = startOfMonth(addMonths(viewMonth.value, offset) ?? viewMonth.value) ?? viewMonth.value;
-  return getMonthCalendarDates(nextMonth, props.firstDayOfWeek).some((date) => isDateValueInRange(date, boundaryMin.value || null, boundaryMax.value || null));
+const disabledDate = (date: Date) => {
+  return !isDateValueInRange(date, boundaryMin.value || null, boundaryMax.value || null);
 };
 
-const getFocusableDayValue = (preferredValue = "") => {
-  const activeValue = activeField.value === "end" ? normalizedEnd.value : normalizedStart.value;
-  const candidates = compactArray([preferredValue, activeValue, normalizedStart.value, normalizedEnd.value, todayValue.value]);
-  const matchedCandidate = candidates.find((value) => hasByValue(enabledCalendarDays.value, (day) => day.value, value));
-  return matchedCandidate || firstItem(enabledCalendarDays.value)?.value || "";
-};
-
-const focusDayButton = (value = focusedDayValue.value) => {
-  if (!value) return;
-  void nextTick(() => {
-    rootRef.value?.querySelector<HTMLButtonElement>(`[data-date="${value}"]`)?.focus();
-  });
-};
-
-const syncFocusedDay = (preferredValue = focusedDayValue.value) => {
-  focusedDayValue.value = getFocusableDayValue(preferredValue);
-};
-
-const focusInput = (field: DateRangeField | null = activeField.value) => {
-  const target = field === "end" ? endInputRef.value : startInputRef.value;
-  target?.focus();
-};
-
-const closePanel = (returnFocus = false) => {
-  const previousField = activeField.value;
-  activeField.value = null;
-  if (returnFocus) {
-    void nextTick(() => focusInput(previousField));
+const normalizePickerValue = (value: DatePickerModelValue): DateRangeValue => {
+  if (!Array.isArray(value) || value.length < 2) {
+    return { start: "", end: "" };
   }
+
+  const [start, end] = value;
+  return {
+    start: parseDateValue(start) ? normalizeDateValue(start) : "",
+    end: parseDateValue(end) ? normalizeDateValue(end) : "",
+  };
 };
 
-const updateValue = (patch: Partial<DateRangeValue>) => {
+const emitRange = (nextValue: DateRangeValue) => {
   if (isReadonly.value) return;
-  const nextValue = applyObjectPatch(props.modelValue, patch);
   inputValue.value = nextValue;
   emit("update:modelValue", nextValue);
   emit("change", nextValue);
+};
+
+const handlePickerUpdate = (value: DatePickerModelValue) => {
+  emitRange(normalizePickerValue(value));
+};
+
+const clear = () => {
+  if (isReadonly.value) return;
+  const emptyValue = { start: "", end: "" };
+  if (inputValue.value.start || inputValue.value.end) {
+    emitRange(emptyValue);
+  }
+  emit("clear");
 };
 
 const applyPreset = (preset: DateRangePreset) => {
   if (isReadonly.value || !isPresetAllowed(preset)) return;
   const nextValue = { start: normalizeDateValue(preset.start), end: normalizeDateValue(preset.end) };
-  inputValue.value = nextValue;
-  emit("update:modelValue", nextValue);
-  emit("change", nextValue);
+  emitRange(nextValue);
   emit("preset", preset);
-  closePanel(true);
-};
-
-const clear = () => {
-  if (isReadonly.value) return;
-  const nextValue = { start: "", end: "" };
-  inputValue.value = nextValue;
-  emit("update:modelValue", nextValue);
-  emit("change", nextValue);
-  emit("clear");
-  closePanel();
 };
 
 const handleInput = (field: DateRangeField, event: Event) => {
@@ -282,9 +205,9 @@ const commitField = (field: DateRangeField) => {
   const value = inputValue.value[field];
   const normalized = normalizeDateValue(value);
   if (!value) {
-    updateValue({ [field]: "" });
+    emitRange(applyObjectPatch(inputValue.value, { [field]: "" }));
   } else if (parseDateValue(normalized)) {
-    updateValue({ [field]: normalized });
+    emitRange(applyObjectPatch(inputValue.value, { [field]: normalized }));
   }
 };
 
@@ -299,150 +222,54 @@ const handleInputKeydown = (field: DateRangeField, event: KeyboardEvent) => {
     commitField(field);
   } else if (isEscapeKey(event)) {
     inputValue.value = { ...props.modelValue };
-    closePanel();
   }
 };
 
-const openPanel = (field: DateRangeField) => {
-  if (!props.showCalendar || isReadonly.value) return;
-  activeField.value = field;
-  syncViewMonth(field);
-  void nextTick(() => syncFocusedDay(inputValue.value[field]));
+const getPickerElement = () => {
+  const current = pickerRef.value;
+  if (!current) return null;
+  if (current instanceof HTMLElement) return current;
+  return current.$el instanceof HTMLElement ? current.$el : null;
 };
 
-const selectDay = (day: CalendarDay) => {
-  if (day.disabled || isReadonly.value) return;
-  const field = activeField.value || "start";
-  const patch: Partial<DateRangeValue> = { [field]: day.value };
+const getFieldFromEvent = (event: FocusEvent): DateRangeField => {
+  const target = event.target;
+  const pickerElement = getPickerElement();
+  const inputs = pickerElement ? Array.from(pickerElement.querySelectorAll<HTMLInputElement>(".el-range-input")) : [];
+  return target instanceof HTMLInputElement && inputs.indexOf(target) === 1 ? "end" : "start";
+};
 
-  if (field === "start" && normalizedEnd.value && compareDateValues(day.value, normalizedEnd.value) > 0) {
-    patch.end = "";
+const handlePickerFocus = (event: FocusEvent) => {
+  emit("focus", getFieldFromEvent(event), event);
+};
+
+const handlePickerBlur = (event: FocusEvent) => {
+  emit("blur", getFieldFromEvent(event), event);
+};
+
+const setOptionalAttribute = (element: HTMLElement, name: string, value?: string | null) => {
+  if (value) {
+    element.setAttribute(name, value);
+    return;
   }
-
-  if (field === "end" && normalizedStart.value && compareDateValues(day.value, normalizedStart.value) < 0) {
-    patch.start = day.value;
-    patch.end = "";
-    activeField.value = "end";
-  } else {
-    activeField.value = field === "start" ? "end" : null;
-  }
-
-  updateValue(patch);
-  if (field === "start") {
-    viewMonth.value = startOfMonth(parseDateValue(day.value) ?? viewMonth.value) ?? viewMonth.value;
-  } else {
-    closePanel(true);
-  }
+  element.removeAttribute(name);
 };
 
-const goToMonth = (offset: number) => {
-  if (!canGoToMonth(offset)) return;
-  viewMonth.value = startOfMonth(addMonths(viewMonth.value, offset) ?? viewMonth.value) ?? viewMonth.value;
-  void nextTick(() => syncFocusedDay());
-};
-
-const selectToday = () => {
-  if (!canSelectToday.value) return;
-  const today = buildDay(parseDateValue(todayValue.value) ?? getCurrentDate());
-  if (today.disabled) return;
-  selectDay(today);
-};
-
-const handleDocumentClick = (event: MouseEvent) => {
-  if (!isEventTargetInsideElement(event, rootRef.value)) {
-    closePanel();
-  }
-};
-
-const handleKeydown = (event: KeyboardEvent) => {
-  if (isEscapeKey(event)) {
-    closePanel(true);
-  }
-};
-
-const moveFocusedDay = (day: CalendarDay, offset: number) => {
-  const nextDate = addDays(parseDateValue(day.value) ?? day.value, offset);
-  const nextValue = normalizeDateValue(nextDate);
-
-  if (!nextDate || !nextValue || !isDateValueInRange(nextValue, boundaryMin.value || null, boundaryMax.value || null)) return;
-
-  viewMonth.value = startOfMonth(nextDate) ?? viewMonth.value;
-  void nextTick(() => {
-    syncFocusedDay(nextValue);
-    focusDayButton();
+const syncPickerAria = async () => {
+  await nextTick();
+  const pickerElement = getPickerElement();
+  const inputs = pickerElement ? Array.from(pickerElement.querySelectorAll<HTMLInputElement>(".el-range-input")) : [];
+  const labels = [startLabel.value, endLabel.value];
+  inputs.forEach((input, index) => {
+    setOptionalAttribute(input, "aria-label", labels[index]);
+    setOptionalAttribute(input, "aria-describedby", describedBy.value);
+    setOptionalAttribute(input, "aria-invalid", resolvedError.value ? "true" : undefined);
+    setOptionalAttribute(input, "aria-errormessage", resolvedError.value ? errorId : undefined);
+    setOptionalAttribute(input, "aria-readonly", props.readonly ? "true" : undefined);
   });
 };
 
-const handleDayKeydown = (day: CalendarDay, event: KeyboardEvent) => {
-  if (day.disabled) return;
-
-  if (isActivationKey(event)) {
-    event.preventDefault();
-    selectDay(day);
-    return;
-  }
-
-  if (isKeyboardKey(event, "ArrowLeft")) {
-    event.preventDefault();
-    moveFocusedDay(day, -1);
-    return;
-  }
-
-  if (isKeyboardKey(event, "ArrowRight")) {
-    event.preventDefault();
-    moveFocusedDay(day, 1);
-    return;
-  }
-
-  if (isKeyboardKey(event, "ArrowUp")) {
-    event.preventDefault();
-    moveFocusedDay(day, -7);
-    return;
-  }
-
-  if (isKeyboardKey(event, "ArrowDown")) {
-    event.preventDefault();
-    moveFocusedDay(day, 7);
-    return;
-  }
-
-  if (isKeyboardKey(event, "PageUp")) {
-    event.preventDefault();
-    if (!canGoToMonth(-1)) return;
-    const nextDate = addMonths(parseDateValue(day.value) ?? day.value, -1);
-    viewMonth.value = startOfMonth(nextDate ?? viewMonth.value) ?? viewMonth.value;
-    void nextTick(() => {
-      syncFocusedDay(normalizeDateValue(nextDate));
-      focusDayButton();
-    });
-    return;
-  }
-
-  if (isKeyboardKey(event, "PageDown")) {
-    event.preventDefault();
-    if (!canGoToMonth(1)) return;
-    const nextDate = addMonths(parseDateValue(day.value) ?? day.value, 1);
-    viewMonth.value = startOfMonth(nextDate ?? viewMonth.value) ?? viewMonth.value;
-    void nextTick(() => {
-      syncFocusedDay(normalizeDateValue(nextDate));
-      focusDayButton();
-    });
-    return;
-  }
-
-  const boundaryPosition = getKeyboardBoundaryPosition(event);
-  if (boundaryPosition) {
-    event.preventDefault();
-    const index = findIndexByValue(calendarDays.value, (item) => item.value, day.value);
-    const weekDays = getArrayChunkAtIndex(calendarDays.value, index, 7).items.filter((item) => !item.disabled);
-    const nextDay = getBoundaryItem(weekDays, boundaryPosition);
-    if (!nextDay) return;
-    focusedDayValue.value = nextDay.value;
-    focusDayButton();
-  }
-};
-
-const isPresetActive = (preset: DateRangePreset) => isSameDateRange(props.modelValue, preset);
+const isPresetActive = (preset: DateRangePreset) => isSameDateRange(inputValue.value, preset);
 const isPresetAllowed = (preset: DateRangePreset) => {
   const normalizedPreset = {
     start: normalizeDateValue(preset.start),
@@ -464,40 +291,27 @@ watch(
   { immediate: true }
 );
 
-watch(
-  () => [props.modelValue.start, props.modelValue.end],
-  () => {
-    if (calendarPanelOpen.value) {
-      void nextTick(() => {
-        syncViewMonth();
-        syncFocusedDay();
-      });
-    }
-  },
-);
-
-onMounted(() => {
-  stopDocumentListeners = mergeDomEventCleanups([
-    addDomEventListener(document, "click", handleDocumentClick),
-    addDomEventListener(document, "keydown", handleKeydown),
-  ]);
-  syncViewMonth();
-});
-
-onBeforeUnmount(() => {
-  stopDocumentListeners?.();
-  stopDocumentListeners = null;
+watchEffect(() => {
+  void props.showCalendar;
+  void props.readonly;
+  void props.disabled;
+  void inputValue.value.start;
+  void inputValue.value.end;
+  void describedBy.value;
+  void resolvedError.value;
+  void syncPickerAria();
 });
 </script>
 
 <template>
   <div
-    ref="rootRef"
     class="base-date-range"
     :class="{
       'base-date-range--compact': compact,
       [`base-date-range--${size}`]: true,
       [`base-date-range--surface-${surface}`]: true,
+      'base-date-range--picker': showCalendar,
+      'base-date-range--manual': !showCalendar,
       'is-disabled': disabled,
       'is-readonly': readonly,
       'is-error': resolvedError
@@ -507,10 +321,10 @@ onBeforeUnmount(() => {
     :aria-describedby="describedBy"
     :aria-invalid="resolvedError ? 'true' : undefined"
   >
-    <div v-if="label || clearable" class="base-date-range__header">
+    <div v-if="label || (clearable && !showCalendar)" class="base-date-range__header">
       <span v-if="label" :id="labelId">{{ label }}</span>
       <button
-        v-if="clearable && (modelValue.start || modelValue.end)"
+        v-if="clearable && !showCalendar && (inputValue.start || inputValue.end)"
         type="button"
         :disabled="isReadonly"
         :aria-label="clearLabel"
@@ -523,20 +337,46 @@ onBeforeUnmount(() => {
       </button>
     </div>
 
-    <div class="base-date-range__inputs">
-      <label :class="{ 'is-active': activeField === 'start' }" @click="openPanel('start')">
+    <el-config-provider v-if="showCalendar" :locale="elementLocale">
+      <el-date-picker
+        ref="pickerRef"
+        class="base-date-range__picker"
+        type="daterange"
+        :model-value="pickerModelValue"
+        value-format="YYYY-MM-DD"
+        format="YYYY-MM-DD"
+        :id="datePickerIds"
+        :name="datePickerNames"
+        :size="elementSize"
+        :disabled="disabled"
+        :readonly="readonly"
+        :clearable="clearable"
+        :editable="true"
+        :disabled-date="disabledDate"
+        :range-separator="t('common.to')"
+        :start-placeholder="startPlaceholder || t('common.startDate')"
+        :end-placeholder="endPlaceholder || t('common.endDate')"
+        :aria-label="panelLabelText"
+        :validate-event="false"
+        :popper-class="resolvedPopperClass"
+        placement="bottom-start"
+        @update:model-value="handlePickerUpdate"
+        @clear="clear"
+        @focus="handlePickerFocus"
+        @blur="handlePickerBlur"
+      />
+    </el-config-provider>
+
+    <div v-else class="base-date-range__inputs">
+      <label>
         <BaseIcon name="CalendarDays" size="15" aria-hidden="true" />
         <input
-          ref="startInputRef"
           type="text"
           :value="inputValue.start"
           :placeholder="startPlaceholder || t('common.startDate')"
           :aria-label="startLabel"
           :aria-invalid="resolvedError ? 'true' : undefined"
           :aria-describedby="describedBy"
-          :aria-haspopup="showCalendar ? 'dialog' : undefined"
-          :aria-controls="calendarPanelOpen ? panelId : undefined"
-          :aria-expanded="activeField === 'start'"
           autocomplete="off"
           inputmode="numeric"
           pattern="\\d{4}-\\d{2}-\\d{2}"
@@ -545,25 +385,21 @@ onBeforeUnmount(() => {
           :disabled="disabled"
           :readonly="readonly"
           @input="handleInput('start', $event)"
-          @focus="openPanel('start'); emit('focus', 'start', $event)"
+          @focus="emit('focus', 'start', $event)"
           @blur="handleBlur('start', $event)"
           @keydown="handleInputKeydown('start', $event)"
         />
       </label>
       <span class="base-date-range__separator" aria-hidden="true">{{ t("common.to") }}</span>
-      <label :class="{ 'is-active': activeField === 'end' }" @click="openPanel('end')">
+      <label>
         <BaseIcon name="CalendarCheck" size="15" aria-hidden="true" />
         <input
-          ref="endInputRef"
           type="text"
           :value="inputValue.end"
           :placeholder="endPlaceholder || t('common.endDate')"
           :aria-label="endLabel"
           :aria-invalid="resolvedError ? 'true' : undefined"
           :aria-describedby="describedBy"
-          :aria-haspopup="showCalendar ? 'dialog' : undefined"
-          :aria-controls="calendarPanelOpen ? panelId : undefined"
-          :aria-expanded="activeField === 'end'"
           autocomplete="off"
           inputmode="numeric"
           pattern="\\d{4}-\\d{2}-\\d{2}"
@@ -572,68 +408,11 @@ onBeforeUnmount(() => {
           :disabled="disabled"
           :readonly="readonly"
           @input="handleInput('end', $event)"
-          @focus="openPanel('end'); emit('focus', 'end', $event)"
+          @focus="emit('focus', 'end', $event)"
           @blur="handleBlur('end', $event)"
           @keydown="handleInputKeydown('end', $event)"
         />
       </label>
-    </div>
-
-    <div v-if="calendarPanelOpen" :id="panelId" class="base-date-range__calendar" role="dialog" :aria-label="panelLabelText" @click.stop>
-      <div class="base-date-range__calendar-header">
-        <button type="button" :disabled="!canGoToMonth(-1)" :aria-label="previousMonthLabel" @click="goToMonth(-1)">
-          <BaseIcon name="ChevronLeft" size="15" aria-hidden="true" />
-        </button>
-        <div class="base-date-range__calendar-title">
-          <span>{{ monthLabel }}</span>
-          <small>{{ activeField === "end" ? t("common.endDate") : t("common.startDate") }}</small>
-        </div>
-        <button type="button" :disabled="!canGoToMonth(1)" :aria-label="nextMonthLabel" @click="goToMonth(1)">
-          <BaseIcon name="ChevronRight" size="15" aria-hidden="true" />
-        </button>
-      </div>
-
-      <div class="base-date-range__calendar-meta">
-        <div class="base-date-range__calendar-range">
-          <BaseBadge type="primary" variant="outline">{{ normalizedStart || t("common.startDate") }}</BaseBadge>
-          <BaseIcon name="ArrowRight" size="13" aria-hidden="true" />
-          <BaseBadge type="success" variant="outline">{{ normalizedEnd || t("common.endDate") }}</BaseBadge>
-        </div>
-        <button type="button" :disabled="!canSelectToday" @click="selectToday">
-          {{ todayLabel }}
-        </button>
-      </div>
-
-      <div class="base-date-range__weekdays" aria-hidden="true">
-        <span v-for="weekday in weekdayLabels" :key="weekday">{{ weekday }}</span>
-      </div>
-
-      <div class="base-date-range__days" role="group" :aria-label="monthLabel">
-        <button
-          v-for="day in calendarDays"
-          :key="day.key"
-          type="button"
-          :data-date="day.value"
-          :disabled="day.disabled"
-          :tabindex="day.value === focusedDayValue ? 0 : -1"
-          :title="day.value"
-          :aria-label="day.value"
-          :aria-current="day.isToday ? 'date' : undefined"
-          :aria-pressed="day.isStart || day.isEnd"
-          :class="{
-            'is-muted': !day.inMonth,
-            'is-today': day.isToday,
-            'is-start': day.isStart,
-            'is-end': day.isEnd,
-            'is-in-range': day.isInRange
-          }"
-          @focus="focusedDayValue = day.value"
-          @keydown="handleDayKeydown(day, $event)"
-          @click="selectDay(day)"
-        >
-          <span>{{ day.label }}</span>
-        </button>
-      </div>
     </div>
 
     <p v-if="boundaryMin || boundaryMax" :id="hintId" class="base-date-range__hint">
@@ -722,6 +501,62 @@ onBeforeUnmount(() => {
   @apply inline-flex h-7 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 text-[10px] font-black text-slate-500 shadow-sm transition hover:border-red-200 hover:bg-red-50 hover:text-red-600 disabled:opacity-60 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-400 dark:hover:border-red-900 dark:hover:bg-red-950 dark:hover:text-red-300;
 }
 
+.base-date-range__picker {
+  @apply flex h-10 w-full min-w-0 items-center rounded-xl border border-slate-200 bg-white px-3 text-slate-600 shadow-sm transition dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200;
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.04),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.72);
+}
+
+.base-date-range__picker:hover {
+  @apply border-slate-300 bg-slate-50 dark:border-slate-600 dark:bg-slate-900;
+}
+
+.base-date-range__picker.is-active,
+.base-date-range__picker.is-focus {
+  border-color: rgb(var(--color-primary));
+  background-color: #ffffff;
+  box-shadow:
+    0 0 0 3px rgb(var(--color-primary) / 0.14),
+    0 8px 18px rgba(15, 23, 42, 0.06);
+}
+
+.base-date-range.is-error .base-date-range__picker {
+  @apply border-red-300 bg-red-50 dark:border-red-900 dark:bg-red-950;
+}
+
+.base-date-range.is-error .base-date-range__picker.is-active,
+.base-date-range.is-error .base-date-range__picker.is-focus {
+  @apply border-red-400;
+  box-shadow:
+    0 0 0 3px rgba(239, 68, 68, 0.14),
+    0 8px 18px rgba(15, 23, 42, 0.06);
+}
+
+.base-date-range.is-readonly .base-date-range__picker,
+.base-date-range.is-disabled .base-date-range__picker {
+  @apply bg-slate-100 dark:bg-slate-900;
+}
+
+.base-date-range__picker :deep(.el-range-input) {
+  @apply min-w-0 bg-transparent text-xs font-black text-slate-800 dark:text-slate-100;
+  color-scheme: light;
+}
+
+.base-date-range__picker :deep(.el-range-input::placeholder) {
+  @apply text-slate-400 dark:text-slate-500;
+}
+
+.base-date-range__picker :deep(.el-range-separator) {
+  @apply flex h-6 min-w-8 items-center justify-center rounded-full bg-slate-100 px-2 text-[10px] font-black text-slate-400 dark:bg-slate-800 dark:text-slate-500;
+}
+
+.base-date-range__picker :deep(.el-input__icon),
+.base-date-range__picker :deep(.el-range__icon),
+.base-date-range__picker :deep(.el-range__close-icon) {
+  @apply text-slate-400 dark:text-slate-500;
+}
+
 .base-date-range__inputs {
   @apply grid grid-cols-1 items-center gap-2 md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)];
 }
@@ -731,12 +566,6 @@ onBeforeUnmount(() => {
   box-shadow:
     0 1px 2px rgba(15, 23, 42, 0.04),
     inset 0 0 0 1px rgba(255, 255, 255, 0.72);
-}
-
-.base-date-range__inputs label.is-active {
-  border-color: rgb(var(--color-primary) / 0.55);
-  background-color: #ffffff;
-  color: rgb(var(--color-primary));
 }
 
 .base-date-range__inputs label:focus-within {
@@ -756,126 +585,6 @@ onBeforeUnmount(() => {
 
 .base-date-range__separator {
   @apply flex h-6 items-center justify-center rounded-full bg-slate-100 px-2 text-[10px] font-black text-slate-400 dark:bg-slate-800 dark:text-slate-500;
-}
-
-.base-date-range__calendar {
-  @apply relative z-10 mt-3 overflow-hidden rounded-xl border border-slate-200 bg-white p-0 shadow-md ring-1 dark:border-slate-800 dark:bg-slate-900;
-  background-image:
-    linear-gradient(135deg, rgb(var(--color-primary) / 0.035), transparent 30%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.99), rgba(248, 250, 252, 0.96));
-  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.08);
-  --tw-ring-color: rgba(255, 255, 255, 0.8);
-}
-
-.base-date-range__calendar-header {
-  @apply grid grid-cols-[2rem_minmax(0,1fr)_2rem] items-center gap-2 border-b border-slate-100 px-3 py-2.5 dark:border-slate-800;
-  background-color: rgba(248, 250, 252, 0.82);
-}
-
-.base-date-range__calendar-header button,
-.base-date-range__calendar-meta button {
-  @apply inline-flex h-8 items-center justify-center rounded-lg border border-slate-200 bg-white px-2 text-[10px] font-black text-slate-500 shadow-sm transition hover:border-primary hover:text-primary focus:outline-none focus:ring-2 focus:ring-primary focus:ring-opacity-20 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-400;
-}
-
-.base-date-range__calendar-title {
-  @apply flex min-w-0 flex-col items-center gap-0.5 text-center;
-}
-
-.base-date-range__calendar-title span {
-  @apply truncate text-sm font-black text-slate-800 dark:text-slate-100;
-}
-
-.base-date-range__calendar-title small {
-  @apply text-[10px] font-black text-slate-400 dark:text-slate-500;
-}
-
-.base-date-range__calendar-meta {
-  @apply mx-3 my-2.5 flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-100 bg-white p-2 shadow-sm dark:border-slate-800 dark:bg-slate-950;
-}
-
-.base-date-range__calendar-range {
-  @apply flex min-w-0 flex-1 flex-wrap items-center gap-2;
-}
-
-.base-date-range__weekdays,
-.base-date-range__days {
-  @apply mx-3 grid grid-cols-7;
-}
-
-.base-date-range__weekdays span {
-  @apply pb-1.5 text-center text-[10px] font-black text-slate-400 dark:text-slate-500;
-}
-
-.base-date-range__days {
-  @apply mb-3 overflow-hidden rounded-lg border border-slate-100 bg-slate-50 p-1 dark:border-slate-800 dark:bg-slate-950;
-}
-
-.base-date-range__days button {
-  @apply relative flex h-8 min-h-8 items-center justify-center text-xs font-black text-slate-600 transition focus:outline-none focus:ring-2 focus:ring-primary focus:ring-opacity-20 disabled:cursor-not-allowed disabled:text-slate-300 disabled:opacity-50 dark:text-slate-300 dark:disabled:text-slate-700;
-}
-
-.base-date-range__days button::before {
-  @apply absolute inset-y-1 left-0 right-0;
-  content: "";
-}
-
-.base-date-range__days button:nth-child(7n + 1)::before {
-  @apply rounded-l-lg;
-}
-
-.base-date-range__days button:nth-child(7n)::before {
-  @apply rounded-r-lg;
-}
-
-.base-date-range__days button > span {
-  @apply relative z-10 flex h-6 w-6 items-center justify-center rounded-md transition;
-}
-
-.base-date-range__days button:not(.is-start):not(.is-end):not(:disabled):hover > span {
-  @apply bg-white text-slate-900 shadow-sm dark:bg-slate-800 dark:text-slate-100;
-}
-
-.base-date-range__days button.is-muted {
-  @apply text-slate-300 dark:text-slate-700;
-}
-
-.base-date-range__days button.is-in-range {
-  @apply text-primary;
-}
-
-.base-date-range__days button.is-in-range::before {
-  background-color: rgb(var(--color-primary) / 0.1);
-}
-
-.base-date-range__days button.is-start,
-.base-date-range__days button.is-end {
-  @apply text-white;
-}
-
-.base-date-range__days button.is-start::before {
-  left: 50%;
-  background-color: rgb(var(--color-primary) / 0.1);
-}
-
-.base-date-range__days button.is-end::before {
-  right: 50%;
-  background-color: rgb(var(--color-primary) / 0.1);
-}
-
-.base-date-range__days button.is-start.is-end::before {
-  display: none;
-}
-
-.base-date-range__days button.is-start > span,
-.base-date-range__days button.is-end > span {
-  background-color: rgb(var(--color-primary));
-  @apply shadow-sm;
-}
-
-.base-date-range__days button.is-today::after {
-  @apply absolute bottom-1 h-1 w-1 rounded-full;
-  content: "";
-  background-color: currentColor;
 }
 
 .base-date-range__hint {
@@ -901,7 +610,7 @@ onBeforeUnmount(() => {
 }
 
 .base-date-range__error {
-  @apply mt-2 text-[10px] font-bold text-red-500;
+  @apply mt-2 text-[10px] font-bold text-red-500 dark:text-red-300;
 }
 
 :global(.dark) .base-date-range {
@@ -920,29 +629,161 @@ onBeforeUnmount(() => {
   background-image: none;
 }
 
+:global(.dark) .base-date-range__picker :deep(.el-range-input),
 :global(.dark) .base-date-range__inputs input {
   color-scheme: dark;
 }
 
-:global(.dark) .base-date-range__calendar {
-  background-image:
-    linear-gradient(135deg, rgb(var(--color-primary) / 0.1), transparent 32%),
-    linear-gradient(180deg, rgba(15, 23, 42, 0.98), rgba(2, 6, 23, 0.94));
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.25);
-  --tw-ring-color: rgba(51, 65, 85, 0.3);
+:global(.base-date-range-popper.el-popper) {
+  --el-color-primary: rgb(var(--color-primary));
 }
 
-:global(.dark) .base-date-range__calendar-header {
-  background-color: rgba(15, 23, 42, 0.74);
+:global(.base-date-range-popper .el-date-range-picker) {
+  overflow: hidden;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  background: #ffffff;
+  box-shadow:
+    0 18px 42px rgba(15, 23, 42, 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 0.86);
+}
+
+:global(.base-date-range-popper .el-picker-panel__body) {
+  min-width: 0;
+}
+
+:global(.base-date-range-popper .el-date-range-picker__content) {
+  padding: 14px;
+}
+
+:global(.base-date-range-popper .el-date-range-picker__content.is-left) {
+  border-right-color: #e2e8f0;
+}
+
+:global(.base-date-range-popper .el-date-range-picker__header) {
+  margin-bottom: 8px;
+}
+
+:global(.base-date-range-popper .el-date-range-picker__header div) {
+  color: #0f172a;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+:global(.base-date-range-popper .el-picker-panel__icon-btn) {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  color: #64748b;
+}
+
+:global(.base-date-range-popper .el-picker-panel__icon-btn:hover) {
+  background: #f1f5f9;
+  color: rgb(var(--color-primary));
+}
+
+:global(.base-date-range-popper .el-date-table th) {
+  color: #94a3b8;
+  font-size: 10px;
+  font-weight: 900;
+}
+
+:global(.base-date-range-popper .el-date-table td) {
+  height: 34px;
+  padding: 2px 0;
+}
+
+:global(.base-date-range-popper .el-date-table td .el-date-table-cell) {
+  height: 30px;
+  padding: 2px 0;
+}
+
+:global(.base-date-range-popper .el-date-table td .el-date-table-cell__text) {
+  border-radius: 9px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+:global(.base-date-range-popper .el-date-table td.available:hover .el-date-table-cell__text) {
+  background: #f1f5f9;
+  color: #0f172a;
+}
+
+:global(.base-date-range-popper .el-date-table td.in-range .el-date-table-cell) {
+  background: rgb(var(--color-primary) / 0.1);
+}
+
+:global(.base-date-range-popper .el-date-table td.start-date .el-date-table-cell),
+:global(.base-date-range-popper .el-date-table td.end-date .el-date-table-cell) {
+  background: rgb(var(--color-primary) / 0.1);
+}
+
+:global(.base-date-range-popper .el-date-table td.start-date .el-date-table-cell__text),
+:global(.base-date-range-popper .el-date-table td.end-date .el-date-table-cell__text),
+:global(.base-date-range-popper .el-date-table td.current:not(.disabled) .el-date-table-cell__text) {
+  background: rgb(var(--color-primary));
+  color: #ffffff;
+}
+
+:global(.base-date-range-popper .el-date-table td.today .el-date-table-cell__text) {
+  color: rgb(var(--color-primary));
+}
+
+:global(.base-date-range-popper .el-date-table td.today.start-date .el-date-table-cell__text),
+:global(.base-date-range-popper .el-date-table td.today.end-date .el-date-table-cell__text),
+:global(.base-date-range-popper .el-date-table td.today.current .el-date-table-cell__text) {
+  color: #ffffff;
+}
+
+:global(.dark .base-date-range-popper .el-date-range-picker) {
+  border-color: #1e293b;
+  background: #0f172a;
+  box-shadow:
+    0 18px 42px rgba(0, 0, 0, 0.34),
+    inset 0 1px 0 rgba(148, 163, 184, 0.08);
+}
+
+:global(.dark .base-date-range-popper .el-date-range-picker__content.is-left) {
+  border-right-color: #1e293b;
+}
+
+:global(.dark .base-date-range-popper .el-date-range-picker__header div) {
+  color: #f8fafc;
+}
+
+:global(.dark .base-date-range-popper .el-picker-panel__icon-btn) {
+  color: #94a3b8;
+}
+
+:global(.dark .base-date-range-popper .el-picker-panel__icon-btn:hover) {
+  background: #1e293b;
+  color: rgb(var(--color-primary));
+}
+
+:global(.dark .base-date-range-popper .el-date-table th) {
+  color: #64748b;
+}
+
+:global(.dark .base-date-range-popper .el-date-table td.available:hover .el-date-table-cell__text) {
+  background: #1e293b;
+  color: #f8fafc;
+}
+
+:global(.dark .base-date-range-popper .el-date-table td.disabled .el-date-table-cell__text) {
+  color: #475569;
+}
+
+@media (max-width: 680px) {
+  :global(.base-date-range-popper .el-date-range-picker__content) {
+    width: 100%;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .base-date-range,
-  .base-date-range__header button,
+  .base-date-range__clear,
+  .base-date-range__picker,
   .base-date-range__inputs label,
-  .base-date-range__calendar-header button,
-  .base-date-range__calendar-meta button,
-  .base-date-range__days button,
   .base-date-range__presets button {
     transition: none !important;
   }
