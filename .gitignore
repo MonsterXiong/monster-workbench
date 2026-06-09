@@ -10,3 +10,4 @@ src-tauri/gen
 .codex-tauri-dev.*.log
 __pycache__/
 *.pyc
+.gemini
