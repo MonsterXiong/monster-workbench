@@ -135,6 +135,16 @@ const MOCK_IMAGE_DATA_URL =
 const MOCK_IMAGE_DATA_URL_ALT =
   "data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%201024%201024%22%3E%3Cdefs%3E%3ClinearGradient%20id%3D%22g%22%20x1%3D%221%22%20x2%3D%220%22%20y1%3D%220%22%20y2%3D%221%22%3E%3Cstop%20stop-color%3D%22%23f59e0b%22/%3E%3Cstop%20offset%3D%221%22%20stop-color%3D%22%238b5cf6%22/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect%20width%3D%221024%22%20height%3D%221024%22%20rx%3D%2280%22%20fill%3D%22url(%23g)%22/%3E%3Ccircle%20cx%3D%22512%22%20cy%3D%22388%22%20r%3D%22118%22%20fill%3D%22white%22%20opacity%3D%22.9%22/%3E%3Crect%20x%3D%22304%22%20y%3D%22572%22%20width%3D%22416%22%20height%3D%22104%22%20rx%3D%2252%22%20fill%3D%22white%22%20opacity%3D%22.9%22/%3E%3Ctext%20x%3D%22512%22%20y%3D%22804%22%20text-anchor%3D%22middle%22%20font-family%3D%22Arial%2Csans-serif%22%20font-size%3D%2256%22%20font-weight%3D%22700%22%20fill%3D%22white%22%3EMock%202%3C/text%3E%3C/svg%3E";
 
+function createMockSavedFile(index: number, size: string) {
+  const suffix = index > 0 ? `-${index + 1}` : "";
+  return {
+    path: `C:\\Users\\刘雄成\\.monster-tools\\generated\\browser-mock\\mock-image-${size}${suffix}.png`,
+    sizeBytes: 1683860 + index * 122880,
+    mimeType: "image/png",
+    dimensions: size,
+  };
+}
+
 function trimMockAiTasks() {
   const tasks = sortByMany(mapValuesToArray(mockAiTasks), [
     { getValue: (task) => task.createdAtMs, direction: "desc" },
@@ -198,6 +208,7 @@ function createMockAiResult(args: Record<string, unknown>, action: string) {
         rawPreview: "{\"error\":{\"message\":\"unsupported image size\"}}"
       };
     }
+    const imageUrls = shouldMockMultiImage ? [MOCK_IMAGE_DATA_URL, MOCK_IMAGE_DATA_URL_ALT] : [MOCK_IMAGE_DATA_URL];
     return {
       ...createMockAiResultBase(args, "image"),
       ok: true,
@@ -205,9 +216,9 @@ function createMockAiResult(args: Record<string, unknown>, action: string) {
       latencyMs: 260,
       totalLatencyMs: 260,
       message: "浏览器 Mock 生图测试成功",
-      imageUrls: shouldMockMultiImage ? [MOCK_IMAGE_DATA_URL, MOCK_IMAGE_DATA_URL_ALT] : [MOCK_IMAGE_DATA_URL],
+      imageUrls,
       imagePaths: [],
-      savedFiles: [],
+      savedFiles: imageUrls.map((_, index) => createMockSavedFile(index, requestedImageSize)),
       apiImageSize: requestedImageSize,
       requestedImageSize,
       actualImageSize: requestedImageSize,

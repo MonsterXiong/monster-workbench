@@ -249,7 +249,7 @@ const activeSizeDetail = computed(() => {
   if (!option) {
     return aiStore.imageDraftSize;
   }
-  return joinBy([option.description, option.meta], (item) => item, " · ");
+  return [option.description, option.meta].filter(Boolean).join(" · ");
 });
 const activeSizeNotice = computed(() => {
   if (!EXPERIMENTAL_IMAGE_SIZE_VALUES.has(aiStore.imageDraftSize)) {
@@ -373,11 +373,11 @@ const filteredImageSessionEmptyText = computed(() => {
   }
   return t("aiPage.image.sessionListEmpty");
 });
-const activeImageHeaderMeta = computed(() => joinBy([
+const activeImageHeaderMeta = computed(() => [
   aiStore.activeImageConfig?.name || aiStore.activeImageConfig?.displayName,
   activeImageModelName.value,
   isBusy.value ? imageStatusLabel.value : "",
-], (item) => item, " · "));
+].filter(Boolean).join(" · "));
 
 onMounted(async () => {
   stopPreviewKeydown = addDomEventListener(window, "keydown", handlePreviewKeydown);
