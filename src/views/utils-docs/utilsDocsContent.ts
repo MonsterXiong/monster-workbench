@@ -48,6 +48,10 @@ function files(name: string, split = false): string[] {
   return split ? [`src/utils/${name}.ts`, `src/utils/${name}/index.ts`] : [`src/utils/${name}.ts`];
 }
 
+function splitFiles(name: string, modules: readonly string[]): string[] {
+  return [`src/utils/${name}.ts`, ...modules.map((moduleName) => `src/utils/${name}/${moduleName}.ts`)];
+}
+
 function doc(entry: UtilityDocEntry): UtilityDocEntry {
   return entry;
 }
@@ -257,8 +261,8 @@ export const utilityDocs: UtilityDocEntry[] = [
     title: "format 格式化工具",
     group: "业务通用",
     importPath: "src/utils/format",
-    sourceFiles: files("format"),
-    splitStatus: "single",
+    sourceFiles: splitFiles("format", ["index", "types", "constants", "bytes", "number", "duration", "list", "summary-items", "dimensions", "template"]),
+    splitStatus: "split",
     description: "字节、时长、百分比、模板插值、状态摘要项和概览项报告。",
     functions: ["formatBytes", "formatDuration", "formatPercent", "formatTemplateWithReport", "createSummaryItemsReport", "createStatusSummaryItemsReport"],
     snippets: ["formatTemplateWithReport(template, params)", "createSummaryItemsReport(summaryItems)"],
@@ -460,8 +464,8 @@ export const utilityDocs: UtilityDocEntry[] = [
     title: "url URL 工具",
     group: "数据资源",
     importPath: "src/utils/url",
-    sourceFiles: files("url"),
-    splitStatus: "single",
+    sourceFiles: splitFiles("url", ["index", "types", "core", "query-value", "search-params", "query-summary", "hash", "path", "mutation", "summary"]),
+    splitStatus: "split",
     description: "URL 解析、query record、query diff、标准化、追加、过滤和 URL 列表摘要。",
     functions: ["summarizeUrl", "summarizeUrls", "summarizeSearchParams", "diffSearchParams", "createQueryKey", "appendQuery", "normalizeUrlQuery", "filterUrlQueryParams"],
     snippets: ["summarizeUrl(input, { baseUrl })", "appendQuery('/tools', { tag: ['ai', 'utils'], page: 2 })"],
