@@ -12,6 +12,11 @@ on:
         required: true
         default: false
         type: boolean
+      full_bundle:
+        description: "Build installers and updater artifacts during dry-run"
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -71,7 +76,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: release-${{ runner.os }}
+          shared-key: release-verify-${{ runner.os }}
           workspaces: |
             src-tauri -> target
 
@@ -115,7 +120,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: release-${{ runner.os }}
+          shared-key: release-build-${{ runner.os }}
           workspaces: |
             src-tauri -> target
 
@@ -130,6 +135,7 @@ jobs:
 
       - name: Get Release Notes
         id: release_notes
+        if: github.event_name != 'workflow_dispatch' || inputs.publish_release
         shell: bash
         run: |
           if [ -f .github/release-notes.md ]; then
@@ -140,8 +146,12 @@ jobs:
             echo "body=Monster Tools native desktop release." >> $GITHUB_OUTPUT
           fi
 
-      - name: Build Tauri app for release test
-        if: github.event_name == 'workflow_dispatch' && !inputs.publish_release
+      - name: Build Tauri app for quick release test
+        if: github.event_name == 'workflow_dispatch' && !inputs.publish_release && !inputs.full_bundle
+        run: npx tauri build --no-bundle ${{ matrix.args }}
+
+      - name: Build Tauri app for full release test
+        if: github.event_name == 'workflow_dispatch' && !inputs.publish_release && inputs.full_bundle
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
