@@ -172,6 +172,11 @@ const componentGroups: ComponentGroup[] = [
     icon: FunctionSquare,
     components: [
       { key: "utils-number", name: "number", title: "数值工具", description: "数值解析、范围归一化、分桶统计、分页边界和典型异常输入。" },
+      { key: "utils-csv", name: "csv", title: "CSV 工具", description: "CSV/TSV 解析、自动分隔符、多行引号、列摘要和安全导出。" },
+      { key: "utils-array", name: "array", title: "数组工具", description: "去重、分组、分页、筛选、排序、索引 diff 和 keyed diff。" },
+      { key: "utils-object", name: "object", title: "对象工具", description: "record 处理、路径读写、cleanup、patch、对象 diff 和 deep diff。" },
+      { key: "utils-tree", name: "tree", title: "树形工具", description: "tree to list、list to tree、lookup、诊断、可见节点和 diff by key。" },
+      { key: "utils-json-path", name: "json / path", title: "JSON 与路径", description: "循环 JSON、中文路径、Windows 路径、安全子路径和文件名清理。" },
     ],
   },
   {
@@ -243,6 +248,11 @@ const coveredComponentKeys = [
   "skeleton-card",
   "progress",
   "utils-number",
+  "utils-csv",
+  "utils-array",
+  "utils-object",
+  "utils-tree",
+  "utils-json-path",
 ];
 
 const playgroundPanes = [
