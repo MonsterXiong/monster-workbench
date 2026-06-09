@@ -4,7 +4,7 @@
 
 ## 当前未解决事项
 
-- [ ] 补充当前项目基线结果
+- [x] 补充当前项目基线结果：2026-06-10 Goal 00 记录在 `docs/ai/creative-master-plan.md`。
 - [ ] 确认 SQLite migration 现有机制
 - [ ] 确认 AI Provider 测试链路的回归步骤
 - [ ] 确认 Python sidecar 发布策略

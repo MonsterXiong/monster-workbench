@@ -766,7 +766,7 @@ export default {
       copyPrompt: "Copy Prompt",
       copyError: "Copy Error",
       copyRequestId: "Copy Request",
-      copyPath: "Copy Path",
+      copyPath: "Copy File Path",
       copyImageUrl: "Copy Image URL",
       copyImageInfo: "Copy Info",
       openFileLocation: "Open Containing Folder",

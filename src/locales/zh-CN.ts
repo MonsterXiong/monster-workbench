@@ -766,7 +766,7 @@ export default {
       copyPrompt: "复制提示词",
       copyError: "复制错误",
       copyRequestId: "复制请求",
-      copyPath: "复制路径",
+      copyPath: "复制文件路径",
       copyImageUrl: "复制图片地址",
       copyImageInfo: "复制信息",
       openFileLocation: "打开文件所在位置",
