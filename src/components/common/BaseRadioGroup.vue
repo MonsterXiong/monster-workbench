@@ -81,12 +81,12 @@ onBeforeUpdate(() => {
 });
 
 const setOptionRef = (element: Element | ComponentPublicInstance | null, index: number) => {
-  if (element instanceof HTMLElement) {
-    optionRefs.value[index] = element;
-    return;
-  }
+  const resolvedElement = element instanceof HTMLElement ? element : (element as ComponentPublicInstance | null)?.$el;
+  optionRefs.value[index] = resolvedElement instanceof HTMLElement ? resolvedElement : null;
+};
 
-  optionRefs.value[index] = element?.$el instanceof HTMLElement ? element.$el : null;
+const optionRefSetter = (index: number) => {
+  return (element: Element | ComponentPublicInstance | null) => setOptionRef(element, index);
 };
 
 const focusOptionByValue = async (value: string | number) => {
@@ -200,7 +200,7 @@ const optionButtonId = (index: number) => `${groupId}-option-${index}`;
       v-for="(option, index) in options"
       :key="option.value"
       :id="optionButtonId(index)"
-      :ref="(element) => setOptionRef(element, index)"
+      :ref="optionRefSetter(index)"
       class="base-radio-group__option"
       :class="{
         'is-active': currentValue === option.value,
@@ -231,6 +231,7 @@ const optionButtonId = (index: number) => `${groupId}-option-${index}`;
 <style scoped>
 .base-radio-group {
   @apply grid grid-cols-1 gap-2;
+  align-items: stretch;
 }
 
 .base-radio-group--cols-2 {
@@ -246,11 +247,16 @@ const optionButtonId = (index: number) => `${groupId}-option-${index}`;
 }
 
 .base-radio-group__option {
-  @apply flex w-full items-start gap-3 rounded-2xl border border-slate-200 bg-white p-3 text-left transition-colors dark:border-slate-800 dark:bg-slate-900;
+  @apply relative flex w-full min-w-0 items-start gap-3 rounded-2xl border border-slate-200 bg-white p-3 text-left transition-colors dark:border-slate-800 dark:bg-slate-900;
+  color: inherit;
+  height: auto !important;
+  line-height: normal;
+  margin-right: 0 !important;
+  white-space: normal;
 }
 
 .base-radio-group--inline .base-radio-group__option {
-  @apply w-auto min-w-28;
+  @apply w-auto min-w-28 flex-none;
 }
 
 .base-radio-group--compact .base-radio-group__option {
@@ -269,7 +275,7 @@ const optionButtonId = (index: number) => `${groupId}-option-${index}`;
   @apply border-slate-300 bg-slate-50 dark:border-slate-700 dark:bg-slate-950;
 }
 
-.base-radio-group__option:focus-visible {
+.base-radio-group__option:focus-within {
   border-color: rgb(var(--color-primary));
   box-shadow: 0 0 0 3px rgb(var(--color-primary) / 0.14);
   outline: none;
@@ -288,7 +294,7 @@ const optionButtonId = (index: number) => `${groupId}-option-${index}`;
   @apply border-red-300 bg-red-50 dark:border-red-900 dark:bg-red-950;
 }
 
-.base-radio-group--error .base-radio-group__option:focus-visible {
+.base-radio-group--error .base-radio-group__option:focus-within {
   @apply border-red-400;
   box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.14);
 }
@@ -305,17 +311,53 @@ const optionButtonId = (index: number) => `${groupId}-option-${index}`;
   @apply bg-slate-50 dark:bg-slate-950;
 }
 
-.base-radio-group__mark {
-  @apply mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border border-slate-300 bg-white dark:border-slate-700 dark:bg-slate-950;
+.base-radio-group__option :deep(.el-radio__input) {
+  @apply mt-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center;
+  cursor: inherit;
 }
 
-.base-radio-group__mark span {
-  @apply h-2 w-2 rounded-full;
+.base-radio-group__option :deep(.el-radio__inner) {
+  @apply h-4 w-4 rounded-full border border-slate-300 bg-white transition-colors dark:border-slate-700 dark:bg-slate-950;
+  cursor: inherit;
+}
+
+.base-radio-group__option :deep(.el-radio__inner::after) {
+  @apply h-1.5 w-1.5 rounded-full bg-white;
+}
+
+.base-radio-group__option:hover:not(.is-disabled):not(.is-readonly) :deep(.el-radio__inner) {
+  @apply border-slate-400 dark:border-slate-600;
+}
+
+.base-radio-group__option.is-active :deep(.el-radio__inner) {
+  border-color: rgb(var(--color-primary));
   background-color: rgb(var(--color-primary));
 }
 
+.base-radio-group--success .base-radio-group__option.is-active :deep(.el-radio__inner) {
+  @apply border-emerald-500 bg-emerald-500 dark:border-emerald-400 dark:bg-emerald-500;
+}
+
+.base-radio-group--error .base-radio-group__option.is-active :deep(.el-radio__inner) {
+  @apply border-red-500 bg-red-500 dark:border-red-400 dark:bg-red-500;
+}
+
+.base-radio-group__option.is-disabled :deep(.el-radio__inner) {
+  @apply border-slate-300 bg-slate-100 dark:border-slate-700 dark:bg-slate-900;
+}
+
+.base-radio-group__option :deep(.el-radio__original) {
+  cursor: inherit;
+}
+
+.base-radio-group__option :deep(.el-radio__label) {
+  @apply min-w-0 flex-1 p-0;
+  color: inherit !important;
+  line-height: normal;
+}
+
 .base-radio-group__text {
-  @apply min-w-0;
+  @apply block min-w-0;
 }
 
 .base-radio-group__label-row {
