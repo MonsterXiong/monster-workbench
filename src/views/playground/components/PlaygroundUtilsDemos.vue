@@ -1,11 +1,16 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { arrayUtilityBoundaryCases, arrayUtilityExamples } from "../../../utils/examples/array";
+import { browserUtilityBoundaryCases, browserUtilityExamples } from "../../../utils/examples/browser";
+import { businessUtilityBoundaryCases, businessUtilityExamples } from "../../../utils/examples/business";
 import { csvUtilityBoundaryCases, csvUtilityExamples } from "../../../utils/examples/csv";
+import { dataUtilityBoundaryCases, dataUtilityExamples } from "../../../utils/examples/data";
 import { jsonUtilityBoundaryCases, jsonUtilityExamples } from "../../../utils/examples/json";
 import { numberUtilityBoundaryCases, numberUtilityExamples } from "../../../utils/examples/number";
 import { objectUtilityBoundaryCases, objectUtilityExamples } from "../../../utils/examples/object";
 import { pathUtilityBoundaryCases, pathUtilityExamples } from "../../../utils/examples/path";
+import { runtimeUtilityBoundaryCases, runtimeUtilityExamples } from "../../../utils/examples/runtime";
+import { textUtilityBoundaryCases, textUtilityExamples } from "../../../utils/examples/text";
 import { treeUtilityBoundaryCases, treeUtilityExamples } from "../../../utils/examples/tree";
 import PlaygroundDemoSection from "./PlaygroundDemoSection.vue";
 
@@ -175,6 +180,61 @@ const pathSummaryItems = computed(() => [
   { key: "sanitized", label: "Sanitized name", value: pathUtilityExamples.sanitizedFileName },
   { key: "traversal", label: "Has traversal", value: String(pathUtilityExamples.traversalSafety.hasTraversal), status: "warning" as const },
 ]);
+
+const runtimeSummaryItems = computed(() => [
+  { key: "retry", label: "Retry attempts", value: runtimeUtilityExamples.retryOptions.maxAttempts },
+  { key: "workers", label: "Batch workers", value: runtimeUtilityExamples.batchPlan.workerCount },
+  { key: "settled", label: "Settled results", value: runtimeUtilityExamples.settledText, status: "warning" as const },
+  { key: "contrast", label: "Color contrast", value: runtimeUtilityExamples.colorContrast.level, status: runtimeUtilityExamples.colorContrast.readable ? "success" as const : "danger" as const },
+  { key: "palette", label: "Palette average", value: runtimeUtilityExamples.colorPalette.averageHex },
+  { key: "range", label: "Date range", value: runtimeUtilityExamples.dateRangeText },
+  { key: "dates", label: "Date list valid", value: `${runtimeUtilityExamples.dateList.validCount}/${runtimeUtilityExamples.dateList.totalCount}` },
+  { key: "weekdays", label: "Weekdays", value: runtimeUtilityExamples.weekdays.join(" / ") },
+]);
+
+const textSummaryItems = computed(() => [
+  { key: "chars", label: "Characters", value: textUtilityExamples.textSummary.characterCount },
+  { key: "lines", label: "Lines", value: textUtilityExamples.textSummary.lineCount },
+  { key: "preview", label: "Preview", value: textUtilityExamples.formattedPreview },
+  { key: "keywords", label: "Keyword hits", value: `${textUtilityExamples.keywordSummary.matchedCount}/${textUtilityExamples.keywordSummary.keywordCount}` },
+  { key: "dataUrl", label: "Data URL", value: `${textUtilityExamples.dataUrl.mimeType} / ${textUtilityExamples.dataUrl.encoding}` },
+  { key: "stableId", label: "Stable ID", value: textUtilityExamples.stableId },
+  { key: "uniqueIds", label: "Unique IDs", value: textUtilityExamples.uniqueIds.ids.join(", ") },
+  { key: "shortcut", label: "Shortcut", value: textUtilityExamples.keyboard.label },
+]);
+
+const dataSummaryItems = computed(() => [
+  { key: "files", label: "Files", value: dataUtilityExamples.fileDisplay.totalCount },
+  { key: "duplicates", label: "Duplicate files", value: dataUtilityExamples.fileDeduplication.summary.duplicateCount, status: "warning" as const },
+  { key: "intake", label: "Accepted files", value: `${dataUtilityExamples.fileIntake.summary.acceptedCount}/${dataUtilityExamples.fileIntake.summary.totalCount}` },
+  { key: "storage", label: "Storage entries", value: dataUtilityExamples.storageSummary.keyCount },
+  { key: "ttl", label: "TTL active", value: `${dataUtilityExamples.ttlSummary.activeCount}/${dataUtilityExamples.ttlSummary.ttlEntryCount}` },
+  { key: "url", label: "URL query", value: `${dataUtilityExamples.url.queryCount} params` },
+  { key: "invalidUrl", label: "Invalid URL", value: dataUtilityExamples.urlList.invalidCount, status: "danger" as const },
+  { key: "queryDiff", label: "Query changed", value: dataUtilityExamples.queryDiff.changedKeys.join(", ") || "-" },
+]);
+
+const browserSummaryItems = computed(() => [
+  { key: "platform", label: "Platform", value: browserUtilityExamples.environment.platform },
+  { key: "viewport", label: "Viewport", value: `${browserUtilityExamples.environment.width}x${browserUtilityExamples.environment.height}` },
+  { key: "breakpoint", label: "Breakpoint", value: browserUtilityExamples.breakpoints.breakpoint },
+  { key: "media", label: "Media matches", value: browserUtilityExamples.mediaQueries.filter((item) => item.matches).length },
+  { key: "clipboard", label: "Clipboard", value: browserUtilityExamples.clipboardText, status: "warning" as const },
+  { key: "location", label: "Location", value: browserUtilityExamples.location.pathname },
+  { key: "rect", label: "Rect visible", value: String(browserUtilityExamples.rect.partiallyVisible), status: "success" as const },
+  { key: "languages", label: "Languages", value: browserUtilityExamples.capabilities.languages.join(", ") },
+]);
+
+const businessSummaryItems = computed(() => [
+  { key: "sorted", label: "Largest item", value: businessUtilityExamples.sortedItems[0]?.title ?? "-" },
+  { key: "sort", label: "Sort controls", value: businessUtilityExamples.sortControls.controls.length },
+  { key: "search", label: "Search matches", value: `${businessUtilityExamples.search.summary.matchedCount}/${businessUtilityExamples.search.summary.totalCount}` },
+  { key: "selection", label: "Selection", value: businessUtilityExamples.selection.label },
+  { key: "unavailable", label: "Unavailable selected", value: businessUtilityExamples.selectionAvailability.unavailableSelectedCount, status: "warning" as const },
+  { key: "validation", label: "Validation errors", value: businessUtilityExamples.validation.summary.errorCount, status: "danger" as const },
+  { key: "errors", label: "Error reports", value: businessUtilityExamples.errorReports.length },
+  { key: "template", label: "Template missing", value: businessUtilityExamples.template.missingKeys.join(", ") || "-" },
+]);
 </script>
 
 <template>
@@ -289,6 +349,76 @@ const pathSummaryItems = computed(() => [
 
         <BasePanel title="Path 边界用例" subtitle="中文文件名、Windows 相对路径和路径穿越阻断。">
           <BaseKeyValueList :items="toBoundaryItems(pathUtilityBoundaryCases)" :columns="1" compact wrap-label wrap-value wrap-description aria-label="Path 边界用例" />
+        </BasePanel>
+      </div>
+    </PlaygroundDemoSection>
+  </section>
+
+  <section v-else-if="activeComponentKey === 'utils-runtime'" class="detail-stack">
+    <PlaygroundDemoSection title="Async / Color / Date 工具函数" subtitle="异步批处理摘要、颜色对比与日期范围示例。" icon="Timer">
+      <div class="utils-demo-grid">
+        <BasePanel title="运行时摘要" subtitle="覆盖 async、color、date 的常用业务组合。">
+          <BaseDescriptionList :items="runtimeSummaryItems" :columns="2" compact wrap-value aria-label="Runtime 工具函数摘要" />
+        </BasePanel>
+
+        <BasePanel title="边界用例" subtitle="失败任务、非法颜色和日期范围枚举。">
+          <BaseKeyValueList :items="toBoundaryItems(runtimeUtilityBoundaryCases)" :columns="1" compact wrap-label wrap-value wrap-description aria-label="Runtime 边界用例" />
+        </BasePanel>
+      </div>
+    </PlaygroundDemoSection>
+  </section>
+
+  <section v-else-if="activeComponentKey === 'utils-text'" class="detail-stack">
+    <PlaygroundDemoSection title="String / Encoding / ID / Keyboard 工具函数" subtitle="文本清理、编码摘要、稳定 ID 和快捷键摘要。" icon="TextCursorInput">
+      <div class="utils-demo-grid">
+        <BasePanel title="文本与输入摘要" subtitle="覆盖文案预览、base64/data URL、DOM ID 和快捷键。">
+          <BaseDescriptionList :items="textSummaryItems" :columns="2" compact wrap-value aria-label="Text 工具函数摘要" />
+        </BasePanel>
+
+        <BasePanel title="边界用例" subtitle="空文本、Unicode ID、非法 base64 和重复快捷键。">
+          <BaseKeyValueList :items="toBoundaryItems(textUtilityBoundaryCases)" :columns="1" compact wrap-label wrap-value wrap-description aria-label="Text 边界用例" />
+        </BasePanel>
+      </div>
+    </PlaygroundDemoSection>
+  </section>
+
+  <section v-else-if="activeComponentKey === 'utils-data'" class="detail-stack">
+    <PlaygroundDemoSection title="File / Storage / URL 工具函数" subtitle="文件选择、Storage key/TTL 和 URL query 摘要。" icon="Files">
+      <div class="utils-demo-grid">
+        <BasePanel title="数据载体摘要" subtitle="覆盖文件去重、选择 intake、storage TTL 和 query diff。">
+          <BaseDescriptionList :items="dataSummaryItems" :columns="2" compact wrap-value aria-label="Data 工具函数摘要" />
+        </BasePanel>
+
+        <BasePanel title="边界用例" subtitle="重复文件、空 storage value、过期 TTL 和非法 URL。">
+          <BaseKeyValueList :items="toBoundaryItems(dataUtilityBoundaryCases)" :columns="1" compact wrap-label wrap-value wrap-description aria-label="Data 边界用例" />
+        </BasePanel>
+      </div>
+    </PlaygroundDemoSection>
+  </section>
+
+  <section v-else-if="activeComponentKey === 'utils-browser'" class="detail-stack">
+    <PlaygroundDemoSection title="Browser / Clipboard / DOM 工具函数" subtitle="浏览器能力、剪贴板结果和 DOM 可见区域摘要。" icon="PanelTop">
+      <div class="utils-demo-grid">
+        <BasePanel title="浏览器摘要" subtitle="通过 mock Window/Navigator/Location 展示 SSR 友好的能力判断。">
+          <BaseDescriptionList :items="browserSummaryItems" :columns="2" compact wrap-value aria-label="Browser 工具函数摘要" />
+        </BasePanel>
+
+        <BasePanel title="边界用例" subtitle="剪贴板失败、断点匹配和 DOM rect 可见性。">
+          <BaseKeyValueList :items="toBoundaryItems(browserUtilityBoundaryCases)" :columns="1" compact wrap-label wrap-value wrap-description aria-label="Browser 边界用例" />
+        </BasePanel>
+      </div>
+    </PlaygroundDemoSection>
+  </section>
+
+  <section v-else-if="activeComponentKey === 'utils-business'" class="detail-stack">
+    <PlaygroundDemoSection title="Compare / Error / Format / Search / Selection / Validation / Value 工具函数" subtitle="业务页面常见排序、搜索、选择、校验和值解析组合。" icon="Workflow">
+      <div class="utils-demo-grid">
+        <BasePanel title="业务通用摘要" subtitle="覆盖排序控制、搜索排名、选择可用性、校验和错误展示。">
+          <BaseDescriptionList :items="businessSummaryItems" :columns="2" compact wrap-value aria-label="Business 工具函数摘要" />
+        </BasePanel>
+
+        <BasePanel title="边界用例" subtitle="缺失模板变量、非法 record、不可用选择项和枚举 fallback。">
+          <BaseKeyValueList :items="toBoundaryItems(businessUtilityBoundaryCases)" :columns="1" compact wrap-label wrap-value wrap-description aria-label="Business 边界用例" />
         </BasePanel>
       </div>
     </PlaygroundDemoSection>

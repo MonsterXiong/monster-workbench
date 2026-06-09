@@ -177,6 +177,11 @@ const componentGroups: ComponentGroup[] = [
       { key: "utils-object", name: "object", title: "对象工具", description: "record 处理、路径读写、cleanup、patch、对象 diff 和 deep diff。" },
       { key: "utils-tree", name: "tree", title: "树形工具", description: "tree to list、list to tree、lookup、诊断、可见节点和 diff by key。" },
       { key: "utils-json-path", name: "json / path", title: "JSON 与路径", description: "循环 JSON、中文路径、Windows 路径、安全子路径和文件名清理。" },
+      { key: "utils-runtime", name: "async / color / date", title: "运行时工具", description: "异步任务、批处理摘要、颜色转换/对比与日期范围/日历工具。" },
+      { key: "utils-text", name: "string / encoding / id / keyboard", title: "文本与输入工具", description: "文本清理、编码摘要、稳定 ID、DOM ID 和键盘快捷键。" },
+      { key: "utils-data", name: "file / storage / url", title: "文件存储 URL", description: "文件选择摘要、Storage key/TTL、URL 与 query 参数处理。" },
+      { key: "utils-browser", name: "browser / clipboard / dom", title: "浏览器能力工具", description: "视口、媒体查询、剪贴板结果、DOM 可见区域摘要。" },
+      { key: "utils-business", name: "compare / error / format / search / selection / validation / value", title: "业务通用工具", description: "排序、错误展示、格式化、搜索、选择、校验和值解析。" },
     ],
   },
   {
@@ -253,6 +258,11 @@ const coveredComponentKeys = [
   "utils-object",
   "utils-tree",
   "utils-json-path",
+  "utils-runtime",
+  "utils-text",
+  "utils-data",
+  "utils-browser",
+  "utils-business",
 ];
 
 const playgroundPanes = [
