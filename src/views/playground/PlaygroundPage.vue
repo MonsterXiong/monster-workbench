@@ -4,6 +4,7 @@ import {
   BellRing,
   Database,
   FileText,
+  FunctionSquare,
   ListTree,
   LoaderCircle,
   MousePointer,
@@ -21,6 +22,7 @@ import PlaygroundFoundationDemos from "./components/PlaygroundFoundationDemos.vu
 import PlaygroundLayoutDemos from "./components/PlaygroundLayoutDemos.vue";
 import PlaygroundLoadingDemos from "./components/PlaygroundLoadingDemos.vue";
 import PlaygroundNavigationDemos from "./components/PlaygroundNavigationDemos.vue";
+import PlaygroundUtilsDemos from "./components/PlaygroundUtilsDemos.vue";
 import PlaygroundWorkflowDemos from "./components/PlaygroundWorkflowDemos.vue";
 import { findByValue, firstItem, hasItem } from "../../utils";
 
@@ -34,7 +36,8 @@ type ComponentGroupKey =
   | "layout"
   | "workflow"
   | "feedback"
-  | "loading";
+  | "loading"
+  | "utils";
 
 interface ComponentEntry {
   key: string;
@@ -164,6 +167,14 @@ const componentGroups: ComponentGroup[] = [
     ],
   },
   {
+    key: "utils",
+    title: "工具函数",
+    icon: FunctionSquare,
+    components: [
+      { key: "utils-number", name: "number", title: "数值工具", description: "数值解析、范围归一化、分桶统计、分页边界和典型异常输入。" },
+    ],
+  },
+  {
     key: "loading",
     title: "加载占位",
     icon: LoaderCircle,
@@ -231,6 +242,7 @@ const coveredComponentKeys = [
   "loading",
   "skeleton-card",
   "progress",
+  "utils-number",
 ];
 
 const playgroundPanes = [
@@ -299,6 +311,7 @@ const selectComponent = (key: string) => {
             <PlaygroundWorkflowDemos :active-component-key="activeComponentKey" />
             <PlaygroundLoadingDemos :active-component-key="activeComponentKey" />
             <PlaygroundFeedbackDemos :active-component-key="activeComponentKey" />
+            <PlaygroundUtilsDemos :active-component-key="activeComponentKey" />
 
             <section
               v-if="!hasActiveDemo"

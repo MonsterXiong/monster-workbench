@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref } from "vue";
 import { useToast } from "../../../composables/useToast";
-import { joinBy } from "../../../utils";
+import { joinBy, roundTo } from "../../../utils";
 import PlaygroundDemoSection from "./PlaygroundDemoSection.vue";
 
 defineProps<{
@@ -35,7 +35,7 @@ const pageShellBreadcrumbs = [
 
 type PanelResizePayload = { panes: Array<{ size: number }> };
 
-const formatPanelSummary = (payload: PanelResizePayload) => joinBy(payload.panes, (pane) => `${Math.round(pane.size)}%`, " / ");
+const formatPanelSummary = (payload: PanelResizePayload) => joinBy(payload.panes, (pane) => `${roundTo(pane.size)}%`, " / ");
 
 const handlePanelResized = (payload: PanelResizePayload) => {
   panelSummary.value = formatPanelSummary(payload);
@@ -50,11 +50,11 @@ const handlePlainPanelResized = (payload: PanelResizePayload) => {
 };
 
 const handleThreeColumnResize = (payload: { leftWidth: number; rightWidth: number }) => {
-  threeColumnSummary.value = `${Math.round(payload.leftWidth)}px / ${Math.round(payload.rightWidth)}px`;
+  threeColumnSummary.value = `${roundTo(payload.leftWidth)}px / ${roundTo(payload.rightWidth)}px`;
 };
 
 const handleCompactThreeColumnResize = (payload: { leftWidth: number; rightWidth: number }) => {
-  compactThreeColumnSummary.value = `${Math.round(payload.leftWidth)}px / ${Math.round(payload.rightWidth)}px`;
+  compactThreeColumnSummary.value = `${roundTo(payload.leftWidth)}px / ${roundTo(payload.rightWidth)}px`;
 };
 </script>
 
@@ -1148,12 +1148,12 @@ const handleCompactThreeColumnResize = (payload: { leftWidth: number; rightWidth
 
 .field-group-demo-stack {
   @apply grid min-w-0;
-  gap: clamp(2.5rem, 4vw, 3rem);
+  gap: clamp(4rem, 6vw, 4.75rem);
 }
 
 .field-group-demo-grid {
   @apply grid min-w-0 items-start lg:grid-cols-2;
-  gap: clamp(1.5rem, 3vw, 2rem);
+  gap: clamp(1.75rem, 3.25vw, 2.25rem);
 }
 
 .page-header-demo-grid {

@@ -126,6 +126,28 @@ const longTimelineItems = [
     meta: "长文案",
     tag: "Wrap",
   },
+  {
+    key: "trace",
+    title: "trace-20260609-component-playground-timeline-verification-with-very-long-unbroken-token",
+    time: "2026-06-09 18:42:16.238 UTC+08:00",
+    description:
+      "https://monster.local/audit/component/BaseTimeline/events/very-long-path-segment-that-should-wrap-anywhere?trace_id=trace_01HZYX_LONG_LONG_LONG_LONG_LONG&request_id=req_component_sandbox_timeline_visual_check",
+    type: "warning" as const,
+    icon: "Link",
+    meta: "workspace/components/workflow/timeline/very-long-meta-value",
+    tag: "TraceId",
+  },
+  {
+    key: "disabled-action",
+    title: "权限不足的事件仍展示上下文，但不允许触发选择",
+    time: "只读",
+    description: "禁用项应保留可读信息，同时 actions 插槽按 interactiveDisabled 自动禁用。",
+    type: "neutral" as const,
+    icon: "Lock",
+    meta: "Readonly",
+    tag: "Disabled",
+    disabled: true,
+  },
 ];
 </script>
 
@@ -182,10 +204,12 @@ const longTimelineItems = [
             clickable
             :selected-key="selectedTimelineKey"
             aria-label="组件审计时间线"
+            actions-label="审计时间线动作"
             @select="selectedTimelineKey = $event.item.key"
           >
-            <template #actions="{ item }">
-              <BaseBadge v-if="item.key === selectedTimelineKey" type="primary" size="sm">已选中</BaseBadge>
+            <template #actions="{ selected, interactiveDisabled }">
+              <BaseBadge v-if="selected" type="primary" size="sm">已选中</BaseBadge>
+              <BaseButton v-else type="neutral" size="sm" :disabled="interactiveDisabled">定位</BaseButton>
             </template>
           </BaseTimeline>
           <template #footer>
@@ -198,10 +222,10 @@ const longTimelineItems = [
       </div>
 
       <BasePanel title="发布记录" subtitle="数字节点、大尺寸和 muted 表面适合阶段性发布说明。">
-        <BaseTimeline :items="releaseTimelineItems" size="lg" surface="muted" marker="number" aria-label="发布记录时间线">
-          <template #actions="{ item }">
-            <BaseButton v-if="item.key === 'check'" type="primary" size="sm">查看检查</BaseButton>
-            <BaseButton v-else type="neutral" size="sm">查看详情</BaseButton>
+        <BaseTimeline :items="releaseTimelineItems" size="lg" surface="muted" marker="number" aria-label="发布记录时间线" actions-label="发布记录动作">
+          <template #actions="{ item, interactiveDisabled }">
+            <BaseButton v-if="item.key === 'check'" type="primary" size="sm" :disabled="interactiveDisabled">查看检查</BaseButton>
+            <BaseButton v-else type="neutral" size="sm" :disabled="interactiveDisabled">查看详情</BaseButton>
           </template>
         </BaseTimeline>
         <template #footer>
@@ -224,7 +248,34 @@ const longTimelineItems = [
               marker="number"
               surface="plain"
               :bordered="false"
-            />
+              actions-label="长文案时间线动作"
+            >
+              <template #actions="{ item, interactiveDisabled }">
+                <BaseButton type="neutral" size="sm" :disabled="interactiveDisabled">{{ item.key === "trace" ? "复制路径" : "查看" }}</BaseButton>
+              </template>
+            </BaseTimeline>
+          </div>
+        </BasePanel>
+        <BasePanel title="窄容器压力" subtitle="侧栏宽度下长时间、长 URI、动作区和禁用态都不产生横向溢出。">
+          <div class="timeline-narrow-demo">
+            <BaseTimeline
+              :items="longTimelineItems"
+              clickable
+              :selected-key="selectedTimelineKey"
+              dense
+              size="sm"
+              wrap-title
+              wrap-description
+              :max-description-lines="6"
+              actions-label="窄容器时间线动作"
+              aria-label="窄容器时间线压力示例"
+              @select="selectedTimelineKey = $event.item.key"
+            >
+              <template #actions="{ item, selected, interactiveDisabled }">
+                <BaseBadge v-if="selected" type="primary" size="sm">当前</BaseBadge>
+                <BaseButton v-else type="neutral" size="sm" :disabled="interactiveDisabled">{{ item.disabled ? "只读" : "处理" }}</BaseButton>
+              </template>
+            </BaseTimeline>
           </div>
         </BasePanel>
       </div>
@@ -255,6 +306,10 @@ const longTimelineItems = [
 
 .timeline-demo-stack {
   @apply grid gap-3;
+}
+
+.timeline-narrow-demo {
+  @apply w-full max-w-[320px];
 }
 
 .stepper-demo-stack {

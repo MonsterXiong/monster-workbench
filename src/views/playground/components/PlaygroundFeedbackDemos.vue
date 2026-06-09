@@ -107,6 +107,28 @@ const detailCardItems = [
             <BaseBadge type="success" variant="outline">已启用</BaseBadge>
           </template>
         </BaseAlert>
+        <BaseAlert
+          type="info"
+          title="动作区换行"
+          description="当右侧动作较多或容器较窄时，按钮会稳定换行，不会挤压正文或溢出面板。"
+          wrap-description
+          actions-label="动作区换行提示操作"
+        >
+          <template #actions>
+            <BaseButton type="primary" size="xs">查看详情</BaseButton>
+            <BaseButton type="neutral" size="xs" outline>同步策略</BaseButton>
+            <BaseButton type="neutral" size="xs" outline>忽略本次</BaseButton>
+          </template>
+        </BaseAlert>
+        <BaseAlert
+          type="info"
+          variant="plain"
+          description="仅描述提示可以通过 aria-label 补充可访问名称，适合表单辅助说明和局部状态说明。"
+          aria-label="仅描述提示"
+          role="note"
+          :show-icon="false"
+          wrap-description
+        />
       </div>
     </PlaygroundDemoSection>
 
@@ -238,6 +260,9 @@ const detailCardItems = [
         description="对话框适合短表单、确认操作和上下文编辑。"
         width="560px"
         :close-on-click-modal="false"
+        body-label="编辑组件信息表单"
+        footer-label="编辑组件信息操作"
+        close-label="关闭编辑组件信息"
         @close="triggerToast('对话框已关闭', 'info')"
       >
         <BaseForm title="基础信息" description="对话框适合承载短表单。" :columns="2" compact>
@@ -261,6 +286,9 @@ const detailCardItems = [
         title="确认归档组件"
         description="紧凑对话框适合二次确认和轻量说明。"
         size="sm"
+        role="alertdialog"
+        close-label="关闭归档确认"
+        footer-label="归档确认操作"
         @close="triggerToast('确认弹窗已关闭', 'info')"
       >
         <BaseAlert type="warning" title="归档后仍可恢复" description="归档不会删除组件数据，但会从默认列表中隐藏。" compact />
@@ -293,12 +321,15 @@ const detailCardItems = [
         show-icon
         wrap-title
         wrap-description
+        actions-label="头部动作弹窗操作"
+        close-label="关闭头部动作弹窗"
         footer-align="between"
         body-label="头部动作弹窗内容"
         footer-label="头部动作弹窗页脚"
       >
         <template #actions>
           <BaseBadge type="primary" variant="outline">Beta</BaseBadge>
+          <BaseButton type="neutral" size="xs" outline @click="triggerToast('打开帮助文档', 'info')">帮助</BaseButton>
         </template>
         <BaseAlert type="info" title="头部动作" description="actions 插槽适合状态徽标、帮助入口或轻量操作。" compact />
         <template #footer>
@@ -317,6 +348,9 @@ const detailCardItems = [
         lock-close-on-loading
         :close-on-click-modal="false"
         :close-on-press-escape="false"
+        role="alertdialog"
+        actions-label="关闭锁定弹窗操作"
+        close-label="关闭锁定弹窗"
         footer-align="between"
       >
         <BaseAlert type="warning" title="关闭已锁定" description="右上角关闭按钮会禁用，业务仍可以通过明确按钮结束流程。" compact />
@@ -381,6 +415,8 @@ const detailCardItems = [
         show-icon
         size="lg"
         footer-align="between"
+        actions-label="组件详情抽屉操作"
+        close-label="关闭组件详情抽屉"
         body-label="组件详情抽屉内容"
         footer-label="组件详情抽屉页脚"
         @close="triggerToast('右侧抽屉已关闭', 'info')"
@@ -415,7 +451,9 @@ const detailCardItems = [
         placement="left"
         width="max-w-sm"
         :close-on-overlay="false"
+        close-label="关闭筛选设置抽屉"
         body-label="筛选设置抽屉内容"
+        footer-label="筛选设置抽屉操作"
       >
         <BaseForm title="筛选条件" description="左侧抽屉适合导航、筛选和资源选择。" compact>
           <BaseFormItem label="关键词">
@@ -446,6 +484,8 @@ const detailCardItems = [
         confirm-loading-text="保存中"
         footer-align="between"
         :close-on-overlay="false"
+        actions-label="加载资源抽屉操作"
+        close-label="关闭加载资源抽屉"
         body-label="加载资源抽屉内容"
         footer-label="加载资源抽屉页脚"
       >
@@ -466,11 +506,14 @@ const detailCardItems = [
         wrap-description
         size="lg"
         footer-align="between"
+        actions-label="头部动作抽屉操作"
+        close-label="关闭头部动作抽屉"
         body-label="头部动作抽屉内容"
         footer-label="头部动作抽屉页脚"
       >
         <template #actions>
           <BaseBadge type="primary" variant="outline">Beta</BaseBadge>
+          <BaseButton type="neutral" size="xs" outline @click="triggerToast('打开抽屉帮助', 'info')">帮助</BaseButton>
         </template>
         <BaseAlert type="info" title="头部动作" description="actions 插槽适合状态徽标、帮助入口或轻量操作。" compact />
         <BaseDescriptionList aria-label="头部动作能力摘要" :items="detailCardItems" :columns="2" compact />
@@ -492,8 +535,11 @@ const detailCardItems = [
         confirm-loading
         confirm-loading-text="保存中"
         lock-close-on-loading
+        role="alertdialog"
         :close-on-overlay="false"
         :close-on-esc="false"
+        actions-label="关闭锁定抽屉操作"
+        close-label="关闭锁定抽屉"
         footer-align="between"
         body-label="关闭锁定抽屉内容"
         footer-label="关闭锁定抽屉页脚"

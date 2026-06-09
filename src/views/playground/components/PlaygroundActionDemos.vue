@@ -52,6 +52,14 @@ const verboseActionMenuItems = [
     label: "复制 trace://playground/action-menu/very-long-resource-identifier",
     description: "长路径、trace id 和资源 URI 需要留在菜单内部。",
     icon: "Copy",
+    meta: "trace://workspace/component/action-menu/meta/overflow-check",
+  },
+  {
+    key: "shortcut-long",
+    label: "长快捷键",
+    description: "尾部快捷键和元信息也需要被约束，不能撑破菜单宽度。",
+    icon: "Keyboard",
+    shortcut: "Ctrl Shift Alt Meta Enter",
   },
   {
     key: "remove-long",
@@ -61,6 +69,13 @@ const verboseActionMenuItems = [
     type: "danger" as const,
     divided: true,
   },
+];
+
+const statusActionMenuItems = [
+  { key: "compact", label: "紧凑视图", description: "适合侧栏和高密度表格。", icon: "Rows3", selected: true, meta: "当前" },
+  { key: "comfortable", label: "舒适视图", description: "适合信息较多的详情页。", icon: "Maximize2", meta: "L" },
+  { key: "syncing", label: "同步中", description: "异步动作执行期间保持可见但不可点击。", icon: "RefreshCw", loading: true, meta: "保存" },
+  { key: "readonly", label: "只读模式", description: "权限不足时禁用入口。", icon: "Lock", disabled: true },
 ];
 
 const handleCommandSelect = (command: { label: string }) => {
@@ -136,6 +151,13 @@ const handleConfirmAction = (label: string) => {
           </div>
         </BasePanel>
 
+        <BasePanel title="状态菜单" subtitle="支持当前项、元信息和加载中的异步动作。">
+          <div class="action-row">
+            <BaseActionMenu :actions="statusActionMenuItems" label="视图状态" align="left" @select="triggerToast(`状态菜单：${$event.label}`, 'info')" />
+            <BaseActionMenu :actions="statusActionMenuItems" icon="ListChecks" aria-label="状态更多操作" />
+          </div>
+        </BasePanel>
+
         <BasePanel title="裁切容器" subtitle="弹层会脱离局部 overflow 容器，适合表格、卡片和侧栏内更多操作。">
           <div class="action-clip-demo">
             <div class="action-clip-demo__bar">
@@ -201,6 +223,52 @@ const handleConfirmAction = (label: string) => {
             <BaseButton type="neutral" size="sm">排序</BaseButton>
             <BaseButton type="primary" size="sm">应用</BaseButton>
           </BaseToolbar>
+        </BasePanel>
+
+        <BasePanel title="图标工具栏" subtitle="图标按钮、分组和侧向工具栏适合编辑器与窄侧栏。">
+          <div class="toolbar-orientation-demo">
+            <BaseToolbar compact divided aria-label="图标编辑工具栏" left-label="历史操作" main-label="文本操作" right-label="扩展操作">
+              <template #left>
+                <BaseButton type="ghost" size="sm" circle aria-label="撤销" title="撤销">
+                  <template #icon><BaseIcon name="Undo2" size="14" /></template>
+                </BaseButton>
+                <BaseButton type="ghost" size="sm" circle aria-label="重做" title="重做">
+                  <template #icon><BaseIcon name="Redo2" size="14" /></template>
+                </BaseButton>
+              </template>
+              <BaseButton type="ghost" size="sm" circle aria-label="加粗" title="加粗">
+                <template #icon><BaseIcon name="Bold" size="14" /></template>
+              </BaseButton>
+              <BaseButton type="ghost" size="sm" circle aria-label="斜体" title="斜体">
+                <template #icon><BaseIcon name="Italic" size="14" /></template>
+              </BaseButton>
+              <BaseButton type="ghost" size="sm" circle aria-label="链接" title="链接">
+                <template #icon><BaseIcon name="Link" size="14" /></template>
+              </BaseButton>
+              <template #right>
+                <BaseActionMenu :actions="actionMenuItems" icon="MoreHorizontal" aria-label="编辑器更多操作" />
+              </template>
+            </BaseToolbar>
+
+            <BaseToolbar orientation="vertical" compact divided surface="muted" aria-label="侧向工具栏">
+              <template #left>
+                <BaseButton type="ghost" size="sm" circle aria-label="选择" title="选择">
+                  <template #icon><BaseIcon name="MousePointer2" size="14" /></template>
+                </BaseButton>
+                <BaseButton type="ghost" size="sm" circle aria-label="移动" title="移动">
+                  <template #icon><BaseIcon name="Move" size="14" /></template>
+                </BaseButton>
+              </template>
+              <BaseButton type="ghost" size="sm" circle aria-label="缩放" title="缩放">
+                <template #icon><BaseIcon name="ScanSearch" size="14" /></template>
+              </BaseButton>
+              <template #right>
+                <BaseButton type="ghost" size="sm" circle aria-label="吸附" title="吸附">
+                  <template #icon><BaseIcon name="Magnet" size="14" /></template>
+                </BaseButton>
+              </template>
+            </BaseToolbar>
+          </div>
         </BasePanel>
 
         <BasePanel title="吸顶工具栏" subtitle="列表或长表单滚动时可保持操作入口稳定。">
@@ -296,6 +364,19 @@ const handleConfirmAction = (label: string) => {
               type="warning"
               @confirm="handleConfirmAction('清理缓存')"
             />
+            <BaseConfirmAction
+              label="强制删除"
+              title="强制删除组件？"
+              message="该操作会绕过回收站并移除当前组件配置，请输入确认词后继续。"
+              confirm-text="确认强制删除"
+              cancel-text="取消操作"
+              confirm-keyword="DELETE"
+              confirm-input-label="输入 DELETE 确认"
+              confirm-input-hint="为避免误操作，请输入 DELETE 后再确认。"
+              danger
+              icon="ShieldAlert"
+              @confirm="handleConfirmAction('强制删除')"
+            />
           </div>
         </BasePanel>
 
@@ -348,22 +429,75 @@ const handleConfirmAction = (label: string) => {
 
   <section v-else-if="activeComponentKey === 'form-actions'" class="detail-stack">
     <PlaygroundDemoSection title="表单动作栏" subtitle="说明区、状态区和按钮区的职责更清晰。" icon="PanelBottomOpen">
-      <BasePanel title="模型参数" subtitle="适合与 BaseForm、BaseFieldGroup、BasePanel 组合。">
-        <BaseFormActions sticky title="待保存修改" description="滚动较长时保持操作入口稳定。" justify="end">
-          <template #meta>
-            <BaseStatusDot type="warning" label="有 3 项变更" description="尚未保存" />
-          </template>
-          <BaseButton type="neutral" size="sm">取消</BaseButton>
-          <BaseButton type="primary" size="sm">保存配置</BaseButton>
-        </BaseFormActions>
-      </BasePanel>
+      <div class="demo-grid">
+        <BasePanel title="模型参数" subtitle="适合与 BaseForm、BaseFieldGroup、BasePanel 组合。">
+          <div class="form-actions-sticky-demo">
+            <div class="form-actions-sticky-demo__content">
+              <BaseList
+                :items="[
+                  { id: 'model', title: '模型名称', meta: 'gpt-image-2' },
+                  { id: 'timeout', title: '超时策略', meta: '86400s' },
+                  { id: 'queue', title: '队列模式', meta: '并发' },
+                  { id: 'review', title: '审核状态', meta: '待保存' },
+                ]"
+                variant="plain"
+                simple
+                :bordered="false"
+              />
+            </div>
+            <BaseFormActions
+              sticky
+              surface="default"
+              title="待保存修改"
+              description="滚动较长时保持操作入口稳定。"
+              justify="end"
+              actions-label="模型参数操作"
+              meta-label="保存状态"
+            >
+              <template #meta>
+                <BaseStatusDot type="warning" label="有 3 项变更" description="尚未保存" />
+              </template>
+              <BaseButton type="neutral" size="sm">取消</BaseButton>
+              <BaseButton type="primary" size="sm">保存配置</BaseButton>
+            </BaseFormActions>
+          </div>
+        </BasePanel>
 
-      <BasePanel title="紧凑动作" subtitle="抽屉、侧栏和小表单使用 compact。">
-        <BaseFormActions compact title="字段动作" description="用于局部配置保存。" justify="between">
-          <BaseButton type="ghost" size="sm">重置</BaseButton>
-          <BaseButton type="primary" size="sm">应用</BaseButton>
-        </BaseFormActions>
-      </BasePanel>
+        <BasePanel title="紧凑动作" subtitle="抽屉、侧栏和小表单使用 compact。">
+          <BaseFormActions compact surface="muted" title="字段动作" description="用于局部配置保存。" justify="between" actions-label="字段动作">
+            <BaseButton type="ghost" size="sm">重置</BaseButton>
+            <BaseButton type="primary" size="sm">应用</BaseButton>
+          </BaseFormActions>
+        </BasePanel>
+      </div>
+
+      <div class="demo-grid">
+        <BasePanel title="加载锁定" subtitle="异步保存时锁定内容区，保留状态反馈。">
+          <BaseFormActions loading loading-text="正在保存权限策略" surface="default" title="保存中" description="按钮区不可交互，状态仍可被读到。">
+            <template #meta>
+              <BaseBadge type="warning" variant="outline">处理中</BaseBadge>
+            </template>
+            <BaseButton type="neutral" size="sm">返回</BaseButton>
+            <BaseButton type="primary" size="sm">保存</BaseButton>
+          </BaseFormActions>
+        </BasePanel>
+
+        <BasePanel title="窄容器堆叠" subtitle="长文案和按钮在窄侧栏内不撑破布局。">
+          <div class="form-actions-narrow-demo">
+            <BaseFormActions
+              surface="muted"
+              wrap-text
+              title="同步一个跨工作区且名称很长的组件配置"
+              description="用于验证标题、描述和操作按钮在受限宽度内自动换行和堆叠。"
+              justify="end"
+              actions-label="窄容器操作"
+            >
+              <BaseButton type="neutral" size="sm">稍后处理</BaseButton>
+              <BaseButton type="primary" size="sm">立即同步</BaseButton>
+            </BaseFormActions>
+          </div>
+        </BasePanel>
+      </div>
     </PlaygroundDemoSection>
   </section>
 </template>
@@ -409,11 +543,27 @@ const handleConfirmAction = (label: string) => {
   @apply grid min-w-0 gap-3;
 }
 
+.toolbar-orientation-demo {
+  @apply grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-3;
+}
+
 .toolbar-long-badge {
   @apply max-w-full;
 }
 
 .confirm-action-stack {
   @apply grid min-w-0 gap-3;
+}
+
+.form-actions-sticky-demo {
+  @apply max-h-56 overflow-auto rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950;
+}
+
+.form-actions-sticky-demo__content {
+  @apply min-h-44 pb-3;
+}
+
+.form-actions-narrow-demo {
+  @apply max-w-72 min-w-0;
 }
 </style>

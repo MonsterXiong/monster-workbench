@@ -567,6 +567,7 @@ const handleTreeToggle = (payload: { node: { name: string; path: string }; expan
     <PlaygroundDemoSection title="动态列表" subtitle="展示自定义行内容、状态标签、行内动作和 transition-group 动效。" icon="List">
       <BasePanel title="增强默认列表" subtitle="默认渲染即可覆盖图标、说明、徽标、meta、选中和禁用态。">
         <BaseList
+          data-testid="enhanced-base-list"
           :items="rowListItems"
           variant="row"
           surface="muted"
@@ -575,7 +576,11 @@ const handleTreeToggle = (payload: { node: { name: string; path: string }; expan
           :active-key="activeRowListKey"
           aria-label="增强默认列表"
           @item-click="(item: RowListItem) => (activeRowListKey = item.id)"
-        />
+        >
+          <template #actions="{ item }">
+            <BaseButton type="neutral" size="sm" @click="triggerToast(`行内动作：${item.title}`, 'success')">操作</BaseButton>
+          </template>
+        </BaseList>
         <template #footer>
           <span class="navigation-result">当前行：{{ activeRowListKey }}</span>
         </template>
