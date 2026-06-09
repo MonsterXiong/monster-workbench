@@ -3,6 +3,7 @@ import path from "node:path";
 
 const root = process.cwd();
 const pkgPath = path.join(root, "package.json");
+const packageLockPath = path.join(root, "package-lock.json");
 const tauriConfPath = path.join(root, "src-tauri", "tauri.conf.json");
 const cargoTomlPath = path.join(root, "src-tauri", "Cargo.toml");
 
@@ -16,6 +17,16 @@ fs.writeFileSync(tauriConfPath, JSON.stringify(tauriConf, null, 2) + "\n");
 let cargo = fs.readFileSync(cargoTomlPath, "utf8");
 cargo = cargo.replace(/^version = "[^"]+"/m, `version = "${pkg.version}"`);
 fs.writeFileSync(cargoTomlPath, cargo);
+
+if (fs.existsSync(packageLockPath)) {
+  const packageLock = JSON.parse(fs.readFileSync(packageLockPath, "utf8"));
+  packageLock.version = pkg.version;
+  if (packageLock.packages?.[""]) {
+    packageLock.packages[""].version = pkg.version;
+  }
+  fs.writeFileSync(packageLockPath, JSON.stringify(packageLock, null, 2) + "\n");
+  console.log(`✓ synced package-lock.json version: ${pkg.version}`);
+}
 
 // 同步更新 .env 中的 VITE_APP_VERSION
 const envPath = path.join(root, ".env");

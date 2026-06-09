@@ -9,6 +9,7 @@ const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
 const currentVersion = pkg.version;
 const releaseStagePaths = [
   "package.json",
+  "package-lock.json",
   "src-tauri/tauri.conf.json",
   "src-tauri/Cargo.toml",
   "CHANGELOG.md",
@@ -42,8 +43,70 @@ function quoteGitPath(filePath) {
   return JSON.stringify(filePath);
 }
 
+function getOutput(command) {
+  return execSync(command, { encoding: "utf8" }).trim();
+}
+
+function runCommand(command) {
+  console.log(`\n$ ${command}`);
+  execSync(command, { stdio: "inherit" });
+}
+
+function assertMainBranch() {
+  const branch = getOutput("git branch --show-current");
+  if (branch !== "main") {
+    throw new Error(`发布必须在 main 分支执行，当前分支是 ${branch || "(detached)"}。`);
+  }
+}
+
+function assertCleanWorktree() {
+  const status = getOutput("git status --porcelain");
+  if (status) {
+    throw new Error(
+      [
+        "发布前工作区必须干净，避免把未审查改动混入版本提交。",
+        "请先提交、暂存到其他分支，或清理以下变更：",
+        status
+      ].join("\n")
+    );
+  }
+}
+
+function assertValidVersion(version) {
+  if (!/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(version)) {
+    throw new Error(`版本号格式不合法: ${version}`);
+  }
+}
+
+function assertTagDoesNotExist(version) {
+  try {
+    getOutput(`git rev-parse -q --verify refs/tags/v${version}`);
+    throw new Error(`Git Tag v${version} 已存在，请选择新的版本号。`);
+  } catch (error) {
+    if (error.status === 0 || error.message.includes("已存在")) {
+      throw error;
+    }
+  }
+}
+
+function runReleasePreflight() {
+  if (process.env.SKIP_RELEASE_PREFLIGHT === "1") {
+    console.warn("已跳过发布前本地门禁：SKIP_RELEASE_PREFLIGHT=1");
+    return;
+  }
+
+  console.log("\n--- 发布前本地门禁 ---");
+  runCommand("npm run verify");
+  runCommand("npm run test:ai-sidecar");
+  runCommand("npm run test:ai-sidecar:stress");
+  runCommand("npm run tauri:build:no-bundle");
+}
+
 async function main() {
   try {
+    assertMainBranch();
+    assertCleanWorktree();
+
     console.log("建议的升级版本:");
     console.log(`1) Patch: v${suggestPatch}`);
     console.log(`2) Minor: v${suggestMinor}`);
@@ -64,6 +127,9 @@ async function main() {
       }
     }
 
+    assertValidVersion(newVersion);
+    assertTagDoesNotExist(newVersion);
+
     console.log(`\n准备发布版本: v${newVersion}`);
     const confirm = await askQuestion("确认继续吗？(y/n, 默认 y): ");
     if (confirm.toLowerCase() === "n") {
@@ -71,6 +137,8 @@ async function main() {
       rl.close();
       process.exit(0);
     }
+
+    runReleasePreflight();
 
     // 1. 更新 package.json 版本号
     pkg.version = newVersion;

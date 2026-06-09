@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:desktop": "npm run tauri:dev",
     "check:architecture": "node scripts/check-architecture.js",
     "test:ai-sidecar": "python src-tauri/sidecars/python/test_ai_provider_tester.py",
     "test:ai-sidecar:stress": "python src-tauri/sidecars/python/stress_ai_provider_tester.py",
@@ -13,13 +14,20 @@
     "prebuild": "npm run typecheck",
     "build": "npm run build:frontend",
     "build:frontend": "npm run sync-version && vite build",
+    "build:staging": "npm run sync-version && vite build --mode staging",
+    "build:production": "npm run build",
     "preview": "vite preview",
     "pretauri:dev": "npm run typecheck",
     "tauri:dev": "node scripts/tauri-dev.cjs",
+    "tauri:build:no-bundle": "npx tauri build --no-bundle",
+    "tauri:build:full": "npx tauri build",
     "pretauri": "npm run typecheck",
     "tauri": "node scripts/tauri.cjs",
     "sync-version": "node scripts/sync-version.js",
     "changelog": "node scripts/changelog.js",
+    "release:test": "gh workflow run release.yml --ref main -f publish_release=false",
+    "release:test:full": "gh workflow run release.yml --ref main -f publish_release=false -f full_bundle=true",
+    "release:runs": "gh run list --workflow release.yml --limit 5",
     "release": "node scripts/release.js"
   },
   "dependencies": {

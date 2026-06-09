@@ -26,7 +26,7 @@
 5. Rust 侧按 `commands -> services -> infra/repo` 拆分，Command 保持薄代理。
 6. 新增 Tauri Command 时同步补 `src/services/tauri.mock.ts`。
 7. 补齐 `zh-CN.ts` / `en-US.ts`，避免 Raw Key 出现在界面。
-8. 运行 `npm run verify`；涉及 Rust / capabilities 时再运行 `npx tauri build --no-bundle`。
+8. 运行 `npm run verify`；涉及 Rust / capabilities 时再运行 `npm run tauri:build:no-bundle`。
 
 ### 修复 Bug
 
@@ -119,7 +119,7 @@ AI 修改代码后：
 
 1. 运行 `npm run typecheck`。
 2. 涉及分层边界时运行 `npm run check:architecture` 或 `npm run verify`。
-3. 涉及 Rust / capabilities 时运行 `npx tauri build --no-bundle`。
+3. 涉及 Rust / capabilities 时运行 `npm run tauri:build:no-bundle`。
 4. 涉及 UI 时打开浏览器预览或真实 Tauri 窗口抽查。
 5. 结束重要任务前更新 Codex 记忆库，只记录决策、状态和待跟进项。
 
@@ -139,7 +139,9 @@ AI 不应做：
 | `npm run typecheck` | 每次 TS / Vue 代码变更后必须运行 |
 | `npm run verify` | 普通前端任务完成前推荐运行 |
 | `npm run tauri:dev` | 真实桌面联调 |
-| `npx tauri build --no-bundle` | Rust、capabilities、打包链路变更后运行 |
+| `npm run tauri:build:no-bundle` | Rust、capabilities、打包链路变更后运行 |
+| `npm run release:test` | 触发 GitHub Actions 快速发布 dry-run，不上传 Release |
+| `npm run release:test:full` | 触发完整发布 dry-run，验证安装包、更新包和签名链路 |
 
 完成定义：
 

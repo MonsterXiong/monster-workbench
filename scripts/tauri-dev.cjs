@@ -79,20 +79,21 @@ function printPortHelp() {
 }
 
 async function main() {
+  const cliArgs = process.argv.slice(2);
   const canReuseDevServer = await probeDevServer(DEV_SERVER_URL);
   if (canReuseDevServer) {
     console.log(
       `[TAURI_DEV] 检测到 ${DEV_SERVER_URL} 已在运行，将复用现有前端 dev server 启动 Tauri。`
     );
     const result = withReusableDevServerConfig((configPath) =>
-      spawnTauriDev(["--config", configPath])
+      spawnTauriDev(["--config", configPath, ...cliArgs])
     );
     process.exit(result.status ?? 1);
   }
 
   const portState = await checkPort(DEV_SERVER_PORT);
   if (portState === "free") {
-    const result = spawnTauriDev([]);
+    const result = spawnTauriDev(cliArgs);
     process.exit(result.status ?? 1);
   }
 

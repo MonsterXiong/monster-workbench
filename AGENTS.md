@@ -59,7 +59,9 @@ npm run check:architecture
 | `npm run typecheck` | TypeScript / Vue 类型校验 | 每次代码变更后 |
 | `npm run check:architecture` | 分层与 Tauri 边界检查 | 涉及底座、IPC、HTTP、DB、文件能力时 |
 | `npm run verify` | 架构检查 + 类型校验 | 普通前端任务完成前推荐 |
-| `npx tauri build --no-bundle` | 发布级编译验证 | 修改 Rust、capabilities、打包链路后 |
+| `npm run tauri:build:no-bundle` | 发布级编译验证 | 修改 Rust、capabilities、打包链路后 |
+| `npm run release:test` | GitHub Actions 快速发布测试 | 日常发布前 dry-run，不上传 Release |
+| `npm run release:test:full` | GitHub Actions 完整发布测试 | 正式发版前验证安装包、更新包和签名链路 |
 | `npm run release` | 一键发布 | 版本发布时；不要手动改版本号绕过脚本 |
 
 ---
