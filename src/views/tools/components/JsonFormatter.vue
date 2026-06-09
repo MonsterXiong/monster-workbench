@@ -4,7 +4,13 @@ import { Code, Trash2, Copy, AlertTriangle } from "lucide-vue-next";
 import { storeToRefs } from "pinia";
 import { useToolsStore } from "../../../stores/tools";
 import { useI18n } from "../../../composables/useI18n";
-import { getErrorMessage, isBlank, tryFormatJsonText, tryMinifyJsonText } from "../../../utils";
+import {
+  getJsonParseData,
+  getJsonParseErrorMessage,
+  isBlank,
+  tryFormatJsonText,
+  tryMinifyJsonText,
+} from "../../../utils";
 
 const emit = defineEmits<{
   (e: "copy", text: string): void;
@@ -25,8 +31,8 @@ function handleFormatJson(spacing = 2) {
     return;
   }
   const result = tryFormatJsonText(jsonFormatter.value.jsonInput, spacing);
-  jsonOutput.value = result.data ?? "";
-  jsonError.value = result.error ? getErrorMessage(result.error, t("tools.jsonFormat.invalidJson")) : "";
+  jsonOutput.value = getJsonParseData(result, "");
+  jsonError.value = getJsonParseErrorMessage(result, t("tools.jsonFormat.invalidJson"));
 }
 
 function handleMinifyJson() {
@@ -36,8 +42,8 @@ function handleMinifyJson() {
     return;
   }
   const result = tryMinifyJsonText(jsonFormatter.value.jsonInput);
-  jsonOutput.value = result.data ?? "";
-  jsonError.value = result.error ? getErrorMessage(result.error, t("tools.jsonFormat.invalidJson")) : "";
+  jsonOutput.value = getJsonParseData(result, "");
+  jsonError.value = getJsonParseErrorMessage(result, t("tools.jsonFormat.invalidJson"));
 }
 
 function handleClearJson() {

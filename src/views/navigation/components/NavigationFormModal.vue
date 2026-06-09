@@ -5,7 +5,7 @@ import { useNavigationStore } from "../../../stores/navigation";
 import { useToast } from "../../../composables/useToast";
 import AppImageUploader from "../../../components/common/AppImageUploader.vue";
 import { useI18n } from "../../../composables/useI18n";
-import { ensureHttpProtocol, getEventTargetValue, isBlank, toTrimmedString } from "../../../utils";
+import { applyObjectPatch, ensureHttpProtocol, getEventTargetValue, isBlank, toTrimmedString } from "../../../utils";
 
 const navigationStore = useNavigationStore();
 const { triggerToast } = useToast();
@@ -27,11 +27,17 @@ const props = defineProps<{
   };
 }>();
 
+type NavigationForm = typeof props.form;
+
 const emit = defineEmits<{
   (e: "update:visible", val: boolean): void;
   (e: "update:form", form: typeof props.form): void;
   (e: "saved"): void;
 }>();
+
+function patchForm(patch: Partial<NavigationForm>) {
+  emit("update:form", applyObjectPatch(props.form, patch));
+}
 
 // 自定义分类切换
 const isCustomCategory = ref(false);
@@ -154,7 +160,7 @@ function closeModal() {
           :model-value="form.title"
           :placeholder="t('navigation.namePlaceholder')"
           size="sm"
-          @update:model-value="emit('update:form', { ...form, title: String($event) })"
+          @update:model-value="patchForm({ title: String($event) })"
         />
       </div>
 
@@ -167,7 +173,7 @@ function closeModal() {
           :model-value="form.url"
           :placeholder="t('navigation.urlPlaceholder')"
           size="sm"
-          @update:model-value="emit('update:form', { ...form, url: String($event) })"
+          @update:model-value="patchForm({ url: String($event) })"
         />
       </div>
 
@@ -202,7 +208,7 @@ function closeModal() {
               :options="categoryOptions"
               size="sm"
               class="flex-1 w-full"
-              @update:model-value="emit('update:form', { ...form, category: String($event) })"
+              @update:model-value="patchForm({ category: String($event) })"
             />
             <BaseInput
               v-else
@@ -223,7 +229,7 @@ function closeModal() {
             :checked="form.is_featured === 1"
             type="checkbox"
             class="checkbox cursor-pointer"
-            @change="emit('update:form', { ...form, is_featured: form.is_featured === 1 ? 0 : 1 })"
+            @change="patchForm({ is_featured: form.is_featured === 1 ? 0 : 1 })"
           />
           <span class="flex items-center gap-1">
             <Star class="h-3.5 w-3.5 text-blue-500" />
@@ -235,7 +241,7 @@ function closeModal() {
             :checked="form.is_hot === 1"
             type="checkbox"
             class="checkbox cursor-pointer"
-            @change="emit('update:form', { ...form, is_hot: form.is_hot === 1 ? 0 : 1 })"
+            @change="patchForm({ is_hot: form.is_hot === 1 ? 0 : 1 })"
           />
           <span class="flex items-center gap-1">
             <Flame class="h-3.5 w-3.5 text-amber-500" />
@@ -251,7 +257,7 @@ function closeModal() {
           :model-value="form.logo_path"
           :label="t('navigation.logoLabel')"
           aspect-ratio="contain"
-          @update:model-value="emit('update:form', { ...form, logo_path: $event })"
+          @update:model-value="patchForm({ logo_path: $event })"
         />
 
         <!-- 背景封面上传 -->
@@ -259,7 +265,7 @@ function closeModal() {
           :model-value="form.bg_path"
           :label="t('navigation.bgLabel')"
           aspect-ratio="cover"
-          @update:model-value="emit('update:form', { ...form, bg_path: $event })"
+          @update:model-value="patchForm({ bg_path: $event })"
         />
       </div>
 
@@ -271,7 +277,7 @@ function closeModal() {
           rows="3"
           :placeholder="t('navigation.descPlaceholder')"
           class="workbench-textarea p-3 text-xs leading-5 resize-none h-20"
-          @input="emit('update:form', { ...form, description: getEventTargetValue($event) })"
+          @input="patchForm({ description: getEventTargetValue($event) })"
         ></textarea>
       </div>
     </div>

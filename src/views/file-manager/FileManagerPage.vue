@@ -5,7 +5,7 @@ import { useFileManagerStore, type UploadedFileInfo, type BatchUploadResult } fr
 import { useToast } from "../../composables/useToast";
 import { useConfirm } from "../../composables/useConfirm";
 import { useI18n } from "../../composables/useI18n";
-import { formatTemplate, getErrorMessage, joinTextList } from "../../utils";
+import { formatTemplate, getErrorMessage, isEmptyArray, isNonEmptyArray, joinTextList } from "../../utils";
 
 // 引入局部业务组件
 import FileManagerToolbar from "./components/FileManagerToolbar.vue";
@@ -103,7 +103,7 @@ async function handleDelete(file: UploadedFileInfo) {
 
 // 批量删除已勾选文件（高度自愈逻辑）
 async function handleBatchDelete() {
-  if (selectedPaths.value.length === 0) {
+  if (isEmptyArray(selectedPaths.value)) {
     triggerToast(t('fileManager.selectToDelete'), "warning");
     return;
   }
@@ -111,14 +111,14 @@ async function handleBatchDelete() {
   try {
     const deletePlan = await fileManagerStore.buildBatchDeletePlan();
     let confirmMsg = formatTemplate(t('fileManager.batchDeleteConfirmMsg'), { count: selectedPaths.value.length });
-    if (deletePlan.referencedUsage.length > 0) {
+    if (isNonEmptyArray(deletePlan.referencedUsage)) {
       confirmMsg = formatTemplate(t('fileManager.batchDeleteConfirmWarning'), { usage: joinTextList(deletePlan.referencedUsage) });
     }
 
     const ok = await confirm({
-      title: deletePlan.referencedUsage.length > 0 ? t('fileManager.batchDeleteConfirmTitleForce') : t('fileManager.batchDeleteConfirmTitle'),
+      title: isNonEmptyArray(deletePlan.referencedUsage) ? t('fileManager.batchDeleteConfirmTitleForce') : t('fileManager.batchDeleteConfirmTitle'),
       message: confirmMsg,
-      confirmText: deletePlan.referencedUsage.length > 0 ? t('fileManager.deleteConfirmBtnForce') : t('fileManager.deleteConfirmBtn'),
+      confirmText: isNonEmptyArray(deletePlan.referencedUsage) ? t('fileManager.deleteConfirmBtnForce') : t('fileManager.deleteConfirmBtn'),
       danger: true,
     });
     if (!ok) return;

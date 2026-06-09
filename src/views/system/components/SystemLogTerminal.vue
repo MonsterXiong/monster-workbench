@@ -2,7 +2,7 @@
 import { ref, watch, nextTick } from "vue";
 import { RefreshCw, Download, Send, Trash2 } from "lucide-vue-next";
 import { useI18n } from "../../../composables/useI18n";
-import { getLogLevelFromText } from "../../../utils";
+import { getLogLevelFromText, scrollElementToBottom } from "../../../utils";
 
 const { t } = useI18n();
 
@@ -26,9 +26,7 @@ watch(
   () => props.filteredLines,
   async () => {
     await nextTick();
-    if (logTerminal.value) {
-      logTerminal.value.scrollTop = logTerminal.value.scrollHeight;
-    }
+    scrollElementToBottom(logTerminal.value, "auto");
   },
   { deep: true }
 );

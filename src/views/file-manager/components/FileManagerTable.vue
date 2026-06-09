@@ -3,7 +3,7 @@ import { computed } from "vue";
 import { FileText, Eye, Trash2 } from "lucide-vue-next";
 import { useI18n } from "../../../composables/useI18n";
 import { useClipboard } from "../../../composables/useClipboard";
-import { formatBytes, formatUnixTimestamp, hasItem } from "../../../utils";
+import { formatBytes, formatOptionalUnixTimestamp, hasSelectionKey } from "../../../utils";
 
 const { t } = useI18n();
 const { copyText } = useClipboard();
@@ -40,8 +40,12 @@ const columns = computed(() => {
 });
 
 function formatModifiedTime(timestamp: number): string {
-  if (!timestamp) return "-";
-  return formatUnixTimestamp(timestamp, "second", "YYYY-MM-DD HH:mm", "-");
+  return formatOptionalUnixTimestamp(timestamp, {
+    unit: "second",
+    pattern: "YYYY-MM-DD HH:mm",
+    fallback: "-",
+    zeroAsMissing: true,
+  });
 }
 
 </script>
@@ -60,7 +64,7 @@ function formatModifiedTime(timestamp: number): string {
           <input
             type="checkbox"
             class="checkbox checkbox-xs cursor-pointer"
-            :checked="hasItem(selectedPaths, row.rel_path)"
+            :checked="hasSelectionKey(selectedPaths, row.rel_path)"
             @change="emit('toggleSelection', row.rel_path)"
           />
         </div>

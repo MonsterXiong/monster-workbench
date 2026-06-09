@@ -9,7 +9,7 @@ import {
 import { useDragSort } from "../../../composables/useDragSort";
 import { toRef } from "vue";
 import { useI18n } from "../../../composables/useI18n";
-import { formatTemplate, getInitials, hasItem } from "../../../utils";
+import { formatTemplate, getInitials, hasSelectionKey } from "../../../utils";
 
 const { t } = useI18n();
 
@@ -63,7 +63,7 @@ function getCategoryName(cat: string): string {
         :key="item.id"
         class="nav-card group"
         :class="{
-          'ring-2 ring-blue-500/40 shadow-blue-500/5 bg-blue-50/20': hasItem(selectedIds, item.id!),
+          'ring-2 ring-blue-500/40 shadow-blue-500/5 bg-blue-50/20': hasSelectionKey(selectedIds, item.id!),
           'is-sorting opacity-40 scale-95 border-dashed border-blue-400/60 bg-blue-50/10 cursor-grabbing': isSortMode && isDraggingIndex === index,
           'hover:shadow-none hover:transform-none cursor-grab': isSortMode
         }"
@@ -85,7 +85,7 @@ function getCategoryName(cat: string): string {
           <input
             type="checkbox"
             class="checkbox cursor-pointer"
-            :checked="hasItem(selectedIds, item.id!)"
+            :checked="hasSelectionKey(selectedIds, item.id!)"
             @change="emit('toggleSelection', item.id!)"
           />
         </div>

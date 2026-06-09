@@ -14,6 +14,7 @@ import {
   formatTemplate,
   getErrorMessage,
   getTotalPages,
+  isEmptyArray,
   resetTimeoutHandle,
   toggleAllSelectionKeys,
   toggleSelectionKey,
@@ -209,7 +210,7 @@ function exitBatchMode() {
 
 // 批量删除（二次确认）
 async function handleBatchDelete() {
-  if (selectedIds.value.length === 0) {
+  if (isEmptyArray(selectedIds.value)) {
     triggerToast(t('navigation.selectToDelete'));
     return;
   }

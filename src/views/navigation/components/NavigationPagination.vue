@@ -13,10 +13,6 @@ const emit = defineEmits<{
 }>();
 
 const { t } = useI18n();
-
-function totalPages(total: number, pageSize: number) {
-  return getTotalPages(total, pageSize);
-}
 </script>
 
 <template>
@@ -35,13 +31,13 @@ function totalPages(total: number, pageSize: number) {
         {{ t("navigation.pagination.prev") }}
       </BaseButton>
       <span class="px-3 py-1 bg-primary/10 text-primary font-extrabold rounded-lg text-xs min-w-[70px] text-center">
-        {{ page }} / {{ totalPages(total, pageSize) }}
+        {{ page }} / {{ getTotalPages(total, pageSize) }}
       </span>
       <BaseButton
         type="neutral"
         outline
         size="sm"
-        :disabled="page >= totalPages(total, pageSize)"
+        :disabled="page >= getTotalPages(total, pageSize)"
         @click="emit('changePage', page + 1)"
       >
         {{ t("navigation.pagination.next") }}
