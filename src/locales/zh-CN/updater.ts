@@ -1,0 +1,20 @@
+export default {
+    checkUpdate: "检查更新",
+    newVersion: "发现新版本",
+    checking: "正在检查更新...",
+    upToDate: "当前已是最新版本",
+    updateNow: "立即升级",
+    later: "稍后更新",
+    downloading: "正在下载...",
+    failed: "检查更新失败",
+    updatingTitle: "正在为您升级系统",
+    newVersionTitle: "发现全新版本可用",
+    currentVersion: "当前",
+    newVersionLabel: "新版",
+    logTitle: "更新日志",
+    releaseDate: "发布日期",
+    defaultLog: "性能细节微调及已知缺陷的修复。",
+    preparing: "准备下载...",
+    progressMsg: "正在下载更新: {percent}%",
+    taskName: "系统更新包下载"
+  };

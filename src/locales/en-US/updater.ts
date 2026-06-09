@@ -1,0 +1,20 @@
+export default {
+    checkUpdate: "Check Update",
+    newVersion: "New Version Available",
+    checking: "Checking for updates...",
+    upToDate: "Already up to date",
+    updateNow: "Update Now",
+    later: "Later",
+    downloading: "Downloading...",
+    failed: "Check update failed",
+    updatingTitle: "Upgrading system for you",
+    newVersionTitle: "New Version Available",
+    currentVersion: "Current",
+    newVersionLabel: "New",
+    logTitle: "Changelog",
+    releaseDate: "Release Date",
+    defaultLog: "Performance tweaks and bug fixes.",
+    preparing: "Preparing download...",
+    progressMsg: "Downloading update: {percent}%",
+    taskName: "System Update Package Download"
+  };
