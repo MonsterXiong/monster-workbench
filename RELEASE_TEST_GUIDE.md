@@ -68,6 +68,8 @@ npm run release
     2.  [CHANGELOG.md](file:///CHANGELOG.md) 顶部已被追加了格式化的英文发布日志。
     3.  `dist/release-notes.md` 已单独输出，且仅包含本次英文变更描述。
 *   **检查 Git 暂存**：在终端运行 `git status`，验证本次版本修改和日志生成的文件都已被自动添加进 Git 暂存区。
+*   **检查 Git Hook**：运行 `git config core.hooksPath`，确认输出为 `.githooks`；如为空，运行 `npm run setup:git-hooks`。
+*   **检查 Git Commit**：运行 `npm run check:commit-message`，确认最新提交符合 `类型：中文概要` 格式。
 *   **检查 Git Tag**：运行 `git log -n 1` 以及 `git tag`，确认本地已成功创建了一个对应于此版本的 `v<版本号>` 的 Git 标签。
 
 ---

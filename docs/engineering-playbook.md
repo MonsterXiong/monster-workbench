@@ -12,6 +12,7 @@
 - 浏览器可预览：所有 Tauri 原生能力必须有浏览器降级或 Mock，不让 `http://localhost:1420` 直接崩溃。
 - 文案可切换：用户可见文本进入 `locales/`，日志和异常保持 `[ERR_*] 中文描述`。
 - 验证前置：每次代码变更后至少运行 `npm run typecheck`，涉及分层边界时运行 `npm run check:architecture`。
+- 命令分层：日常开发、发布级构建、发布 dry-run 和正式发布都使用 `package.json` 中的 npm 脚本入口，避免直接散落调用底层命令。
 
 ---
 
@@ -42,6 +43,15 @@
 3. 浅色主题不得出现大面积深色背景；深色模式必须可用。
 4. 文案短、动作导向，避免说明性堆叠。
 5. 浏览器预览和真实 Tauri 窗口都要抽查关键页面。
+
+### 发布与发布测试
+
+1. 日常桌面联调使用 `npm run dev:desktop` 或 `npm run tauri:dev`。
+2. 修改 Rust、capabilities、sidecar 或打包链路后，本地运行 `npm run verify`、`npm run test:ai-sidecar`、`npm run test:ai-sidecar:stress` 和 `npm run tauri:build:no-bundle`。
+3. 日常发布前先运行 `npm run release:test`，触发 GitHub Actions 的 quick dry-run，不上传 Release。
+4. 正式发版前至少运行一次 `npm run release:test:full`，验证安装包、更新包和签名链路。
+5. 正式发布只使用 `npm run release`；该脚本会检查 main 分支、干净工作区、版本号、重复 tag，并先执行本地发布门禁。
+6. `SKIP_RELEASE_PREFLIGHT=1` 只允许在已明确说明风险的应急场景使用。
 
 ---
 
@@ -121,7 +131,8 @@ AI 修改代码后：
 2. 涉及分层边界时运行 `npm run check:architecture` 或 `npm run verify`。
 3. 涉及 Rust / capabilities 时运行 `npm run tauri:build:no-bundle`。
 4. 涉及 UI 时打开浏览器预览或真实 Tauri 窗口抽查。
-5. 结束重要任务前更新 Codex 记忆库，只记录决策、状态和待跟进项。
+5. 提交前确认 `.githooks/commit-msg` 已启用；如果未启用，运行 `npm run setup:git-hooks`。提交后运行 `npm run check:commit-message` 复核最近一次提交。
+6. 结束重要任务前更新 Codex 记忆库，只记录决策、状态和待跟进项。
 
 AI 不应做：
 
@@ -136,12 +147,27 @@ AI 不应做：
 | 命令 | 使用场景 |
 |------|----------|
 | `npm run check:architecture` | 检查 Tauri / IPC / fetch / SQLite 是否越层，并防止 SQL/FS 插件、capability 与宽 HOME asset scope 回引 |
+| `npm run check:commit-message` | 检查最近一次 commit 是否符合 `类型：中文概要` |
+| `npm run setup:git-hooks` | 将本仓库 Git hooks 指向 `.githooks`，启用 commit-msg 自动拦截 |
 | `npm run typecheck` | 每次 TS / Vue 代码变更后必须运行 |
 | `npm run verify` | 普通前端任务完成前推荐运行 |
+| `npm run dev:desktop` | 日常真实桌面开发入口，等价进入 Tauri dev |
 | `npm run tauri:dev` | 真实桌面联调 |
+| `npm run build:staging` | 生成 staging 模式前端产物 |
+| `npm run build:production` | 生成 production 前端产物，当前等价于默认 `build` |
 | `npm run tauri:build:no-bundle` | Rust、capabilities、打包链路变更后运行 |
+| `npm run tauri:build:full` | 本地完整 Tauri 打包，耗时更长 |
 | `npm run release:test` | 触发 GitHub Actions 快速发布 dry-run，不上传 Release |
 | `npm run release:test:full` | 触发完整发布 dry-run，验证安装包、更新包和签名链路 |
+| `npm run release:runs` | 查看最近 release workflow 运行结果 |
+| `npm run release` | 正式发布入口，负责版本同步、门禁、提交、tag 与推送 |
+
+Commit message 规范：
+
+- 必须使用 `类型：中文概要`，例如 `docs：更新发布命令规范文档`。
+- 类型只能使用 `feat/fix/docs/style/refactor/perf/test/build/ci/chore/release/revert`。
+- 冒号使用中文全角 `：`，概要必须包含中文。
+- `.githooks/commit-msg` 会在本地提交时自动校验；release CI 的 `frontend-verify` 也会运行 `npm run check:commit-message`。
 
 完成定义：
 

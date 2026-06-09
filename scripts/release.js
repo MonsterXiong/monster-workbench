@@ -158,7 +158,9 @@ async function main() {
     // 4. Git 自动暂存、提交与打标签
     console.log("\n正在暂存和提交代码...");
     execSync(`git add -- ${releaseStagePaths.map(quoteGitPath).join(" ")}`, { stdio: "inherit" });
-    execSync(`git commit -m "chore: 发布新版本 v${newVersion}"`, { stdio: "inherit" });
+    const releaseCommitMessage = `chore：发布新版本 v${newVersion}`;
+    execSync(`node scripts/check-commit-message.js ${quoteGitPath(releaseCommitMessage)}`, { stdio: "inherit" });
+    execSync(`git commit -m ${quoteGitPath(releaseCommitMessage)}`, { stdio: "inherit" });
     console.log(`✓ Git 提交成功`);
 
     console.log(`正在创建 Git Tag: v${newVersion}...`);

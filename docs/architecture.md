@@ -144,7 +144,7 @@ npm run verify
 如修改了打包、能力或整体集成链路，再执行：
 
 ```bash
-npx tauri build --no-bundle
+npm run tauri:build:no-bundle
 ```
 
 本地桌面联调统一使用：

@@ -33,7 +33,15 @@ const cleanLogs = commits
     return c.replace(/^[a-f0-9]+\s+/, "").trim();
   })
   .filter(msg => {
-    if (msg.startsWith("release:") || msg.startsWith("release: v") || msg.startsWith("发布新版本") || msg.startsWith("docs: 在AGENTS.md中增加")) {
+    if (
+      msg.startsWith("release:") ||
+      msg.startsWith("release：") ||
+      msg.startsWith("chore: 发布新版本") ||
+      msg.startsWith("chore：发布新版本") ||
+      msg.startsWith("发布新版本") ||
+      msg.startsWith("docs: 在AGENTS.md中增加") ||
+      msg.startsWith("docs：在AGENTS.md中增加")
+    ) {
       return false;
     }
     return msg.length > 0;

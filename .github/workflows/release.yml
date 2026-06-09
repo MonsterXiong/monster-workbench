@@ -41,6 +41,9 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci --prefer-offline --no-audit --no-fund
 
+      - name: Check commit message
+        run: npm run check:commit-message
+
       - name: Check frontend boundaries and types
         run: npm run verify
 

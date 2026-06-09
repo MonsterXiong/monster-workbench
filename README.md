@@ -36,9 +36,10 @@ npm run tauri:dev
 
 ```bash
 npm run verify
+npm run check:commit-message
 ```
 
-其中 `npm run check:architecture` 会检查 Tauri / IPC / HTTP / SQLite 是否越层，并防止 SQL/FS 插件、capability 与宽 HOME asset scope 回引；`npm run typecheck` 会执行 TypeScript 类型校验。
+其中 `npm run check:architecture` 会检查 Tauri / IPC / HTTP / SQLite 是否越层，并防止 SQL/FS 插件、capability 与宽 HOME asset scope 回引；`npm run typecheck` 会执行 TypeScript 类型校验。Commit message 必须符合 `类型：中文概要`，例如 `docs：更新发布命令规范文档`。本地 hook 会在 `npm install` 时自动启用，如未生效可手动运行 `npm run setup:git-hooks`。
 
 涉及 AI sidecar / 模型提供商测试能力时，额外运行：
 

@@ -59,6 +59,7 @@ npm run check:architecture
 | `npm run typecheck` | TypeScript / Vue 类型校验 | 每次代码变更后 |
 | `npm run check:architecture` | 分层与 Tauri 边界检查 | 涉及底座、IPC、HTTP、DB、文件能力时 |
 | `npm run verify` | 架构检查 + 类型校验 | 普通前端任务完成前推荐 |
+| `npm run check:commit-message` | 最近一次提交信息格式检查 | 每次提交后；本地 commit-msg hook 和 release CI 也会执行 |
 | `npm run tauri:build:no-bundle` | 发布级编译验证 | 修改 Rust、capabilities、打包链路后 |
 | `npm run release:test` | GitHub Actions 快速发布测试 | 日常发布前 dry-run，不上传 Release |
 | `npm run release:test:full` | GitHub Actions 完整发布测试 | 正式发版前验证安装包、更新包和签名链路 |
@@ -72,7 +73,8 @@ npm run check:architecture
 - 优先复用现有组件、工具、类型、Store、Service 和请求封装。
 - 不引入新依赖、不升级核心依赖、不重写架构，除非用户明确要求。
 - 不删除看似无用但可能有业务意义的代码，不格式化无关文件。
-- 对用户可见的说明、文档和提交信息使用简体中文；Commit 概要也必须使用简体中文。
+- 对用户可见的说明、文档和提交信息使用简体中文；Commit message 必须使用 `类型：中文概要` 格式，例如 `docs：更新发布命令规范文档`，类型使用 `feat/fix/docs/style/refactor/perf/test/build/ci/chore/release/revert`。
+- 本地 Git hook 由 `.githooks/commit-msg` 执行提交信息校验；若 hook 未生效，先运行 `npm run setup:git-hooks`。
 - CI/CD 由 `v*` / `app-v*` 格式 Tag 触发，禁止修改 `.github/workflows/release.yml` 的触发逻辑。
 
 ---
