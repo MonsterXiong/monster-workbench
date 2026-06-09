@@ -46,6 +46,11 @@ export const router = createRouter({
       component: () => import("../views/playground/PlaygroundPage.vue"),
     },
     {
+      path: "/utils-docs",
+      name: "utils-docs",
+      component: () => import("../views/utils-docs/UtilsDocsPage.vue"),
+    },
+    {
       path: "/403",
       name: "403",
       component: () => import("../views/error/403Page.vue"),

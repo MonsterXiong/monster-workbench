@@ -2,6 +2,7 @@ export default {
     workspace: "Workspace",
     navigation: "Navigation",
     tools: "Toolkit",
+    utilsDocs: "Utils Docs",
     ai: "AI Models",
     logoChar: "M",
     logoText: "Monster Tools",

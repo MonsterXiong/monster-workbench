@@ -2,6 +2,7 @@ export default {
     workspace: "工作台",
     navigation: "导航菜单",
     tools: "工具箱",
+    utilsDocs: "工具函数文档",
     ai: "AI 模型",
     logoChar: "智",
     logoText: "智汇工具箱",

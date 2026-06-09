@@ -9,18 +9,19 @@ import {
   Compass,
   Bot,
   FolderOpen,
-  FlaskConical
+  FlaskConical,
+  BookOpen
 } from "lucide-vue-next";
 
 defineProps<{
-  activeTab: "workspace" | "system" | "tools" | "navigation" | "ai" | "settings" | "file-manager" | "playground";
+  activeTab: "workspace" | "system" | "tools" | "navigation" | "ai" | "settings" | "file-manager" | "playground" | "utils-docs";
   collapsed: boolean;
   version: string;
   hasUpdate?: boolean;
 }>();
 
 const emit = defineEmits<{
-  (e: "changeTab", tab: "workspace" | "system" | "tools" | "navigation" | "ai" | "settings" | "file-manager" | "playground"): void;
+  (e: "changeTab", tab: "workspace" | "system" | "tools" | "navigation" | "ai" | "settings" | "file-manager" | "playground" | "utils-docs"): void;
   (e: "toggleCollapse"): void;
   (e: "checkUpdateManual"): void;
 }>();
@@ -44,6 +45,11 @@ const items = [
     key: "tools",
     titleKey: "sidebar.tools",
     icon: Wrench,
+  },
+  {
+    key: "utils-docs",
+    titleKey: "sidebar.utilsDocs",
+    icon: BookOpen,
   },
   {
     key: "ai",
