@@ -1,5 +1,5 @@
 import { ref } from "vue";
-import { clearTimeoutHandle, clearTimeoutMap, createTimeout, createTimestampId, findIndexByValue, type TimeoutHandle } from "../utils";
+import { clearTimeoutHandle, clearTimeoutMap, createTimeout, createTimestampId, findIndexByValue, removeAt, type TimeoutHandle } from "../utils";
 
 export type MessageType = "success" | "error" | "warning" | "info";
 
@@ -83,7 +83,7 @@ export function useMessage() {
 
     const index = findIndexByValue(messages.value, (message) => message.id, id);
     if (index !== -1) {
-      messages.value.splice(index, 1);
+      messages.value = removeAt(messages.value, index);
     }
   }
 

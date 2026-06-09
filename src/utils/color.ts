@@ -22,9 +22,50 @@ export interface ContrastReadabilityResult {
   level: "fail" | "aa-large" | "aa" | "aaa";
 }
 
+export interface ReadableColorChoice {
+  color: string;
+  ratio: number;
+  readable: boolean;
+  level: ContrastReadabilityResult["level"];
+}
+
+export interface ColorValueSummary {
+  input: string;
+  valid: boolean;
+  hex: string;
+  css: string;
+  rgb: RgbColor | null;
+  hsl: HslColor | null;
+  alpha: number;
+  light: boolean;
+  dark: boolean;
+}
+
+export interface ColorContrastSummary {
+  foreground: string;
+  background: string;
+  ratio: number;
+  readable: boolean;
+  level: ContrastReadabilityResult["level"];
+  foregroundValid: boolean;
+  backgroundValid: boolean;
+}
+
+export interface ColorPaletteSummary {
+  totalCount: number;
+  validCount: number;
+  invalidCount: number;
+  hexColors: string[];
+  lightCount: number;
+  darkCount: number;
+  averageRgb: RgbColor;
+  averageHex: string;
+}
+
 const HEX_COLOR_REGEXP = /^#?([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
 const HEX_COLOR_WITH_ALPHA_REGEXP = /^#?([0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
 const RGB_COLOR_REGEXP = /^rgba?\(([^)]+)\)$/i;
+const HSL_COLOR_REGEXP = /^hsla?\(([^)]+)\)$/i;
 
 export function normalizeHue(value: number): number {
   if (!Number.isFinite(value)) {
@@ -48,6 +89,22 @@ export function normalizeHexColor(value: string, fallback = "#000000"): string {
 
   const hex = match[1];
   const normalizedHex = hex.length === 3
+    ? hex.split("").map((item) => `${item}${item}`).join("")
+    : hex;
+
+  return `#${normalizedHex.toLowerCase()}`;
+}
+
+export function normalizeHexColorWithAlpha(value: string, fallback = "#000000"): string {
+  const trimmedValue = value.trim();
+  const match = trimmedValue.match(HEX_COLOR_WITH_ALPHA_REGEXP);
+
+  if (!match) {
+    return fallback;
+  }
+
+  const hex = match[1];
+  const normalizedHex = hex.length <= 4
     ? hex.split("").map((item) => `${item}${item}`).join("")
     : hex;
 
@@ -179,8 +236,51 @@ export function parseRgbaColorText(value: string): RgbaColor | null {
   return normalizeRgbaColor({ r, g, b, a });
 }
 
+function parsePercentPart(value: string | undefined): number | null {
+  if (value === undefined) {
+    return null;
+  }
+
+  const text = value.trim();
+  const numericValue = text.endsWith("%")
+    ? Number.parseFloat(text.slice(0, -1))
+    : Number.parseFloat(text);
+
+  return Number.isFinite(numericValue) ? numericValue : null;
+}
+
+export function parseHslColorText(value: string): HslColor | null {
+  const trimmedValue = value.trim();
+  const hslBody = trimmedValue.match(HSL_COLOR_REGEXP)?.[1] ?? trimmedValue;
+  const parts = hslBody
+    .replace(/\//g, " ")
+    .split(/[,\s]+/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .slice(0, 3);
+
+  if (parts.length !== 3) {
+    return null;
+  }
+
+  const h = Number.parseFloat(parts[0]);
+  const s = parsePercentPart(parts[1]);
+  const l = parsePercentPart(parts[2]);
+
+  if (!Number.isFinite(h) || s === null || l === null) {
+    return null;
+  }
+
+  return normalizeHslColor({ h, s, l });
+}
+
 export function colorToRgb(value: string | RgbColor): RgbColor | null {
-  return typeof value === "string" ? hexToRgb(value) ?? parseRgbColorText(value) : normalizeRgbColor(value);
+  if (typeof value !== "string") {
+    return normalizeRgbColor(value);
+  }
+
+  const hsl = parseHslColorText(value);
+  return hexToRgb(value) ?? parseRgbColorText(value) ?? (hsl ? hslToRgb(hsl) : null);
 }
 
 export function colorToRgba(value: string | RgbColor | RgbaColor): RgbaColor | null {
@@ -192,7 +292,9 @@ export function colorToRgba(value: string | RgbColor | RgbaColor): RgbaColor | n
     });
   }
 
-  return hexToRgba(value) ?? parseRgbaColorText(value);
+  const hsl = parseHslColorText(value);
+  const rgb = hsl ? hslToRgb(hsl) : null;
+  return hexToRgba(value) ?? parseRgbaColorText(value) ?? (rgb ? { ...rgb, a: 1 } : null);
 }
 
 export function rgbToHex(color: RgbColor): string {
@@ -205,6 +307,16 @@ export function rgbaToHex(color: RgbaColor, includeAlpha = true): string {
   const rgba = normalizeRgbaColor(color);
   const alphaHex = includeAlpha ? clampNumber(rgba.a * 255, 0, 255, 255, 0).toString(16).padStart(2, "0") : "";
   return `${rgbToHex(rgba)}${alphaHex}`;
+}
+
+export function colorToHex(value: string | RgbColor | RgbaColor, includeAlpha = false, fallback = "#000000"): string {
+  const rgba = colorToRgba(value);
+
+  if (!rgba) {
+    return fallback;
+  }
+
+  return includeAlpha ? rgbaToHex(rgba, true) : rgbToHex(rgba);
 }
 
 export function rgbToCss(color: RgbColor, alpha?: number): string {
@@ -322,6 +434,31 @@ export function hslToCss(color: HslColor, alpha?: number): string {
   return `hsl(${hsl.h}, ${hsl.s}%, ${hsl.l}%)`;
 }
 
+export function colorToHsl(value: string | RgbColor | HslColor): HslColor | null {
+  if (typeof value !== "string" && "h" in value) {
+    return normalizeHslColor(value);
+  }
+
+  if (typeof value === "string") {
+    const parsedHsl = parseHslColorText(value);
+    if (parsedHsl) {
+      return parsedHsl;
+    }
+  }
+
+  const rgb = colorToRgb(value as string | RgbColor);
+  return rgb ? rgbToHsl(rgb) : null;
+}
+
+export function colorToCss(value: string | RgbColor | RgbaColor | HslColor, fallback = "rgb(0, 0, 0)"): string {
+  if (typeof value !== "string" && "h" in value) {
+    return hslToCss(value);
+  }
+
+  const rgba = colorToRgba(value as string | RgbColor | RgbaColor);
+  return rgba ? (rgba.a < 1 ? rgbaToCss(rgba) : rgbToCss(rgba)) : fallback;
+}
+
 export function adjustRgbLightness(color: RgbColor, amountPercent: number): RgbColor {
   const hsl = rgbToHsl(color);
   return hslToRgb({
@@ -398,6 +535,39 @@ export function getContrastReadability(left: RgbColor, right: RgbColor, minRatio
   };
 }
 
+export function summarizeColorContrast(
+  foreground: string | RgbColor,
+  background: string | RgbColor,
+  minRatio = 4.5
+): ColorContrastSummary {
+  const foregroundRgb = colorToRgb(foreground);
+  const backgroundRgb = colorToRgb(background);
+
+  if (!foregroundRgb || !backgroundRgb) {
+    return {
+      foreground: typeof foreground === "string" ? foreground : rgbToHex(foreground),
+      background: typeof background === "string" ? background : rgbToHex(background),
+      ratio: 1,
+      readable: false,
+      level: "fail",
+      foregroundValid: Boolean(foregroundRgb),
+      backgroundValid: Boolean(backgroundRgb),
+    };
+  }
+
+  const readability = getContrastReadability(foregroundRgb, backgroundRgb, minRatio);
+
+  return {
+    foreground: rgbToHex(foregroundRgb),
+    background: rgbToHex(backgroundRgb),
+    ratio: readability.ratio,
+    readable: readability.readable,
+    level: readability.level,
+    foregroundValid: true,
+    backgroundValid: true,
+  };
+}
+
 export function isReadableContrast(left: RgbColor, right: RgbColor, minRatio = 4.5): boolean {
   return getContrastReadability(left, right, minRatio).readable;
 }
@@ -428,17 +598,115 @@ export function getReadableTextColor(
   ).color;
 }
 
+export function getReadableTextColorChoice(
+  background: string | RgbColor,
+  candidates: readonly string[] = ["#ffffff", "#111827"],
+  fallback = "#111827",
+  minRatio = 4.5
+): ReadableColorChoice {
+  const backgroundRgb = colorToRgb(background);
+
+  if (!backgroundRgb || candidates.length === 0) {
+    return {
+      color: fallback,
+      ratio: 1,
+      readable: false,
+      level: "fail",
+    };
+  }
+
+  return candidates.reduce<ReadableColorChoice>(
+    (best, candidate) => {
+      const candidateRgb = colorToRgb(candidate);
+
+      if (!candidateRgb) {
+        return best;
+      }
+
+      const readability = getContrastReadability(backgroundRgb, candidateRgb, minRatio);
+      return readability.ratio > best.ratio
+        ? {
+            color: candidate,
+            ratio: readability.ratio,
+            readable: readability.readable,
+            level: readability.level,
+          }
+        : best;
+    },
+    {
+      color: fallback,
+      ratio: 0,
+      readable: false,
+      level: "fail",
+    }
+  );
+}
+
 export function isLightColor(value: string | RgbColor, threshold = 0.55): boolean {
   const rgb = colorToRgb(value);
   return rgb ? getPerceivedLuminance(rgb) > threshold : false;
 }
 
-export function getContrastTextColor(value: string, light = "#ffffff", dark = "#111827"): string {
-  const rgb = hexToRgb(value);
+export function isDarkColor(value: string | RgbColor, threshold = 0.55): boolean {
+  const rgb = colorToRgb(value);
+  return rgb ? getPerceivedLuminance(rgb) <= threshold : false;
+}
+
+export function getContrastTextColor(value: string | RgbColor, light = "#ffffff", dark = "#111827"): string {
+  const rgb = colorToRgb(value);
 
   if (!rgb) {
     return dark;
   }
 
   return isLightColor(rgb) ? dark : light;
+}
+
+export function summarizeColorValue(value: string | RgbColor | RgbaColor | HslColor, fallback = "#000000"): ColorValueSummary {
+  const input = typeof value === "string" ? value : colorToCss(value);
+  const rgba = colorToRgba(value as string | RgbColor | RgbaColor);
+  const rgb = typeof value !== "string" && "h" in value ? hslToRgb(value) : rgba ? normalizeRgbColor(rgba) : null;
+  const hsl = typeof value !== "string" && "h" in value ? normalizeHslColor(value) : rgb ? rgbToHsl(rgb) : null;
+
+  return {
+    input,
+    valid: Boolean(rgb),
+    hex: rgb ? rgbToHex(rgb) : fallback,
+    css: rgb ? colorToCss(value) : fallback,
+    rgb,
+    hsl,
+    alpha: rgba?.a ?? 1,
+    light: rgb ? isLightColor(rgb) : false,
+    dark: rgb ? isDarkColor(rgb) : false,
+  };
+}
+
+export function summarizeColorPalette(values: readonly (string | RgbColor | RgbaColor)[]): ColorPaletteSummary {
+  const colors = values.map(colorToRgb).filter((color): color is RgbColor => Boolean(color));
+  const total = colors.reduce(
+    (result, color) => ({
+      r: result.r + color.r,
+      g: result.g + color.g,
+      b: result.b + color.b,
+    }),
+    { r: 0, g: 0, b: 0 }
+  );
+  const averageRgb = colors.length > 0
+    ? normalizeRgbColor({
+        r: total.r / colors.length,
+        g: total.g / colors.length,
+        b: total.b / colors.length,
+      })
+    : { r: 0, g: 0, b: 0 };
+
+  return {
+    totalCount: values.length,
+    validCount: colors.length,
+    invalidCount: values.length - colors.length,
+    hexColors: colors.map(rgbToHex),
+    lightCount: colors.filter((color) => isLightColor(color)).length,
+    darkCount: colors.filter((color) => isDarkColor(color)).length,
+    averageRgb,
+    averageHex: rgbToHex(averageRgb),
+  };
 }

@@ -8,7 +8,7 @@ import { updaterService } from "../services/updater.service";
 import { getTranslation } from "../locales";
 import { useSettingStore } from "./settings";
 import { useTaskStore } from "./task";
-import { createInterval, formatTemplate, getCurrentTimestampMs, stringifyErrorMessage } from "../utils";
+import { createInterval, formatTemplate, getCurrentTimestampMs, joinIdParts, stringifyErrorMessage } from "../utils";
 
 let autoCheckInitialized = false;
 
@@ -115,7 +115,7 @@ export const useUpdateStore = defineStore("update", {
      */
     async triggerDummyDownload() {
       const taskStore = useTaskStore();
-      const taskId = `update-${getCurrentTimestampMs()}`;
+      const taskId = joinIdParts(["update", getCurrentTimestampMs()]);
       const taskName = "系统更新包下载";
       taskStore.addTask(taskId, taskName);
       await updaterService.triggerUpdateDownload(taskId, taskName);

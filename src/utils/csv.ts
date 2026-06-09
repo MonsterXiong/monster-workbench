@@ -14,8 +14,22 @@ export interface CsvStringifyRowsOptions {
   lineBreak?: string;
 }
 
+export interface CsvSpreadsheetStringifyRowsOptions extends CsvStringifyRowsOptions {
+  formulaPrefix?: string;
+}
+
+export interface NormalizeCsvRowsWidthOptions {
+  width?: number;
+  fillValue?: CsvValue;
+  trimExtraCells?: boolean;
+}
+
 export interface CsvStringifyOptions extends CsvStringifyRowsOptions {
   includeHeader?: boolean;
+}
+
+export interface CsvSpreadsheetStringifyOptions extends CsvStringifyOptions {
+  formulaPrefix?: string;
 }
 
 export interface CsvParseOptions {
@@ -34,6 +48,67 @@ export interface CsvRowsToObjectsOptions extends CsvHeaderOptions {
 }
 
 export interface CsvParseObjectsOptions extends CsvParseOptions, CsvRowsToObjectsOptions {}
+
+export interface CsvAutoParseOptions extends Omit<CsvParseOptions, "delimiter"> {
+  delimiters?: readonly string[];
+  hasHeader?: boolean;
+}
+
+export interface CsvAutoParseObjectsOptions extends CsvAutoParseOptions, CsvRowsToObjectsOptions {}
+
+export interface CsvRowsSummary {
+  rowCount: number;
+  columnCount: number;
+  dataRowCount: number;
+  headerCount: number;
+  empty: boolean;
+}
+
+export interface CsvCellSummary {
+  totalCellCount: number;
+  nonEmptyCellCount: number;
+  emptyCellCount: number;
+  formulaLikeCellCount: number;
+  quotedCellCount: number;
+}
+
+export interface CsvParseSummary extends CsvRowsSummary {
+  delimiter: string;
+  hasHeader: boolean;
+}
+
+export interface CsvParseResult {
+  delimiter: string;
+  rows: string[][];
+  summary: CsvParseSummary;
+}
+
+export interface CsvParseObjectsResult extends CsvParseResult {
+  records: CsvRecord[];
+}
+
+export interface CsvColumnSummary {
+  index: number;
+  header: string;
+  values: string[];
+  nonEmptyCount: number;
+  emptyCount: number;
+  uniqueCount: number;
+}
+
+export interface CsvTableSummary extends CsvRowsSummary {
+  columns: CsvColumnSummary[];
+  hasHeader: boolean;
+}
+
+export interface CsvRecordSummary {
+  recordCount: number;
+  fieldCount: number;
+  empty: boolean;
+  headers: string[];
+  fieldCounts: Record<string, number>;
+  emptyFieldCounts: Record<string, number>;
+}
 
 export type CsvRecord = Record<string, string>;
 
@@ -67,6 +142,19 @@ export function escapeCsvCell(value: CsvValue, delimiter = ","): string {
   return `"${text.replace(/"/g, '""')}"`;
 }
 
+export function isCsvFormulaLikeCell(value: CsvValue): boolean {
+  return /^[=+\-@]/.test(toCsvCellText(value).trimStart());
+}
+
+export function escapeCsvFormulaCell(value: CsvValue, prefix = "'"): string {
+  const text = toCsvCellText(value);
+  return isCsvFormulaLikeCell(text) ? `${prefix}${text}` : text;
+}
+
+export function escapeCsvSpreadsheetCell(value: CsvValue, delimiter = ",", formulaPrefix = "'"): string {
+  return escapeCsvCell(escapeCsvFormulaCell(value, formulaPrefix), delimiter);
+}
+
 export function stringifyCsvRow(row: CsvRow, delimiter = ","): string {
   const normalizedDelimiter = normalizeCsvDelimiter(delimiter);
   return row.map((cell) => escapeCsvCell(cell, normalizedDelimiter)).join(normalizedDelimiter);
@@ -75,6 +163,25 @@ export function stringifyCsvRow(row: CsvRow, delimiter = ","): string {
 export function stringifyCsvRows(rows: readonly CsvRow[], options: CsvStringifyRowsOptions = {}): string {
   const lineBreak = options.lineBreak ?? "\n";
   return rows.map((row) => stringifyCsvRow(row, options.delimiter)).join(lineBreak);
+}
+
+export function stringifySpreadsheetCsvRow(
+  row: CsvRow,
+  delimiter = ",",
+  formulaPrefix = "'"
+): string {
+  const normalizedDelimiter = normalizeCsvDelimiter(delimiter);
+  return row.map((cell) => escapeCsvSpreadsheetCell(cell, normalizedDelimiter, formulaPrefix)).join(normalizedDelimiter);
+}
+
+export function stringifySpreadsheetCsvRows(
+  rows: readonly CsvRow[],
+  options: CsvSpreadsheetStringifyRowsOptions = {}
+): string {
+  const lineBreak = options.lineBreak ?? "\n";
+  return rows
+    .map((row) => stringifySpreadsheetCsvRow(row, options.delimiter, options.formulaPrefix))
+    .join(lineBreak);
 }
 
 export function getCsvColumnHeader<T>(column: CsvColumn<T>): string {
@@ -99,8 +206,31 @@ export function toCsvRows<T>(items: readonly T[], columns: readonly CsvColumn<T>
   return includeHeader ? [toCsvHeaderRow(columns), ...rows] : rows;
 }
 
+export function normalizeCsvRowsWidth(
+  rows: readonly CsvRow[],
+  options: NormalizeCsvRowsWidthOptions = {}
+): CsvValue[][] {
+  const width = options.width ?? Math.max(0, ...rows.map((row) => row.length));
+  const fillValue = options.fillValue ?? "";
+
+  return rows.map((row) => {
+    const cells = options.trimExtraCells ?? true ? row.slice(0, width) : [...row];
+    return cells.length >= width
+      ? [...cells]
+      : [...cells, ...Array.from({ length: width - cells.length }, () => fillValue)];
+  });
+}
+
 export function stringifyCsv<T>(items: readonly T[], columns: readonly CsvColumn<T>[], options: CsvStringifyOptions = {}): string {
   return stringifyCsvRows(toCsvRows(items, columns, options), options);
+}
+
+export function stringifySpreadsheetCsv<T>(
+  items: readonly T[],
+  columns: readonly CsvColumn<T>[],
+  options: CsvSpreadsheetStringifyOptions = {}
+): string {
+  return stringifySpreadsheetCsvRows(toCsvRows(items, columns, options), options);
 }
 
 export function createCsvColumnsFromHeaders<T = Record<string, unknown>>(headers: readonly string[]): Array<CsvColumn<T>> {
@@ -297,6 +427,111 @@ export function parseTsvRecords(text: string, options: Omit<CsvParseObjectsOptio
   return parseTsvObjects(text, options);
 }
 
+export function summarizeCsvRows(rows: readonly (readonly string[])[], hasHeader = true): CsvRowsSummary {
+  const rowCount = rows.length;
+  const columnCount = rows.reduce((max, row) => Math.max(max, row.length), 0);
+  const headerCount = hasHeader && rowCount > 0 ? rows[0].length : 0;
+
+  return {
+    rowCount,
+    columnCount,
+    dataRowCount: hasHeader ? Math.max(0, rowCount - 1) : rowCount,
+    headerCount,
+    empty: rowCount === 0,
+  };
+}
+
+export function summarizeCsvCells(rows: readonly (readonly CsvValue[])[], delimiter = ","): CsvCellSummary {
+  const cells = rows.flatMap((row) => Array.from(row));
+  const texts = cells.map(toCsvCellText);
+
+  return {
+    totalCellCount: cells.length,
+    nonEmptyCellCount: texts.filter((value) => value.trim().length > 0).length,
+    emptyCellCount: texts.filter((value) => value.trim().length === 0).length,
+    formulaLikeCellCount: cells.filter(isCsvFormulaLikeCell).length,
+    quotedCellCount: texts.filter((value) => shouldQuoteCsvCell(value, delimiter)).length,
+  };
+}
+
+export function getCsvColumnValues(
+  rows: readonly (readonly string[])[],
+  columnIndex: number,
+  hasHeader = true
+): string[] {
+  const dataRows = hasHeader ? rows.slice(1) : rows;
+  return dataRows.map((row) => row[columnIndex] ?? "");
+}
+
+export function summarizeCsvColumn(
+  rows: readonly (readonly string[])[],
+  columnIndex: number,
+  hasHeader = true
+): CsvColumnSummary {
+  const header = hasHeader ? rows[0]?.[columnIndex] ?? "" : "";
+  const values = getCsvColumnValues(rows, columnIndex, hasHeader);
+  const nonEmptyValues = values.filter((value) => value.trim().length > 0);
+
+  return {
+    index: columnIndex,
+    header,
+    values,
+    nonEmptyCount: nonEmptyValues.length,
+    emptyCount: values.length - nonEmptyValues.length,
+    uniqueCount: new Set(nonEmptyValues).size,
+  };
+}
+
+export function summarizeCsvTable(rows: readonly (readonly string[])[], hasHeader = true): CsvTableSummary {
+  const summary = summarizeCsvRows(rows, hasHeader);
+
+  return {
+    ...summary,
+    hasHeader,
+    columns: Array.from({ length: summary.columnCount }, (_, index) => summarizeCsvColumn(rows, index, hasHeader)),
+  };
+}
+
+export function summarizeCsvRecords(records: readonly CsvRecord[]): CsvRecordSummary {
+  const headers = Array.from(new Set(records.flatMap((record) => Object.keys(record))));
+  const fieldCounts: Record<string, number> = {};
+  const emptyFieldCounts: Record<string, number> = {};
+
+  headers.forEach((header) => {
+    fieldCounts[header] = 0;
+    emptyFieldCounts[header] = 0;
+  });
+
+  records.forEach((record) => {
+    headers.forEach((header) => {
+      const value = record[header] ?? "";
+      fieldCounts[header] += value.trim().length > 0 ? 1 : 0;
+      emptyFieldCounts[header] += value.trim().length > 0 ? 0 : 1;
+    });
+  });
+
+  return {
+    recordCount: records.length,
+    fieldCount: headers.length,
+    empty: records.length === 0,
+    headers,
+    fieldCounts,
+    emptyFieldCounts,
+  };
+}
+
+export function summarizeParsedCsvRows(
+  rows: readonly (readonly string[])[],
+  delimiter = ",",
+  hasHeader = true
+): CsvParseSummary {
+  return {
+    ...summarizeCsvRows(rows, hasHeader),
+    delimiter: normalizeCsvDelimiter(delimiter),
+    hasHeader,
+  };
+}
+
 function countDelimiterOutsideQuotes(text: string, delimiter: string): number {
   let count = 0;
   let quoted = false;
@@ -338,4 +573,65 @@ export function detectCsvDelimiter(text: string, candidates: readonly string[] =
     },
     { delimiter: normalizedCandidates[0], count: -1 }
   ).delimiter;
+}
+
+export function parseCsvAuto(text: string, options: CsvAutoParseOptions = {}): string[][] {
+  const delimiter = detectCsvDelimiter(text, options.delimiters);
+  return parseCsv(text, {
+    ...options,
+    delimiter,
+  });
+}
+
+export function parseCsvAutoWithSummary(text: string, options: CsvAutoParseOptions = {}): CsvParseResult {
+  const delimiter = detectCsvDelimiter(text, options.delimiters);
+  const rows = parseCsv(text, {
+    ...options,
+    delimiter,
+  });
+
+  return {
+    delimiter,
+    rows,
+    summary: summarizeParsedCsvRows(rows, delimiter, options.hasHeader ?? true),
+  };
+}
+
+export function parseCsvObjectsAuto(text: string, options: CsvAutoParseObjectsOptions = {}): CsvRecord[] {
+  const delimiter = detectCsvDelimiter(text, options.delimiters);
+  return parseCsvObjects(text, {
+    ...options,
+    delimiter,
+  });
+}
+
+export function parseCsvObjectsAutoWithSummary(
+  text: string,
+  options: CsvAutoParseObjectsOptions = {}
+): CsvParseObjectsResult {
+  const delimiter = detectCsvDelimiter(text, options.delimiters);
+  const rows = parseCsv(text, {
+    ...options,
+    delimiter,
+  });
+  const records = csvRowsToObjects(rows, options);
+  const hasHeader = options.hasHeader ?? !options.headers;
+
+  return {
+    delimiter,
+    rows,
+    records,
+    summary: summarizeParsedCsvRows(rows, delimiter, hasHeader),
+  };
+}
+
+export function parseCsvRecordsAuto(text: string, options: CsvAutoParseObjectsOptions = {}): CsvRecord[] {
+  return parseCsvObjectsAuto(text, options);
+}
+
+export function parseCsvRecordsAutoWithSummary(
+  text: string,
+  options: CsvAutoParseObjectsOptions = {}
+): CsvParseObjectsResult {
+  return parseCsvObjectsAutoWithSummary(text, options);
 }
