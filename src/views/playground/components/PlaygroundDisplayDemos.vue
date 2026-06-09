@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref } from "vue";
 import { useToast } from "../../../composables/useToast";
-import { joinFileNames } from "../../../utils";
+import { joinFileNames, joinLines } from "../../../utils";
 import PlaygroundDemoSection from "./PlaygroundDemoSection.vue";
 
 defineProps<{
@@ -11,6 +11,7 @@ defineProps<{
 const { triggerToast } = useToast();
 
 const uploadSummary = ref("尚未选择文件");
+const uploadRejectSummary = ref("暂无拒绝记录");
 
 const codeSnippet = `const panel = {
   component: "BaseResizablePanels",
@@ -19,9 +20,42 @@ const codeSnippet = `const panel = {
   handle: "hover-highlight"
 };`;
 
+const longCodeSnippet = joinLines([
+  "export const playgroundRoute = {",
+  "  path: '/playground',",
+  "  meta: {",
+  "    title: '组件沙箱',",
+  "    requiresDesktopShell: false,",
+  "    description: 'A very long description should wrap inside the code surface instead of forcing the detail panel to scroll sideways when the layout becomes narrow.'",
+  "  }",
+  "};",
+]);
+
+const logSnippet = joinLines([
+  "[09:16:12] START component-audit",
+  "[09:16:13] CHECK BaseCodeBlock wrap=true",
+  "[09:16:14] PASS line-highlight copyable empty loading",
+]);
+
+const syncSnippet = joinLines(["{", '  "status": "syncing"', "}"]);
+
 const handleUploadSelect = (files: FileList) => {
   uploadSummary.value = joinFileNames(files);
   triggerToast(`已选择 ${files.length} 个文件`, "success");
+};
+
+const handleUploadReject = (payload: { reason: string; files: File[] }) => {
+  const reasonMap: Record<string, string> = {
+    accept: "类型不匹配",
+    "max-files": "数量超限",
+    "max-size": "大小超限",
+  };
+  uploadRejectSummary.value = `${reasonMap[payload.reason] ?? "未通过"}：${joinFileNames(payload.files) || "无文件名"}`;
+  triggerToast(uploadRejectSummary.value, "warning");
+};
+
+const handleCopyError = () => {
+  triggerToast("复制失败，请检查浏览器权限", "warning");
 };
 </script>
 
@@ -178,45 +212,135 @@ const handleUploadSelect = (files: FileList) => {
 
   <section v-else-if="activeComponentKey === 'code-copy'" class="detail-stack">
     <PlaygroundDemoSection title="代码复制" subtitle="代码片段、命令、配置预览和一键复制常常一起出现。" icon="Code2">
-      <BasePanel title="配置片段" subtitle="代码块提供标题、语言、行号、最大高度和自动换行。">
-        <template #actions>
-          <BaseCopyButton :text="codeSnippet" @copied="triggerToast('代码已复制', 'success')" />
-        </template>
-        <BaseCodeBlock :code="codeSnippet" language="ts" title="panel.config.ts" wrap />
-      </BasePanel>
+      <div class="demo-grid">
+        <BasePanel title="配置片段" subtitle="标题、语言、行号、高亮行和内置复制。">
+          <BaseCodeBlock
+            :code="codeSnippet"
+            language="ts"
+            title="panel.config.ts"
+            description="可用于配置、命令和 JSON 片段。"
+            copyable
+            :highlight-lines="[2, 4]"
+            @copied="triggerToast('代码已复制', 'success')"
+            @copy-error="handleCopyError"
+          />
+        </BasePanel>
+
+        <BasePanel title="长行换行" subtitle="wrap=true 时长行不会撑出内容区域。">
+          <BaseCodeBlock
+            :code="longCodeSnippet"
+            language="ts"
+            title="route.ts"
+            max-height="180px"
+            wrap
+            copyable
+            :line-number-start="12"
+            @copied="triggerToast('长代码已复制', 'success')"
+            @copy-error="handleCopyError"
+          />
+        </BasePanel>
+
+        <BasePanel title="日志片段" subtitle="支持隐藏行号和更紧凑的展示密度。">
+          <BaseCodeBlock
+            :code="logSnippet"
+            language="log"
+            title="audit.log"
+            size="sm"
+            :show-line-numbers="false"
+            max-height="110px"
+          />
+        </BasePanel>
+
+        <BasePanel title="状态展示" subtitle="空态和加载态保持代码块结构稳定。">
+          <div class="code-demo-stack">
+            <BaseCodeBlock code="" title="empty.json" language="json" empty-text="暂无配置内容" max-height="92px" />
+            <BaseCodeBlock
+              :code="syncSnippet"
+              title="sync.json"
+              language="json"
+              loading
+              loading-text="同步中"
+              max-height="112px"
+            />
+          </div>
+        </BasePanel>
+      </div>
     </PlaygroundDemoSection>
   </section>
 
   <section v-else-if="activeComponentKey === 'tooltip-upload'" class="detail-stack">
-    <PlaygroundDemoSection title="提示上传" subtitle="工具提示补充短说明，上传组件承接拖拽和文件选择事件。" icon="UploadCloud">
-      <div class="demo-grid">
-        <BasePanel title="悬浮提示" subtitle="四个方向都可用于图标按钮和紧凑工具条。">
-          <div class="tooltip-row">
-            <BaseTooltip content="顶部提示">
-              <BaseButton type="neutral" size="sm">Top</BaseButton>
-            </BaseTooltip>
-            <BaseTooltip content="右侧提示支持长文案换行，适合解释紧凑图标按钮。" placement="right" multiline>
-              <BaseButton type="neutral" size="sm">Right</BaseButton>
-            </BaseTooltip>
-            <BaseTooltip content="底部提示" placement="bottom">
-              <BaseButton type="neutral" size="sm">Bottom</BaseButton>
-            </BaseTooltip>
-            <BaseTooltip content="禁用提示" disabled>
-              <BaseButton type="neutral" size="sm">Disabled</BaseButton>
-            </BaseTooltip>
-          </div>
-        </BasePanel>
+    <PlaygroundDemoSection title="悬浮提示" subtitle="工具提示补充短说明，支持方向、禁用和多行文案。" icon="MessageCircleQuestion">
+      <BasePanel title="悬浮提示" subtitle="四个方向都可用于图标按钮和紧凑工具条。">
+        <div class="tooltip-row">
+          <BaseTooltip content="顶部提示">
+            <BaseButton type="neutral" size="sm">Top</BaseButton>
+          </BaseTooltip>
+          <BaseTooltip content="右侧提示支持长文案换行，适合解释紧凑图标按钮。" placement="right" multiline>
+            <BaseButton type="neutral" size="sm">Right</BaseButton>
+          </BaseTooltip>
+          <BaseTooltip content="底部提示" placement="bottom">
+            <BaseButton type="neutral" size="sm">Bottom</BaseButton>
+          </BaseTooltip>
+          <BaseTooltip content="禁用提示" disabled>
+            <BaseButton type="neutral" size="sm">Disabled</BaseButton>
+          </BaseTooltip>
+        </div>
+      </BasePanel>
+    </PlaygroundDemoSection>
+  </section>
 
-        <BasePanel title="文件上传" subtitle="支持点击选择和拖拽选择，业务侧接收 FileList。">
+  <section v-else-if="activeComponentKey === 'upload'" class="detail-stack">
+    <PlaygroundDemoSection title="文件上传" subtitle="点击选择、拖拽、类型/数量/大小限制与上传状态。" icon="UploadCloud">
+      <div class="demo-grid">
+        <BasePanel title="基础上传" subtitle="支持点击选择和拖拽选择，业务侧接收 FileList。">
           <BaseUpload
             title="拖拽文件到这里"
             description="支持图片、JSON、Markdown 等常见资源文件。"
-            helper=".png, .json, .md"
             accept=".png,.jpg,.jpeg,.json,.md"
+            :max-files="3"
+            :max-size="1048576"
             multiple
             @select="handleUploadSelect"
+            @reject="handleUploadReject"
           />
-          <BaseAlert type="info" :title="uploadSummary" description="选择结果会通过 select 事件交给业务侧。" compact class="mt-3" />
+          <div class="upload-alert-stack">
+            <BaseAlert type="info" :title="uploadSummary" description="选择结果会通过 select 事件交给业务侧。" compact />
+            <BaseAlert type="warning" :title="uploadRejectSummary" description="类型、数量或大小不符合时会触发 reject 事件。" compact />
+          </div>
+        </BasePanel>
+
+        <BasePanel title="状态反馈" subtitle="加载、成功、错误、紧凑和禁用状态都由组件统一表达。">
+          <div class="upload-demo-stack">
+            <BaseUpload
+              title="正在上传"
+              description="上传中会锁定点击、拖拽和键盘触发。"
+              loading
+              loading-text="上传中"
+              size="sm"
+            />
+            <BaseUpload
+              title="上传完成"
+              description="成功态适合展示已完成或已同步的资源。"
+              success
+              success-text="资源已同步"
+              compact
+              :show-helper="false"
+            />
+            <BaseUpload
+              title="上传失败"
+              description="错误态用于类型不支持、容量过大或服务异常。"
+              error
+              error-text="文件超过限制"
+              helper="请重新选择 1MB 以内文件"
+            />
+            <BaseUpload
+              title="禁用上传"
+              description="权限不足时保留上传说明但不可操作。"
+              disabled
+              accept=".zip"
+              :max-files="1"
+            />
+          </div>
         </BasePanel>
       </div>
     </PlaygroundDemoSection>
@@ -244,5 +368,11 @@ const handleUploadSelect = (files: FileList) => {
 
 .divider-preview {
   @apply text-xs font-bold text-slate-500 dark:text-slate-400;
+}
+
+.upload-demo-stack,
+.upload-alert-stack,
+.code-demo-stack {
+  @apply grid gap-3;
 }
 </style>

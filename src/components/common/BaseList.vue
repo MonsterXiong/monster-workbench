@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref } from "vue";
 import type { ComponentPublicInstance } from "vue";
-import { filterByFalsyValue, findIndexByValue, getNextClampedIndex } from "../../utils";
+import { filterByFalsyValue, findIndexByValue, firstItem, getFirstRecordValue, getKeyboardBoundaryPosition, getKeyboardNavigationDirection, getNextClampedIndex, lastItem } from "../../utils";
 
 type ListVariant = "card" | "plain" | "row";
 type ListSize = "xs" | "sm" | "md" | "lg";
@@ -81,13 +81,13 @@ defineSlots<{
 
 const itemRefs = ref(new Map<string | number, HTMLElement>());
 
-const getItemKey = (item: any, index: number) => item?.[props.itemKey] ?? item?.key ?? item?.id ?? index;
-const getItemLabel = (item: any) => item?.[props.labelKey] ?? item?.title ?? item?.label ?? item?.name ?? "";
-const getItemDescription = (item: any) => item?.[props.descriptionKey] ?? item?.description ?? "";
-const getItemIcon = (item: any) => item?.[props.iconKey] ?? item?.icon ?? "";
-const getItemBadge = (item: any) => item?.[props.badgeKey] ?? item?.badge ?? item?.status ?? "";
-const getItemBadgeType = (item: any): BadgeType => item?.[props.badgeTypeKey] ?? item?.badgeType ?? item?.type ?? "neutral";
-const getItemMeta = (item: any) => item?.[props.metaKey] ?? item?.meta ?? "";
+const getItemKey = (item: any, index: number) => getFirstRecordValue<string | number>(item, [props.itemKey, "key", "id"], index) ?? index;
+const getItemLabel = (item: any): string => getFirstRecordValue<string>(item, [props.labelKey, "title", "label", "name"], "") ?? "";
+const getItemDescription = (item: any): string => getFirstRecordValue<string>(item, [props.descriptionKey, "description"], "") ?? "";
+const getItemIcon = (item: any): string => getFirstRecordValue<string>(item, [props.iconKey, "icon"], "") ?? "";
+const getItemBadge = (item: any): string => getFirstRecordValue<string>(item, [props.badgeKey, "badge", "status"], "") ?? "";
+const getItemBadgeType = (item: any): BadgeType => getFirstRecordValue<BadgeType>(item, [props.badgeTypeKey, "badgeType", "type"], "neutral") ?? "neutral";
+const getItemMeta = (item: any): string => getFirstRecordValue<string>(item, [props.metaKey, "meta"], "") ?? "";
 const isDisabled = (item: any) => Boolean(props.disabled || item?.[props.disabledKey] || item?.disabled);
 const isActive = (item: any, index: number) => props.activeKey !== null && getItemKey(item, index) === props.activeKey;
 const isInteractive = computed(() => props.clickable && !props.disabled && !props.loading);
@@ -132,25 +132,24 @@ const moveFocus = (item: any, index: number, offset: 1 | -1) => {
 const handleItemKeydown = (event: KeyboardEvent, item: any, index: number) => {
   if (!isInteractive.value || isDisabled(item)) return;
 
-  if (event.key === "ArrowDown" || event.key === "ArrowRight") {
+  const direction = getKeyboardNavigationDirection(event);
+  if (direction) {
     event.preventDefault();
-    moveFocus(item, index, 1);
+    moveFocus(item, index, direction);
+    return;
   }
 
-  if (event.key === "ArrowUp" || event.key === "ArrowLeft") {
+  const boundaryPosition = getKeyboardBoundaryPosition(event);
+  if (boundaryPosition === "first") {
     event.preventDefault();
-    moveFocus(item, index, -1);
-  }
-
-  if (event.key === "Home") {
-    event.preventDefault();
-    const firstEntry = enabledEntries.value[0];
+    const firstEntry = firstItem(enabledEntries.value);
     if (firstEntry) focusItem(firstEntry.key);
+    return;
   }
 
-  if (event.key === "End") {
+  if (boundaryPosition === "last") {
     event.preventDefault();
-    const lastEntry = enabledEntries.value[enabledEntries.value.length - 1];
+    const lastEntry = lastItem(enabledEntries.value);
     if (lastEntry) focusItem(lastEntry.key);
   }
 };

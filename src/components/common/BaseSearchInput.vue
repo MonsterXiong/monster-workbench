@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, nextTick, ref } from "vue";
 import { Search, X, LoaderCircle } from "lucide-vue-next";
 import { useI18n } from "../../composables/useI18n";
+import { getEventTargetValue, isEscapeKey, isKeyboardKey } from "../../utils";
 
 interface Props {
   modelValue: string;
@@ -14,7 +15,9 @@ interface Props {
   surface?: "default" | "muted" | "plain";
   error?: boolean;
   searchOnInput?: boolean;
+  clearOnEscape?: boolean;
   clearText?: string;
+  loadingText?: string;
   ariaLabel?: string;
 }
 
@@ -28,7 +31,9 @@ const props = withDefaults(defineProps<Props>(), {
   surface: "default",
   error: false,
   searchOnInput: false,
+  clearOnEscape: true,
   clearText: "",
+  loadingText: "",
   ariaLabel: "",
 });
 
@@ -41,21 +46,33 @@ const emit = defineEmits<{
 }>();
 
 const { t } = useI18n();
+const inputRef = ref<HTMLInputElement | null>(null);
 
 const value = computed({
   get: () => props.modelValue,
   set: (nextValue) => emit("update:modelValue", nextValue),
 });
+const isClearDisabled = computed(() => props.disabled || props.readonly || props.loading);
+const showClearButton = computed(() => props.clearable && Boolean(props.modelValue) && !props.readonly && !props.loading);
+const resolvedClearText = computed(() => props.clearText || t("common.clear"));
+const resolvedLoadingText = computed(() => props.loadingText || t("common.loading"));
 
 const handleClear = () => {
-  if (props.disabled || props.readonly || props.loading) return;
+  if (isClearDisabled.value) return;
   emit("update:modelValue", "");
   emit("clear");
   emit("search", "");
+  void nextTick(() => inputRef.value?.focus());
 };
 
 const handleKeydown = (event: KeyboardEvent) => {
-  if (event.key === "Enter" && !props.disabled && !props.loading) {
+  if (props.clearOnEscape && isEscapeKey(event) && props.modelValue && !isClearDisabled.value) {
+    event.preventDefault();
+    handleClear();
+    return;
+  }
+
+  if (isKeyboardKey(event, "Enter") && !props.disabled && !props.loading) {
     emit("search", props.modelValue);
   }
 };
@@ -82,11 +99,13 @@ const handleInput = (nextValue: string) => {
       },
     ]"
     :aria-busy="loading ? 'true' : undefined"
+    :aria-disabled="disabled || readonly ? 'true' : undefined"
   >
     <slot name="prefix">
       <Search class="base-search-input__icon" aria-hidden="true" />
     </slot>
     <input
+      ref="inputRef"
       :value="value"
       class="base-search-input__control"
       type="text"
@@ -95,30 +114,38 @@ const handleInput = (nextValue: string) => {
       :aria-invalid="error ? 'true' : undefined"
       :disabled="disabled"
       :readonly="readonly"
-      @input="handleInput(($event.target as HTMLInputElement).value)"
+      @input="handleInput(getEventTargetValue($event))"
       @keydown="handleKeydown"
       @focus="emit('focus', $event)"
       @blur="emit('blur', $event)"
     />
-    <LoaderCircle v-if="loading" class="base-search-input__action animate-spin" aria-hidden="true" />
+    <span v-if="$slots.suffix && !loading" class="base-search-input__suffix">
+      <slot name="suffix"></slot>
+    </span>
+    <span v-if="loading" class="base-search-input__loading" role="status" :aria-label="resolvedLoadingText">
+      <LoaderCircle class="base-search-input__action animate-spin" aria-hidden="true" />
+      <span class="sr-only">{{ resolvedLoadingText }}</span>
+    </span>
     <button
-      v-else-if="clearable && modelValue && !readonly"
+      v-if="showClearButton"
       type="button"
       class="base-search-input__clear"
-      :disabled="disabled || loading"
-      :aria-label="clearText || t('common.clear')"
-      :title="clearText || t('common.clear')"
+      :disabled="isClearDisabled"
+      :aria-label="resolvedClearText"
+      :title="resolvedClearText"
       @click="handleClear"
     >
       <X class="h-3.5 w-3.5" aria-hidden="true" />
     </button>
-    <slot v-else name="suffix"></slot>
   </label>
 </template>
 
 <style scoped>
 .base-search-input {
-  @apply flex w-full min-w-0 items-center gap-2 rounded-xl border border-slate-300 bg-slate-50 text-slate-700 shadow-sm transition-all dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100;
+  @apply flex w-full min-w-0 items-center gap-2 rounded-xl border border-slate-300 bg-white text-slate-700 shadow-sm transition-all dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100;
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.04),
+    inset 0 1px 0 rgba(255, 255, 255, 0.72);
 }
 
 .base-search-input--muted {
@@ -131,7 +158,9 @@ const handleInput = (nextValue: string) => {
 
 .base-search-input:focus-within {
   border-color: rgb(var(--color-primary));
-  box-shadow: 0 0 0 3px rgb(var(--color-primary) / 0.15);
+  box-shadow:
+    0 0 0 3px rgb(var(--color-primary) / 0.15),
+    0 8px 18px rgba(15, 23, 42, 0.06);
   @apply bg-white dark:bg-slate-900;
 }
 
@@ -141,7 +170,7 @@ const handleInput = (nextValue: string) => {
 }
 
 .base-search-input.is-error {
-  @apply border-red-300 dark:border-red-700;
+  @apply border-red-300 bg-red-50 dark:border-red-700 dark:bg-red-950;
 }
 
 .base-search-input.is-error:focus-within {
@@ -182,8 +211,16 @@ const handleInput = (nextValue: string) => {
   @apply h-4 w-4 shrink-0 text-slate-400;
 }
 
+.base-search-input__suffix {
+  @apply flex min-w-0 shrink-0 items-center gap-1;
+}
+
+.base-search-input__loading {
+  @apply inline-flex h-5 w-5 shrink-0 items-center justify-center text-slate-400;
+}
+
 .base-search-input__clear {
-  @apply flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-slate-400 transition hover:bg-slate-200 hover:text-slate-700 disabled:cursor-not-allowed dark:hover:bg-slate-800 dark:hover:text-slate-100;
+  @apply flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-opacity-30 disabled:cursor-not-allowed dark:hover:bg-slate-800 dark:hover:text-slate-100;
 }
 
 @media (prefers-reduced-motion: reduce) {

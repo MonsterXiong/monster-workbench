@@ -5,7 +5,7 @@ import { useFileManagerStore, type UploadedFileInfo, type BatchUploadResult } fr
 import { useToast } from "../../composables/useToast";
 import { useConfirm } from "../../composables/useConfirm";
 import { useI18n } from "../../composables/useI18n";
-import { formatTemplate, joinTextList } from "../../utils";
+import { formatTemplate, getErrorMessage, joinTextList } from "../../utils";
 
 // 引入局部业务组件
 import FileManagerToolbar from "./components/FileManagerToolbar.vue";
@@ -41,7 +41,7 @@ async function fetchFiles() {
   try {
     await fileManagerStore.fetchFiles();
   } catch (err) {
-    triggerToast(err instanceof Error ? err.message : t('common.error'), "error");
+    triggerToast(getErrorMessage(err, t('common.error')), "error");
   }
 }
 
@@ -73,7 +73,7 @@ async function handleUpload() {
       triggerToast(t('fileManager.uploadSuccess'), "success");
     }
   } catch (err) {
-    triggerToast(err instanceof Error ? err.message : t('fileManager.uploadFailed'), "error");
+    triggerToast(getErrorMessage(err, t('fileManager.uploadFailed')), "error");
   }
 }
 
@@ -97,7 +97,7 @@ async function handleDelete(file: UploadedFileInfo) {
     await fileManagerStore.deleteFile(file, check);
     triggerToast(t('fileManager.deleteSuccess'), "success");
   } catch (err) {
-    triggerToast(err instanceof Error ? err.message : t('fileManager.deleteFailed'), "error");
+    triggerToast(getErrorMessage(err, t('fileManager.deleteFailed')), "error");
   }
 }
 
@@ -127,7 +127,7 @@ async function handleBatchDelete() {
     await fileManagerStore.batchDeleteSelected(deletePlan);
     triggerToast(formatTemplate(t('fileManager.batchDeleteSuccess'), { count: deletedCount }), "success");
   } catch (err) {
-    triggerToast(err instanceof Error ? err.message : t('fileManager.batchDeleteFailed'), "error");
+    triggerToast(getErrorMessage(err, t('fileManager.batchDeleteFailed')), "error");
   }
 }
 

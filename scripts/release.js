@@ -7,6 +7,18 @@ const root = process.cwd();
 const pkgPath = path.join(root, "package.json");
 const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
 const currentVersion = pkg.version;
+const releaseStagePaths = [
+  "package.json",
+  "src-tauri/tauri.conf.json",
+  "src-tauri/Cargo.toml",
+  "CHANGELOG.md",
+  "CHANGELOG.zh-CN.md",
+  ".github/release-notes.md",
+  ".github/release-notes.zh-CN.md",
+  ".github/workflows/release.yml",
+  ".gitattributes",
+  "src-tauri/sidecars/python"
+];
 
 console.log(`=== Monster Tools One-Click Release System ===`);
 console.log(`Current Version: v${currentVersion}\n`);
@@ -24,6 +36,10 @@ const rl = readline.createInterface({
 
 function askQuestion(query) {
   return new Promise((resolve) => rl.question(query, resolve));
+}
+
+function quoteGitPath(filePath) {
+  return JSON.stringify(filePath);
 }
 
 async function main() {
@@ -73,7 +89,7 @@ async function main() {
 
     // 4. Git 自动暂存、提交与打标签
     console.log("\n正在暂存和提交代码...");
-    execSync("git add package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml CHANGELOG.md CHANGELOG.zh-CN.md .github/release-notes.md .github/release-notes.zh-CN.md .env", { stdio: "inherit" });
+    execSync(`git add -- ${releaseStagePaths.map(quoteGitPath).join(" ")}`, { stdio: "inherit" });
     execSync(`git commit -m "chore: 发布新版本 v${newVersion}"`, { stdio: "inherit" });
     console.log(`✓ Git 提交成功`);
 

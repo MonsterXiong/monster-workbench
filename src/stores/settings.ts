@@ -4,7 +4,19 @@ import { isTauriRuntime } from "../services/runtime";
 import { configService } from "../services/config.service";
 import { systemService } from "../services/system.service";
 import { useAppStore } from "./app";
-import { firstOf, parseBoolean, parseEnum, safeJsonParseObject, safeJsonStringify } from "../utils";
+import {
+  firstOf,
+  getStorageBoolean,
+  getStorageEnum,
+  getStorageItem,
+  parseBoolean,
+  parseEnum,
+  removeStorageItem,
+  safeJsonParseObject,
+  safeJsonStringify,
+  setStorageItem,
+  toTrimmedString,
+} from "../utils";
 
 export type ThemeMode = "light" | "dark" | "system";
 export type SettingsBackupResult = "desktop" | "browser" | "cancelled";
@@ -21,9 +33,9 @@ export const useSettingStore = defineStore("settings", () => {
   const initSettings = async () => {
     // 默认浏览器 LocalStorage 降级策略
     const localData = {
-      theme: localStorage.getItem("theme") || "light",
-      locale: localStorage.getItem("locale") || "zh-CN",
-      autoCheckUpdate: localStorage.getItem("autoCheckUpdate") !== "false",
+      theme: getStorageEnum("theme", ["light", "dark", "system"] as const, "light", { emptyAsMissing: true }),
+      locale: getStorageItem("locale", "zh-CN", { emptyAsMissing: true }),
+      autoCheckUpdate: getStorageBoolean("autoCheckUpdate", true),
     };
 
     if (isTauriRuntime()) {
@@ -48,7 +60,7 @@ export const useSettingStore = defineStore("settings", () => {
     setupThemeListener();
     applyTheme(theme.value);
     applyPrimaryColor();
-    localStorage.removeItem("primaryColor");
+    removeStorageItem("primaryColor");
   };
 
   const applyPrimaryColor = () => {
@@ -88,19 +100,19 @@ export const useSettingStore = defineStore("settings", () => {
   const setTheme = async (val: ThemeMode) => {
     theme.value = val;
     applyTheme(val);
-    localStorage.setItem("theme", val);
+    setStorageItem("theme", val);
     await syncConfig();
   };
 
   const setLocale = async (val: string) => {
     locale.value = val;
-    localStorage.setItem("locale", val);
+    setStorageItem("locale", val);
     await syncConfig();
   };
 
   const setAutoCheckUpdate = async (val: boolean) => {
     autoCheckUpdate.value = val;
-    localStorage.setItem("autoCheckUpdate", String(val));
+    setStorageItem("autoCheckUpdate", val);
     await syncConfig();
   };
 
@@ -122,7 +134,7 @@ export const useSettingStore = defineStore("settings", () => {
   };
 
   const updateDataDir = (newPath: string): boolean => {
-    const cleanPath = newPath.trim();
+    const cleanPath = toTrimmedString(newPath);
     if (!cleanPath) return false;
 
     const appStore = useAppStore();

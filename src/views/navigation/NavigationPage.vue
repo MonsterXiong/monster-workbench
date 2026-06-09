@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, watch } from "vue";
+import { ref, onBeforeUnmount, onMounted, watch } from "vue";
 import {
   NavigationBackupValidationError,
   useNavigationStore,
@@ -7,7 +7,18 @@ import {
 import { useToast } from "../../composables/useToast";
 import { useConfirm } from "../../composables/useConfirm";
 import { useI18n } from "../../composables/useI18n";
-import { compactArray, formatTemplate, getTotalPages, toggleAllSelection, toggleSelectionKey } from "../../utils";
+import {
+  clearTimeoutHandle,
+  clearSelection,
+  compactArray,
+  formatTemplate,
+  getErrorMessage,
+  getTotalPages,
+  resetTimeoutHandle,
+  toggleAllSelectionKeys,
+  toggleSelectionKey,
+  type TimeoutHandle,
+} from "../../utils";
 
 import NavigationToolbar from "./components/NavigationToolbar.vue";
 import NavigationCardGrid from "./components/NavigationCardGrid.vue";
@@ -94,7 +105,7 @@ async function handleExportData() {
       "success"
     );
   } catch (err) {
-    triggerToast(err instanceof Error ? err.message : t('navigation.backupFailed'), "error");
+    triggerToast(getErrorMessage(err, t('navigation.backupFailed')), "error");
   }
 }
 
@@ -134,7 +145,7 @@ async function handleImportData() {
       triggerToast(getImportErrorMessage(err), "error");
       return;
     }
-    triggerToast(err instanceof Error ? err.message : t('navigation.restoreFailed'), "error");
+    triggerToast(getErrorMessage(err, t('navigation.restoreFailed')), "error");
   }
 }
 
@@ -157,17 +168,22 @@ watch(
 );
 
 // 关键词防抖搜索
-let searchTimeout: ReturnType<typeof setTimeout> | null = null;
+let searchTimeout: TimeoutHandle | null = null;
 watch(
   () => navigationStore.keyword,
   () => {
-    if (searchTimeout) clearTimeout(searchTimeout);
-    searchTimeout = setTimeout(() => {
+    searchTimeout = resetTimeoutHandle(searchTimeout, () => {
       navigationStore.page = 1;
       navigationStore.fetchList();
+      searchTimeout = null;
     }, 250);
   }
 );
+
+onBeforeUnmount(() => {
+  clearTimeoutHandle(searchTimeout);
+  searchTimeout = null;
+});
 
 // 勾选操作
 function toggleSelection(id: number) {
@@ -177,18 +193,18 @@ function toggleSelection(id: number) {
 // 全选
 function toggleSelectAll() {
   const currentIds = compactArray(navigationStore.items.map((item) => item.id));
-  selectedIds.value = toggleAllSelection(currentIds, selectedIds.value, (id) => id);
+  selectedIds.value = toggleAllSelectionKeys(currentIds, selectedIds.value);
 }
 
 // 批量模式
 function enterBatchMode() {
   isBatchMode.value = true;
-  selectedIds.value = [];
+  selectedIds.value = clearSelection<number>();
 }
 
 function exitBatchMode() {
   isBatchMode.value = false;
-  selectedIds.value = [];
+  selectedIds.value = clearSelection<number>();
 }
 
 // 批量删除（二次确认）

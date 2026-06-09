@@ -1,6 +1,7 @@
 import base64
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -39,7 +40,7 @@ class MockProviderHandler(BaseHTTPRequestHandler):
     def _write_too_large_image_headers(self):
         self.send_response(200)
         self.send_header("Content-Type", "image/png")
-        self.send_header("Content-Length", str(64 * 1024 * 1024 + 1))
+        self.send_header("Content-Length", str(AI_PROVIDER_TESTER.MAX_IMAGE_RESPONSE_BYTES + 1))
         self.end_headers()
 
     def do_GET(self):
@@ -81,6 +82,12 @@ class MockProviderHandler(BaseHTTPRequestHandler):
 
         if self.path == "/v1/images/generations":
             prompt = str(body.get("prompt") or "")
+            if "unsupported size image" in prompt and body.get("size") != "1024x1024":
+                self._write_json({"error": {"message": "unsupported image size"}}, status=400)
+                return
+            if "fallback size image" in prompt and body.get("size") != "1024x1024":
+                self.close_connection = True
+                return
             if "metadata url image" in prompt:
                 self._write_json({
                     "data": [{
@@ -89,9 +96,10 @@ class MockProviderHandler(BaseHTTPRequestHandler):
                 })
                 return
             if "oversized b64 image" in prompt:
+                byte_count = int(getattr(self.server, "oversized_b64_bytes", 33 * 1024 * 1024))
                 self._write_json({
                     "data": [{
-                        "b64_json": base64.b64encode(b"x" * (33 * 1024 * 1024)).decode("ascii")
+                        "b64_json": base64.b64encode(b"x" * byte_count).decode("ascii")
                     }]
                 })
                 return
@@ -141,7 +149,7 @@ class AiProviderTesterContractTest(unittest.TestCase):
         cls.server.shutdown()
         cls.server.server_close()
 
-    def run_sidecar(self, action, output_dir=None, request_id="contract-test", config_patch=None):
+    def run_sidecar(self, action, output_dir=None, request_id="contract-test", config_patch=None, env_patch=None):
         config = {
             "provider": "custom",
             "displayName": "Mock Provider",
@@ -168,6 +176,7 @@ class AiProviderTesterContractTest(unittest.TestCase):
             input=json.dumps(payload).encode("utf-8"),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            env={**os.environ, **(env_patch or {})},
             timeout=15,
             check=False,
         )
@@ -246,6 +255,10 @@ class AiProviderTesterContractTest(unittest.TestCase):
             self.assertEqual(result["statusCode"], 200)
             self.assertEqual(len(result["imagePaths"]), 1)
             self.assertEqual(len(result["savedFiles"]), 1)
+            self.assertEqual(result["requestedImageSize"], "1024x1024")
+            self.assertEqual(result["actualImageSize"], "1024x1024")
+            self.assertIsNone(result["fallbackImageSize"])
+            self.assertEqual(result["imageAttempts"], 1)
 
             saved_file = result["savedFiles"][0]
             saved_path = Path(saved_file["path"])
@@ -254,6 +267,88 @@ class AiProviderTesterContractTest(unittest.TestCase):
             self.assertEqual(saved_file["path"], result["imagePaths"][0])
             self.assertEqual(saved_file["sizeBytes"], len(PNG_BYTES))
             self.assertEqual(saved_file["mimeType"], "image/png")
+
+    def test_image_contract_reports_fallback_size_metadata(self):
+        with tempfile.TemporaryDirectory(prefix="monster-ai-sidecar-fallback-size-") as temp_dir:
+            result = self.run_sidecar(
+                "image",
+                output_dir=temp_dir,
+                request_id="image-fallback-size",
+                config_patch={
+                    "imagePrompt": "fallback size image",
+                    "imageSize": "960x3840",
+                },
+            )
+            self.assertTrue(result["ok"], result)
+            self.assertEqual(result["requestId"], "image-fallback-size")
+            self.assertEqual(result["requestedImageSize"], "960x3840")
+            self.assertEqual(result["actualImageSize"], "1024x1024")
+            self.assertEqual(result["fallbackImageSize"], "1024x1024")
+            self.assertEqual(result["imageAttempts"], 2)
+            self.assertIn("已自动降级为 1024x1024", result["message"])
+            self.assertEqual(len(result["imagePaths"]), 1)
+
+    def test_image_contract_falls_back_after_http_size_rejection(self):
+        with tempfile.TemporaryDirectory(prefix="monster-ai-sidecar-http-size-") as temp_dir:
+            result = self.run_sidecar(
+                "image",
+                output_dir=temp_dir,
+                request_id="image-http-size-fallback",
+                config_patch={
+                    "imagePrompt": "unsupported size image",
+                    "imageSize": "7680x960",
+                },
+            )
+
+            self.assertTrue(result["ok"], result)
+            self.assertEqual(result["requestId"], "image-http-size-fallback")
+            self.assertEqual(result["requestedImageSize"], "7680x960")
+            self.assertEqual(result["actualImageSize"], "1024x1024")
+            self.assertEqual(result["fallbackImageSize"], "1024x1024")
+            self.assertEqual(result["imageAttempts"], 2)
+            self.assertEqual(len(result["imagePaths"]), 1)
+
+    def test_image_contract_falls_back_for_extreme_8k_tall_size(self):
+        with tempfile.TemporaryDirectory(prefix="monster-ai-sidecar-extreme-8k-") as temp_dir:
+            result = self.run_sidecar(
+                "image",
+                output_dir=temp_dir,
+                request_id="image-extreme-8k-fallback",
+                config_patch={
+                    "imagePrompt": "unsupported size image",
+                    "imageSize": "640x7680",
+                },
+            )
+
+            self.assertTrue(result["ok"], result)
+            self.assertEqual(result["requestId"], "image-extreme-8k-fallback")
+            self.assertEqual(result["requestedImageSize"], "640x7680")
+            self.assertEqual(result["actualImageSize"], "1024x1024")
+            self.assertEqual(result["fallbackImageSize"], "1024x1024")
+            self.assertEqual(result["imageAttempts"], 2)
+            self.assertEqual(len(result["imagePaths"]), 1)
+
+    def test_image_contract_falls_back_for_extreme_8k_longest_and_widest_sizes(self):
+        for image_size in ["7680x480", "480x7680"]:
+            with self.subTest(image_size=image_size):
+                with tempfile.TemporaryDirectory(prefix="monster-ai-sidecar-extreme-8k-edge-") as temp_dir:
+                    result = self.run_sidecar(
+                        "image",
+                        output_dir=temp_dir,
+                        request_id="image-extreme-8k-edge-fallback",
+                        config_patch={
+                            "imagePrompt": "unsupported size image",
+                            "imageSize": image_size,
+                        },
+                    )
+
+                    self.assertTrue(result["ok"], result)
+                    self.assertEqual(result["requestId"], "image-extreme-8k-edge-fallback")
+                    self.assertEqual(result["requestedImageSize"], image_size)
+                    self.assertEqual(result["actualImageSize"], "1024x1024")
+                    self.assertEqual(result["fallbackImageSize"], "1024x1024")
+                    self.assertEqual(result["imageAttempts"], 2)
+                    self.assertEqual(len(result["imagePaths"]), 1)
 
     def test_image_contract_downloads_url_to_local_file(self):
         with tempfile.TemporaryDirectory(prefix="monster-ai-sidecar-url-") as temp_dir:
@@ -325,12 +420,17 @@ class AiProviderTesterContractTest(unittest.TestCase):
 
     def test_image_contract_rejects_oversized_b64_decode(self):
         with tempfile.TemporaryDirectory(prefix="monster-ai-sidecar-big-b64-") as temp_dir:
-            result = self.run_sidecar(
-                "image",
-                output_dir=temp_dir,
-                request_id="image-oversized-b64",
-                config_patch={"imagePrompt": "oversized b64 image"},
-            )
+            self.server.oversized_b64_bytes = 2048
+            try:
+                result = self.run_sidecar(
+                    "image",
+                    output_dir=temp_dir,
+                    request_id="image-oversized-b64",
+                    config_patch={"imagePrompt": "oversized b64 image"},
+                    env_patch={"AI_PROVIDER_MAX_DECODED_IMAGE_BYTES": "1024"},
+                )
+            finally:
+                self.server.oversized_b64_bytes = 33 * 1024 * 1024
             self.assertFalse(result["ok"], result)
             self.assertEqual(result["requestId"], "image-oversized-b64")
             self.assertEqual(result["statusCode"], 200)

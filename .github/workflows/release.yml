@@ -6,11 +6,65 @@ on:
       - "v*"
       - "app-v*"
   workflow_dispatch:
+    inputs:
+      publish_release:
+        description: "Upload artifacts to a GitHub Release"
+        required: true
+        default: false
+        type: boolean
 
 jobs:
+  verify:
+    permissions:
+      contents: read
+
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "lts/*"
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-tauri/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Check architecture boundaries
+        run: npm run check:architecture
+
+      - name: Test AI sidecar contract
+        run: npm run test:ai-sidecar
+
+      - name: Stress test AI sidecar
+        run: npm run test:ai-sidecar:stress
+
+      - name: Test Rust AI service
+        run: cargo test --manifest-path src-tauri/Cargo.toml ai_service
+
   build:
     permissions:
       contents: write
+
+    needs: verify
 
     strategy:
       fail-fast: false
@@ -29,8 +83,20 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "lts/*"
+          cache: npm
+          cache-dependency-path: package-lock.json
 
       - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-tauri/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
 
       - name: Install Linux dependencies
         if: matrix.platform == 'ubuntu-22.04'
@@ -53,7 +119,15 @@ jobs:
             echo "body=Monster Tools native desktop release." >> $GITHUB_OUTPUT
           fi
 
+      - name: Build Tauri app for release test
+        if: github.event_name == 'workflow_dispatch' && !inputs.publish_release
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: npx tauri build ${{ matrix.args }}
+
       - name: Build Tauri app and upload release
+        if: github.event_name != 'workflow_dispatch' || inputs.publish_release
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

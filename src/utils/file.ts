@@ -1,11 +1,35 @@
+import { firstItem, uniqueArray } from "./array";
+import { toFiniteNumber, toNonNegativeInteger } from "./number";
 import { getFileExtension, getFileName } from "./path";
-import { joinTextList } from "./string";
+import { joinTextList, splitBySeparators } from "./string";
+import { isNonEmptyValue } from "./value";
 
 export type FileKind = "image" | "text" | "document" | "archive" | "audio" | "video" | "code" | "file";
 export type UploadFileType = "image" | "file";
+export type FileAcceptInput = string | readonly string[] | null | undefined;
+export type FileValidationRejectReason = "accept" | "max-files" | "max-size";
 
 export interface FileNameLike {
   name: string;
+}
+
+export interface FileLike extends FileNameLike {
+  size?: number;
+  type?: string;
+}
+
+export interface FileValidationOptions {
+  accept?: FileAcceptInput;
+  maxFiles?: number;
+  maxSize?: number;
+  multiple?: boolean;
+}
+
+export interface FileValidationResult<T extends FileLike = File> {
+  valid: boolean;
+  files: T[];
+  rejectedFiles: T[];
+  reason: FileValidationRejectReason | null;
 }
 
 export type FileListInput<T extends FileNameLike = File> = ArrayLike<T> | Iterable<T> | null | undefined;
@@ -140,6 +164,15 @@ export function getMimeTypeByPath(path: string, fallback = "application/octet-st
   return extension ? getMimeTypeByExtension(extension, fallback) : fallback;
 }
 
+export function getMimeTypeBase(value: string): string {
+  return value.split(";")[0]?.trim().toLowerCase() ?? "";
+}
+
+export function isJsonMimeType(value: string): boolean {
+  const mimeType = getMimeTypeBase(value);
+  return mimeType === "application/json" || mimeType.endsWith("+json");
+}
+
 export function hasExtension(path: string, extensions: readonly string[]): boolean {
   const extension = getFileExtension(path);
   const normalizedExtensions = extensions.map(normalizeFileExtension);
@@ -189,29 +222,59 @@ export function getUploadFileType(path: string): UploadFileType {
   return isImageFile(path) ? "image" : "file";
 }
 
-export function normalizeAccept(accept: string | readonly string[] | null | undefined): string[] {
+export function normalizeAcceptRule(rule: unknown): string {
+  const value = String(rule ?? "").trim().toLowerCase();
+
+  if (!value) {
+    return "";
+  }
+
+  if (value === "*") {
+    return "*/*";
+  }
+
+  if (value.startsWith(".")) {
+    return normalizeFileExtensionWithDot(value);
+  }
+
+  if (value.includes("/")) {
+    return getMimeTypeBase(value);
+  }
+
+  return normalizeFileExtension(value);
+}
+
+export function normalizeAccept(accept: FileAcceptInput): string[] {
   if (!accept) {
     return [];
   }
 
-  const items = Array.isArray(accept) ? Array.from(accept) : String(accept).split(",");
-  return items
-    .map((item: string) => item.trim().toLowerCase())
-    .filter(Boolean)
-    .map((item: string) => (item === "*" ? "*/*" : item));
+  const items = Array.isArray(accept)
+    ? accept.flatMap((item) => splitBySeparators(String(item ?? ""), [","], true))
+    : splitBySeparators(String(accept), [","], true);
+  return uniqueArray(items.map(normalizeAcceptRule).filter(isNonEmptyValue));
 }
 
-export function buildAcceptString(items: readonly string[]): string {
-  return normalizeAccept(items).join(",");
+export function isAcceptAll(accept: FileAcceptInput): boolean {
+  const rules = normalizeAccept(accept);
+  return rules.length === 0 || rules.includes("*/*");
 }
 
-export function getAcceptedExtensions(accept: string | readonly string[] | null | undefined): string[] {
+export function buildAcceptString(accept: FileAcceptInput): string {
+  return normalizeAccept(accept).join(",");
+}
+
+export function getNativeAcceptValue(accept: FileAcceptInput): string | undefined {
+  return isAcceptAll(accept) ? undefined : buildAcceptString(accept);
+}
+
+export function getAcceptedExtensions(accept: FileAcceptInput): string[] {
   return normalizeAccept(accept)
     .filter((item) => item.startsWith("."))
     .map(normalizeFileExtension);
 }
 
-export function matchesAccept(path: string, accept: string | readonly string[] | null | undefined, mimeType = getMimeTypeByPath(path, "")): boolean {
+export function matchesAccept(path: string, accept: FileAcceptInput, mimeType = getMimeTypeByPath(path, "")): boolean {
   const rules = normalizeAccept(accept);
 
   if (rules.length === 0 || rules.includes("*/*")) {
@@ -219,7 +282,7 @@ export function matchesAccept(path: string, accept: string | readonly string[] |
   }
 
   const extension = getFileExtension(path);
-  const normalizedMimeType = mimeType.toLowerCase();
+  const normalizedMimeType = getMimeTypeBase(mimeType);
 
   return rules.some((rule) => {
     if (rule.startsWith(".")) {
@@ -238,12 +301,158 @@ export function matchesAccept(path: string, accept: string | readonly string[] |
   });
 }
 
+export function getFileLikeMimeType(file: FileLike, fallback = getMimeTypeByPath(file.name, "")): string {
+  return getMimeTypeBase(file.type || fallback);
+}
+
+export function matchesFileAccept(file: FileLike, accept: FileAcceptInput): boolean {
+  return matchesAccept(file.name, accept, getFileLikeMimeType(file));
+}
+
 export function getSafeFileName(path: string, fallback = "file"): string {
   return getFileName(path) || fallback;
 }
 
 export function toFileArray<T extends FileNameLike = File>(files: FileListInput<T>): T[] {
   return files ? Array.from(files) : [];
+}
+
+export function getFileCount<T extends FileNameLike = File>(files: FileListInput<T>): number {
+  return toFileArray(files).length;
+}
+
+export function hasFiles<T extends FileNameLike = File>(files: FileListInput<T>): files is Exclude<FileListInput<T>, null | undefined> {
+  return getFileCount(files) > 0;
+}
+
+export function getDragEventFiles(event: DragEvent): FileList | null {
+  return event.dataTransfer?.files ?? null;
+}
+
+export function firstFile<T extends FileNameLike = File>(files: FileListInput<T>): T | undefined {
+  return firstItem(toFileArray(files));
+}
+
+export function getEffectiveMaxFiles(maxFiles = 0, multiple = true): number {
+  const safeMaxFiles = toNonNegativeInteger(maxFiles);
+  return safeMaxFiles > 0 ? safeMaxFiles : multiple ? 0 : 1;
+}
+
+export function getFilesRejectedByAccept<T extends FileLike>(
+  files: FileListInput<T>,
+  accept: FileAcceptInput
+): T[] {
+  return toFileArray(files).filter((file) => !matchesFileAccept(file, accept));
+}
+
+export function getFilesExceedingSize<T extends FileLike>(files: FileListInput<T>, maxSize = 0): T[] {
+  const safeMaxSize = Math.max(0, toFiniteNumber(maxSize));
+  return safeMaxSize > 0 ? toFileArray(files).filter((file) => toFiniteNumber(file.size ?? 0) > safeMaxSize) : [];
+}
+
+export function validateFileList<T extends FileLike = File>(
+  files: FileListInput<T>,
+  options: FileValidationOptions = {}
+): FileValidationResult<T> {
+  const fileArray = toFileArray(files);
+
+  if (fileArray.length === 0) {
+    return {
+      valid: false,
+      files: fileArray,
+      rejectedFiles: [],
+      reason: null,
+    };
+  }
+
+  const maxFiles = getEffectiveMaxFiles(options.maxFiles, options.multiple ?? true);
+  if (maxFiles > 0 && fileArray.length > maxFiles) {
+    return {
+      valid: false,
+      files: fileArray,
+      rejectedFiles: fileArray,
+      reason: "max-files",
+    };
+  }
+
+  const invalidAcceptedFiles = getFilesRejectedByAccept(fileArray, options.accept);
+  if (invalidAcceptedFiles.length > 0) {
+    return {
+      valid: false,
+      files: fileArray,
+      rejectedFiles: invalidAcceptedFiles,
+      reason: "accept",
+    };
+  }
+
+  const oversizedFiles = getFilesExceedingSize(fileArray, options.maxSize);
+  if (oversizedFiles.length > 0) {
+    return {
+      valid: false,
+      files: fileArray,
+      rejectedFiles: oversizedFiles,
+      reason: "max-size",
+    };
+  }
+
+  return {
+    valid: true,
+    files: fileArray,
+    rejectedFiles: [],
+    reason: null,
+  };
+}
+
+export function createTextBlob(contents: string, mimeType = "text/plain"): Blob {
+  return new Blob([contents], { type: mimeType });
+}
+
+export function downloadBlob(fileName: string, blob: Blob): void {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+
+  try {
+    document.body.appendChild(link);
+    link.click();
+  } finally {
+    link.remove();
+    URL.revokeObjectURL(url);
+  }
+}
+
+export function downloadTextFile(fileName: string, contents: string, mimeType = "text/plain"): void {
+  downloadBlob(fileName, createTextBlob(contents, mimeType));
+}
+
+export function readFileAsText(file: Blob, failedMessage = "Failed to read file"): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (event: ProgressEvent<FileReader>) => {
+      resolve(String(event.target?.result ?? ""));
+    };
+    reader.onerror = () => reject(new Error(failedMessage));
+    reader.readAsText(file);
+  });
+}
+
+export function readBrowserTextFile(
+  accept: string | readonly string[] | null | undefined,
+  failedMessage = "Failed to read file"
+): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = getNativeAcceptValue(accept) ?? "";
+    input.onchange = (event: Event) => {
+      const file = firstFile((event.target as HTMLInputElement).files);
+      if (!file) return;
+
+      readFileAsText(file, failedMessage).then(resolve, reject);
+    };
+    input.click();
+  });
 }
 
 export function getFileNames<T extends FileNameLike = File>(files: FileListInput<T>): string[] {

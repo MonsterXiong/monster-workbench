@@ -1,6 +1,6 @@
+use crate::infra::{AppError, AppResult};
 use std::net::TcpStream;
 use std::time::Duration;
-use crate::infra::{AppError, AppResult};
 
 pub struct HttpInfra;
 
@@ -20,7 +20,9 @@ impl HttpInfra {
                 use std::net::ToSocketAddrs;
                 match addr.to_socket_addrs() {
                     Ok(addrs) => addrs.collect(),
-                    Err(e) => return Err(AppError::Network(format!("无法解析主机名或地址: {}", e))),
+                    Err(e) => {
+                        return Err(AppError::Network(format!("无法解析主机名或地址: {}", e)))
+                    }
                 }
             }
         };

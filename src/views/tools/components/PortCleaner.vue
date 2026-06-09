@@ -6,7 +6,7 @@ import { useConfirm } from "../../../composables/useConfirm";
 import { useToast } from "../../../composables/useToast";
 import { useToolsStore } from "../../../stores/tools";
 import { useI18n } from "../../../composables/useI18n";
-import { formatTemplate, isPort } from "../../../utils";
+import { createPortValidator, formatTemplate, getErrorMessage, getFirstValidationError, toTrimmedString } from "../../../utils";
 
 const { confirm } = useConfirm();
 const { triggerToast } = useToast();
@@ -26,14 +26,15 @@ const {
 } = storeToRefs(toolsStore);
 
 async function handleQueryPort() {
-  if (!isPort(portCleaner.value.portInput)) {
-    triggerToast(t("tools.portCleaner.invalidPort"), "error");
+  const error = getFirstValidationError(portCleaner.value.portInput, [createPortValidator(t("tools.portCleaner.invalidPort"))]);
+  if (error) {
+    triggerToast(error, "error");
     return;
   }
   try {
     await toolsStore.queryPortProcess();
   } catch (err: any) {
-    triggerToast(err?.message || t("tools.portCleaner.queryPortFailed"), "error");
+    triggerToast(getErrorMessage(err, t("tools.portCleaner.queryPortFailed")), "error");
   }
 }
 
@@ -49,12 +50,12 @@ async function handleKillProcess(pid: number) {
     await toolsStore.killPortProcess(pid);
     triggerToast(formatTemplate(t("tools.portCleaner.killProcessSuccess"), { pid }), "success");
   } catch (err: any) {
-    triggerToast(err?.message || t("tools.portCleaner.killProcessFailed"), "error");
+    triggerToast(getErrorMessage(err, t("tools.portCleaner.killProcessFailed")), "error");
   }
 }
 
 async function handleQueryInstances() {
-  const name = portCleaner.value.processNameInput.trim();
+  const name = toTrimmedString(portCleaner.value.processNameInput);
   if (!name) {
     triggerToast(t("tools.portCleaner.inputProcessName"), "error");
     return;
@@ -62,7 +63,7 @@ async function handleQueryInstances() {
   try {
     await toolsStore.queryProcessInstances();
   } catch (err: any) {
-    triggerToast(err?.message || t("tools.portCleaner.queryInstancesFailed"), "error");
+    triggerToast(getErrorMessage(err, t("tools.portCleaner.queryInstancesFailed")), "error");
   }
 }
 
@@ -79,12 +80,12 @@ async function handleKillInstance(pid: number) {
     await toolsStore.killProcessInstance(pid);
     triggerToast(formatTemplate(t("tools.portCleaner.killInstanceSuccess"), { pid }), "success");
   } catch (err: any) {
-    triggerToast(err?.message || t("tools.portCleaner.killInstanceFailed"), "error");
+    triggerToast(getErrorMessage(err, t("tools.portCleaner.killInstanceFailed")), "error");
   }
 }
 
 async function handleKillAllInstances() {
-  const name = portCleaner.value.processNameInput.trim();
+  const name = toTrimmedString(portCleaner.value.processNameInput);
   if (!name) return;
 
   const count = processInstances.value.length;
@@ -100,7 +101,7 @@ async function handleKillAllInstances() {
     await toolsStore.killAllProcessInstances();
     triggerToast(formatTemplate(t("tools.portCleaner.killAllSuccess"), { name }), "success");
   } catch (err: any) {
-    triggerToast(err?.message || t("tools.portCleaner.killAllFailed"), "error");
+    triggerToast(getErrorMessage(err, t("tools.portCleaner.killAllFailed")), "error");
   }
 }
 

@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { computed, useId } from "vue";
-import { filterByFalsyValue, findNextCircularItem, firstItem, lastItem } from "../../utils";
+import { filterByFalsyValue, findNextCircularItem, firstItem, getKeyboardBoundaryPosition, getKeyboardNavigationDirection, lastItem } from "../../utils";
 
 export interface RadioOption {
   label: string;
   value: string | number;
   description?: string;
+  icon?: string;
+  meta?: string;
   disabled?: boolean;
 }
 
@@ -17,6 +19,9 @@ interface Props {
   compact?: boolean;
   inline?: boolean;
   columns?: 1 | 2 | 3;
+  size?: "sm" | "md" | "lg";
+  error?: boolean;
+  success?: boolean;
   ariaLabel?: string;
 }
 
@@ -26,6 +31,9 @@ const props = withDefaults(defineProps<Props>(), {
   compact: false,
   inline: false,
   columns: 1,
+  size: "md",
+  error: false,
+  success: false,
   ariaLabel: "",
 });
 
@@ -40,6 +48,10 @@ const emit = defineEmits<{
 const groupId = useId();
 const isReadonly = computed(() => props.disabled || props.readonly);
 const enabledOptions = computed(() => filterByFalsyValue(props.options, (option) => option.disabled));
+const focusableValue = computed(() => {
+  if (props.disabled || !enabledOptions.value.length) return undefined;
+  return enabledOptions.value.find((option) => option.value === props.modelValue)?.value ?? firstItem(enabledOptions.value)?.value;
+});
 
 const currentValue = computed({
   get: () => props.modelValue,
@@ -69,21 +81,17 @@ const selectBoundary = (position: "first" | "last") => {
 
 const handleKeydown = (event: KeyboardEvent) => {
   emit("keydown", event);
-  if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+  const direction = getKeyboardNavigationDirection(event);
+  if (direction) {
     event.preventDefault();
-    moveSelection(1);
+    moveSelection(direction);
+    return;
   }
-  if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+
+  const boundaryPosition = getKeyboardBoundaryPosition(event);
+  if (boundaryPosition) {
     event.preventDefault();
-    moveSelection(-1);
-  }
-  if (event.key === "Home") {
-    event.preventDefault();
-    selectBoundary("first");
-  }
-  if (event.key === "End") {
-    event.preventDefault();
-    selectBoundary("last");
+    selectBoundary(boundaryPosition);
   }
 };
 
@@ -96,15 +104,20 @@ const optionDescriptionId = (index: number) => `${groupId}-description-${index}`
     class="base-radio-group"
     :class="[
       `base-radio-group--cols-${columns}`,
+      `base-radio-group--${size}`,
       {
         'base-radio-group--disabled': disabled,
         'base-radio-group--readonly': readonly,
         'base-radio-group--compact': compact,
-        'base-radio-group--inline': inline
+        'base-radio-group--inline': inline,
+        'base-radio-group--error': error,
+        'base-radio-group--success': success
       }
     ]"
     role="radiogroup"
     :aria-label="ariaLabel || undefined"
+    :aria-disabled="disabled ? 'true' : undefined"
+    :aria-readonly="readonly ? 'true' : undefined"
     @keydown="handleKeydown"
   >
     <button
@@ -120,9 +133,11 @@ const optionDescriptionId = (index: number) => `${groupId}-description-${index}`
       }"
       :disabled="disabled || option.disabled"
       :aria-checked="currentValue === option.value"
+      :aria-disabled="(disabled || option.disabled) ? 'true' : undefined"
+      :aria-readonly="readonly ? 'true' : undefined"
       :aria-labelledby="optionLabelId(index)"
       :aria-describedby="option.description ? optionDescriptionId(index) : undefined"
-      :tabindex="currentValue === option.value ? 0 : -1"
+      :tabindex="focusableValue === option.value ? 0 : -1"
       @click="selectOption(option)"
       @focus="emit('focus', $event)"
       @blur="emit('blur', $event)"
@@ -131,7 +146,11 @@ const optionDescriptionId = (index: number) => `${groupId}-description-${index}`
         <span v-if="currentValue === option.value"></span>
       </span>
       <span class="base-radio-group__text">
-        <span :id="optionLabelId(index)" class="base-radio-group__label">{{ option.label }}</span>
+        <span class="base-radio-group__label-row">
+          <BaseIcon v-if="option.icon" :name="option.icon" size="14" aria-hidden="true" />
+          <span :id="optionLabelId(index)" class="base-radio-group__label">{{ option.label }}</span>
+          <small v-if="option.meta" class="base-radio-group__meta">{{ option.meta }}</small>
+        </span>
         <span v-if="option.description" :id="optionDescriptionId(index)" class="base-radio-group__description">
           {{ option.description }}
         </span>
@@ -169,6 +188,14 @@ const optionDescriptionId = (index: number) => `${groupId}-description-${index}`
   @apply gap-2 rounded-xl p-2;
 }
 
+.base-radio-group--sm .base-radio-group__option {
+  @apply gap-2 rounded-xl p-2;
+}
+
+.base-radio-group--lg .base-radio-group__option {
+  @apply p-4;
+}
+
 .base-radio-group__option:hover:not(.is-disabled):not(.is-readonly) {
   @apply border-slate-300 bg-slate-50 dark:border-slate-700 dark:bg-slate-950;
 }
@@ -176,6 +203,14 @@ const optionDescriptionId = (index: number) => `${groupId}-description-${index}`
 .base-radio-group__option.is-active {
   border-color: rgba(var(--color-primary), 0.34);
   background-color: rgba(var(--color-primary), 0.06);
+}
+
+.base-radio-group--success .base-radio-group__option.is-active {
+  @apply border-emerald-300 bg-emerald-50 dark:border-emerald-900 dark:bg-emerald-950;
+}
+
+.base-radio-group--error .base-radio-group__option.is-active {
+  @apply border-red-300 bg-red-50 dark:border-red-900 dark:bg-red-950;
 }
 
 .base-radio-group__option.is-disabled {
@@ -203,8 +238,20 @@ const optionDescriptionId = (index: number) => `${groupId}-description-${index}`
   @apply min-w-0;
 }
 
+.base-radio-group__label-row {
+  @apply flex min-w-0 flex-wrap items-center gap-1.5;
+}
+
+.base-radio-group__label-row :deep(svg) {
+  @apply shrink-0 text-slate-400;
+}
+
 .base-radio-group__label {
-  @apply block text-xs font-black text-slate-800 dark:text-slate-100;
+  @apply min-w-0 truncate text-xs font-black text-slate-800 dark:text-slate-100;
+}
+
+.base-radio-group__meta {
+  @apply shrink-0 rounded-full bg-slate-100 px-1.5 py-0.5 text-[9px] font-black leading-none text-slate-500 dark:bg-slate-800 dark:text-slate-300;
 }
 
 .base-radio-group__description {

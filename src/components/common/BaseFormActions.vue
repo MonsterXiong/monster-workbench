@@ -82,7 +82,11 @@ const describedBy = computed(() => (props.description ? descriptionId : undefine
 }
 
 .base-form-actions--compact {
-  @apply gap-2 pt-2.5;
+  @apply gap-2;
+}
+
+.base-form-actions--compact.base-form-actions--divided {
+  @apply pt-2.5;
 }
 
 .base-form-actions--sticky {

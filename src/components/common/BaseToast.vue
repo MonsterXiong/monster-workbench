@@ -9,9 +9,14 @@ const {
   toastMsg,
   toastType,
   toastTitle,
+  toastDescription,
   toastIcon,
   toastClosable,
   toastActionText,
+  toastDuration,
+  toastShowProgress,
+  toastWrap,
+  toastId,
   hideToast,
   runToastAction,
   clearToastTimer,
@@ -43,8 +48,9 @@ onBeforeUnmount(() => {
   >
     <div
       v-if="showToast"
+      :key="toastId"
       class="base-toast"
-      :class="[`base-toast--${toastType}`]"
+      :class="[`base-toast--${toastType}`, { 'base-toast--wrap': toastWrap }]"
       :role="toastType === 'error' || toastType === 'warning' ? 'alert' : 'status'"
       :aria-live="liveMode"
       aria-atomic="true"
@@ -53,6 +59,7 @@ onBeforeUnmount(() => {
       <div class="base-toast__body">
         <strong v-if="toastTitle" class="base-toast__title">{{ toastTitle }}</strong>
         <span class="base-toast__message">{{ toastMsg }}</span>
+        <span v-if="toastDescription" class="base-toast__description">{{ toastDescription }}</span>
       </div>
       <button v-if="toastActionText" type="button" class="base-toast__action" @click="runToastAction">
         {{ toastActionText }}
@@ -67,13 +74,19 @@ onBeforeUnmount(() => {
       >
         <BaseIcon name="X" :size="14" aria-hidden="true" />
       </button>
+      <span
+        v-if="toastShowProgress && toastDuration > 0"
+        class="base-toast__progress"
+        :style="{ animationDuration: `${toastDuration}ms` }"
+        aria-hidden="true"
+      ></span>
     </div>
   </transition>
 </template>
 
 <style scoped>
 .base-toast {
-  @apply fixed bottom-8 right-8 z-[9999] flex max-w-[min(28rem,calc(100vw-2rem))] select-none items-start gap-3 rounded-2xl border px-5 py-3.5 text-xs font-bold shadow-xl backdrop-blur-md transition-all;
+  @apply fixed bottom-8 right-8 z-[9999] flex max-w-[min(28rem,calc(100vw-2rem))] select-none items-start gap-3 overflow-hidden rounded-2xl border px-5 py-3.5 text-xs font-bold shadow-xl backdrop-blur-md transition-all;
 }
 
 .base-toast__icon {
@@ -93,7 +106,19 @@ onBeforeUnmount(() => {
   @apply block min-w-0 break-words leading-5;
 }
 
-.base-toast__title + .base-toast__message {
+.base-toast__description {
+  @apply mt-0.5 block min-w-0 truncate text-[11px] leading-5 opacity-80;
+}
+
+.base-toast--wrap .base-toast__title,
+.base-toast--wrap .base-toast__description {
+  @apply whitespace-normal break-words;
+  overflow: visible;
+  text-overflow: clip;
+}
+
+.base-toast__title + .base-toast__message,
+.base-toast__message + .base-toast__description {
   @apply mt-0.5;
 }
 
@@ -109,6 +134,14 @@ onBeforeUnmount(() => {
 
 .base-toast__close {
   @apply flex h-6 w-6 shrink-0 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 dark:text-slate-500 dark:hover:bg-slate-800 dark:hover:text-slate-300;
+}
+
+.base-toast__progress {
+  @apply pointer-events-none absolute inset-x-0 bottom-0 h-0.5 origin-left;
+  background-color: var(--toast-fg);
+  animation-name: base-toast-progress;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
 }
 
 .base-toast--info {
@@ -170,6 +203,19 @@ onBeforeUnmount(() => {
   .base-toast__action,
   .base-toast__close {
     transition: none !important;
+  }
+
+  .base-toast__progress {
+    animation: none !important;
+  }
+}
+
+@keyframes base-toast-progress {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
   }
 }
 </style>

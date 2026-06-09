@@ -5,7 +5,7 @@ import { storeToRefs } from "pinia";
 import AppPathSelector from "../../../components/common/AppPathSelector.vue";
 import { useToolsStore } from "../../../stores/tools";
 import { useI18n } from "../../../composables/useI18n";
-import { formatTemplate } from "../../../utils";
+import { formatTemplate, getErrorMessage, isBlank } from "../../../utils";
 
 const emit = defineEmits<{
   (e: "toast", msg: string, type?: "success" | "error"): void;
@@ -31,7 +31,7 @@ onMounted(async () => {
 });
 
 async function handleGenerateStructure() {
-  if (!dirGenerator.value.treeInput.trim()) {
+  if (isBlank(dirGenerator.value.treeInput)) {
     emit("toast", t("tools.dirGen.emptyError"), "error");
     return;
   }
@@ -39,7 +39,7 @@ async function handleGenerateStructure() {
     await toolsStore.createDirectoryStructure();
     emit("toast", t("tools.dirGen.successMsg"), "success");
   } catch (err) {
-    emit("toast", err instanceof Error ? err.message : t("tools.dirGen.failedMsg"), "error");
+    emit("toast", getErrorMessage(err, t("tools.dirGen.failedMsg")), "error");
   }
 }
 </script>

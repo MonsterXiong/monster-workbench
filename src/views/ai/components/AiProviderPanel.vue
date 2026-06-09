@@ -1,18 +1,22 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted } from "vue";
-import { Bot, CheckCircle2, KeyRound, Link, ListChecks, Plus, Save, TestTube2, Trash2 } from "lucide-vue-next";
+import { Bot, CheckCircle2, Gauge, KeyRound, Link, ListChecks, Plus, Save, TestTube2, Trash2 } from "lucide-vue-next";
 import { useAiStore } from "../../../stores/ai";
 import { useI18n } from "../../../composables/useI18n";
-import type { AiProviderTestAction } from "../../../types/ai";
-import { clampNumber, takeRightReversed } from "../../../utils";
+import type { AiProviderQueueMode, AiProviderTestAction } from "../../../types/ai";
+import { clampNumber, clearIntervalHandle, createInterval, getErrorMessage, takeRightReversed, type IntervalHandle } from "../../../utils";
 
 const aiStore = useAiStore();
 const { t } = useI18n();
-let queuePollTimer: ReturnType<typeof window.setInterval> | null = null;
+let queuePollTimer: IntervalHandle | null = null;
 
 const config = computed(() => aiStore.config);
 const selectedConfig = computed(() => aiStore.selectedModelConfig);
 const queueItems = computed(() => takeRightReversed(aiStore.testQueue, 6));
+const queueModeOptions = computed(() => [
+  { label: t("settings.aiProvider.queueModeSerial"), value: "serial" },
+  { label: t("settings.aiProvider.queueModeConcurrent"), value: "concurrent" },
+]);
 
 const emit = defineEmits<{
   (e: "saved"): void;
@@ -25,23 +29,25 @@ onMounted(() => {
     void aiStore.loadConfig();
   }
   void aiStore.refreshBackendQueueStatus();
-  queuePollTimer = window.setInterval(() => {
+  queuePollTimer = createInterval(() => {
     void aiStore.refreshBackendQueueStatus();
   }, 1500);
 });
 
 onUnmounted(() => {
-  if (queuePollTimer) {
-    window.clearInterval(queuePollTimer);
-    queuePollTimer = null;
-  }
+  clearIntervalHandle(queuePollTimer);
+  queuePollTimer = null;
 });
 
 function actionBusy(action: AiProviderTestAction) {
-  return Boolean(aiStore.getActionQueueStatus(action)) || aiStore.backendQueueStatus.isSaturated;
+  const configId = action === "image" ? aiStore.activeModelConfigIds.image : aiStore.selectedConfigId;
+  return aiStore.isActionBusy(action, configId);
 }
 
 function actionButtonLabel(action: AiProviderTestAction, fallback: string) {
+  if (!actionBusy(action)) {
+    return fallback;
+  }
   const status = aiStore.getActionQueueStatus(action);
   if (status === "running") {
     return t("settings.aiProvider.queueRunning");
@@ -57,7 +63,7 @@ async function handleSave() {
     await aiStore.saveConfig();
     emit("saved");
   } catch (err) {
-    emit("failed", err instanceof Error ? err.message : t("settings.aiProvider.saveFailed"));
+    emit("failed", getErrorMessage(err, t("settings.aiProvider.saveFailed")));
   }
 }
 
@@ -68,8 +74,13 @@ async function handleTest(action: AiProviderTestAction) {
     });
     emit("tested", result.ok, result.message);
   } catch (err) {
-    emit("failed", err instanceof Error ? err.message : t("settings.aiProvider.testFailed"));
+    emit("failed", getErrorMessage(err, t("settings.aiProvider.testFailed")));
   }
+}
+
+function handleQueueModeChange(value: unknown) {
+  const queueMode: AiProviderQueueMode = value === "concurrent" ? "concurrent" : "serial";
+  aiStore.patchConfig({ queueMode });
 }
 
 async function handleImageTest() {
@@ -80,7 +91,7 @@ async function handleImageTest() {
     });
     emit("tested", result.ok, result.message);
   } catch (err) {
-    emit("failed", err instanceof Error ? err.message : t("settings.aiProvider.testFailed"));
+    emit("failed", getErrorMessage(err, t("settings.aiProvider.testFailed")));
   }
 }
 
@@ -89,7 +100,7 @@ async function handleDeleteConfig() {
     await aiStore.deleteModelConfig(aiStore.selectedConfigId);
     emit("tested", true, "模型配置已删除");
   } catch (err) {
-    emit("failed", err instanceof Error ? err.message : t("settings.aiProvider.saveFailed"));
+    emit("failed", getErrorMessage(err, t("settings.aiProvider.saveFailed")));
   }
 }
 </script>
@@ -187,9 +198,34 @@ async function handleDeleteConfig() {
             :model-value="Math.round(config.timeoutMs / 1000)"
             type="number"
             min="3"
-            max="600"
+            max="43200"
             :placeholder="t('settings.aiProvider.timeoutPlaceholder')"
-            @update:model-value="aiStore.patchConfig({ timeoutMs: clampNumber($event, 3, 600, 600, 0) * 1000 })"
+            @update:model-value="aiStore.patchConfig({ timeoutMs: clampNumber($event, 3, 43200, 43200, 0) * 1000 })"
+          />
+        </label>
+
+        <label class="field-block">
+          <span class="field-label">
+            <Gauge class="h-3.5 w-3.5" />
+            {{ t("settings.aiProvider.queueModeLabel") }}
+          </span>
+          <BaseSelect
+            :model-value="config.queueMode"
+            :options="queueModeOptions"
+            @update:model-value="handleQueueModeChange"
+          />
+        </label>
+
+        <label class="field-block">
+          <span class="field-label">{{ t("settings.aiProvider.maxConcurrencyLabel") }}</span>
+          <BaseInput
+            :model-value="config.maxConcurrency"
+            type="number"
+            min="1"
+            max="6"
+            :disabled="config.queueMode !== 'concurrent'"
+            :placeholder="t('settings.aiProvider.maxConcurrencyPlaceholder')"
+            @update:model-value="aiStore.patchConfig({ maxConcurrency: clampNumber($event, 1, 6, 3, 0) })"
           />
         </label>
 

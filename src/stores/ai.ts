@@ -3,6 +3,7 @@ import { computed, ref } from "vue";
 import { aiService } from "../services/ai.service";
 import { configService } from "../services/config.service";
 import {
+  applyObjectPatch,
   arrayIfArray,
   clampNumber,
   countWhere,
@@ -11,19 +12,28 @@ import {
   filterByValue,
   filterByValues,
   findByValue,
+  formatReducedAspectRatio,
+  firstItem,
   findLastItem,
+  getCurrentTimestampMs,
+  hasTimeElapsed,
   hasByValue,
   keySetBy,
   mapToMap,
   mapArrayIfArray,
+  nextAnimationFrame,
+  normalizeTimestampMs,
   objectKeys,
+  parseDimensionsText,
   removeByValue,
   removeByValues,
   replaceByValue,
+  runAllSettled,
   safeJsonParseObject,
   safeJsonStringify,
   sleep,
   sortByMany,
+  stringifyErrorMessage,
   take,
   truncateText,
   toReversedArray,
@@ -45,6 +55,7 @@ import type {
   AiProviderTestResult,
   AiProviderTestTask,
   AiProviderType,
+  AiProviderQueueMode,
 } from "../types/ai";
 
 const CONFIG_KEY = "aiProvider";
@@ -55,9 +66,11 @@ const PROMPT_LIBRARY_KEY = "aiPromptLibrary";
 const TASK_POLL_INTERVAL_MS = 600;
 const TASK_POLL_RECOVERY_SLACK_MS = 30_000;
 const LOCAL_FINISHED_TASK_LIMIT = 40;
-const IMAGE_REQUEST_TIMEOUT_MS = 600_000;
+const IMAGE_REQUEST_TIMEOUT_MS = 43_200_000;
 const IMAGE_SIDECAR_TIMEOUT_SLACK_MS = 15_000;
 const IMAGE_STALE_TIMEOUT_MS = IMAGE_REQUEST_TIMEOUT_MS + IMAGE_SIDECAR_TIMEOUT_SLACK_MS + TASK_POLL_RECOVERY_SLACK_MS;
+const DEFAULT_MAX_CONCURRENCY = 3;
+const MAX_MODEL_CONCURRENCY = 6;
 const SUPPORTED_IMAGE_SIZES = new Set([
   "1024x1024",
   "1008x1792",
@@ -102,6 +115,18 @@ const SUPPORTED_IMAGE_SIZES = new Set([
   "1648x3840",
   "3840x1280",
   "1280x3840",
+  "3840x960",
+  "960x3840",
+  "3840x768",
+  "768x3840",
+  "3840x640",
+  "640x3840",
+  "7680x960",
+  "960x7680",
+  "7680x640",
+  "640x7680",
+  "7680x480",
+  "480x7680",
 ]);
 
 const providerDefaults: Record<AiProviderType, Pick<AiProviderConfig, "displayName" | "baseUrl" | "model">> = {
@@ -137,11 +162,13 @@ const defaultConfig: AiProviderConfig = {
   testPrompt: "请用一句话回复：连接测试成功。",
   imageModel: "gpt-image-2",
   imagePrompt: "生成一张简洁的蓝色机器人图标，白色背景。",
-  imageSize: "1024x1024",
+  imageSize: "1008x1792",
   timeoutMs: IMAGE_REQUEST_TIMEOUT_MS,
+  queueMode: "serial",
+  maxConcurrency: DEFAULT_MAX_CONCURRENCY,
 };
 
-const currentTime = () => Date.now();
+const currentTime = () => getCurrentTimestampMs();
 
 const defaultPromptLibrary: AiPromptLibrary = {
   categories: [
@@ -252,9 +279,28 @@ function normalizeImageSize(value: unknown) {
   return SUPPORTED_IMAGE_SIZES.has(size) ? size : defaultConfig.imageSize;
 }
 
+function buildImagePromptWithSize(prompt: string, imageSize: string) {
+  const cleanPrompt = toTrimmedString(prompt);
+  const dimensions = parseDimensionsText(imageSize);
+  if (!dimensions) {
+    return cleanPrompt;
+  }
+  const ratio = formatReducedAspectRatio(dimensions);
+  const sizeInstruction = `画幅要求：请严格按 ${ratio} 比例构图，参考尺寸 ${imageSize}，不要把比例或尺寸文字写进画面。`;
+  return cleanPrompt ? `${cleanPrompt}\n\n${sizeInstruction}` : sizeInstruction;
+}
+
+function normalizeQueueMode(value: unknown): AiProviderQueueMode {
+  return value === "concurrent" ? "concurrent" : "serial";
+}
+
+function normalizeMaxConcurrency(value: unknown) {
+  return clampNumber(value, 1, MAX_MODEL_CONCURRENCY, DEFAULT_MAX_CONCURRENCY, 0);
+}
+
 function normalizeMessageStatus(message: Record<string, unknown>) {
-  const createdAt = Number(message?.createdAt || currentTime());
-  if (message?.status === "pending" && currentTime() - createdAt > IMAGE_STALE_TIMEOUT_MS) {
+  const createdAt = normalizeTimestampMs(message?.createdAt, currentTime);
+  if (message?.status === "pending" && hasTimeElapsed(createdAt, IMAGE_STALE_TIMEOUT_MS)) {
     return "failed";
   }
   return message?.status === "failed" ? "failed" : message?.status === "pending" ? "pending" : "success";
@@ -273,7 +319,17 @@ function normalizeConfig(raw: Partial<AiProviderConfig> | null | undefined): AiP
   const provider = (raw?.provider && raw.provider in providerDefaults ? raw.provider : "custom") as AiProviderType;
   const preset = providerDefaults[provider];
   const rawTimeoutMs = Number(raw?.timeoutMs || defaultConfig.timeoutMs);
-  const timeoutMs = rawTimeoutMs === 20000 || rawTimeoutMs === 285000 ? defaultConfig.timeoutMs : rawTimeoutMs;
+  const timeoutMs =
+    rawTimeoutMs === 20000 ||
+    rawTimeoutMs === 285000 ||
+    rawTimeoutMs === 900_000 ||
+    rawTimeoutMs === 1_800_000 ||
+    rawTimeoutMs === 3_600_000 ||
+    rawTimeoutMs === 7_200_000 ||
+    rawTimeoutMs === 14_400_000 ||
+    rawTimeoutMs === 28_800_000
+      ? defaultConfig.timeoutMs
+      : rawTimeoutMs;
 
   return {
     ...defaultConfig,
@@ -284,6 +340,8 @@ function normalizeConfig(raw: Partial<AiProviderConfig> | null | undefined): AiP
     baseUrl: raw?.baseUrl || preset.baseUrl,
     model: raw?.model || preset.model,
     timeoutMs: clampNumber(timeoutMs, 3000, IMAGE_REQUEST_TIMEOUT_MS, defaultConfig.timeoutMs, 0),
+    queueMode: normalizeQueueMode(raw?.queueMode),
+    maxConcurrency: normalizeMaxConcurrency(raw?.maxConcurrency),
   };
 }
 
@@ -295,19 +353,20 @@ function normalizeModelConfig(raw: Partial<AiModelConfig | AiProviderConfig> | n
     ...normalized,
     id: String((raw as Partial<AiModelConfig> | undefined)?.id || createId("ai-model")),
     name,
-    createdAt: Number((raw as Partial<AiModelConfig> | undefined)?.createdAt || timestamp),
-    updatedAt: Number((raw as Partial<AiModelConfig> | undefined)?.updatedAt || timestamp),
+    createdAt: normalizeTimestampMs((raw as Partial<AiModelConfig> | undefined)?.createdAt, timestamp),
+    updatedAt: normalizeTimestampMs((raw as Partial<AiModelConfig> | undefined)?.updatedAt, timestamp),
   };
 }
 
 function toProviderConfig(modelConfig: AiModelConfig): AiProviderConfig {
-  const { id: _id, name: _name, createdAt: _createdAt, updatedAt: _updatedAt, ...providerConfig } = modelConfig;
+  const { id: _id, name: _name, createdAt: _createdAt, updatedAt: _updatedAt, queueKey: _queueKey, ...providerConfig } = modelConfig;
   return providerConfig;
 }
 
 function toPersistedModelConfig(modelConfig: AiModelConfig): AiModelConfig {
+  const { queueKey: _queueKey, ...persistedConfig } = modelConfig;
   return {
-    ...modelConfig,
+    ...persistedConfig,
     apiKey: modelConfig.rememberApiKey ? modelConfig.apiKey : "",
   };
 }
@@ -351,7 +410,7 @@ function normalizeSessions(raw: unknown, configIds: Set<string>, fallbackConfigI
     .map((session) => {
       const type: AiPromptType = session?.type === "image" ? "image" : "chat";
       const modelConfigId = configIds.has(String(session?.modelConfigId)) ? String(session.modelConfigId) : fallbackConfigId;
-      const timestamp = Number(session?.createdAt || currentTime());
+      const timestamp = normalizeTimestampMs(session?.createdAt, currentTime);
       const messages = mapArrayIfArray<Record<string, unknown>, AiConversationSession["messages"][number]>(
         session?.messages,
         (message) => ({
@@ -359,14 +418,19 @@ function normalizeSessions(raw: unknown, configIds: Set<string>, fallbackConfigI
           role: message?.role === "assistant" || message?.role === "error" ? message.role : "user",
           status: normalizeMessageStatus(message),
           content: normalizeMessageContent(message),
+          requestId: message?.requestId ? String(message.requestId) : undefined,
           modelConfigId: configIds.has(String(message?.modelConfigId)) ? String(message.modelConfigId) : modelConfigId,
           model: String(message?.model || ""),
           error: message?.error ? String(message.error) : undefined,
           imageSize: message?.imageSize ? normalizeImageSize(message.imageSize) : undefined,
+          requestedImageSize: message?.requestedImageSize ? normalizeImageSize(message.requestedImageSize) : undefined,
+          actualImageSize: message?.actualImageSize ? normalizeImageSize(message.actualImageSize) : undefined,
+          fallbackImageSize: message?.fallbackImageSize ? normalizeImageSize(message.fallbackImageSize) : undefined,
+          imageAttempts: message?.imageAttempts ? clampNumber(message.imageAttempts, 1, 10, 1, 0) : undefined,
           imageUrls: mapArrayIfArray(message?.imageUrls, String),
           imagePaths: mapArrayIfArray(message?.imagePaths, String),
           savedFiles: arrayIfArray<AiProviderSavedFile>(message?.savedFiles),
-          createdAt: Number(message?.createdAt || timestamp),
+          createdAt: normalizeTimestampMs(message?.createdAt, timestamp),
         })
       ) ?? [];
 
@@ -377,7 +441,7 @@ function normalizeSessions(raw: unknown, configIds: Set<string>, fallbackConfigI
         modelConfigId,
         imageSize: session?.imageSize ? normalizeImageSize(session.imageSize) : undefined,
         createdAt: timestamp,
-        updatedAt: Number(session?.updatedAt || timestamp),
+        updatedAt: normalizeTimestampMs(session?.updatedAt, timestamp),
         messages,
       };
     })
@@ -388,8 +452,8 @@ function normalizePromptLibrary(raw: Partial<AiPromptLibrary> | null | undefined
   const timestamp = currentTime();
   const baseCategories = defaultPromptLibrary.categories.map((category) => ({
     ...category,
-    createdAt: category.createdAt || timestamp,
-    updatedAt: category.updatedAt || timestamp,
+    createdAt: normalizeTimestampMs(category.createdAt, timestamp),
+    updatedAt: normalizeTimestampMs(category.updatedAt, timestamp),
   }));
   const rawCategories = arrayIfArray<Partial<AiPromptLibrary["categories"][number]>>(raw?.categories) ?? [];
   const categories = rawCategories
@@ -397,8 +461,8 @@ function normalizePromptLibrary(raw: Partial<AiPromptLibrary> | null | undefined
       id: String(category?.id || createId("prompt-category")),
       type: normalizePromptType(category?.type),
       name: toTrimmedString(category?.name),
-      createdAt: Number(category?.createdAt || timestamp),
-      updatedAt: Number(category?.updatedAt || timestamp),
+      createdAt: normalizeTimestampMs(category?.createdAt, timestamp),
+      updatedAt: normalizeTimestampMs(category?.updatedAt, timestamp),
     }))
     .filter((category) => category.name);
 
@@ -437,8 +501,8 @@ function normalizePromptLibrary(raw: Partial<AiPromptLibrary> | null | undefined
         categoryId: categoryIds.has(categoryId) ? categoryId : firstCategoryByType(type),
         title: toTrimmedString(prompt?.title),
         content: toTrimmedString(prompt?.content),
-        createdAt: Number(prompt?.createdAt || timestamp),
-        updatedAt: Number(prompt?.updatedAt || timestamp),
+        createdAt: normalizeTimestampMs(prompt?.createdAt, timestamp),
+        updatedAt: normalizeTimestampMs(prompt?.updatedAt, timestamp),
       };
     })
     .filter((prompt) => prompt.title && prompt.content && prompt.categoryId);
@@ -448,8 +512,8 @@ function normalizePromptLibrary(raw: Partial<AiPromptLibrary> | null | undefined
       prompts.push({
         ...fallback,
         categoryId: fallbackCategoryId(fallback),
-        createdAt: fallback.createdAt || timestamp,
-        updatedAt: fallback.updatedAt || timestamp,
+        createdAt: normalizeTimestampMs(fallback.createdAt, timestamp),
+        updatedAt: normalizeTimestampMs(fallback.updatedAt, timestamp),
       });
     }
   }
@@ -462,8 +526,8 @@ export const useAiStore = defineStore("ai", () => {
   const selectedConfigId = ref("");
   const modelConfigs = ref<AiModelConfig[]>([normalizeModelConfig(defaultConfig)]);
   const activeModelConfigIds = ref<AiActiveConfigIds>({
-    chat: modelConfigs.value[0].id,
-    image: modelConfigs.value[0].id,
+    chat: firstItem(modelConfigs.value)!.id,
+    image: firstItem(modelConfigs.value)!.id,
   });
   const sessions = ref<AiConversationSession[]>([]);
   const activeSessionIds = ref<Record<AiPromptType, string>>({
@@ -471,7 +535,7 @@ export const useAiStore = defineStore("ai", () => {
     image: "",
   });
   const pendingPrompt = ref<{ type: AiPromptType; content: string } | null>(null);
-  const imageDraftSize = ref("1024x1024");
+  const imageDraftSize = ref("1008x1792");
   const isLoaded = ref(false);
   const isTesting = ref(false);
   const activeAction = ref<AiProviderTestAction | null>(null);
@@ -480,13 +544,18 @@ export const useAiStore = defineStore("ai", () => {
   const promptLibrary = ref<AiPromptLibrary>(normalizePromptLibrary(defaultPromptLibrary));
   const backendQueueStatus = ref<AiProviderBackendQueueStatus>({
     running: null,
+    runningItems: [],
     queued: [],
     pendingCount: 0,
-    queueLimit: 8,
-    availableSlots: 8,
+    queueLimit: 16,
+    runningCount: 0,
+    runningLimit: 6,
+    availableRunningSlots: 6,
+    availableSlots: 16,
     isSaturated: false,
     waitTimeoutMs: 90000,
   });
+  let loadConfigPromise: Promise<void> | null = null;
 
   const providerOptions = computed(() =>
     objectKeys(providerDefaults).map((provider) => ({
@@ -529,11 +598,39 @@ export const useAiStore = defineStore("ai", () => {
   }
 
   function nextFrame() {
-    return new Promise<number>((resolve) => window.requestAnimationFrame(resolve));
+    return nextAnimationFrame();
   }
 
   function getModelConfig(configId: string) {
-    return findByValue(modelConfigs.value, (item) => item.id, configId) ?? modelConfigs.value[0] ?? normalizeModelConfig(defaultConfig);
+    return findByValue(modelConfigs.value, (item) => item.id, configId) ?? firstItem(modelConfigs.value) ?? normalizeModelConfig(defaultConfig);
+  }
+
+  function getBackendRunningItems() {
+    return backendQueueStatus.value.runningItems?.length
+      ? backendQueueStatus.value.runningItems
+      : backendQueueStatus.value.running
+        ? [backendQueueStatus.value.running]
+        : [];
+  }
+
+  function getDefaultActionConfigId(action: AiProviderTestAction) {
+    return action === "image" ? activeModelConfigIds.value.image : selectedConfigId.value;
+  }
+
+  function isHighConcurrencyConfig(configLike: Pick<AiProviderConfig, "queueMode" | "maxConcurrency"> | null | undefined) {
+    return configLike?.queueMode === "concurrent" && normalizeMaxConcurrency(configLike.maxConcurrency) > 1;
+  }
+
+  function isActionBusy(action: AiProviderTestAction, configId = getDefaultActionConfigId(action)) {
+    if (backendQueueStatus.value.isSaturated) {
+      return true;
+    }
+
+    if (isHighConcurrencyConfig(getModelConfig(configId))) {
+      return false;
+    }
+
+    return Boolean(getActionQueueStatus(action));
   }
 
   function syncEditableConfig(configId = selectedConfigId.value) {
@@ -608,7 +705,7 @@ export const useAiStore = defineStore("ai", () => {
   }
 
   async function renameSession(sessionId: string, title: string) {
-    const nextTitle = title.trim();
+    const nextTitle = toTrimmedString(title);
     if (!nextTitle) {
       throw new Error("会话名称不能为空");
     }
@@ -650,8 +747,9 @@ export const useAiStore = defineStore("ai", () => {
     message: AiConversationSession["messages"][number]
   ) {
     session.messages.push(message);
-    if (session.messages.length === 1 && message.content.trim()) {
-      session.title = truncateText(message.content.trim(), 24, "");
+    const content = toTrimmedString(message.content);
+    if (session.messages.length === 1 && content) {
+      session.title = truncateText(content, 24, "");
     }
     session.updatedAt = currentTime();
   }
@@ -664,7 +762,7 @@ export const useAiStore = defineStore("ai", () => {
     if (!session) {
       return null;
     }
-    session.messages = updateByValue(session.messages, (message) => message.id, messageId, (message) => ({ ...message, ...patch }));
+    session.messages = updateByValue(session.messages, (message) => message.id, messageId, (message) => applyObjectPatch(message, patch));
     session.updatedAt = currentTime();
     return findByValue(session.messages, (message) => message.id, messageId) ?? null;
   }
@@ -728,7 +826,7 @@ export const useAiStore = defineStore("ai", () => {
       throw new Error("至少保留一套模型配置");
     }
     modelConfigs.value = removeByValue(modelConfigs.value, (item) => item.id, configId);
-    const fallbackId = modelConfigs.value[0].id;
+    const fallbackId = firstItem(modelConfigs.value)!.id;
     if (selectedConfigId.value === configId) {
       syncEditableConfig(fallbackId);
     }
@@ -749,7 +847,8 @@ export const useAiStore = defineStore("ai", () => {
   function getTaskPollTimeoutMs(action: AiProviderTestAction, configSnapshot: AiProviderConfig) {
     const requestTimeoutMs =
       action === "image"
-        ? IMAGE_REQUEST_TIMEOUT_MS + IMAGE_SIDECAR_TIMEOUT_SLACK_MS
+        ? clampNumber(configSnapshot.timeoutMs, 3_000, IMAGE_REQUEST_TIMEOUT_MS, defaultConfig.timeoutMs, 0) +
+          IMAGE_SIDECAR_TIMEOUT_SLACK_MS
         : clampNumber(configSnapshot.timeoutMs, 3_000, 60_000, defaultConfig.timeoutMs, 0);
     const queueTimeoutMs =
       action === "image"
@@ -764,7 +863,7 @@ export const useAiStore = defineStore("ai", () => {
       return localStatus;
     }
 
-    if (backendQueueStatus.value.running?.action === action) {
+    if (getBackendRunningItems().some((item) => item.action === action)) {
       return "running";
     }
 
@@ -778,9 +877,10 @@ export const useAiStore = defineStore("ai", () => {
   function updateTestingState() {
     const pendingItem = testQueue.value.find((item) => item.status === "queued" || item.status === "running");
     isTesting.value = Boolean(pendingItem) || backendQueueStatus.value.pendingCount > 0;
+    const runningItem = firstItem(getBackendRunningItems()) ?? null;
     activeAction.value =
       testQueue.value.find((item) => item.status === "running")?.action ??
-      backendQueueStatus.value.running?.action ??
+      runningItem?.action ??
       pendingItem?.action ??
       null;
   }
@@ -796,7 +896,7 @@ export const useAiStore = defineStore("ai", () => {
 
   function syncLocalQueueWithBackendStatus() {
     const backendItems = [
-      ...(backendQueueStatus.value.running ? [backendQueueStatus.value.running] : []),
+      ...getBackendRunningItems(),
       ...backendQueueStatus.value.queued,
     ];
     for (const backendItem of backendItems) {
@@ -813,7 +913,7 @@ export const useAiStore = defineStore("ai", () => {
       });
     }
 
-    const runningRequestId = backendQueueStatus.value.running?.requestId ?? null;
+    const runningRequestIds = keySetBy(getBackendRunningItems(), (item) => item.requestId);
     const queuedRequestIds = keySetBy(backendQueueStatus.value.queued, (item) => item.requestId);
 
     for (const item of testQueue.value) {
@@ -821,9 +921,9 @@ export const useAiStore = defineStore("ai", () => {
         continue;
       }
 
-      if (runningRequestId === item.id) {
+      if (runningRequestIds.has(item.id)) {
         item.status = "running";
-        item.startedAt ??= Date.now();
+        item.startedAt ??= currentTime();
         continue;
       }
 
@@ -863,11 +963,11 @@ export const useAiStore = defineStore("ai", () => {
   }
 
   async function waitForBackendTask(requestId: string, item: AiProviderTestQueueItem, pollTimeoutMs: number) {
-    const startedAt = Date.now();
+    const startedAt = currentTime();
     for (;;) {
-      if (Date.now() - startedAt > pollTimeoutMs) {
+      if (hasTimeElapsed(startedAt, pollTimeoutMs)) {
         item.status = "failed";
-        item.finishedAt = Date.now();
+        item.finishedAt = currentTime();
         item.error = "AI 模型测试任务轮询超时，请刷新队列状态后重试";
         trimLocalTestQueue();
         throw new Error(item.error);
@@ -878,9 +978,9 @@ export const useAiStore = defineStore("ai", () => {
       try {
         task = await aiService.getProviderTestTask(requestId);
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
+        const message = stringifyErrorMessage(err);
         item.status = "failed";
-        item.finishedAt = Date.now();
+        item.finishedAt = currentTime();
         item.error = `AI 模型测试任务状态丢失：${message}`;
         trimLocalTestQueue();
         throw new Error(item.error);
@@ -914,22 +1014,23 @@ export const useAiStore = defineStore("ai", () => {
     const queuedRequestIds = filterByValue(testQueue.value, (item) => item.status, "queued").map((item) => item.id);
     const cancelled = await aiService.cancelProviderQueuedTests();
     await refreshBackendQueueStatus();
-    await Promise.allSettled(
-      queuedRequestIds.map(async (requestId) => {
+    await runAllSettled(
+      queuedRequestIds,
+      async (requestId) => {
         const item = findByValue(testQueue.value, (candidate) => candidate.id, requestId);
         try {
           const task = await aiService.getProviderTestTask(requestId);
           applyBackendTask(task, item);
         } catch (err) {
           if (item && item.status === "queued") {
-            const message = err instanceof Error ? err.message : String(err);
+            const message = stringifyErrorMessage(err);
             item.status = "failed";
-            item.finishedAt = Date.now();
+            item.finishedAt = currentTime();
             item.error = `AI 模型测试任务状态丢失：${message}`;
             trimLocalTestQueue();
           }
         }
-      })
+      }
     );
     return cancelled;
   }
@@ -947,9 +1048,9 @@ export const useAiStore = defineStore("ai", () => {
       applyBackendTask(task, item);
     } catch (err) {
       if (item && item.status === "queued") {
-        const message = err instanceof Error ? err.message : String(err);
+        const message = stringifyErrorMessage(err);
         item.status = "failed";
-        item.finishedAt = Date.now();
+        item.finishedAt = currentTime();
         item.error = `AI 模型测试任务状态丢失：${message}`;
         trimLocalTestQueue();
       }
@@ -957,7 +1058,39 @@ export const useAiStore = defineStore("ai", () => {
     return true;
   }
 
-  async function loadConfig() {
+  async function cancelImageMessage(messageId: string) {
+    const session = sessions.value.find((item) => hasByValue(item.messages, (message) => message.id, messageId));
+    const message = session ? findByValue(session.messages, (item) => item.id, messageId) : null;
+    if (!session || !message?.requestId || message.status !== "pending") {
+      return false;
+    }
+
+    const cancelled = await aiService.cancelProviderTestTask(message.requestId);
+    if (!cancelled) {
+      return false;
+    }
+
+    const queueItem = findByValue(testQueue.value, (item) => item.id, message.requestId);
+    if (queueItem) {
+      queueItem.status = "failed";
+      queueItem.finishedAt = currentTime();
+      queueItem.error = "图片生成已取消";
+    }
+
+    patchSessionMessage(messageId, {
+      role: "error",
+      status: "failed",
+      content: "图片生成已取消",
+      error: "图片生成已取消",
+    });
+    trimLocalTestQueue();
+    updateTestingState();
+    await refreshBackendQueueStatus();
+    await persistAiState();
+    return true;
+  }
+
+  async function loadConfigInner() {
     try {
       const raw = await configService.getPreferenceConfig();
       const parsed = raw ? safeJsonParseObject<Record<string, unknown>>(raw, {}) : {};
@@ -966,7 +1099,7 @@ export const useAiStore = defineStore("ai", () => {
         parsed[CONFIG_KEY] as Partial<AiProviderConfig> | null | undefined
       );
       const configIds = keySetBy(modelConfigs.value, (item) => item.id);
-      const fallbackId = modelConfigs.value[0].id;
+      const fallbackId = firstItem(modelConfigs.value)!.id;
       const activeIds = normalizeActiveConfigIds(
         parsed[ACTIVE_MODEL_CONFIGS_KEY] as Partial<AiActiveConfigIds> | null | undefined,
         fallbackId
@@ -987,11 +1120,11 @@ export const useAiStore = defineStore("ai", () => {
       console.error("[ERR_AI_CONFIG_LOAD] AI 模型提供商配置加载失败:", err);
       modelConfigs.value = [normalizeModelConfig(defaultConfig)];
       activeModelConfigIds.value = {
-        chat: modelConfigs.value[0].id,
-        image: modelConfigs.value[0].id,
+        chat: firstItem(modelConfigs.value)!.id,
+        image: firstItem(modelConfigs.value)!.id,
       };
-      selectedConfigId.value = modelConfigs.value[0].id;
-      config.value = toProviderConfig(modelConfigs.value[0]);
+      selectedConfigId.value = firstItem(modelConfigs.value)!.id;
+      config.value = toProviderConfig(firstItem(modelConfigs.value)!);
       sessions.value = [];
       promptLibrary.value = normalizePromptLibrary(defaultPromptLibrary);
     } finally {
@@ -999,12 +1132,25 @@ export const useAiStore = defineStore("ai", () => {
     }
   }
 
+  async function loadConfig() {
+    if (isLoaded.value) {
+      return;
+    }
+    if (loadConfigPromise) {
+      return loadConfigPromise;
+    }
+
+    loadConfigPromise = loadConfigInner();
+    try {
+      await loadConfigPromise;
+    } finally {
+      loadConfigPromise = null;
+    }
+  }
+
   function patchConfig(patch: Partial<AiProviderConfig>) {
     const current = getModelConfig(selectedConfigId.value);
-    const next = normalizeConfig({
-      ...toProviderConfig(current),
-      ...patch,
-    });
+    const next = normalizeConfig(applyObjectPatch(toProviderConfig(current), patch));
 
     if (patch.provider && patch.provider !== "custom") {
       const preset = providerDefaults[patch.provider];
@@ -1014,8 +1160,7 @@ export const useAiStore = defineStore("ai", () => {
     }
 
     const updated: AiModelConfig = {
-      ...current,
-      ...next,
+      ...applyObjectPatch(current, next),
       name: patch.displayName ? String(patch.displayName) : current.name || next.displayName,
       updatedAt: currentTime(),
     };
@@ -1070,7 +1215,7 @@ export const useAiStore = defineStore("ai", () => {
   }
 
   function ensurePromptCategory(type: AiPromptType, name: string) {
-    const normalizedName = name.trim();
+    const normalizedName = toTrimmedString(name);
     if (!normalizedName) {
       throw new Error("提示词分类不能为空");
     }
@@ -1101,8 +1246,8 @@ export const useAiStore = defineStore("ai", () => {
   }
 
   async function savePrompt(input: AiPromptInput) {
-    const title = input.title.trim();
-    const content = input.content.trim();
+    const title = toTrimmedString(input.title);
+    const content = toTrimmedString(input.content);
     if (!title) {
       throw new Error("提示词标题不能为空");
     }
@@ -1111,10 +1256,11 @@ export const useAiStore = defineStore("ai", () => {
     }
 
     const timestamp = currentTime();
-    const categoryId = input.categoryName?.trim()
-      ? ensurePromptCategory(input.type, input.categoryName)
+    const categoryName = toTrimmedString(input.categoryName);
+    const categoryId = categoryName
+      ? ensurePromptCategory(input.type, categoryName)
       : input.categoryId ||
-        getPromptCategories(input.type)[0]?.id ||
+        firstItem(getPromptCategories(input.type))?.id ||
         ensurePromptCategory(input.type, input.type === "image" ? "通用生图" : "通用对话");
 
     if (input.id) {
@@ -1178,28 +1324,44 @@ export const useAiStore = defineStore("ai", () => {
     const source = options.configId ? getModelConfig(options.configId) : getModelConfig(fallbackConfigId);
     const base = toProviderConfig(source);
     if (action === "image") {
+      const imageSize = normalizeImageSize(options.imageSize || base.imageSize || imageDraftSize.value);
       return {
         ...base,
+        queueKey: source.id,
         imageModel: base.imageModel || base.model,
-        imagePrompt: options.prompt || base.imagePrompt || base.testPrompt,
-        imageSize: normalizeImageSize(options.imageSize || base.imageSize || imageDraftSize.value),
+        imagePrompt: buildImagePromptWithSize(options.prompt || base.imagePrompt || base.testPrompt, imageSize),
+        imageSize,
+        queueMode: normalizeQueueMode(base.queueMode),
+        maxConcurrency: normalizeMaxConcurrency(base.maxConcurrency),
       };
     }
     return {
       ...base,
+      queueKey: source.id,
       testPrompt: options.prompt || base.testPrompt,
+      queueMode: normalizeQueueMode(base.queueMode),
+      maxConcurrency: normalizeMaxConcurrency(base.maxConcurrency),
     };
   }
 
   async function testProvider(
     action: AiProviderTestAction,
-    options: { configId?: string; prompt?: string; imageSize?: string } = {}
+    options: {
+      configId?: string;
+      prompt?: string;
+      imageSize?: string;
+      onTask?: (task: AiProviderTestTask, item: AiProviderTestQueueItem) => void | Promise<void>;
+    } = {}
   ) {
-    const existing = testQueue.value.find(
-      (item) => item.action === action && (item.status === "queued" || item.status === "running")
-    );
-    if (existing) {
-      return Promise.reject(new Error("该测试已在队列中，请等待当前任务完成"));
+    const configSnapshot = buildRuntimeConfig(action, options);
+
+    if (!isHighConcurrencyConfig(configSnapshot)) {
+      const existing = testQueue.value.find(
+        (item) => item.action === action && (item.status === "queued" || item.status === "running")
+      );
+      if (existing) {
+        return Promise.reject(new Error("该测试已在队列中，请等待当前任务完成"));
+      }
     }
 
     await refreshBackendQueueStatus();
@@ -1209,10 +1371,11 @@ export const useAiStore = defineStore("ai", () => {
 
     let activeItem: AiProviderTestQueueItem | null = null;
     try {
-      const configSnapshot = buildRuntimeConfig(action, options);
       const task = await aiService.enqueueProviderTest(configSnapshot, action);
       const item = applyBackendTask(task);
+      item.queueKey = configSnapshot.queueKey;
       activeItem = item;
+      await options.onTask?.(task, item);
       const result = await waitForBackendTask(
         task.requestId,
         item,
@@ -1221,25 +1384,25 @@ export const useAiStore = defineStore("ai", () => {
       item.status = result.ok ? "success" : "failed";
       item.result = result;
       item.error = result.ok ? undefined : result.message;
-      item.finishedAt = Date.now();
+      item.finishedAt = currentTime();
       item.startedAt ??= item.finishedAt;
       testResult.value = result;
       trimLocalTestQueue();
       return result;
     } catch (err) {
       console.error("[ERR_AI_PROVIDER_TEST] AI 模型提供商连接测试失败:", err);
-      const message = err instanceof Error ? err.message : String(err);
+      const message = stringifyErrorMessage(err);
       if (activeItem) {
         activeItem.status = "failed";
         activeItem.error = message;
-        activeItem.finishedAt = Date.now();
+        activeItem.finishedAt = currentTime();
       } else {
         testQueue.value.push({
           id: createQueueId(action),
           action,
           status: "failed",
-          createdAt: Date.now(),
-          finishedAt: Date.now(),
+          createdAt: currentTime(),
+          finishedAt: currentTime(),
           error: message,
         });
       }
@@ -1252,7 +1415,7 @@ export const useAiStore = defineStore("ai", () => {
   }
 
   async function sendChatMessage(content: string, configId = activeModelConfigIds.value.chat) {
-    const prompt = content.trim();
+    const prompt = toTrimmedString(content);
     if (!prompt) {
       throw new Error("请输入对话内容");
     }
@@ -1303,7 +1466,7 @@ export const useAiStore = defineStore("ai", () => {
       await persistAiState();
       return result;
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = stringifyErrorMessage(err);
       const pendingAssistant = findLastItem(session.messages, (item) => item.role === "assistant" && item.status === "pending");
       if (pendingAssistant) {
         patchSessionMessage(pendingAssistant.id, {
@@ -1334,7 +1497,7 @@ export const useAiStore = defineStore("ai", () => {
     configId = activeModelConfigIds.value.image,
     imageSize = imageDraftSize.value
   ) {
-    const prompt = content.trim();
+    const prompt = toTrimmedString(content);
     if (!prompt) {
       throw new Error("请输入生图提示词");
     }
@@ -1353,10 +1516,13 @@ export const useAiStore = defineStore("ai", () => {
       modelConfigId: modelConfig.id,
       model: modelConfig.model,
       imageSize: normalizedImageSize,
+      requestedImageSize: normalizedImageSize,
       createdAt: currentTime(),
     });
     await persistAiState();
 
+    let pendingMessageId = "";
+    let pendingRequestId = "";
     try {
       const pendingMessage: AiConversationSession["messages"][number] = {
         id: createId("ai-message"),
@@ -1366,8 +1532,10 @@ export const useAiStore = defineStore("ai", () => {
         modelConfigId: modelConfig.id,
         model: modelConfig.imageModel || modelConfig.model,
         imageSize: normalizedImageSize,
+        requestedImageSize: normalizedImageSize,
         createdAt: currentTime(),
       };
+      pendingMessageId = pendingMessage.id;
       appendSessionMessage(session, pendingMessage);
       await persistAiState();
 
@@ -1375,13 +1543,26 @@ export const useAiStore = defineStore("ai", () => {
         configId: modelConfig.id,
         prompt,
         imageSize: normalizedImageSize,
+        onTask: async (task) => {
+          pendingRequestId = task.requestId;
+          patchSessionMessage(pendingMessage.id, {
+            requestId: task.requestId,
+          });
+          await persistAiState();
+        },
       });
       patchSessionMessage(pendingMessage.id, {
         role: result.ok ? "assistant" : "error",
         status: result.ok ? "success" : "failed",
         content: result.message,
+        requestId: result.requestId || pendingRequestId || undefined,
         model: result.model || modelConfig.imageModel || modelConfig.model,
         error: result.ok ? undefined : result.message,
+        imageSize: normalizeImageSize(result.actualImageSize || result.fallbackImageSize || normalizedImageSize),
+        requestedImageSize: normalizeImageSize(result.requestedImageSize || normalizedImageSize),
+        actualImageSize: result.actualImageSize ? normalizeImageSize(result.actualImageSize) : undefined,
+        fallbackImageSize: result.fallbackImageSize ? normalizeImageSize(result.fallbackImageSize) : undefined,
+        imageAttempts: result.imageAttempts ? clampNumber(result.imageAttempts, 1, 10, 1, 0) : undefined,
         imageUrls: result.imageUrls,
         imagePaths: result.imagePaths,
         savedFiles: result.savedFiles,
@@ -1389,15 +1570,33 @@ export const useAiStore = defineStore("ai", () => {
       await persistAiState();
       return result;
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      const pendingImage = findLastItem(session.messages, (item) => item.role === "assistant" && item.status === "pending");
+      const message = stringifyErrorMessage(err);
+      const pendingImage = pendingMessageId
+        ? findByValue(session.messages, (item) => item.id, pendingMessageId)
+        : findLastItem(session.messages, (item) => item.role === "assistant" && item.status === "pending");
       if (pendingImage) {
-        patchSessionMessage(pendingImage.id, {
-          role: "error",
-          status: "failed",
-          content: message,
-          error: message,
-        });
+        const wasCancelled = pendingImage.error === "图片生成已取消";
+        if (!wasCancelled) {
+          patchSessionMessage(pendingImage.id, {
+            role: "error",
+            status: "failed",
+            content: message,
+            error: message,
+          });
+        }
+        await persistAiState();
+        if (wasCancelled) {
+          return {
+            requestId: pendingImage.requestId || null,
+            ok: false,
+            action: "image",
+            provider: modelConfig.provider,
+            model: modelConfig.imageModel || modelConfig.model,
+            baseUrl: modelConfig.baseUrl,
+            latencyMs: 0,
+            message: "图片生成已取消",
+          };
+        }
       } else {
         appendSessionMessage(session, {
           id: createId("ai-message"),
@@ -1408,6 +1607,7 @@ export const useAiStore = defineStore("ai", () => {
           model: modelConfig.imageModel || modelConfig.model,
           error: message,
           imageSize: normalizedImageSize,
+          requestedImageSize: normalizedImageSize,
           createdAt: currentTime(),
         });
       }
@@ -1454,6 +1654,7 @@ export const useAiStore = defineStore("ai", () => {
     activeImageSession,
     providerOptions,
     promptTypeOptions,
+    isActionBusy,
     getActionQueueStatus,
     getPromptCategories,
     getPromptCategoryOptions,
@@ -1468,6 +1669,7 @@ export const useAiStore = defineStore("ai", () => {
     refreshBackendQueueStatus,
     cancelBackendQueuedTests,
     cancelBackendQueuedTest,
+    cancelImageMessage,
     loadConfig,
     patchConfig,
     createModelConfig,

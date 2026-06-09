@@ -1,9 +1,9 @@
-use std::fs::{self, File};
-use std::io::{Read, Write};
-use std::path::Path;
 use crate::infra::path::PathProvider;
 use crate::infra::sensitive::sanitize_sensitive_text;
 use crate::infra::{AppError, AppResult};
+use std::fs::{self, File};
+use std::io::{Read, Write};
+use std::path::Path;
 
 pub struct LoggerInfra {
     path_provider: PathProvider,

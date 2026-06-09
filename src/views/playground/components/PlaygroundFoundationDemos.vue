@@ -27,6 +27,43 @@ const simpleTableRows = [
   { name: "BaseTable", usage: "轻量表格", status: "待增强", owner: "数据组" },
 ];
 
+const nestedTableColumns = [
+  { key: "name", title: "组件", width: "22%" },
+  { key: "meta.version", title: "版本", width: "13%", align: "center" as const },
+  { key: "meta.owner", title: "负责人", width: "18%" },
+  { key: "meta.trace", title: "追踪标识", wrap: true, ariaLabel: "组件追踪标识" },
+];
+
+const nestedTableRows = [
+  {
+    name: "BaseDescriptionList",
+    meta: {
+      id: "foundation-description-list",
+      version: "0.0.3",
+      owner: "基础组",
+      trace: "trace://playground/foundation/BaseDescriptionList/long-readable-path-for-wrapping-check",
+    },
+  },
+  {
+    name: "BaseKeyValueList",
+    meta: {
+      id: "foundation-key-value-list",
+      version: "0.0.3",
+      owner: "基础组",
+      trace: "trace://playground/foundation/BaseKeyValueList/sidebar-summary-and-detail-card",
+    },
+  },
+  {
+    name: "BaseTable",
+    meta: {
+      id: "foundation-table",
+      version: "0.0.4",
+      owner: "数据组",
+      trace: "trace://playground/foundation/BaseTable/nested-key-and-long-cell-content",
+    },
+  },
+];
+
 const descriptionItems = [
   { key: "name", label: "组件名称", value: "BaseDescriptionList", status: "primary" as const },
   { key: "category", label: "所属分类", value: "基础控件" },
@@ -43,6 +80,30 @@ const auditDescriptionItems = [
   { key: "updated", label: "最近更新", value: "2026-06-08", description: "通过类型与架构检查" },
 ];
 
+const longDescriptionItems = [
+  {
+    key: "resource",
+    label: "资源路径",
+    value: "workspace://components/foundation/BaseDescriptionList/very-long-detail-summary-field",
+    description: "用于验证长路径、长标识符和跨系统资源名在属性网格内自然换行。",
+    status: "primary" as const,
+    span: 2 as const,
+  },
+  {
+    key: "owner",
+    label: "责任团队",
+    value: "组件平台 / Playground 治理小组",
+    description: "说明文本较长时不会挤压右侧列，也不会产生横向滚动。",
+  },
+  {
+    key: "hash",
+    label: "配置摘要",
+    value: "sha256:4f8c9a1b2d3e5f7098a6c4d2e1f0b9a7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1",
+    description: "开启 wrapValue 后完整展示。",
+    status: "success" as const,
+  },
+];
+
 const keyValueItems = [
   { key: "runtime", label: "运行态", value: "正常", icon: "Activity", status: "success" as const, description: "实时状态" },
   { key: "version", label: "版本", value: "0.0.3", icon: "Package", description: "当前包版本" },
@@ -54,6 +115,26 @@ const keyValueAuditItems = [
   { key: "coverage", label: "覆盖范围", value: "6 个状态", icon: "LayoutGrid", status: "primary" as const },
   { key: "risk", label: "残余风险", value: "低", icon: "ShieldCheck", status: "neutral" as const },
   { key: "note", label: "备注", value: "适合侧栏摘要、详情卡片和确认页", icon: "FileText", span: 2 as const },
+];
+
+const keyValueLongItems = [
+  {
+    key: "job",
+    label: "最近任务",
+    value: "playground-review-description-and-key-value-list-2026-06-09",
+    icon: "ListChecks",
+    status: "primary" as const,
+    description: "长任务名在侧栏摘要里需要完整保留，便于定位组件审查批次。",
+  },
+  {
+    key: "trace",
+    label: "Trace",
+    value: "trace_01JZ9T7R9FZ7V4D4XMA7S4K1QZ/component-foundation-description-list",
+    icon: "Route",
+    status: "success" as const,
+    description: "开启 wrapDescription 后说明会在卡片内换行。",
+    span: 2 as const,
+  },
 ];
 
 const handleSearch = (value: string) => {
@@ -151,12 +232,17 @@ const handleSearch = (value: string) => {
             @search="handleSearch"
             @clear="triggerToast('搜索已清空', 'info')"
           />
-          <BaseSearchInput model-value="加载中" placeholder="加载态" loading disabled />
+          <BaseSearchInput model-value="加载中" placeholder="加载态" loading loading-text="正在搜索组件" disabled />
           <BaseSearchInput model-value="错误关键词" placeholder="错误态" error clear-text="清空错误关键词" />
           <BaseSearchInput model-value="只读查询" placeholder="只读态" readonly surface="muted" />
           <BaseSearchInput v-model="searchValue" placeholder="即时搜索" search-on-input surface="plain" :clearable="false">
             <template #suffix>
               <BaseBadge type="primary" variant="outline">Live</BaseBadge>
+            </template>
+          </BaseSearchInput>
+          <BaseSearchInput v-model="searchValue" placeholder="后缀与清空共存" clear-text="清空后缀搜索">
+            <template #suffix>
+              <BaseBadge type="success" variant="outline">Enter</BaseBadge>
             </template>
           </BaseSearchInput>
           <BaseSearchInput v-model="searchValue" placeholder="带前缀搜索" size="lg" surface="muted">
@@ -174,6 +260,16 @@ const handleSearch = (value: string) => {
             show-edges
             aria-label="完整分页"
             @change="triggerToast(`分页：${$event.page} / ${$event.pageSize}`, 'info')"
+          />
+          <BasePagination
+            :page="18"
+            :page-size="25"
+            :page-size-options="[10, 20, 50]"
+            :total="980"
+            show-edges
+            :sibling-count="2"
+            size="lg"
+            aria-label="长列表分页"
           />
           <BasePagination
             v-model:page="foundationPage"
@@ -196,6 +292,7 @@ const handleSearch = (value: string) => {
             v-model:page-size="foundationPageSize"
             :total="0"
             loading
+            loading-text="正在加载分页"
             size="lg"
           />
           <BasePagination
@@ -223,9 +320,26 @@ const handleSearch = (value: string) => {
             surface="muted"
             bordered
             min-height="260px"
+            actions-label="空结果操作"
           >
             <BaseButton type="primary" size="sm">新建组件</BaseButton>
             <BaseButton type="neutral" size="sm">重置筛选</BaseButton>
+          </BaseEmpty>
+        </BasePanel>
+        <BasePanel title="完成空态" subtitle="成功态和大尺寸适合引导页、完成页和空看板。">
+          <BaseEmpty
+            title="当前筛选已覆盖全部组件"
+            description="所有高频基础控件都已经完成首轮审查，可继续切换到数据展示、表单输入或布局容器分类继续补齐。"
+            icon="CheckCircle2"
+            icon-tone="success"
+            size="lg"
+            surface="card"
+            bordered
+            min-height="260px"
+            actions-label="完成态操作"
+          >
+            <BaseButton type="success" size="sm">继续审查</BaseButton>
+            <BaseButton type="neutral" size="sm" outline>查看记录</BaseButton>
           </BaseEmpty>
         </BasePanel>
         <BasePanel title="嵌入空态" subtitle="紧凑尺寸可放入表格、详情卡、抽屉和局部面板。">
@@ -239,6 +353,7 @@ const handleSearch = (value: string) => {
               align="start"
               surface="plain"
               aria-label="暂无审计记录"
+              actions-label="审计记录操作"
             >
               <BaseButton type="neutral" size="xs" outline>查看规则</BaseButton>
             </BaseEmpty>
@@ -263,6 +378,7 @@ const handleSearch = (value: string) => {
             surface="muted"
             bordered
             disabled
+            actions-label="权限申请操作"
           >
             <BaseButton type="danger" size="sm">申请权限</BaseButton>
           </BaseEmpty>
@@ -277,6 +393,7 @@ const handleSearch = (value: string) => {
               surface="muted"
               bordered
               min-height="220px"
+              extra-label="错误代码"
               @retry="triggerToast('重新加载组件列表', 'info')"
             >
               <BaseBadge type="danger" variant="outline">ERR_COMPONENT_LOAD</BaseBadge>
@@ -292,9 +409,24 @@ const handleSearch = (value: string) => {
                 compact
                 show-retry
                 retry-text="检查配置"
+                extra-label="配置错误标记"
                 @retry="triggerToast('检查配置项', 'info')"
               >
                 <BaseBadge type="warning" variant="outline">WARN_SCHEMA</BaseBadge>
+              </BaseError>
+              <BaseError
+                title="同步任务返回了非常长的错误标题但仍然需要保持卡片内部换行稳定"
+                message="错误详情包含组件路径、筛选条件、运行环境和本地服务状态等较长内容时，标题与说明应当在容器内部自然换行，不挤压按钮，也不产生横向滚动。"
+                icon="AlertTriangle"
+                tone="danger"
+                surface="muted"
+                compact
+                show-retry
+                retry-text="重新同步"
+                extra-label="长错误标记"
+                @retry="triggerToast('重新同步任务', 'info')"
+              >
+                <BaseBadge type="danger" variant="outline">ERR_SYNC_LONG_MESSAGE</BaseBadge>
               </BaseError>
               <BaseError
                 title="同步已暂停"
@@ -328,10 +460,21 @@ const handleSearch = (value: string) => {
         <BasePanel title="嵌套形态" subtitle="plain 表面适合放入详情卡、抽屉和面板正文。">
           <BaseDescriptionList aria-label="嵌套描述列表" :items="auditDescriptionItems.slice(0, 4)" :columns="2" surface="plain" :bordered="false" />
         </BasePanel>
+        <BasePanel title="长字段" subtitle="长路径、摘要哈希和跨系统标识可以主动开启换行。">
+          <BaseDescriptionList
+            aria-label="长字段描述列表"
+            :items="longDescriptionItems"
+            :columns="2"
+            surface="muted"
+            wrap-label
+            wrap-value
+            wrap-description
+          />
+        </BasePanel>
         <BasePanel title="状态兜底" subtitle="加载、空态和禁用态让异步详情区域更稳定。">
           <div class="description-state-stack">
-            <BaseDescriptionList aria-label="加载中的描述列表" :items="[]" loading compact />
-            <BaseDescriptionList aria-label="空描述列表" :items="[]" empty-text="暂无可展示属性" compact />
+            <BaseDescriptionList aria-label="加载中的描述列表" :items="[]" loading loading-text="正在加载属性" :skeleton-rows="5" compact />
+            <BaseDescriptionList aria-label="空描述列表" :items="[]" empty-text="暂无可展示属性" empty-icon="Inbox" compact />
             <BaseDescriptionList aria-label="禁用描述列表" :items="descriptionItems.slice(0, 2)" disabled compact />
           </div>
         </BasePanel>
@@ -358,10 +501,19 @@ const handleSearch = (value: string) => {
           <div class="key-value-demo-stack">
             <BaseKeyValueList aria-label="运行态键值摘要" :items="keyValueItems" :columns="1" />
             <BaseKeyValueList aria-label="审计键值摘要" :items="keyValueAuditItems" :columns="2" surface="card" size="lg" />
+            <BaseKeyValueList
+              aria-label="长字段键值摘要"
+              :items="keyValueLongItems"
+              :columns="2"
+              surface="muted"
+              wrap-label
+              wrap-value
+              wrap-description
+            />
             <BaseKeyValueList aria-label="嵌套键值摘要" :items="keyValueAuditItems.slice(0, 3)" :columns="3" surface="plain" :bordered="false" compact />
             <div class="key-value-state-grid">
-              <BaseKeyValueList aria-label="加载中的键值摘要" :items="[]" loading compact />
-              <BaseKeyValueList aria-label="空键值摘要" :items="[]" empty-text="暂无摘要指标" compact />
+              <BaseKeyValueList aria-label="加载中的键值摘要" :items="[]" loading loading-text="正在加载摘要" :skeleton-rows="4" compact />
+              <BaseKeyValueList aria-label="空键值摘要" :items="[]" empty-text="暂无摘要指标" empty-icon="Inbox" compact />
               <BaseKeyValueList aria-label="禁用键值摘要" :items="keyValueItems.slice(0, 2)" disabled compact />
             </div>
           </div>
@@ -417,9 +569,32 @@ const handleSearch = (value: string) => {
             </template>
           </BaseTable>
         </BasePanel>
+        <BasePanel title="长字段表格" subtitle="支持嵌套 key、列级换行和自定义最小宽度。">
+          <BaseTable
+            aria-label="嵌套字段轻量表格"
+            :columns="nestedTableColumns"
+            :data="nestedTableRows"
+            row-key="meta.id"
+            :selected-keys="['foundation-table']"
+            min-width="640px"
+            size="sm"
+          >
+            <template #name="{ row }">
+              <strong class="simple-table-name">{{ row.name }}</strong>
+            </template>
+          </BaseTable>
+        </BasePanel>
         <BasePanel title="加载与空态" subtitle="轻量表格内置加载骨架和空态。">
           <div class="table-state-stack">
-            <BaseTable aria-label="加载中的轻量表格" :columns="simpleTableColumns.slice(0, 3)" :data="[]" loading :skeleton-rows="4" size="sm" />
+            <BaseTable
+              aria-label="加载中的轻量表格"
+              :columns="simpleTableColumns.slice(0, 3)"
+              :data="[]"
+              loading
+              loading-text="正在加载组件表格"
+              :skeleton-rows="4"
+              size="sm"
+            />
             <BaseTable aria-label="空轻量表格" :columns="simpleTableColumns.slice(0, 2)" :data="[]" size="sm" empty-text="暂无组件记录" empty-icon="FolderOpen" />
             <BaseTable
               aria-label="禁用 plain 表格"

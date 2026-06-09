@@ -16,9 +16,13 @@ const dialogOpen = ref(false);
 const compactDialogOpen = ref(false);
 const loadingDialogOpen = ref(false);
 const fullscreenDialogOpen = ref(false);
+const actionDialogOpen = ref(false);
+const lockedDialogOpen = ref(false);
 const drawerOpen = ref(false);
 const leftDrawerOpen = ref(false);
 const loadingDrawerOpen = ref(false);
+const actionDrawerOpen = ref(false);
+const lockedDrawerOpen = ref(false);
 const formItemName = ref("Monster Workbench");
 const formItemDescription = ref("用于承载高频表单字段的标签、说明、校验反馈和辅助信息。");
 const selectVal = ref("vue");
@@ -62,6 +66,47 @@ const detailCardItems = [
           </template>
         </BaseAlert>
         <BaseAlert type="info" variant="plain" title="嵌入提示" description="plain 形态适合放入已有卡片或表单正文。" :show-icon="false" />
+      </div>
+    </PlaygroundDemoSection>
+
+    <PlaygroundDemoSection title="横幅与长文案" subtitle="页面级横幅、左侧强调线和底部动作适合承载更完整的提示信息。" icon="Megaphone">
+      <div class="dialog-demo-stack">
+        <BaseAlert
+          type="info"
+          variant="outline"
+          title="页面横幅"
+          description="banner 形态适合放在页面或面板顶部，弱化卡片感，只保留边界与语义色。"
+          banner
+          accent
+        />
+        <BaseAlert
+          type="warning"
+          title="长说明提示"
+          description="这是一段较长的提示说明，用于验证提示条在窄屏或复杂表单中是否能够稳定换行，并通过最大行数控制避免占用过多纵向空间。"
+          wrap-title
+          wrap-description
+          :max-description-lines="2"
+          actions-placement="bottom"
+          accent
+        >
+          <template #actions>
+            <BaseButton type="warning" size="xs">立即处理</BaseButton>
+            <BaseButton type="neutral" size="xs" outline>稍后提醒</BaseButton>
+          </template>
+        </BaseAlert>
+        <BaseAlert
+          type="success"
+          variant="outline"
+          title="垂直居中提示"
+          description="align=center 适合单行动作说明，图标与正文垂直居中。"
+          align="center"
+          role="note"
+          actions-label="垂直居中提示操作"
+        >
+          <template #actions>
+            <BaseBadge type="success" variant="outline">已启用</BaseBadge>
+          </template>
+        </BaseAlert>
       </div>
     </PlaygroundDemoSection>
 
@@ -121,6 +166,13 @@ const detailCardItems = [
             >
               常驻错误
             </BaseButton>
+            <BaseButton
+              type="neutral"
+              size="sm"
+              @click="triggerToast('导出任务已加入后台队列。', { type: 'info', title: '后台导出', description: '右下角 Toast 支持辅助说明、进度条和长文案换行。', duration: 4200, closable: true, showProgress: true, wrap: true })"
+            >
+              说明进度
+            </BaseButton>
           </div>
         </BasePanel>
 
@@ -150,6 +202,13 @@ const detailCardItems = [
             >
               不可关闭
             </BaseButton>
+            <BaseButton
+              type="neutral"
+              size="sm"
+              @click="triggerMessage('导入任务正在后台执行，完成后会自动刷新当前列表。', 'info', { title: '队列进度', description: '顶部 Message 支持说明文字、倒计时进度条和长文案换行。', duration: 4500, showProgress: true, wrap: true, actionText: '查看队列', onAction: () => triggerToast('已打开任务队列', 'info') })"
+            >
+              进度消息
+            </BaseButton>
           </div>
         </BasePanel>
       </div>
@@ -162,6 +221,8 @@ const detailCardItems = [
         <BaseButton type="primary" @click="dialogOpen = true">打开对话框</BaseButton>
         <BaseButton type="neutral" @click="compactDialogOpen = true">紧凑确认</BaseButton>
         <BaseButton type="neutral" @click="loadingDialogOpen = true">加载弹窗</BaseButton>
+        <BaseButton type="neutral" @click="actionDialogOpen = true">头部动作</BaseButton>
+        <BaseButton type="neutral" @click="lockedDialogOpen = true">关闭锁定</BaseButton>
         <BaseButton type="neutral" @click="fullscreenDialogOpen = true">全屏弹窗</BaseButton>
         <BaseBadge type="neutral">open: {{ dialogOpen ? "true" : "false" }}</BaseBadge>
       </div>
@@ -215,11 +276,53 @@ const detailCardItems = [
         size="lg"
         loading
         confirm-loading
+        loading-text="加载组件配置"
+        confirm-loading-text="同步中"
       >
         <BaseDescriptionList aria-label="加载前的组件摘要" :items="detailCardItems" :columns="3" compact />
         <template #footer>
           <BaseButton type="neutral" size="sm" @click="loadingDialogOpen = false">关闭</BaseButton>
           <BaseButton type="primary" size="sm" loading>保存中</BaseButton>
+        </template>
+      </BaseDialog>
+      <BaseDialog
+        v-model="actionDialogOpen"
+        title="很长的对话框标题可以按需换行并保持头部操作区稳定"
+        description="适合资源名称较长、策略说明较完整的弹窗，头部动作与关闭按钮不会挤压标题。"
+        icon="Settings2"
+        show-icon
+        wrap-title
+        wrap-description
+        footer-align="between"
+        body-label="头部动作弹窗内容"
+        footer-label="头部动作弹窗页脚"
+      >
+        <template #actions>
+          <BaseBadge type="primary" variant="outline">Beta</BaseBadge>
+        </template>
+        <BaseAlert type="info" title="头部动作" description="actions 插槽适合状态徽标、帮助入口或轻量操作。" compact />
+        <template #footer>
+          <BaseButton type="neutral" size="sm" @click="actionDialogOpen = false">取消</BaseButton>
+          <BaseButton type="primary" size="sm" @click="actionDialogOpen = false">保存配置</BaseButton>
+        </template>
+      </BaseDialog>
+      <BaseDialog
+        v-model="lockedDialogOpen"
+        title="处理中关闭锁定"
+        description="异步保存或提交时可以锁定遮罩、ESC 和关闭按钮，避免误关造成状态不明确。"
+        icon="ShieldAlert"
+        show-icon
+        confirm-loading
+        confirm-loading-text="保存中"
+        lock-close-on-loading
+        :close-on-click-modal="false"
+        :close-on-press-escape="false"
+        footer-align="between"
+      >
+        <BaseAlert type="warning" title="关闭已锁定" description="右上角关闭按钮会禁用，业务仍可以通过明确按钮结束流程。" compact />
+        <template #footer>
+          <BaseBadge type="warning" variant="outline">confirmLoading</BaseBadge>
+          <BaseButton type="primary" size="sm" @click="lockedDialogOpen = false">完成并关闭</BaseButton>
         </template>
       </BaseDialog>
       <BaseDialog
@@ -254,6 +357,8 @@ const detailCardItems = [
         <BaseButton type="primary" @click="drawerOpen = true">右侧抽屉</BaseButton>
         <BaseButton type="neutral" @click="leftDrawerOpen = true">左侧抽屉</BaseButton>
         <BaseButton type="neutral" @click="loadingDrawerOpen = true">加载抽屉</BaseButton>
+        <BaseButton type="neutral" @click="actionDrawerOpen = true">头部动作</BaseButton>
+        <BaseButton type="neutral" @click="lockedDrawerOpen = true">关闭锁定</BaseButton>
       </div>
       <div class="dialog-demo-stack">
         <BaseDetailCard
@@ -265,16 +370,24 @@ const detailCardItems = [
           :items="detailCardItems"
           compact
         />
-        <BaseAlert type="info" title="能力覆盖" description="支持左右方向、尺寸、遮罩关闭策略、ESC、加载态、页脚处理中和焦点回退。" compact />
+        <BaseAlert type="info" title="能力覆盖" description="支持左右方向、尺寸、遮罩关闭策略、ESC、加载态、关闭锁定、页脚处理中和焦点回退。" compact />
       </div>
 
       <BaseDrawer
         v-model="drawerOpen"
         title="组件详情"
         description="支持说明、ESC 关闭、遮罩关闭策略和页脚动作。"
+        icon="PanelRightOpen"
+        show-icon
         size="lg"
+        footer-align="between"
+        body-label="组件详情抽屉内容"
+        footer-label="组件详情抽屉页脚"
         @close="triggerToast('右侧抽屉已关闭', 'info')"
       >
+        <template #actions>
+          <BaseBadge type="primary" variant="outline">Detail</BaseBadge>
+        </template>
         <BaseDetailCard
           title="BaseDrawer"
           description="右侧抽屉适合详情查看和局部编辑。"
@@ -285,7 +398,8 @@ const detailCardItems = [
           compact
         />
         <template #footer>
-          <BaseFormActions compact>
+          <BaseBadge type="neutral" variant="outline">lg / right</BaseBadge>
+          <BaseFormActions compact :divided="false" justify="end">
             <BaseButton type="neutral" size="sm" @click="drawerOpen = false">关闭</BaseButton>
             <BaseButton type="primary" size="sm" @click="drawerOpen = false">保存</BaseButton>
           </BaseFormActions>
@@ -296,9 +410,12 @@ const detailCardItems = [
         v-model="leftDrawerOpen"
         title="筛选设置"
         description="左侧抽屉可用于导航筛选和批量配置。"
+        icon="Filter"
+        show-icon
         placement="left"
         width="max-w-sm"
         :close-on-overlay="false"
+        body-label="筛选设置抽屉内容"
       >
         <BaseForm title="筛选条件" description="左侧抽屉适合导航、筛选和资源选择。" compact>
           <BaseFormItem label="关键词">
@@ -309,7 +426,7 @@ const detailCardItems = [
           </BaseFormItem>
         </BaseForm>
         <template #footer>
-          <BaseFormActions compact>
+          <BaseFormActions compact :divided="false">
             <BaseButton type="neutral" size="sm" @click="leftDrawerOpen = false">重置</BaseButton>
             <BaseButton type="primary" size="sm" @click="leftDrawerOpen = false">应用</BaseButton>
           </BaseFormActions>
@@ -320,15 +437,71 @@ const detailCardItems = [
         v-model="loadingDrawerOpen"
         title="加载资源详情"
         description="loading 和 confirmLoading 可以稳定住异步抽屉布局。"
+        icon="LoaderCircle"
+        show-icon
         size="xl"
         loading
         confirm-loading
+        loading-text="加载资源详情"
+        confirm-loading-text="保存中"
+        footer-align="between"
         :close-on-overlay="false"
+        body-label="加载资源抽屉内容"
+        footer-label="加载资源抽屉页脚"
       >
         <BaseDescriptionList aria-label="加载前的资源摘要" :items="detailCardItems" :columns="3" compact />
         <template #footer>
-          <BaseButton type="neutral" size="sm" @click="loadingDrawerOpen = false">关闭</BaseButton>
+          <BaseBadge type="primary" variant="outline">loading</BaseBadge>
           <BaseButton type="primary" size="sm" loading>保存中</BaseButton>
+        </template>
+      </BaseDrawer>
+
+      <BaseDrawer
+        v-model="actionDrawerOpen"
+        title="很长的抽屉标题可以按需换行并保持头部动作区稳定"
+        description="适合资源名称较长、策略说明较完整的详情抽屉，头部动作与关闭按钮不会挤压标题。"
+        icon="Settings2"
+        show-icon
+        wrap-title
+        wrap-description
+        size="lg"
+        footer-align="between"
+        body-label="头部动作抽屉内容"
+        footer-label="头部动作抽屉页脚"
+      >
+        <template #actions>
+          <BaseBadge type="primary" variant="outline">Beta</BaseBadge>
+        </template>
+        <BaseAlert type="info" title="头部动作" description="actions 插槽适合状态徽标、帮助入口或轻量操作。" compact />
+        <BaseDescriptionList aria-label="头部动作能力摘要" :items="detailCardItems" :columns="2" compact />
+        <template #footer>
+          <BaseBadge type="neutral" variant="outline">wrap</BaseBadge>
+          <BaseFormActions compact :divided="false" justify="end">
+            <BaseButton type="neutral" size="sm" @click="actionDrawerOpen = false">取消</BaseButton>
+            <BaseButton type="primary" size="sm" @click="actionDrawerOpen = false">保存配置</BaseButton>
+          </BaseFormActions>
+        </template>
+      </BaseDrawer>
+
+      <BaseDrawer
+        v-model="lockedDrawerOpen"
+        title="处理中关闭锁定"
+        description="异步保存或提交时可以锁定遮罩、ESC 和关闭按钮，避免误关造成状态不明确。"
+        icon="ShieldAlert"
+        show-icon
+        confirm-loading
+        confirm-loading-text="保存中"
+        lock-close-on-loading
+        :close-on-overlay="false"
+        :close-on-esc="false"
+        footer-align="between"
+        body-label="关闭锁定抽屉内容"
+        footer-label="关闭锁定抽屉页脚"
+      >
+        <BaseAlert type="warning" title="关闭已锁定" description="右上角关闭按钮会禁用，业务仍可以通过明确按钮结束流程。" compact />
+        <template #footer>
+          <BaseBadge type="warning" variant="outline">confirmLoading</BaseBadge>
+          <BaseButton type="primary" size="sm" @click="lockedDrawerOpen = false">完成并关闭</BaseButton>
         </template>
       </BaseDrawer>
     </PlaygroundDemoSection>

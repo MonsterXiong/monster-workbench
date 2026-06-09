@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from "vue";
 import { useI18n } from "../../composables/useI18n";
-import { createRandomId, filterByFalsyValue, filterBySearchFields, getNextCircularIndex, groupByEntries, normalizeSearchText } from "../../utils";
+import { createRandomId, filterByFalsyValue, filterBySearchFields, getNextCircularIndex, groupByEntries, isEscapeKey, isKeyboardKey, normalizeSearchText } from "../../utils";
 
 export interface CommandPaletteItem {
   key: string;
@@ -84,22 +84,22 @@ const moveActive = (step: number) => {
 };
 
 const handleKeydown = (event: KeyboardEvent) => {
-  if (event.key === "Escape") {
+  if (isEscapeKey(event)) {
     event.preventDefault();
     close();
     return;
   }
-  if (event.key === "ArrowDown") {
+  if (isKeyboardKey(event, "ArrowDown")) {
     event.preventDefault();
     moveActive(1);
     return;
   }
-  if (event.key === "ArrowUp") {
+  if (isKeyboardKey(event, "ArrowUp")) {
     event.preventDefault();
     moveActive(-1);
     return;
   }
-  if (event.key === "Enter" && activeItem.value) {
+  if (isKeyboardKey(event, "Enter") && activeItem.value) {
     event.preventDefault();
     handleSelect(activeItem.value);
   }

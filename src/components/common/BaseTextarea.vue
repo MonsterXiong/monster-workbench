@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, useId, watch } from "vue";
 import { useI18n } from "../../composables/useI18n";
-import { joinAriaIds } from "../../utils";
+import { getComputedCssPixelValue, getEventTargetValue, joinAriaIds } from "../../utils";
 
 interface Props {
   modelValue: string;
@@ -9,10 +9,13 @@ interface Props {
   disabled?: boolean;
   readonly?: boolean;
   error?: boolean;
+  loading?: boolean;
+  size?: "sm" | "md" | "lg";
   rows?: number;
   autosize?: boolean | { minRows?: number; maxRows?: number };
   maxlength?: number;
   showCount?: boolean;
+  showWordLimit?: boolean;
   autocomplete?: string;
   resize?: "none" | "vertical";
   ariaLabel?: string;
@@ -24,10 +27,13 @@ const props = withDefaults(defineProps<Props>(), {
   disabled: false,
   readonly: false,
   error: false,
+  loading: false,
+  size: "md",
   rows: 4,
   autosize: false,
   maxlength: undefined,
   showCount: true,
+  showWordLimit: undefined,
   autocomplete: "off",
   resize: "vertical",
   ariaLabel: "",
@@ -56,8 +62,9 @@ const controlRef = ref<HTMLTextAreaElement | null>(null);
 const countId = `${textareaId}-count`;
 const errorId = `${textareaId}-error`;
 const resolvedAriaLabel = computed(() => props.ariaLabel || props.placeholder || t("common.inputPlaceholder"));
+const resolvedShowCount = computed(() => props.showWordLimit ?? props.showCount);
 const describedBy = computed(() => {
-  return joinAriaIds([props.showCount ? countId : undefined, props.error && props.errorMessage ? errorId : undefined]);
+  return joinAriaIds([resolvedShowCount.value ? countId : undefined, props.error && props.errorMessage ? errorId : undefined]);
 });
 
 const countText = computed(() => {
@@ -69,7 +76,7 @@ const resizeTextarea = () => {
   if (!props.autosize || !controlRef.value) return;
 
   const control = controlRef.value;
-  const lineHeight = Number.parseFloat(window.getComputedStyle(control).lineHeight) || 20;
+  const lineHeight = getComputedCssPixelValue(control, "lineHeight", 20);
   const autosize = typeof props.autosize === "object" ? props.autosize : {};
   const minRows = autosize.minRows ?? props.rows;
   const maxRows = autosize.maxRows;
@@ -77,15 +84,13 @@ const resizeTextarea = () => {
   const maxHeight = maxRows ? maxRows * lineHeight : undefined;
 
   control.style.height = "auto";
-  control.style.height = `${Math.max(control.scrollHeight, minHeight)}px`;
+  const nextHeight = Math.max(control.scrollHeight, minHeight);
+  control.style.height = `${maxHeight ? Math.min(nextHeight, maxHeight) : nextHeight}px`;
   control.style.overflowY = maxHeight && control.scrollHeight > maxHeight ? "auto" : "hidden";
-  if (maxHeight) {
-    control.style.height = `${Math.min(Number.parseFloat(control.style.height), maxHeight)}px`;
-  }
 };
 
 const handleInput = (event: Event) => {
-  emit("input", (event.target as HTMLTextAreaElement).value);
+  emit("input", getEventTargetValue(event));
   resizeTextarea();
 };
 
@@ -104,8 +109,9 @@ onMounted(() => {
 <template>
   <label
     class="base-textarea"
-    :class="[{ 'is-error': error, 'is-disabled': disabled }, `is-resize-${resize}`]"
+    :class="[`base-textarea--${size}`, { 'is-error': error, 'is-disabled': disabled, 'is-loading': loading }, `is-resize-${resize}`]"
     :aria-invalid="error ? 'true' : undefined"
+    :aria-busy="loading || undefined"
   >
     <textarea
       ref="controlRef"
@@ -123,12 +129,16 @@ onMounted(() => {
       @focus="emit('focus', $event)"
       @blur="emit('blur', $event)"
       @input="handleInput"
-      @change="emit('change', ($event.target as HTMLTextAreaElement).value)"
+      @change="emit('change', getEventTargetValue($event))"
       @keydown="emit('keydown', $event)"
       @keyup="emit('keyup', $event)"
       @keyup.enter="emit('enter', $event)"
     ></textarea>
-    <span v-if="showCount" :id="countId" class="base-textarea__count" role="status" aria-live="polite">{{ countText }}</span>
+    <span v-if="loading" class="base-textarea__loading" role="status" aria-live="polite" :aria-label="t('common.loading')">
+      <BaseIcon name="LoaderCircle" size="14" aria-hidden="true" />
+      <span class="sr-only">{{ t("common.loading") }}</span>
+    </span>
+    <span v-if="resolvedShowCount" :id="countId" class="base-textarea__count" role="status" aria-live="polite">{{ countText }}</span>
     <span v-if="error && errorMessage" :id="errorId" class="base-textarea__error" role="alert">
       {{ errorMessage }}
     </span>
@@ -162,6 +172,14 @@ onMounted(() => {
   @apply block w-full rounded-xl bg-transparent px-3 py-2.5 text-xs font-bold leading-5 text-slate-700 outline-none placeholder:text-slate-400 disabled:cursor-not-allowed dark:text-slate-100;
 }
 
+.base-textarea--sm .base-textarea__control {
+  @apply px-2.5 py-2 text-[11px] leading-5;
+}
+
+.base-textarea--lg .base-textarea__control {
+  @apply px-3.5 py-3 text-sm leading-6;
+}
+
 .base-textarea.is-resize-none .base-textarea__control {
   resize: none;
 }
@@ -174,7 +192,31 @@ onMounted(() => {
   @apply absolute bottom-2 right-3 rounded bg-white/80 px-1.5 text-[10px] font-black text-slate-400 dark:bg-slate-900/80 dark:text-slate-500;
 }
 
+.base-textarea.is-loading .base-textarea__count {
+  @apply right-9;
+}
+
+.base-textarea__loading {
+  @apply absolute bottom-2 right-3 inline-flex h-5 w-5 items-center justify-center rounded-md bg-white/80 text-primary dark:bg-slate-900/80;
+}
+
+.base-textarea__loading :deep(svg) {
+  animation: base-textarea-spin 0.9s linear infinite;
+}
+
 .base-textarea__error {
   @apply sr-only;
+}
+
+@keyframes base-textarea-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .base-textarea__loading :deep(svg) {
+    animation: none !important;
+  }
 }
 </style>

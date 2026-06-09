@@ -1,12 +1,12 @@
 import {
   createStableHashId,
   getCurrentIsoString,
-  getTextAfterLogLevel,
-  hasLogLevel,
   isNonNullable,
   objectKeys,
-  safeJsonParseObject,
-  safeJsonStringify,
+  parseLogLine,
+  getStorageJsonObject,
+  removeStorageItem,
+  setStorageJson,
   splitOnce,
   toReversedArray,
 } from "../utils";
@@ -40,16 +40,11 @@ function getNowIsoString(): string {
 }
 
 function readReviewMap(): Record<string, ErrorReviewRecord> {
-  const raw = localStorage.getItem(STORAGE_KEY);
-  if (!raw) {
-    return {};
-  }
-
-  return safeJsonParseObject<Record<string, ErrorReviewRecord>>(raw, {});
+  return getStorageJsonObject<Record<string, ErrorReviewRecord>>(STORAGE_KEY, {});
 }
 
 function writeReviewMap(reviewMap: Record<string, ErrorReviewRecord>) {
-  localStorage.setItem(STORAGE_KEY, safeJsonStringify(reviewMap, "{}"));
+  setStorageJson(STORAGE_KEY, reviewMap, "{}");
 }
 
 function splitSummaryAndDetails(payload: string) {
@@ -98,13 +93,14 @@ function parseSummary(summary: string) {
 }
 
 function parseErrorLine(line: string): ErrorMonitorEntry | null {
-  if (!hasLogLevel(line, "ERROR")) {
+  const parsedLine = parseLogLine(line);
+
+  if (parsedLine.level !== "ERROR") {
     return null;
   }
 
-  const timeMatch = line.match(/^\[(.*?)\]/);
-  const time = timeMatch ? timeMatch[1] : "";
-  const payload = getTextAfterLogLevel(line, "ERROR");
+  const time = parsedLine.time;
+  const payload = parsedLine.message;
   const { summary, details } = splitSummaryAndDetails(payload);
   const { errorCode, errorType, message } = parseSummary(summary);
   const fingerprint = createStableHashId(line, "err");
@@ -172,6 +168,6 @@ export const errorMonitorService = {
   },
 
   clearReviewState() {
-    localStorage.removeItem(STORAGE_KEY);
+    removeStorageItem(STORAGE_KEY);
   },
 };

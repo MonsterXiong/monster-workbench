@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { createRandomId } from "../../utils";
+import { createDomId } from "../../utils";
 
-const tooltipId = createRandomId("base-tooltip");
+const tooltipId = createDomId("base-tooltip");
 
 interface Props {
   content: string;

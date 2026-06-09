@@ -6,17 +6,22 @@ import { toRangePercent } from "../../utils";
 type ProgressType = "primary" | "success" | "warning" | "danger" | "neutral";
 type ProgressSize = "xs" | "sm" | "md" | "lg";
 type ProgressSurface = "plain" | "card" | "muted";
+type ProgressValuePlacement = "header" | "track" | "both" | "none";
 
 interface Props {
   value: number;
+  min?: number;
   max?: number;
+  precision?: number;
   label?: string;
   description?: string;
   type?: ProgressType;
   size?: ProgressSize;
   showValue?: boolean;
+  valuePlacement?: ProgressValuePlacement;
   striped?: boolean;
   ariaLabel?: string;
+  ariaValueText?: string;
   surface?: ProgressSurface;
   bordered?: boolean;
   compact?: boolean;
@@ -25,17 +30,24 @@ interface Props {
   bufferValue?: number;
   valueText?: string;
   valueSuffix?: string;
+  wrapLabel?: boolean;
+  wrapDescription?: boolean;
+  maxDescriptionLines?: number;
 }
 
 const props = withDefaults(defineProps<Props>(), {
+  min: 0,
   max: 100,
+  precision: 0,
   label: "",
   description: "",
   type: "primary",
   size: "md",
   showValue: true,
+  valuePlacement: "header",
   striped: false,
   ariaLabel: "",
+  ariaValueText: "",
   surface: "plain",
   bordered: false,
   compact: false,
@@ -44,22 +56,33 @@ const props = withDefaults(defineProps<Props>(), {
   bufferValue: 0,
   valueText: "",
   valueSuffix: "%",
+  wrapLabel: false,
+  wrapDescription: false,
+  maxDescriptionLines: 2,
 });
 
 const percent = computed(() => {
-  return toRangePercent(props.value, 0, props.max, 0);
+  return toRangePercent(props.value, props.min, props.max, props.precision);
 });
 
 const { t } = useI18n();
 const bufferPercent = computed(() => {
-  return toRangePercent(Math.max(props.bufferValue, props.value), 0, props.max, 0);
+  return toRangePercent(Math.max(props.bufferValue, props.value), props.min, props.max, props.precision);
 });
+const resolvedValuePlacement = computed(() => (props.showValue ? props.valuePlacement : "none"));
+const showHeaderValue = computed(() => resolvedValuePlacement.value === "header" || resolvedValuePlacement.value === "both");
+const showTrackValue = computed(() => resolvedValuePlacement.value === "track" || resolvedValuePlacement.value === "both");
 const resolvedValueText = computed(() => {
   if (props.valueText) return props.valueText;
   if (props.indeterminate) return t("common.loading");
   return `${percent.value}${props.valueSuffix}`;
 });
+const resolvedAriaValueText = computed(() => props.ariaValueText || resolvedValueText.value);
 const progressLabel = computed(() => props.ariaLabel || props.label || t("common.progress"));
+const descriptionStyle = computed(() => {
+  if (!props.wrapDescription || props.maxDescriptionLines <= 0) return undefined;
+  return { WebkitLineClamp: `${props.maxDescriptionLines}` };
+});
 </script>
 
 <template>
@@ -69,21 +92,24 @@ const progressLabel = computed(() => props.ariaLabel || props.label || t("common
       `base-progress--${type}`,
       `base-progress--${size}`,
       `base-progress--${surface}`,
+      `base-progress--value-${resolvedValuePlacement}`,
       {
         'base-progress--bordered': bordered,
         'base-progress--compact': compact,
         'base-progress--indeterminate': indeterminate,
+        'base-progress--wrap-label': wrapLabel,
+        'base-progress--wrap-description': wrapDescription,
         'is-disabled': disabled,
       },
     ]"
     :aria-disabled="disabled ? 'true' : undefined"
   >
-    <div v-if="label || description || showValue" class="base-progress__header">
+    <div v-if="label || description || showHeaderValue" class="base-progress__header">
       <div class="base-progress__text">
         <span v-if="label" class="base-progress__label">{{ label }}</span>
-        <span v-if="description" class="base-progress__description">{{ description }}</span>
+        <span v-if="description" class="base-progress__description" :style="descriptionStyle">{{ description }}</span>
       </div>
-      <span v-if="showValue" class="base-progress__value" role="status" aria-live="polite">
+      <span v-if="showHeaderValue" class="base-progress__value" role="status" aria-live="polite">
         {{ resolvedValueText }}
       </span>
     </div>
@@ -94,10 +120,13 @@ const progressLabel = computed(() => props.ariaLabel || props.label || t("common
       :aria-valuenow="indeterminate ? undefined : percent"
       aria-valuemin="0"
       aria-valuemax="100"
-      :aria-valuetext="resolvedValueText"
+      :aria-valuetext="resolvedAriaValueText"
     >
       <div v-if="bufferValue > 0 && !indeterminate" class="base-progress__buffer" :style="{ width: `${bufferPercent}%` }"></div>
       <div class="base-progress__bar" :class="{ 'is-striped': striped }" :style="{ width: indeterminate ? undefined : `${percent}%` }"></div>
+      <span v-if="showTrackValue" class="base-progress__track-value" aria-hidden="true">
+        {{ resolvedValueText }}
+      </span>
     </div>
   </div>
 </template>
@@ -148,8 +177,19 @@ const progressLabel = computed(() => props.ariaLabel || props.label || t("common
   @apply block truncate text-xs font-black text-slate-800 dark:text-slate-100;
 }
 
+.base-progress--wrap-label .base-progress__label {
+  @apply whitespace-normal break-words;
+}
+
 .base-progress__description {
   @apply mt-0.5 block truncate text-[10px] font-bold text-slate-400 dark:text-slate-500;
+}
+
+.base-progress--wrap-description .base-progress__description {
+  @apply whitespace-normal break-words;
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
 }
 
 .base-progress__value {
@@ -176,6 +216,11 @@ const progressLabel = computed(() => props.ariaLabel || props.label || t("common
   @apply h-3.5;
 }
 
+.base-progress--value-track .base-progress__track,
+.base-progress--value-both .base-progress__track {
+  min-height: 1.25rem;
+}
+
 .base-progress__buffer {
   @apply absolute inset-y-0 left-0 rounded-full bg-slate-200 dark:bg-slate-700;
 }
@@ -197,6 +242,15 @@ const progressLabel = computed(() => props.ariaLabel || props.label || t("common
     transparent
   );
   background-size: 14px 14px;
+}
+
+.base-progress__track-value {
+  @apply pointer-events-none absolute inset-0 z-10 flex items-center justify-center px-2 text-[10px] font-black text-slate-700 dark:text-slate-100;
+  text-shadow: 0 1px 2px rgba(255, 255, 255, 0.56);
+}
+
+:global(.dark) .base-progress__track-value {
+  text-shadow: 0 1px 2px rgba(15, 23, 42, 0.56);
 }
 
 .base-progress--indeterminate .base-progress__bar {

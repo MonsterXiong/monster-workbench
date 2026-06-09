@@ -1,27 +1,33 @@
 import { onMounted, onUnmounted } from "vue";
-import { isKeyboardShortcutMatched, parseKeyboardShortcut } from "../utils";
+import {
+  addDomEventListener,
+  handleKeyboardShortcut,
+  parseKeyboardShortcut,
+  type DomEventCleanup,
+  type KeyboardShortcutHandlerOptions,
+} from "../utils";
 
 /**
  * 注册全局键盘快捷键 Hook，支持 Ctrl+S, Esc, Ctrl+Alt+N 等写法
  */
 export function useKeyboardShortcut(
   keyCombo: string,
-  callback: (e: KeyboardEvent) => void
+  callback: (e: KeyboardEvent) => void,
+  options: KeyboardShortcutHandlerOptions = {}
 ) {
   const shortcut = parseKeyboardShortcut(keyCombo);
+  let stopKeydown: DomEventCleanup | null = null;
 
   const handleKeyDown = (e: KeyboardEvent) => {
-    if (isKeyboardShortcutMatched(e, shortcut)) {
-      e.preventDefault();
-      callback(e);
-    }
+    handleKeyboardShortcut(e, shortcut, callback, options);
   };
 
   onMounted(() => {
-    window.addEventListener("keydown", handleKeyDown);
+    stopKeydown = addDomEventListener(window, "keydown", handleKeyDown);
   });
 
   onUnmounted(() => {
-    window.removeEventListener("keydown", handleKeyDown);
+    stopKeydown?.();
+    stopKeydown = null;
   });
 }

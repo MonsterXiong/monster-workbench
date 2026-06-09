@@ -2,13 +2,16 @@
 import { computed } from "vue";
 import BaseIcon from "./BaseIcon.vue";
 import { useI18n } from "../../composables/useI18n";
-import { hasItem } from "../../utils";
+import { getByPath, hasItem, toIntegerAtLeast } from "../../utils";
 
 export interface BaseTableColumn {
   key: string;
   title: string;
   width?: string;
   align?: "left" | "center" | "right";
+  headerAlign?: "left" | "center" | "right";
+  wrap?: boolean;
+  ariaLabel?: string;
 }
 
 interface Props {
@@ -29,6 +32,9 @@ interface Props {
   selectedKeys?: Array<string | number>;
   skeletonRows?: number;
   caption?: string;
+  loadingText?: string;
+  wrapCells?: boolean;
+  minWidth?: string;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -47,19 +53,27 @@ const props = withDefaults(defineProps<Props>(), {
   selectedKeys: () => [],
   skeletonRows: 3,
   caption: "",
+  loadingText: "",
+  wrapCells: false,
+  minWidth: "520px",
 });
 
 const { t } = useI18n();
 
 const tableLabel = computed(() => props.ariaLabel || props.caption || t("common.table"));
+const skeletonCount = computed(() => toIntegerAtLeast(props.skeletonRows, 1, 3));
+const resolvedLoadingText = computed(() => props.loadingText || t("common.loading"));
+const tableStyle = computed(() => ({ "--base-table-min-width": props.minWidth } as Record<string, string>));
 
 const getRowKey = (row: any, index: number) => {
   if (typeof props.rowKey === "function") return props.rowKey(row, index);
-  if (props.rowKey && row[props.rowKey] != null) return String(row[props.rowKey]);
+  const rowKeyValue = props.rowKey ? getByPath(row, props.rowKey) : undefined;
+  if (rowKeyValue !== undefined) return String(rowKeyValue);
   return index;
 };
 
 const isRowSelected = (row: any, index: number) => hasItem(props.selectedKeys, getRowKey(row, index));
+const getCellValue = (row: any, key: string) => getByPath(row, key, "");
 </script>
 
 <template>
@@ -72,6 +86,7 @@ const isRowSelected = (row: any, index: number) => hasItem(props.selectedKeys, g
         'base-table--bordered': bordered,
         'base-table--rounded': rounded,
         'base-table--hover': hover,
+        'base-table--wrap-cells': wrapCells,
         'is-disabled': disabled,
       },
     ]"
@@ -80,7 +95,7 @@ const isRowSelected = (row: any, index: number) => hasItem(props.selectedKeys, g
     :aria-busy="loading ? 'true' : 'false'"
     :aria-disabled="disabled ? 'true' : undefined"
   >
-    <table class="base-table__table">
+    <table class="base-table__table" :style="tableStyle">
       <caption v-if="caption" class="base-table__caption">
         {{ caption }}
       </caption>
@@ -91,7 +106,9 @@ const isRowSelected = (row: any, index: number) => hasItem(props.selectedKeys, g
             :key="col.key"
             :style="{ width: col.width }"
             class="base-table__head-cell"
-            :class="col.align ? `base-table__cell--${col.align}` : ''"
+            :class="col.headerAlign || col.align ? `base-table__cell--${col.headerAlign || col.align}` : ''"
+            scope="col"
+            :aria-label="col.ariaLabel || undefined"
           >
             {{ col.title }}
           </th>
@@ -99,7 +116,12 @@ const isRowSelected = (row: any, index: number) => hasItem(props.selectedKeys, g
       </thead>
       <tbody>
         <template v-if="loading">
-          <tr v-for="i in skeletonRows" :key="i" class="base-table__row">
+          <tr>
+            <td :colspan="columns.length" class="sr-only" role="status" aria-live="polite">
+              {{ resolvedLoadingText }}
+            </td>
+          </tr>
+          <tr v-for="i in skeletonCount" :key="i" class="base-table__row" aria-hidden="true">
             <td v-for="col in columns" :key="col.key" class="base-table__cell">
               <div class="base-table__skeleton" aria-hidden="true"></div>
             </td>
@@ -130,10 +152,13 @@ const isRowSelected = (row: any, index: number) => hasItem(props.selectedKeys, g
               v-for="col in columns"
               :key="col.key"
               class="base-table__cell"
-              :class="col.align ? `base-table__cell--${col.align}` : ''"
+              :class="[
+                col.align ? `base-table__cell--${col.align}` : '',
+                col.wrap ? 'base-table__cell--wrap' : '',
+              ]"
             >
               <slot :name="col.key" :row="row" :index="idx">
-                {{ row[col.key] }}
+                {{ getCellValue(row, col.key) }}
               </slot>
             </td>
           </tr>
@@ -169,11 +194,12 @@ const isRowSelected = (row: any, index: number) => hasItem(props.selectedKeys, g
 }
 
 .base-table.is-disabled {
-  @apply opacity-70;
+  @apply pointer-events-none opacity-70;
 }
 
 .base-table__table {
-  @apply w-full min-w-[520px] table-fixed border-collapse;
+  min-width: var(--base-table-min-width, 520px);
+  @apply w-full table-fixed border-collapse;
 }
 
 .base-table__caption {
@@ -214,6 +240,15 @@ const isRowSelected = (row: any, index: number) => hasItem(props.selectedKeys, g
 
 .base-table__cell {
   @apply min-w-0 truncate px-4 py-3 text-sm text-slate-800 dark:text-slate-200;
+  vertical-align: top;
+}
+
+.base-table--wrap-cells .base-table__cell,
+.base-table__cell--wrap {
+  overflow: visible;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  white-space: normal;
 }
 
 .base-table--sm .base-table__cell {

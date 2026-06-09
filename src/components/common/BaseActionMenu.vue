@@ -1,7 +1,26 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useI18n } from "../../composables/useI18n";
-import { createRandomId } from "../../utils";
+import {
+  addDomEventListener,
+  clearAnimationFrameHandle,
+  createAnimationFrame,
+  createRandomId,
+  dispatchWindowCustomEvent,
+  firstItem,
+  formatCssPixelValue,
+  getNextCircularItem,
+  isEventTargetInsideAny,
+  isActivationKey,
+  isEscapeKey,
+  isKeyboardKey,
+  lastItem,
+  mergeDomEventCleanups,
+  queryElements,
+  toAriaKeyShortcuts,
+  type AnimationFrameHandle,
+  type DomEventCleanup,
+} from "../../utils";
 
 export interface ActionMenuItem {
   key: string;
@@ -27,6 +46,8 @@ interface Props {
   maxHeight?: number;
   viewportPadding?: number;
   closeOnSelect?: boolean;
+  emptyText?: string;
+  wrapText?: boolean;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -41,6 +62,8 @@ const props = withDefaults(defineProps<Props>(), {
   maxHeight: 320,
   viewportPadding: 10,
   closeOnSelect: true,
+  emptyText: "",
+  wrapText: false,
 });
 
 const emit = defineEmits<{
@@ -56,18 +79,28 @@ const resolvedPlacement = ref<"bottom" | "top">(props.placement === "top" ? "top
 const { t } = useI18n();
 const menuId = createRandomId("base-action-menu");
 const triggerId = createRandomId("base-action-menu-trigger");
-let positionFrame = 0;
+const resolvedMenuLabel = computed(() => props.ariaLabel || props.label || t("common.moreActions"));
+const resolvedEmptyText = computed(() => props.emptyText || t("common.noData"));
+let positionFrame: AnimationFrameHandle | null = null;
+let stopGlobalListeners: DomEventCleanup | null = null;
 
 const getViewportPadding = () => Math.max(0, props.viewportPadding);
+const getActionAriaKeyshortcuts = (shortcut?: string) => {
+  if (!shortcut) return undefined;
+  return toAriaKeyShortcuts(shortcut.includes("+") ? shortcut : shortcut.trim().replace(/\s+/g, "+"));
+};
 
-const getEnabledItems = () => Array.from(panelRef.value?.querySelectorAll<HTMLButtonElement>(".base-action-menu__item:not(:disabled)") ?? []);
+const getEnabledItems = () => queryElements<HTMLButtonElement>(panelRef.value, ".base-action-menu__item:not(:disabled)");
 
 const focusMenuItem = (target: "first" | "last") => {
   const items = getEnabledItems();
-  if (!items.length) return;
+  if (!items.length) {
+    panelRef.value?.focus({ preventScroll: true });
+    return;
+  }
 
-  const item = target === "last" ? items[items.length - 1] : items[0];
-  item.focus();
+  const item = target === "last" ? lastItem(items) : firstItem(items);
+  item?.focus({ preventScroll: true });
 };
 
 const updatePanelPosition = () => {
@@ -103,11 +136,11 @@ const updatePanelPosition = () => {
   top = Math.min(Math.max(top, viewportPadding), window.innerHeight - viewportPadding - panelHeight);
 
   const nextStyle: Record<string, string> = {
-    minWidth: `${minWidth}px`,
-    maxWidth: `${maxWidth}px`,
-    maxHeight: `${maxHeight}px`,
-    left: `${Math.round(left)}px`,
-    top: `${Math.round(top)}px`,
+    minWidth: formatCssPixelValue(minWidth),
+    maxWidth: formatCssPixelValue(maxWidth),
+    maxHeight: formatCssPixelValue(maxHeight),
+    left: formatCssPixelValue(Math.round(left)),
+    top: formatCssPixelValue(Math.round(top)),
     transformOrigin: placement === "top" ? "bottom center" : "top center",
   };
 
@@ -117,16 +150,16 @@ const updatePanelPosition = () => {
 
 const schedulePanelPosition = () => {
   if (!open.value) return;
-  if (positionFrame) window.cancelAnimationFrame(positionFrame);
-  positionFrame = window.requestAnimationFrame(() => {
-    positionFrame = 0;
+  clearAnimationFrameHandle(positionFrame);
+  positionFrame = createAnimationFrame(() => {
+    positionFrame = null;
     updatePanelPosition();
   });
 };
 
 const openMenu = async (focusTarget: "first" | "last" = "first") => {
   if (props.disabled) return;
-  window.dispatchEvent(new CustomEvent("base-action-menu:close-all", { detail: menuId }));
+  dispatchWindowCustomEvent("base-action-menu:close-all", menuId);
   open.value = true;
   await nextTick();
   updatePanelPosition();
@@ -159,43 +192,46 @@ const handleSelect = (action: ActionMenuItem) => {
 };
 
 const handleDocumentClick = (event: MouseEvent) => {
-  const target = event.target as Node;
-  if (!rootRef.value?.contains(target) && !panelRef.value?.contains(target)) {
+  if (!isEventTargetInsideAny(event, [rootRef.value, panelRef.value])) {
     closeMenu();
   }
 };
 
 const handleKeydown = (event: KeyboardEvent) => {
-  if (event.key === "Escape") closeMenu(true);
+  if (isEscapeKey(event)) closeMenu(true);
 };
 
 const handleTriggerKeydown = (event: KeyboardEvent) => {
-  if (event.key === "ArrowDown" || event.key === "Enter" || event.key === " ") {
+  if (isKeyboardKey(event, "ArrowDown") || isActivationKey(event)) {
     event.preventDefault();
     void openMenu();
-  } else if (event.key === "ArrowUp") {
+  } else if (isKeyboardKey(event, "ArrowUp")) {
     event.preventDefault();
     void openMenu("last");
   }
 };
 
 const handlePanelKeydown = (event: KeyboardEvent) => {
+  if (isKeyboardKey(event, "Tab")) {
+    closeMenu();
+    return;
+  }
+
   const items = getEnabledItems();
   if (!items.length) return;
 
   const currentIndex = items.indexOf(document.activeElement as HTMLButtonElement);
 
-  if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+  if (isKeyboardKey(event, ["ArrowDown", "ArrowUp"])) {
     event.preventDefault();
-    const offset = event.key === "ArrowDown" ? 1 : -1;
-    const nextIndex = currentIndex === -1 ? 0 : (currentIndex + offset + items.length) % items.length;
-    items[nextIndex]?.focus();
-  } else if (event.key === "Home") {
+    const offset = isKeyboardKey(event, "ArrowDown") ? 1 : -1;
+    getNextCircularItem(items, currentIndex, offset)?.focus();
+  } else if (isKeyboardKey(event, "Home")) {
     event.preventDefault();
-    items[0]?.focus();
-  } else if (event.key === "End") {
+    firstItem(items)?.focus();
+  } else if (isKeyboardKey(event, "End")) {
     event.preventDefault();
-    items[items.length - 1]?.focus();
+    lastItem(items)?.focus();
   }
 };
 
@@ -205,20 +241,20 @@ const handleGlobalClose = (event: Event) => {
 };
 
 onMounted(() => {
-  document.addEventListener("click", handleDocumentClick);
-  document.addEventListener("keydown", handleKeydown);
-  window.addEventListener("base-action-menu:close-all", handleGlobalClose);
-  window.addEventListener("resize", schedulePanelPosition);
-  window.addEventListener("scroll", schedulePanelPosition, true);
+  stopGlobalListeners = mergeDomEventCleanups([
+    addDomEventListener(document, "click", handleDocumentClick),
+    addDomEventListener(document, "keydown", handleKeydown),
+    addDomEventListener(window, "base-action-menu:close-all", handleGlobalClose),
+    addDomEventListener(window, "resize", schedulePanelPosition),
+    addDomEventListener(window, "scroll", schedulePanelPosition, true),
+  ]);
 });
 
 onBeforeUnmount(() => {
-  if (positionFrame) window.cancelAnimationFrame(positionFrame);
-  document.removeEventListener("click", handleDocumentClick);
-  document.removeEventListener("keydown", handleKeydown);
-  window.removeEventListener("base-action-menu:close-all", handleGlobalClose);
-  window.removeEventListener("resize", schedulePanelPosition);
-  window.removeEventListener("scroll", schedulePanelPosition, true);
+  clearAnimationFrameHandle(positionFrame);
+  positionFrame = null;
+  stopGlobalListeners?.();
+  stopGlobalListeners = null;
 });
 
 watch(
@@ -231,6 +267,14 @@ watch(
 watch(
   () => [props.align, props.placement, props.minWidth, props.maxWidth, props.maxHeight, props.viewportPadding],
   schedulePanelPosition,
+);
+
+watch(
+  () => props.actions,
+  () => {
+    void nextTick(schedulePanelPosition);
+  },
+  { deep: true },
 );
 </script>
 
@@ -246,7 +290,7 @@ watch(
       aria-haspopup="menu"
       :aria-expanded="open"
       :aria-controls="open ? menuId : undefined"
-      :aria-label="ariaLabel || label || t('common.moreActions')"
+      :aria-label="resolvedMenuLabel"
       @click.stop="toggle"
       @keydown="handleTriggerKeydown"
     >
@@ -259,13 +303,23 @@ watch(
         v-if="open"
         ref="panelRef"
         class="base-action-menu__panel"
-        :class="[`base-action-menu__panel--${resolvedPlacement}`]"
+        :class="[`base-action-menu__panel--${resolvedPlacement}`, { 'base-action-menu__panel--wrap-text': wrapText }]"
         :style="panelStyle"
         :id="menuId"
         role="menu"
+        aria-orientation="vertical"
+        :aria-label="resolvedMenuLabel"
         :aria-labelledby="triggerId"
+        :data-placement="resolvedPlacement"
+        :data-align="align"
+        tabindex="-1"
         @keydown="handlePanelKeydown"
       >
+        <div v-if="actions.length === 0" class="base-action-menu__empty" role="status">
+          <BaseIcon name="Inbox" size="14" aria-hidden="true" />
+          <span>{{ resolvedEmptyText }}</span>
+        </div>
+
         <button
           v-for="action in actions"
           :key="action.key"
@@ -278,7 +332,8 @@ watch(
           }"
           :disabled="action.disabled"
           role="menuitem"
-          :aria-disabled="action.disabled"
+          :aria-disabled="action.disabled ? 'true' : undefined"
+          :aria-keyshortcuts="getActionAriaKeyshortcuts(action.shortcut)"
           @click="handleSelect(action)"
         >
           <BaseIcon v-if="action.icon" :name="action.icon" size="14" aria-hidden="true" />
@@ -309,8 +364,16 @@ watch(
 
 .base-action-menu__panel {
   @apply fixed z-[1200] overflow-y-auto rounded-lg border border-slate-200 bg-white p-1.5 shadow-xl shadow-slate-900/10 outline-none dark:border-slate-800 dark:bg-slate-900 dark:shadow-black/30;
+  overscroll-behavior: contain;
   scrollbar-width: thin;
   scrollbar-color: rgb(203 213 225) transparent;
+  max-width: calc(100vw - 20px);
+}
+
+.base-action-menu__panel:focus-visible {
+  box-shadow:
+    0 18px 42px rgba(15, 23, 42, 0.14),
+    0 0 0 3px rgba(var(--color-primary), 0.16);
 }
 
 .base-action-menu__item {
@@ -324,6 +387,14 @@ watch(
 .base-action-menu__item-text span,
 .base-action-menu__item-text small {
   @apply truncate;
+}
+
+.base-action-menu__panel--wrap-text .base-action-menu__item-text span,
+.base-action-menu__panel--wrap-text .base-action-menu__item-text small {
+  overflow: visible;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  white-space: normal;
 }
 
 .base-action-menu__item-text small {
@@ -340,5 +411,9 @@ watch(
 
 .base-action-menu__item.is-divided {
   @apply mt-1 border-t border-slate-100 pt-2 dark:border-slate-800;
+}
+
+.base-action-menu__empty {
+  @apply flex min-h-20 flex-col items-center justify-center gap-2 rounded-md px-3 py-4 text-center text-[11px] font-bold text-slate-400 dark:text-slate-500;
 }
 </style>

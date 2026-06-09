@@ -1,19 +1,15 @@
 import { ref, watch } from "vue";
-import { parseJsonOrRaw, safeJsonStringify } from "../utils";
+import { getStorageJsonOrRaw, setStorageJson } from "../utils";
 
 export function useLocalSetting<T>(key: string, defaultValue: T) {
-  const readValue = (): T => {
-    const raw = localStorage.getItem(key);
-    if (raw === null) return defaultValue;
-    return parseJsonOrRaw<T>(raw) as T;
-  };
+  const readValue = (): T => getStorageJsonOrRaw<T>(key, defaultValue);
 
   const data = ref<T>(readValue());
 
   watch(
     data,
     (newValue) => {
-      localStorage.setItem(key, safeJsonStringify(newValue, String(newValue)));
+      setStorageJson(key, newValue, String(newValue));
     },
     { deep: true }
   );

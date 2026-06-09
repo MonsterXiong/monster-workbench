@@ -23,6 +23,23 @@ const releaseSteps = [
   { key: "notify", title: "通知", description: "同步结果。", state: "disabled" as const, icon: "Bell" },
 ];
 
+const longStepperSteps = [
+  {
+    key: "collect",
+    title: "收集需要迁移的公共组件和对应页面入口",
+    description: "长标题和长描述在窄容器中需要自然换行，避免步骤卡片把页面撑出横向滚动。",
+    state: "done" as const,
+    icon: "ListChecks",
+  },
+  {
+    key: "review",
+    title: "逐个补齐状态、交互、键盘和视觉反馈",
+    description: "适合流程配置页、导入向导、发布检查和组件沙箱的长任务说明。",
+    state: "current" as const,
+    icon: "ScanSearch",
+  },
+];
+
 const timelineItems = [
   {
     key: "create",
@@ -96,6 +113,20 @@ const releaseTimelineItems = [
     tag: "Next",
   },
 ];
+
+const longTimelineItems = [
+  {
+    key: "long-review",
+    title: "超长任务标题会在 wrapTitle 开启后自然换行，避免窄容器里被截断",
+    time: "11:40",
+    description:
+      "时间线经常出现在抽屉、审计详情和发布记录中，描述文本可能包含较长的业务背景。开启 wrapDescription 后应该完整展示，并且不会让内容区产生横向溢出。",
+    type: "primary" as const,
+    icon: "ScrollText",
+    meta: "长文案",
+    tag: "Wrap",
+  },
+];
 </script>
 
 <template>
@@ -118,6 +149,27 @@ const releaseTimelineItems = [
       <BasePanel title="发布流程" subtitle="自定义图标、状态和大尺寸适合发布检查。">
         <BaseStepper :steps="releaseSteps" :current="1" size="lg" :columns="4" aria-label="发布流程步骤" />
       </BasePanel>
+
+      <div class="demo-grid">
+        <BasePanel title="状态展示" subtitle="空态和加载态保持流程区域结构稳定。">
+          <div class="stepper-demo-stack">
+            <BaseStepper :steps="[]" :current="0" empty-text="暂无流程步骤" surface="muted" />
+            <BaseStepper :steps="workflowSteps" :current="1" loading loading-text="加载步骤配置" size="sm" />
+          </div>
+        </BasePanel>
+        <BasePanel title="长文案步骤" subtitle="标题与描述支持换行，不撑出内容区域。">
+          <BaseStepper
+            :steps="longStepperSteps"
+            :current="1"
+            wrap-title
+            wrap-description
+            :max-description-lines="4"
+            surface="plain"
+            :bordered="false"
+            vertical
+          />
+        </BasePanel>
+      </div>
     </PlaygroundDemoSection>
   </section>
 
@@ -128,6 +180,7 @@ const releaseTimelineItems = [
           <BaseTimeline
             :items="timelineItems"
             clickable
+            :selected-key="selectedTimelineKey"
             aria-label="组件审计时间线"
             @select="selectedTimelineKey = $event.item.key"
           >
@@ -159,8 +212,20 @@ const releaseTimelineItems = [
         <BasePanel title="只读记录" subtitle="保留旧 API：只传 items 就能展示标准时间线。">
           <BaseTimeline :items="timelineItems" />
         </BasePanel>
-        <BasePanel title="紧凑卡片" subtitle="dense 与小尺寸组合，适合低高度容器。">
-          <BaseTimeline :items="timelineItems" dense size="sm" />
+        <BasePanel title="状态与长文案" subtitle="空态、加载态、选中态和长文案换行保持稳定。">
+          <div class="timeline-demo-stack">
+            <BaseTimeline :items="[]" empty-text="暂无审计记录" surface="muted" />
+            <BaseTimeline :items="timelineItems" loading loading-text="加载审计记录" dense size="sm" />
+            <BaseTimeline
+              :items="longTimelineItems"
+              wrap-title
+              wrap-description
+              :max-description-lines="4"
+              marker="number"
+              surface="plain"
+              :bordered="false"
+            />
+          </div>
         </BasePanel>
       </div>
     </PlaygroundDemoSection>
@@ -186,5 +251,13 @@ const releaseTimelineItems = [
 
 .timeline-result {
   @apply text-xs font-black text-slate-500 dark:text-slate-400;
+}
+
+.timeline-demo-stack {
+  @apply grid gap-3;
+}
+
+.stepper-demo-stack {
+  @apply grid gap-3;
 }
 </style>

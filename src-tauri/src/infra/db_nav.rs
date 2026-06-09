@@ -1,7 +1,7 @@
-use std::path::Path;
-use rusqlite::{Connection, params};
-use serde::{Deserialize, Serialize};
 use crate::infra::AppResult;
+use rusqlite::{params, Connection};
+use serde::{Deserialize, Serialize};
+use std::path::Path;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct NavigationItem {
@@ -39,7 +39,7 @@ impl DbNavInfra {
         let conn = Connection::open(&path)?;
         conn.execute_batch(
             "PRAGMA journal_mode = WAL;
-             PRAGMA busy_timeout = 5000;"
+             PRAGMA busy_timeout = 5000;",
         )?;
 
         // 初始化建表
@@ -61,7 +61,10 @@ impl DbNavInfra {
         // 自动增加可能缺失的新增列（自愈式数据库迁移）
         let _ = conn.execute("ALTER TABLE navigation ADD COLUMN logo_path TEXT;", []);
         let _ = conn.execute("ALTER TABLE navigation ADD COLUMN bg_path TEXT;", []);
-        let _ = conn.execute("ALTER TABLE navigation ADD COLUMN sort_order INTEGER DEFAULT 0;", []);
+        let _ = conn.execute(
+            "ALTER TABLE navigation ADD COLUMN sort_order INTEGER DEFAULT 0;",
+            [],
+        );
 
         Ok(conn)
     }
@@ -74,7 +77,7 @@ impl DbNavInfra {
         let conn = Connection::open(db_path)?;
         conn.execute_batch(
             "PRAGMA journal_mode = WAL;
-             PRAGMA busy_timeout = 5000;"
+             PRAGMA busy_timeout = 5000;",
         )?;
         conn.execute(
             "CREATE TABLE IF NOT EXISTS test_logs (
@@ -188,11 +191,11 @@ impl DbNavInfra {
         let conn = Self::connect_nav_db(db_dir)?;
 
         // 查询当前最大的 sort_order，加 1
-        let max_order: Option<i32> = conn.query_row(
-            "SELECT MAX(sort_order) FROM navigation",
-            [],
-            |row| row.get(0),
-        ).unwrap_or(Some(0));
+        let max_order: Option<i32> = conn
+            .query_row("SELECT MAX(sort_order) FROM navigation", [], |row| {
+                row.get(0)
+            })
+            .unwrap_or(Some(0));
         let next_order = max_order.unwrap_or(0) + 1;
 
         conn.execute(
@@ -255,7 +258,10 @@ impl DbNavInfra {
 
     pub fn increment_clicks(db_dir: &str, id: i32) -> AppResult<()> {
         let conn = Self::connect_nav_db(db_dir)?;
-        conn.execute("UPDATE navigation SET clicks = clicks + 1 WHERE id = ?", params![id])?;
+        conn.execute(
+            "UPDATE navigation SET clicks = clicks + 1 WHERE id = ?",
+            params![id],
+        )?;
         Ok(())
     }
 
@@ -272,20 +278,31 @@ impl DbNavInfra {
 
     pub fn migrate_category(db_dir: &str, from_cat: &str, to_cat: &str) -> AppResult<()> {
         let conn = Self::connect_nav_db(db_dir)?;
-        conn.execute("UPDATE navigation SET category = ? WHERE category = ?", params![to_cat, from_cat])?;
+        conn.execute(
+            "UPDATE navigation SET category = ? WHERE category = ?",
+            params![to_cat, from_cat],
+        )?;
         Ok(())
     }
 
     pub fn clear_file_references(db_dir: &str, rel_path: &str) -> AppResult<()> {
         let conn = Self::connect_nav_db(db_dir)?;
-        conn.execute("UPDATE navigation SET logo_path = NULL WHERE logo_path = ?", params![rel_path])?;
-        conn.execute("UPDATE navigation SET bg_path = NULL WHERE bg_path = ?", params![rel_path])?;
+        conn.execute(
+            "UPDATE navigation SET logo_path = NULL WHERE logo_path = ?",
+            params![rel_path],
+        )?;
+        conn.execute(
+            "UPDATE navigation SET bg_path = NULL WHERE bg_path = ?",
+            params![rel_path],
+        )?;
         Ok(())
     }
 
     pub fn check_file_references(db_dir: &str, rel_path: &str) -> AppResult<Vec<String>> {
         let conn = Self::connect_nav_db(db_dir)?;
-        let mut stmt = conn.prepare("SELECT title, logo_path, bg_path FROM navigation WHERE logo_path = ? OR bg_path = ?")?;
+        let mut stmt = conn.prepare(
+            "SELECT title, logo_path, bg_path FROM navigation WHERE logo_path = ? OR bg_path = ?",
+        )?;
         let rows = stmt.query_map(params![rel_path, rel_path], |row| {
             let title: String = row.get(0)?;
             let logo_path: Option<String> = row.get(1)?;
@@ -358,11 +375,11 @@ impl DbNavInfra {
             .collect();
 
         // 查找最大的 sort_order
-        let max_order: Option<i32> = conn.query_row(
-            "SELECT MAX(sort_order) FROM navigation",
-            [],
-            |row| row.get(0),
-        ).unwrap_or(Some(0));
+        let max_order: Option<i32> = conn
+            .query_row("SELECT MAX(sort_order) FROM navigation", [], |row| {
+                row.get(0)
+            })
+            .unwrap_or(Some(0));
         let mut current_max_order = max_order.unwrap_or(0);
 
         let tx = conn.transaction()?;

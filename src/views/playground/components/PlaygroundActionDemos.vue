@@ -39,6 +39,30 @@ const longActionMenuItems = [
   { key: "delete", label: "删除组件", description: "危险操作需要确认。", icon: "Trash2", type: "danger" as const, divided: true },
 ];
 
+const verboseActionMenuItems = [
+  {
+    key: "sync-long",
+    label: "同步一个跨工作区的超长组件配置名称",
+    description: "用于验证菜单项长标题和说明在受限宽度内自然换行，不挤压快捷键区域。",
+    icon: "RefreshCw",
+    shortcut: "Ctrl Shift S",
+  },
+  {
+    key: "copy-trace",
+    label: "复制 trace://playground/action-menu/very-long-resource-identifier",
+    description: "长路径、trace id 和资源 URI 需要留在菜单内部。",
+    icon: "Copy",
+  },
+  {
+    key: "remove-long",
+    label: "删除这个仍然很长的菜单项",
+    description: "危险动作保留红色语义，并且不会撑开弹层。",
+    icon: "Trash2",
+    type: "danger" as const,
+    divided: true,
+  },
+];
+
 const handleCommandSelect = (command: { label: string }) => {
   selectedCommand.value = command.label;
   triggerToast(`已选择命令：${command.label}`, "success");
@@ -105,9 +129,28 @@ const handleConfirmAction = (label: string) => {
         <BasePanel title="长菜单与单开" subtitle="长列表限制高度并滚动；连续打开多个菜单时只保留当前一个。">
           <div class="action-row">
             <BaseActionMenu :actions="longActionMenuItems" label="长菜单" :max-height="220" />
+            <BaseActionMenu :actions="verboseActionMenuItems" label="换行菜单" wrap-text :min-width="240" :max-width="280" />
             <BaseActionMenu :actions="actionMenuItems" label="菜单 A" />
             <BaseActionMenu :actions="actionMenuItems" label="菜单 B" align="left" />
             <BaseActionMenu :actions="actionMenuItems" icon="SlidersHorizontal" aria-label="更多设置" />
+          </div>
+        </BasePanel>
+
+        <BasePanel title="裁切容器" subtitle="弹层会脱离局部 overflow 容器，适合表格、卡片和侧栏内更多操作。">
+          <div class="action-clip-demo">
+            <div class="action-clip-demo__bar">
+              <BaseBadge type="primary" variant="outline">overflow hidden</BaseBadge>
+              <BaseActionMenu :actions="actionMenuItems" label="裁切容器" placement="auto" />
+            </div>
+            <BaseAlert type="info" title="保持打开" description="closeOnSelect=false 可用于连续执行多个弱操作。" compact />
+            <BaseActionMenu
+              :actions="actionMenuItems.slice(0, 3)"
+              label="保持打开"
+              :close-on-select="false"
+              align="left"
+              @select="triggerToast(`保持打开：${$event.label}`, 'info')"
+            />
+            <BaseActionMenu :actions="[]" label="空菜单" empty-text="暂无可用操作" align="left" />
           </div>
         </BasePanel>
       </div>
@@ -162,7 +205,7 @@ const handleConfirmAction = (label: string) => {
 
         <BasePanel title="吸顶工具栏" subtitle="列表或长表单滚动时可保持操作入口稳定。">
           <div class="toolbar-scroll-demo">
-            <BaseToolbar sticky surface="muted" compact aria-label="吸顶工具栏">
+            <BaseToolbar sticky :sticky-offset="6" surface="muted" compact aria-label="吸顶工具栏">
               <template #left>
                 <BaseBadge type="primary" variant="outline">Sticky</BaseBadge>
               </template>
@@ -183,6 +226,23 @@ const handleConfirmAction = (label: string) => {
               simple
               :bordered="false"
             />
+          </div>
+        </BasePanel>
+
+        <BasePanel title="长内容与空态" subtitle="长上下文不撑破容器；无动作时有明确兜底。">
+          <div class="toolbar-demo-stack">
+            <BaseToolbar surface="muted" aria-label="长上下文工具栏" left-label="资源上下文" right-label="扩展动作">
+              <template #left>
+                <BaseBadge class="toolbar-long-badge" type="primary" variant="outline">
+                  workspace://components/action/BaseToolbar/very-long-resource-name
+                </BaseBadge>
+              </template>
+              <BaseButton type="neutral" size="sm">同步跨工作区配置</BaseButton>
+              <template #right>
+                <BaseActionMenu :actions="actionMenuItems" />
+              </template>
+            </BaseToolbar>
+            <BaseToolbar aria-label="空工具栏" surface="plain" empty-text="暂无可用动作" empty-icon="Inbox" />
           </div>
         </BasePanel>
       </div>
@@ -223,6 +283,10 @@ const handleConfirmAction = (label: string) => {
               confirm-text="确认删除"
               cancel-text="再想想"
               danger
+              icon="Trash2"
+              aria-label="删除组件确认"
+              @open="triggerToast('打开删除确认', 'info')"
+              @cancel="triggerToast('已取消删除', 'info')"
               @confirm="handleConfirmAction('删除组件')"
             />
             <BaseConfirmAction
@@ -251,6 +315,30 @@ const handleConfirmAction = (label: string) => {
               message="禁用状态不会触发确认弹窗。"
               type="neutral"
               disabled
+            />
+          </div>
+        </BasePanel>
+
+        <BasePanel title="长文案与状态" subtitle="长标题、换行消息、加载态和块级按钮。">
+          <div class="confirm-action-stack">
+            <BaseConfirmAction
+              label="长文案确认"
+              title="确认同步一个跨工作区且名称非常长的组件配置？"
+              message="该操作会同步 workspace://components/action/BaseConfirmAction/very-long-resource-name 的配置。\n请确认当前筛选、权限和目标工作区都已经检查完成。"
+              confirm-text="确认同步"
+              cancel-text="返回检查"
+              type="primary"
+              icon="RefreshCw"
+              block
+              @confirm="handleConfirmAction('长文案同步')"
+            />
+            <BaseConfirmAction
+              label="提交中"
+              title="保存提交"
+              message="加载态下不会打开确认弹窗。"
+              type="neutral"
+              loading
+              button-title="确认动作提交中"
             />
           </div>
         </BasePanel>
@@ -305,7 +393,27 @@ const handleConfirmAction = (label: string) => {
   @apply items-end;
 }
 
+.action-clip-demo {
+  @apply max-h-32 overflow-hidden rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950;
+}
+
+.action-clip-demo__bar {
+  @apply mb-3 flex min-w-0 items-center justify-between gap-3;
+}
+
 .toolbar-scroll-demo {
   @apply h-48 overflow-auto rounded-xl border border-slate-200 bg-slate-50 p-2 dark:border-slate-800 dark:bg-slate-950;
+}
+
+.toolbar-demo-stack {
+  @apply grid min-w-0 gap-3;
+}
+
+.toolbar-long-badge {
+  @apply max-w-full;
+}
+
+.confirm-action-stack {
+  @apply grid min-w-0 gap-3;
 }
 </style>

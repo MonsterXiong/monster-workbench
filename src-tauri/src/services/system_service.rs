@@ -31,7 +31,10 @@ pub struct ProcessInstanceInfo {
 
 impl SystemService {
     pub fn new(app_handle: AppHandle, path_provider: PathProvider) -> Self {
-        Self { app_handle, path_provider }
+        Self {
+            app_handle,
+            path_provider,
+        }
     }
 
     pub fn open_system_path(&self, path: &str) -> AppResult<()> {
@@ -220,7 +223,10 @@ impl SystemService {
             }
 
             let output = Command::new("cmd")
-                .args(["/C", &format!("tasklist /FI \"IMAGENAME eq {}\" /FO CSV /NH", name)])
+                .args([
+                    "/C",
+                    &format!("tasklist /FI \"IMAGENAME eq {}\" /FO CSV /NH", name),
+                ])
                 .output()
                 .map_err(|e| AppError::Process(format!("运行 tasklist 异常: {}", e)))?;
 
@@ -284,9 +290,7 @@ impl SystemService {
         let metadata = std::fs::metadata(target)?;
 
         if metadata.len() > MAX_BACKUP_TEXT_BYTES {
-            return Err(AppError::Permission(
-                "备份文件过大，已拒绝读取".to_string(),
-            ));
+            return Err(AppError::Permission("备份文件过大，已拒绝读取".to_string()));
         }
 
         std::fs::read_to_string(target).map_err(AppError::from)
@@ -309,7 +313,10 @@ impl SystemService {
         report.push_str("        MONSTER WORKBENCH SYSTEM DIAGNOSTICS      \n");
         report.push_str("==================================================\n\n");
         report.push_str(&format!("Generated Time: {}\n", current_time));
-        report.push_str(&format!("App Version: {}\n", self.app_handle.package_info().version));
+        report.push_str(&format!(
+            "App Version: {}\n",
+            self.app_handle.package_info().version
+        ));
         report.push_str(&format!("OS Platform: {}\n", std::env::consts::OS));
         report.push_str(&format!("CPU Architecture: {}\n", std::env::consts::ARCH));
 
@@ -341,7 +348,9 @@ impl SystemService {
 fn ensure_json_backup_path(path: &str) -> AppResult<&Path> {
     let target = Path::new(path);
     if !target.is_absolute() {
-        return Err(AppError::Permission("备份文件路径必须是绝对路径".to_string()));
+        return Err(AppError::Permission(
+            "备份文件路径必须是绝对路径".to_string(),
+        ));
     }
     if target
         .components()
@@ -352,7 +361,9 @@ fn ensure_json_backup_path(path: &str) -> AppResult<&Path> {
         ));
     }
     if target.file_name().is_none() {
-        return Err(AppError::Permission("备份文件路径必须指向具体文件".to_string()));
+        return Err(AppError::Permission(
+            "备份文件路径必须指向具体文件".to_string(),
+        ));
     }
     let is_json = target
         .extension()
@@ -368,7 +379,9 @@ fn ensure_json_backup_path(path: &str) -> AppResult<&Path> {
 fn ensure_diagnostics_export_path(path: &str) -> AppResult<&Path> {
     let target = Path::new(path);
     if !target.is_absolute() {
-        return Err(AppError::Permission("诊断导出路径必须是绝对路径".to_string()));
+        return Err(AppError::Permission(
+            "诊断导出路径必须是绝对路径".to_string(),
+        ));
     }
     if target
         .components()
@@ -379,7 +392,9 @@ fn ensure_diagnostics_export_path(path: &str) -> AppResult<&Path> {
         ));
     }
     if target.file_name().is_none() {
-        return Err(AppError::Permission("诊断导出路径必须指向具体文件".to_string()));
+        return Err(AppError::Permission(
+            "诊断导出路径必须指向具体文件".to_string(),
+        ));
     }
     let allowed = target
         .extension()
@@ -404,7 +419,10 @@ fn process_name_by_pid(pid: u32) -> Option<String> {
     use std::process::Command;
 
     let task_out = Command::new("cmd")
-        .args(["/C", &format!("tasklist /FI \"PID eq {}\" /FO CSV /NH", pid)])
+        .args([
+            "/C",
+            &format!("tasklist /FI \"PID eq {}\" /FO CSV /NH", pid),
+        ])
         .output()
         .ok()?;
     let task_str = String::from_utf8_lossy(&task_out.stdout);

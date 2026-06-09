@@ -8,7 +8,7 @@ import { ref } from "vue";
 import { systemService } from "./system.service";
 import { navigationService } from "./navigation.service";
 import { convertFileSrc, getCurrentWebviewWindow } from "./tauri";
-import { buildUrlWithQuery, filterByValue, getCurrentUnixTimestamp, getUploadFileType, removeByValue, safeJsonParse } from "../utils";
+import { buildUrlWithQuery, filterByValue, getCurrentUnixTimestamp, getUploadFileType, joinPathIfPresent, removeByValue, safeJsonParse } from "../utils";
 
 /** 文件元数据类型 */
 export interface UploadedFileInfo {
@@ -107,7 +107,7 @@ function buildPreviewUrl(appDataPath: string, relPath: string): string {
     return buildUrlWithQuery("https://api.dicebear.com/7.x/identicon/svg", { params: { seed: relPath } });
   }
 
-  return convertFileSrc(`${appDataPath}/${relPath}`);
+  return convertFileSrc(joinPathIfPresent(appDataPath, relPath));
 }
 
 async function clearFileReferences(appDataPath: string, relPath: string): Promise<void> {

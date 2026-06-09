@@ -3,13 +3,18 @@ import { computed, ref, useId, watch } from "vue";
 import { useI18n } from "../../composables/useI18n";
 
 type AlertType = "info" | "success" | "warning" | "danger";
-type AlertVariant = "soft" | "solid" | "plain";
+type AlertVariant = "soft" | "solid" | "plain" | "outline";
 type AlertSize = "sm" | "md" | "lg";
+type AlertLevel = 2 | 3 | 4 | 5 | 6;
+type AlertActionsPlacement = "inline" | "bottom";
+type AlertAlign = "start" | "center";
+type AlertRole = "status" | "alert" | "note";
 
 interface Props {
   type?: AlertType;
   title?: string;
   description?: string;
+  level?: AlertLevel;
   closable?: boolean;
   modelValue?: boolean;
   closeLabel?: string;
@@ -18,14 +23,24 @@ interface Props {
   size?: AlertSize;
   icon?: string;
   showIcon?: boolean;
+  align?: AlertAlign;
+  actionsPlacement?: AlertActionsPlacement;
+  banner?: boolean;
+  accent?: boolean;
+  wrapTitle?: boolean;
+  wrapDescription?: boolean;
+  maxDescriptionLines?: number;
   disabled?: boolean;
+  role?: AlertRole;
   ariaLabel?: string;
+  actionsLabel?: string;
 }
 
 const props = withDefaults(defineProps<Props>(), {
   type: "info",
   title: "",
   description: "",
+  level: 4,
   closable: false,
   modelValue: true,
   closeLabel: "",
@@ -34,8 +49,17 @@ const props = withDefaults(defineProps<Props>(), {
   size: "md",
   icon: "",
   showIcon: true,
+  align: "start",
+  actionsPlacement: "inline",
+  banner: false,
+  accent: false,
+  wrapTitle: false,
+  wrapDescription: false,
+  maxDescriptionLines: 0,
   disabled: false,
+  role: undefined,
   ariaLabel: "",
+  actionsLabel: "",
 });
 
 const emit = defineEmits<{
@@ -52,7 +76,14 @@ const resolvedCloseLabel = computed(() => props.closeLabel || t("common.close"))
 const resolvedSize = computed(() => (props.compact ? "sm" : props.size));
 const labelledBy = computed(() => (!props.ariaLabel && props.title ? titleId.value : undefined));
 const describedBy = computed(() => (props.description ? descriptionId.value : undefined));
-const role = computed(() => (props.type === "danger" || props.type === "warning" ? "alert" : "status"));
+const resolvedRole = computed(() => props.role || (props.type === "danger" || props.type === "warning" ? "alert" : "status"));
+const headingTag = computed(() => `h${props.level}`);
+const isActionsBottom = computed(() => props.actionsPlacement === "bottom");
+const resolvedActionsLabel = computed(() => props.actionsLabel || `${props.title || props.ariaLabel || "提示"} 操作`);
+const descriptionStyle = computed(() => {
+  if (!props.wrapDescription || props.maxDescriptionLines <= 0) return undefined;
+  return { WebkitLineClamp: `${props.maxDescriptionLines}` };
+});
 
 watch(
   () => props.modelValue,
@@ -86,26 +117,39 @@ const close = () => {
         `base-alert--${type}`,
         `base-alert--${variant}`,
         `base-alert--${resolvedSize}`,
+        `base-alert--align-${align}`,
         {
           'base-alert--compact': compact,
+          'base-alert--banner': banner,
+          'base-alert--accent': accent,
+          'base-alert--actions-bottom': isActionsBottom,
+          'base-alert--wrap-title': wrapTitle,
+          'base-alert--wrap-description': wrapDescription,
           'is-disabled': disabled,
         },
       ]"
-      :role="role"
+      :role="resolvedRole"
       :aria-label="ariaLabel || undefined"
       :aria-labelledby="labelledBy"
       :aria-describedby="describedBy"
       :aria-disabled="disabled ? 'true' : undefined"
     >
-      <BaseIcon v-if="showIcon" :name="iconName" class="base-alert__icon" aria-hidden="true" />
+      <div v-if="showIcon || $slots.icon" class="base-alert__icon" aria-hidden="true">
+        <slot name="icon">
+          <BaseIcon :name="iconName" aria-hidden="true" />
+        </slot>
+      </div>
       <div class="base-alert__body">
-        <h4 v-if="title" :id="titleId" class="base-alert__title">{{ title }}</h4>
-        <p v-if="description" :id="descriptionId" class="base-alert__description">{{ description }}</p>
+        <component :is="headingTag" v-if="title" :id="titleId" class="base-alert__title">{{ title }}</component>
+        <p v-if="description" :id="descriptionId" class="base-alert__description" :style="descriptionStyle">{{ description }}</p>
         <div v-if="$slots.default" class="base-alert__content">
           <slot></slot>
         </div>
+        <div v-if="$slots.actions && isActionsBottom" class="base-alert__actions base-alert__actions--bottom" :aria-label="resolvedActionsLabel">
+          <slot name="actions"></slot>
+        </div>
       </div>
-      <div v-if="$slots.actions" class="base-alert__actions">
+      <div v-if="$slots.actions && !isActionsBottom" class="base-alert__actions" :aria-label="resolvedActionsLabel">
         <slot name="actions"></slot>
       </div>
       <button
@@ -132,7 +176,19 @@ const close = () => {
 }
 
 .base-alert__icon {
-  @apply mt-0.5 shrink-0;
+  @apply mt-0.5 flex shrink-0 items-center justify-center;
+}
+
+.base-alert__icon :deep(svg) {
+  @apply h-4 w-4;
+}
+
+.base-alert--align-center {
+  @apply items-center;
+}
+
+.base-alert--align-center .base-alert__icon {
+  @apply mt-0;
 }
 
 .base-alert--compact {
@@ -156,7 +212,8 @@ const close = () => {
   @apply h-4 w-4;
 }
 
-.base-alert--lg .base-alert__icon {
+.base-alert--lg .base-alert__icon,
+.base-alert--lg .base-alert__icon :deep(svg) {
   @apply h-5 w-5;
 }
 
@@ -168,10 +225,25 @@ const close = () => {
   @apply text-xs font-black;
 }
 
+.base-alert--wrap-title .base-alert__title {
+  @apply break-words;
+}
+
 .base-alert__description,
 .base-alert__content {
   @apply mt-0.5 text-[11px] font-bold leading-5;
   color: var(--alert-muted);
+}
+
+.base-alert--wrap-description .base-alert__description,
+.base-alert--wrap-description .base-alert__content {
+  @apply break-words;
+}
+
+.base-alert--wrap-description .base-alert__description {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
 }
 
 .base-alert--lg .base-alert__title {
@@ -185,6 +257,10 @@ const close = () => {
 
 .base-alert__actions {
   @apply flex shrink-0 flex-wrap items-center justify-end gap-2;
+}
+
+.base-alert__actions--bottom {
+  @apply mt-3 justify-start;
 }
 
 .base-alert__close {
@@ -203,6 +279,10 @@ const close = () => {
   @apply border-0 bg-transparent shadow-none;
 }
 
+.base-alert--outline {
+  @apply bg-white shadow-none dark:bg-slate-900;
+}
+
 .base-alert--solid {
   border-color: transparent;
   background-color: var(--alert-solid-bg);
@@ -212,6 +292,15 @@ const close = () => {
 .base-alert--solid .base-alert__description,
 .base-alert--solid .base-alert__content {
   color: var(--alert-solid-muted);
+}
+
+.base-alert--banner {
+  @apply rounded-none border-x-0 border-t-0 shadow-none;
+}
+
+.base-alert--accent {
+  border-left-width: 4px;
+  border-left-color: var(--alert-fg);
 }
 
 .base-alert--info {

@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed } from "vue";
+import { useRoute, useRouter } from "vue-router";
 import { Bot, Image, MessageSquareText, Puzzle, ScrollText, SlidersHorizontal } from "lucide-vue-next";
 import { useI18n } from "../../composables/useI18n";
 import { useToast } from "../../composables/useToast";
@@ -8,13 +9,16 @@ import AiFeaturePanel from "./components/AiFeaturePanel.vue";
 import AiImagePanel from "./components/AiImagePanel.vue";
 import AiPromptPanel from "./components/AiPromptPanel.vue";
 import AiProviderPanel from "./components/AiProviderPanel.vue";
+import { getQueryParamEnum } from "../../utils";
 
 const { t } = useI18n();
 const { triggerToast } = useToast();
+const route = useRoute();
+const router = useRouter();
 
-type AiTab = "config" | "chat" | "image" | "prompts" | "features";
+const AI_TAB_VALUES = ["config", "chat", "image", "prompts", "features"] as const;
+type AiTab = typeof AI_TAB_VALUES[number];
 
-const activeTab = ref<AiTab>("config");
 const tabs = [
   { key: "config", labelKey: "aiPage.tabs.config", icon: SlidersHorizontal },
   { key: "chat", labelKey: "aiPage.tabs.chat", icon: MessageSquareText },
@@ -22,6 +26,22 @@ const tabs = [
   { key: "prompts", labelKey: "aiPage.tabs.prompts", icon: ScrollText },
   { key: "features", labelKey: "aiPage.tabs.features", icon: Puzzle },
 ] as const;
+
+function normalizeTab(value: unknown): AiTab {
+  return getQueryParamEnum(value, AI_TAB_VALUES, "config", { arrayMode: "fallback" });
+}
+
+const activeTab = computed<AiTab>({
+  get: () => normalizeTab(route.query.tab),
+  set: (tab) => {
+    void router.replace({
+      query: {
+        ...route.query,
+        tab,
+      },
+    });
+  },
+});
 
 const handleSaved = () => {
   triggerToast(t("settings.aiProvider.saveSuccess"), "success");
@@ -68,27 +88,22 @@ const handleUsePrompt = (type: "chat" | "image") => {
       </aside>
 
       <div class="ai-page__panel">
-        <transition name="fade-fast" mode="out-in">
-          <AiProviderPanel
-            v-if="activeTab === 'config'"
-            key="config"
-            @saved="handleSaved"
-            @tested="handleTested"
-            @failed="handleFailed"
-          />
-          <AiChatPanel
-            v-else-if="activeTab === 'chat'"
-            key="chat"
-            @failed="handleFailed"
-          />
-          <AiImagePanel
-            v-else-if="activeTab === 'image'"
-            key="image"
-            @failed="handleFailed"
-          />
-          <AiPromptPanel v-else-if="activeTab === 'prompts'" key="prompts" @use="handleUsePrompt" />
-          <AiFeaturePanel v-else key="features" />
-        </transition>
+        <AiProviderPanel
+          v-if="activeTab === 'config'"
+          @saved="handleSaved"
+          @tested="handleTested"
+          @failed="handleFailed"
+        />
+        <AiChatPanel
+          v-else-if="activeTab === 'chat'"
+          @failed="handleFailed"
+        />
+        <AiImagePanel
+          v-else-if="activeTab === 'image'"
+          @failed="handleFailed"
+        />
+        <AiPromptPanel v-else-if="activeTab === 'prompts'" @use="handleUsePrompt" />
+        <AiFeaturePanel v-else />
       </div>
     </section>
   </main>
@@ -137,15 +152,5 @@ const handleUsePrompt = (type: "chat" | "image") => {
 
 .ai-page__panel {
   @apply min-h-0 flex-1 overflow-hidden pr-1;
-}
-
-.fade-fast-enter-active,
-.fade-fast-leave-active {
-  transition: opacity 0.15s ease;
-}
-
-.fade-fast-enter-from,
-.fade-fast-leave-to {
-  opacity: 0;
 }
 </style>

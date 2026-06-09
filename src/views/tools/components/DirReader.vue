@@ -5,6 +5,7 @@ import { storeToRefs } from "pinia";
 import AppPathSelector from "../../../components/common/AppPathSelector.vue";
 import { useToolsStore } from "../../../stores/tools";
 import { useI18n } from "../../../composables/useI18n";
+import { getErrorMessage, isBlank } from "../../../utils";
 
 const emit = defineEmits<{
   (e: "toast", msg: string, type?: "success" | "error"): void;
@@ -18,7 +19,7 @@ const { dirReader, dirReaderReadLoading } = storeToRefs(toolsStore);
 const showConfigModal = ref(false);
 
 async function handleReadDirectoryTree() {
-  if (!dirReader.value.rootPath.trim()) {
+  if (isBlank(dirReader.value.rootPath)) {
     emit("toast", t("tools.dirReader.emptyPathError"), "error");
     return;
   }
@@ -27,7 +28,7 @@ async function handleReadDirectoryTree() {
     await toolsStore.readDirectoryTree();
     emit("toast", t("tools.dirReader.successMsg"), "success");
   } catch (err) {
-    emit("toast", err instanceof Error ? err.message : t("tools.dirReader.failedMsg"), "error");
+    emit("toast", getErrorMessage(err, t("tools.dirReader.failedMsg")), "error");
   }
 }
 

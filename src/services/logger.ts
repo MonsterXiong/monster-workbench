@@ -1,34 +1,22 @@
 import { config } from "../config";
-import { buildDatedFileName, formatDateTime, safeJsonStringify } from "../utils";
+import { buildDatedFileName, formatCurrentDateTime, formatLogLevelTag, getLogLevelWeight, safeJsonStringify } from "../utils";
 import { systemService } from "./system.service";
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
-
-const LEVEL_WEIGHTS: Record<LogLevel, number> = {
-  debug: 0,
-  info: 1,
-  warn: 2,
-  error: 3,
-};
 
 function getTodayLogFileName(): string {
   return buildDatedFileName("", "log");
 }
 
-function formatTime(d: Date): string {
-  return formatDateTime(d);
-}
-
 async function writeLog(level: LogLevel, message: string, details?: any) {
-  const now = new Date();
-  const timeStr = formatTime(now);
+  const timeStr = formatCurrentDateTime();
 
   // 组装格式化日志行
   let detailStr = "";
   if (details !== undefined && details !== null) {
     detailStr = " | Details: " + (typeof details === "object" ? safeJsonStringify(details, "[Unserializable Object]") : String(details));
   }
-  const logLine = `[${timeStr}] [${level.toUpperCase()}] ${message}${detailStr}`;
+  const logLine = `[${timeStr}] ${formatLogLevelTag(level)} ${message}${detailStr}`;
 
   // 1. 控制台分流输出
   if (level === "error") {
@@ -42,8 +30,8 @@ async function writeLog(level: LogLevel, message: string, details?: any) {
   }
 
   // 2. 检查等级权重限制，若满足要求则持久化追加写入物理日志
-  const configWeight = LEVEL_WEIGHTS[config.logLevel] ?? 1;
-  const currentWeight = LEVEL_WEIGHTS[level];
+  const configWeight = getLogLevelWeight(config.logLevel, 1);
+  const currentWeight = getLogLevelWeight(level, 0);
 
   if (currentWeight >= configWeight) {
     try {

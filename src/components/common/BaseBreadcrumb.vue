@@ -2,7 +2,7 @@
 import { computed, ref, watch } from "vue";
 import { ArrowLeft, ChevronRight, MoreHorizontal } from "lucide-vue-next";
 import { useI18n } from "../../composables/useI18n";
-import { collapseMiddleItems, dropRight, findLastItem, joinBy } from "../../utils";
+import { collapseMiddleItems, dropRight, findLastItem, joinBy, preventAndStopDomEvent } from "../../utils";
 
 type BreadcrumbSize = "sm" | "md" | "lg";
 type BreadcrumbSurface = "plain" | "muted" | "card";
@@ -108,8 +108,7 @@ const handleSelect = (item: BreadcrumbItem, isLast: boolean) => {
 
 const handleLinkSelect = (event: MouseEvent, item: BreadcrumbItem, isLast: boolean) => {
   if (isItemUnavailable(item, isLast)) {
-    event.preventDefault();
-    event.stopPropagation();
+    preventAndStopDomEvent(event);
     return;
   }
 

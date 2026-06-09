@@ -64,7 +64,7 @@ src/
 - **禁止直接访问数据源**：页面组件禁止直接访问 SQLite 或原始网络请求。
 - **禁止在 Store 编写复杂底层逻辑**：Store 内禁止编写复杂底层逻辑或直接处理复杂底座交互。
 
-数据库与持久化代码应优先向 Rust Command / Service / Repository 收敛。当前已移除前端 SQL 插件与 SQL capability，禁止重新引入 `@tauri-apps/plugin-sql`、`tauri-plugin-sql` 或任何前端 SQL 直驱通道。
+数据库与持久化代码应优先向 Rust Command / Service / Repository 收敛，禁止引入 `@tauri-apps/plugin-sql`、`tauri-plugin-sql` 或任何前端 SQL 直驱通道。
 
 文件读写能力必须经 Rust Command / Service 做路径、扩展名、大小与沙箱校验后暴露给前端。禁止直接依赖、注册或开放 `@tauri-apps/plugin-fs`、`tauri-plugin-fs`、`fs:default`，禁止把 `assetProtocol.scope` 放宽到整个 `$HOME/**/*`。
 

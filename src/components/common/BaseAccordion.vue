@@ -4,10 +4,14 @@ import type { ComponentPublicInstance } from "vue";
 import {
   filterByFalsyValue,
   findIndexByValue,
+  firstItem,
+  getKeyboardBoundaryPosition,
+  getKeyboardNavigationDirection,
   getNextCircularIndex,
   hasItem,
+  lastItem,
   sanitizeDomIdSegment,
-  toggleItem as toggleArrayItem,
+  toggleSelectionKeyByMode,
 } from "../../utils";
 
 type AccordionSize = "sm" | "md" | "lg";
@@ -122,13 +126,7 @@ const toggleItem = (item: AccordionItem) => {
   const expanded = isExpanded(item.key);
   if (expanded && !props.allowCollapse) return;
 
-  let nextValue: string[] = [];
-
-  if (props.multiple) {
-    nextValue = toggleArrayItem(activeKeys.value, item.key, expanded);
-  } else {
-    nextValue = expanded ? [] : [item.key];
-  }
+  const nextValue = toggleSelectionKeyByMode(activeKeys.value, item.key, { multiple: props.multiple });
 
   commitValue(nextValue, { key: item.key, expanded: !expanded });
 };
@@ -143,26 +141,25 @@ const moveFocus = (item: AccordionItem, direction: 1 | -1) => {
 const handleTriggerKeydown = (event: KeyboardEvent, item: AccordionItem) => {
   if (isItemDisabled(item)) return;
 
-  if (event.key === "ArrowDown" || event.key === "ArrowRight") {
+  const direction = getKeyboardNavigationDirection(event);
+  if (direction) {
     event.preventDefault();
-    moveFocus(item, 1);
+    moveFocus(item, direction);
+    return;
   }
 
-  if (event.key === "ArrowUp" || event.key === "ArrowLeft") {
+  const boundaryPosition = getKeyboardBoundaryPosition(event);
+  if (boundaryPosition === "first") {
     event.preventDefault();
-    moveFocus(item, -1);
+    const firstEnabledItem = firstItem(enabledItems.value);
+    if (firstEnabledItem) focusTrigger(firstEnabledItem.key);
+    return;
   }
 
-  if (event.key === "Home") {
+  if (boundaryPosition === "last") {
     event.preventDefault();
-    const firstItem = enabledItems.value[0];
-    if (firstItem) focusTrigger(firstItem.key);
-  }
-
-  if (event.key === "End") {
-    event.preventDefault();
-    const lastItem = enabledItems.value[enabledItems.value.length - 1];
-    if (lastItem) focusTrigger(lastItem.key);
+    const lastEnabledItem = lastItem(enabledItems.value);
+    if (lastEnabledItem) focusTrigger(lastEnabledItem.key);
   }
 };
 </script>

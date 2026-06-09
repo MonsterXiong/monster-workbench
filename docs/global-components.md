@@ -6,7 +6,7 @@
 
 ## 1. 基础通用组件的全局注册与零导入机制
 
-- **单体 main.ts 全局注册**：对于在绝大多数业务场景中均会使用到的通用高频 UI 组件（如 `BaseButton`、`BaseInput`、`BaseDialog`、`BaseTable` 等），必须在 `src/main.ts` 的 `bootstrap` 方法中统一通过 `app.component()` 进行全局挂载。业务层页面及子组件中**绝对禁止**再次编写 `import BaseButton from ...` 等重复的样板导入代码，贯彻 DRY 原则。
+- **单体 main.ts 全局注册**：对于在绝大多数业务场景中均会使用到的通用高频 UI 组件（如 `BaseButton`、`BaseInput`、`BaseDialog`、`BaseTable` 等），必须在 `src/main.ts` 的 `bootstrap` 方法中统一通过 `app.component()` 进行全局挂载。业务页面优先在模板中直接使用这些全局组件，避免重复编写 `import BaseButton from ...` 等样板导入；应用壳层单例挂载、基础组件内部组合或脚本侧确需引用组件类型时可以显式导入。
 
 ---
 
@@ -26,5 +26,5 @@
 
 为了保证所有全局公共基础组件的接口清晰、自适应效果好（特别是在浅色/深色模式下的外观表现）：
 
-- **组件沙箱页**：[PlaygroundPage.vue](file:///src/views/playground/PlaygroundPage.vue) 作为开发期组件的展示和调试沙箱，集中展示了所有 `Base*` 基础组件的各种 Props 态（Loading、Disabled、不同类型等）。
+- **组件沙箱页**：[PlaygroundPage.vue](../src/views/playground/PlaygroundPage.vue) 作为开发期组件的展示和调试沙箱，集中展示了所有 `Base*` 基础组件的各种 Props 态（Loading、Disabled、不同类型等）。
 - **同步注册要求**：**新增或重构 Base 组件时，必须同步**在该沙箱页面中注册其展示用例，直观地通过沙箱完成对比度、事件交互以及跨主题样式校验。

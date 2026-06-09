@@ -13,7 +13,7 @@ import {
 } from "../../stores/error-monitor";
 import { useErrorMonitorStore } from "../../stores/error-monitor";
 import { useSystemStore } from "../../stores/system";
-import { formatTemplate } from "../../utils";
+import { formatTemplate, getErrorMessage } from "../../utils";
 
 // 引入局部拆分的组件
 import SystemStatusSidebar from "./components/SystemStatusSidebar.vue";
@@ -78,7 +78,7 @@ async function handleClearLogs() {
     await systemStore.clearLogs();
     triggerToast(t('system.clearLogsSuccess'), "success");
   } catch (err: any) {
-    triggerToast(err?.message || t('system.clearLogsFailed'), "error");
+    triggerToast(getErrorMessage(err, t('system.clearLogsFailed')), "error");
   } finally {
     hideLoading();
   }
@@ -97,7 +97,7 @@ async function handleExportLogs() {
       "success"
     );
   } catch (err: any) {
-    triggerToast(err?.message || t('system.exportLogsFailed'), "error");
+    triggerToast(getErrorMessage(err, t('system.exportLogsFailed')), "error");
   } finally {
     hideLoading();
   }

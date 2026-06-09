@@ -14,6 +14,7 @@ import { useAppStore } from "../stores/app";
 import { useUpdateStore } from "../stores/update";
 import { useToast } from "../composables/useToast";
 import { useI18n } from "../composables/useI18n";
+import { addDomEventListener, mergeDomEventCleanups, type DomEventCleanup } from "../utils";
 
 type RouteTab = "workspace" | "system" | "tools" | "navigation" | "ai" | "settings" | "file-manager" | "playground";
 
@@ -23,6 +24,7 @@ const appStore = useAppStore();
 const updateStore = useUpdateStore();
 const { triggerToast } = useToast();
 const { t } = useI18n();
+let stopNetworkStatusListeners: DomEventCleanup | null = null;
 
 const currentTab = computed<RouteTab>(() => {
   const name = String(route.name ?? "workspace");
@@ -51,13 +53,15 @@ onMounted(async () => {
   await appStore.initialize();
   updateStore.initAutoCheck();
 
-  window.addEventListener("online", updateOnlineStatus);
-  window.addEventListener("offline", updateOnlineStatus);
+  stopNetworkStatusListeners = mergeDomEventCleanups([
+    addDomEventListener(window, "online", updateOnlineStatus),
+    addDomEventListener(window, "offline", updateOnlineStatus),
+  ]);
 });
 
 onUnmounted(() => {
-  window.removeEventListener("online", updateOnlineStatus);
-  window.removeEventListener("offline", updateOnlineStatus);
+  stopNetworkStatusListeners?.();
+  stopNetworkStatusListeners = null;
 });
 
 function handleChangeTab(tab: RouteTab) {

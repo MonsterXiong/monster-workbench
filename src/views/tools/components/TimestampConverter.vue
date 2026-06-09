@@ -4,7 +4,19 @@ import { Clock, RefreshCw, Copy } from "lucide-vue-next";
 import { storeToRefs } from "pinia";
 import { useToolsStore } from "../../../stores/tools";
 import { useI18n } from "../../../composables/useI18n";
-import { formatDate, getCurrentUnixTimestamp, parseDateInput, parseUnixTimestampInput, splitOnce, toUnixTimestamp } from "../../../utils";
+import {
+  clearIntervalHandle,
+  createInterval,
+  formatCurrentDate,
+  formatDate,
+  getCurrentUnixTimestamp,
+  isBlank,
+  parseDateInput,
+  parseUnixTimestampInput,
+  splitOnce,
+  toUnixTimestamp,
+  type IntervalHandle,
+} from "../../../utils";
 
 const emit = defineEmits<{
   (e: "copy", text: string): void;
@@ -16,7 +28,7 @@ const toolsStore = useToolsStore();
 const { timestampConverter } = storeToRefs(toolsStore);
 
 const currentTimestamp = ref(getCurrentUnixTimestamp());
-let timerId: number | null = null;
+let timerId: IntervalHandle | null = null;
 
 const tsOutput = ref("");
 const hasTsError = ref(false);
@@ -29,23 +41,22 @@ function updateCurrentTime() {
 }
 
 onMounted(() => {
-  timerId = window.setInterval(updateCurrentTime, 1000);
+  timerId = createInterval(updateCurrentTime, 1000);
 
   if (!timestampConverter.value.timestampInput) {
     timestampConverter.value.timestampInput = String(getCurrentUnixTimestamp());
   }
 
-  dateInput.value = formatDate(new Date());
+  dateInput.value = formatCurrentDate();
 });
 
 onUnmounted(() => {
-  if (timerId !== null) {
-    clearInterval(timerId);
-  }
+  clearIntervalHandle(timerId);
+  timerId = null;
 });
 
 function handleConvertTsToDate() {
-  if (!timestampConverter.value.timestampInput.trim()) {
+  if (isBlank(timestampConverter.value.timestampInput)) {
     tsOutput.value = t("tools.timestamp.emptyTsError");
     hasTsError.value = true;
     return;
@@ -66,7 +77,7 @@ function handleConvertTsToDate() {
 }
 
 function handleConvertDateToTs() {
-  if (!dateInput.value.trim()) {
+  if (isBlank(dateInput.value)) {
     dateOutput.value = t("tools.timestamp.emptyDateError");
     hasDateError.value = true;
     return;

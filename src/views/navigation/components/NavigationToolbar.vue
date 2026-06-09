@@ -18,7 +18,7 @@ import { useNavigationStore } from "../../../stores/navigation";
 import { useConfirm } from "../../../composables/useConfirm";
 import { useToast } from "../../../composables/useToast";
 import { useI18n } from "../../../composables/useI18n";
-import { formatTemplate } from "../../../utils";
+import { formatTemplate, hasItem } from "../../../utils";
 
 const navigationStore = useNavigationStore();
 const { confirm } = useConfirm();
@@ -233,7 +233,7 @@ async function handleDeleteCategory(cat: string) {
         >
           <span>{{ getCategoryName(cat) }}</span>
           <X
-            v-if="!['Utility', 'Community', 'Documentation', 'Design', 'Leisure'].includes(cat)"
+            v-if="!hasItem(['Utility', 'Community', 'Documentation', 'Design', 'Leisure'], cat)"
             class="h-3.5 w-3.5 hover:text-red-500 transition-colors cursor-pointer rounded-full hover:bg-black/10 p-0.5 shrink-0"
             @click.stop="handleDeleteCategory(cat)"
           />

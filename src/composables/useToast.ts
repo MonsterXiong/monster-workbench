@@ -1,14 +1,19 @@
 import { ref } from "vue";
+import { clearTimeoutHandle, createTimeout, type TimeoutHandle } from "../utils";
 
 export type ToastType = "success" | "error" | "warning" | "info";
 
 export interface ToastOptions {
   duration?: number;
+  type?: ToastType;
   title?: string;
+  description?: string;
   icon?: string;
   closable?: boolean;
   actionText?: string;
   onAction?: () => void;
+  showProgress?: boolean;
+  wrap?: boolean;
 }
 
 /** 全局 Toast 消息内容 */
@@ -18,18 +23,21 @@ const toastType = ref<ToastType>("success");
 /** 全局 Toast 显示状态 */
 const showToast = ref(false);
 const toastTitle = ref("");
+const toastDescription = ref("");
 const toastIcon = ref("");
 const toastClosable = ref(false);
 const toastActionText = ref("");
 const toastAction = ref<(() => void) | null>(null);
+const toastDuration = ref(2500);
+const toastShowProgress = ref(false);
+const toastWrap = ref(false);
+const toastId = ref(0);
 /** 定时器句柄，用于自动关闭 */
-let timer: ReturnType<typeof setTimeout> | null = null;
+let timer: TimeoutHandle | null = null;
 
 function clearToastTimer() {
-  if (timer) {
-    clearTimeout(timer);
-    timer = null;
-  }
+  clearTimeoutHandle(timer);
+  timer = null;
 }
 
 /**
@@ -61,21 +69,26 @@ export function useToast() {
       toastType.value = "success";
       duration = typeOrDuration;
     } else if (typeof typeOrDuration === "object") {
-      toastType.value = "success";
+      toastType.value = typeOrDuration.type ?? "success";
     } else {
-      toastType.value = typeOrDuration;
+      toastType.value = options.type ?? typeOrDuration;
     }
 
     toastTitle.value = options.title ?? "";
+    toastDescription.value = options.description ?? "";
     toastIcon.value = options.icon ?? "";
     toastClosable.value = options.closable ?? false;
     toastActionText.value = options.actionText ?? "";
     toastAction.value = options.onAction ?? null;
+    toastDuration.value = duration;
+    toastShowProgress.value = options.showProgress ?? duration > 0;
+    toastWrap.value = options.wrap ?? false;
+    toastId.value += 1;
     showToast.value = true;
     clearToastTimer();
 
     if (duration > 0) {
-      timer = setTimeout(() => {
+      timer = createTimeout(() => {
         showToast.value = false;
         timer = null;
       }, duration);
@@ -97,9 +110,14 @@ export function useToast() {
     toastType,
     showToast,
     toastTitle,
+    toastDescription,
     toastIcon,
     toastClosable,
     toastActionText,
+    toastDuration,
+    toastShowProgress,
+    toastWrap,
+    toastId,
     triggerToast,
     hideToast,
     runToastAction,

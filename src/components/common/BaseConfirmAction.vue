@@ -20,6 +20,8 @@ interface Props {
   loading?: boolean;
   outline?: boolean;
   block?: boolean;
+  ariaLabel?: string;
+  buttonTitle?: string;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -34,9 +36,12 @@ const props = withDefaults(defineProps<Props>(), {
   loading: false,
   outline: false,
   block: false,
+  ariaLabel: "",
+  buttonTitle: "",
 });
 
 const emit = defineEmits<{
+  (e: "open"): void;
   (e: "confirm"): void;
   (e: "cancel"): void;
 }>();
@@ -51,9 +56,12 @@ const resolvedConfirmText = computed(() => props.confirmText || t("common.confir
 const resolvedCancelText = computed(() => props.cancelText || t("common.cancel"));
 const buttonLabel = computed(() => props.label || resolvedConfirmText.value);
 const buttonLoading = computed(() => props.loading || pending.value);
+const buttonAriaLabel = computed(() => props.ariaLabel || buttonLabel.value);
+const buttonTitle = computed(() => props.buttonTitle || buttonAriaLabel.value);
 
 const handleClick = async () => {
   if (props.disabled || buttonLoading.value) return;
+  emit("open");
   pending.value = true;
   try {
     const confirmed = await confirm({
@@ -84,6 +92,8 @@ const handleClick = async () => {
     :loading="buttonLoading"
     :outline="outline"
     :block="block"
+    :aria-label="buttonAriaLabel"
+    :title="buttonTitle"
     @click="handleClick"
   >
     <template v-if="icon || slots.icon" #icon>

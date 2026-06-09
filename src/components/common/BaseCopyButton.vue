@@ -2,6 +2,7 @@
 import { onBeforeUnmount, ref } from "vue";
 import { Check, Copy } from "lucide-vue-next";
 import { useI18n } from "../../composables/useI18n";
+import { clearTimeoutHandle, copyTextToClipboardResult, resetTimeoutHandle, type TimeoutHandle } from "../../utils";
 
 interface Props {
   text: string;
@@ -9,6 +10,7 @@ interface Props {
   copiedLabel?: string;
   disabled?: boolean;
   size?: "xs" | "sm" | "md";
+  fallbackOnClipboardError?: boolean;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -16,6 +18,7 @@ const props = withDefaults(defineProps<Props>(), {
   copiedLabel: "",
   disabled: false,
   size: "sm",
+  fallbackOnClipboardError: true,
 });
 
 const emit = defineEmits<{
@@ -24,34 +27,18 @@ const emit = defineEmits<{
 }>();
 
 const copied = ref(false);
-let resetTimer: number | undefined;
+let resetTimer: TimeoutHandle | null = null;
 const { t } = useI18n();
-
-const fallbackCopy = (value: string) => {
-  const textarea = document.createElement("textarea");
-  textarea.value = value;
-  textarea.setAttribute("readonly", "true");
-  textarea.style.position = "fixed";
-  textarea.style.opacity = "0";
-  document.body.appendChild(textarea);
-  textarea.select();
-  const ok = document.execCommand("copy");
-  document.body.removeChild(textarea);
-  if (!ok) throw new Error("copy failed");
-};
 
 const handleCopy = async () => {
   if (props.disabled || !props.text) return;
   try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(props.text);
-    } else {
-      fallbackCopy(props.text);
-    }
+    const result = await copyTextToClipboardResult(props.text, { fallbackOnClipboardError: props.fallbackOnClipboardError });
+    if (!result.success) throw result.error ?? new Error("copy failed");
     copied.value = true;
-    window.clearTimeout(resetTimer);
-    resetTimer = window.setTimeout(() => {
+    resetTimer = resetTimeoutHandle(resetTimer, () => {
       copied.value = false;
+      resetTimer = null;
     }, 1500);
     emit("copied", props.text);
   } catch (error) {
@@ -60,7 +47,8 @@ const handleCopy = async () => {
 };
 
 onBeforeUnmount(() => {
-  window.clearTimeout(resetTimer);
+  clearTimeoutHandle(resetTimer);
+  resetTimer = null;
 });
 </script>
 

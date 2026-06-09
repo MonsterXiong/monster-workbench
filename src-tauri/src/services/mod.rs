@@ -1,10 +1,10 @@
+pub mod ai_service;
 pub mod app_service;
+pub mod auth_service;
 pub mod config_service;
 pub mod database_service;
 pub mod file_service;
 pub mod log_service;
+pub mod navigation_service;
 pub mod system_service;
 pub mod task_service;
-pub mod auth_service;
-pub mod navigation_service;
-pub mod ai_service;

@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { ServerCrash } from "lucide-vue-next";
 import { useI18n } from "../../composables/useI18n";
+import { reloadPage } from "../../utils";
 
 const { t } = useI18n();
 
 const reloadApp = () => {
-  window.location.reload();
+  reloadPage();
 };
 </script>
 

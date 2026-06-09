@@ -1,6 +1,6 @@
-use tauri::AppHandle;
 use crate::infra::path::PathProvider;
 use crate::infra::AppResult;
+use tauri::AppHandle;
 
 pub struct AppService {
     app_handle: AppHandle,
@@ -9,7 +9,10 @@ pub struct AppService {
 
 impl AppService {
     pub fn new(app_handle: AppHandle, path_provider: PathProvider) -> Self {
-        Self { app_handle, path_provider }
+        Self {
+            app_handle,
+            path_provider,
+        }
     }
 
     /// 获取当前应用版本号

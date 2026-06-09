@@ -4,7 +4,7 @@ import { Binary, Trash2, Copy, AlertTriangle } from "lucide-vue-next";
 import { storeToRefs } from "pinia";
 import { useToolsStore } from "../../../stores/tools";
 import { useI18n } from "../../../composables/useI18n";
-import { decodeBase64Utf8, encodeBase64Utf8 } from "../../../utils";
+import { encodeBase64Utf8, isBlank, tryDecodeBase64Utf8 } from "../../../utils";
 
 const emit = defineEmits<{
   (e: "copy", text: string): void;
@@ -33,15 +33,17 @@ function handleEncodeBase64() {
 
 function handleDecodeBase64() {
   base64Error.value = "";
-  if (!base64Converter.value.base64Input.trim()) {
+  if (isBlank(base64Converter.value.base64Input)) {
     base64Output.value = "";
     return;
   }
-  try {
-    base64Output.value = decodeBase64Utf8(base64Converter.value.base64Input.trim());
-  } catch (err) {
+  const decodedValue = tryDecodeBase64Utf8(base64Converter.value.base64Input);
+  if (decodedValue === null) {
     base64Error.value = t("tools.base64.decodeError");
+    return;
   }
+
+  base64Output.value = decodedValue;
 }
 
 function handleClearBase64() {

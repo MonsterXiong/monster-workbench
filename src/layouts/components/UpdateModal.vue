@@ -3,18 +3,11 @@ import { useUpdateStore } from "../../stores/update";
 import { useAppStore } from "../../stores/app";
 import { ArrowUpCircle, RefreshCw } from "lucide-vue-next";
 import { useI18n } from "../../composables/useI18n";
+import { formatBytesProgress, formatDateOnly } from "../../utils";
 
 const updateStore = useUpdateStore();
 const appStore = useAppStore();
 const { t } = useI18n();
-
-function formatBytes(bytes: number) {
-  if (!bytes) return "0 B";
-  const k = 1024;
-  const sizes = ["B", "KB", "MB", "GB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
-}
 </script>
 
 <template>
@@ -74,7 +67,7 @@ function formatBytes(bytes: number) {
             <div class="mb-2 flex items-center justify-between">
               <span class="text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">{{ t('updater.logTitle') }}</span>
               <span v-if="updateStore.updateInfo?.date" class="text-[10px] text-slate-400 dark:text-slate-500">
-                {{ t('updater.releaseDate') }}: {{ updateStore.updateInfo.date.split('T')[0] }}
+                {{ t('updater.releaseDate') }}: {{ formatDateOnly(updateStore.updateInfo.date) }}
               </span>
             </div>
 
@@ -123,7 +116,7 @@ function formatBytes(bytes: number) {
               <div class="flex items-center justify-between text-[11px] text-slate-400 dark:text-slate-500">
                 <span>{{ updateStore.message }}</span>
                 <span class="font-medium">
-                  {{ formatBytes(updateStore.appProgress.downloaded) }} / {{ formatBytes(updateStore.appProgress.total) }}
+                  {{ formatBytesProgress(updateStore.appProgress.downloaded, updateStore.appProgress.total) }}
                 </span>
               </div>
             </div>

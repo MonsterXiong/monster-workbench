@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { toReversedArray } from "../../utils";
+import { useI18n } from "../../composables/useI18n";
+import { createLineClampStyle, isActivationKey, toReversedArray } from "../../utils";
 
 type TimelineType = "primary" | "success" | "warning" | "danger" | "neutral";
 type TimelineSize = "sm" | "md" | "lg";
@@ -28,6 +29,13 @@ interface Props {
   clickable?: boolean;
   reverse?: boolean;
   marker?: TimelineMarker;
+  selectedKey?: string;
+  loading?: boolean;
+  loadingText?: string;
+  emptyText?: string;
+  wrapTitle?: boolean;
+  wrapDescription?: boolean;
+  maxDescriptionLines?: number;
   ariaLabel?: string;
 }
 
@@ -39,6 +47,13 @@ const props = withDefaults(defineProps<Props>(), {
   clickable: false,
   reverse: false,
   marker: "icon",
+  selectedKey: "",
+  loading: false,
+  loadingText: "",
+  emptyText: "",
+  wrapTitle: false,
+  wrapDescription: false,
+  maxDescriptionLines: 2,
   ariaLabel: "",
 });
 
@@ -51,7 +66,19 @@ defineSlots<{
   actions?: (props: { item: TimelineItem; index: number }) => any;
 }>();
 
-const renderedItems = computed(() => (props.reverse ? toReversedArray(props.items) : props.items));
+const { t } = useI18n();
+const renderedEntries = computed(() => {
+  const entries = props.items.map((item, index) => ({ item, index }));
+  return props.reverse ? toReversedArray(entries) : entries;
+});
+const hasItems = computed(() => renderedEntries.value.length > 0);
+const resolvedLoadingText = computed(() => props.loadingText || t("common.loading"));
+const resolvedEmptyText = computed(() => props.emptyText || t("common.noData"));
+const descriptionStyle = computed(() => {
+  if (props.wrapDescription) return undefined;
+
+  return createLineClampStyle(props.maxDescriptionLines);
+});
 
 const canSelect = (item: TimelineItem) => props.clickable && !item.disabled;
 
@@ -61,7 +88,7 @@ const handleSelect = (item: TimelineItem, index: number) => {
 };
 
 const handleKeydown = (event: KeyboardEvent, item: TimelineItem, index: number) => {
-  if (event.key !== "Enter" && event.key !== " ") return;
+  if (!isActivationKey(event)) return;
   event.preventDefault();
   handleSelect(item, index);
 };
@@ -78,51 +105,82 @@ const handleKeydown = (event: KeyboardEvent, item: TimelineItem, index: number) 
         'base-timeline--dense': dense,
         'base-timeline--bordered': bordered,
         'base-timeline--clickable': clickable,
+        'base-timeline--wrap-title': wrapTitle,
+        'base-timeline--wrap-description': wrapDescription,
+        'is-loading': loading,
       },
     ]"
     :aria-label="ariaLabel || undefined"
+    :aria-busy="loading ? 'true' : undefined"
   >
     <li
-      v-for="(item, index) in renderedItems"
-      :key="item.key"
-      class="base-timeline__item"
-      :class="[
-        `base-timeline__item--${item.type || 'neutral'}`,
-        {
-          'is-clickable': canSelect(item),
-          'is-disabled': item.disabled,
-        },
-      ]"
-      :role="clickable ? 'button' : undefined"
-      :tabindex="canSelect(item) ? 0 : undefined"
-      :aria-disabled="item.disabled ? 'true' : undefined"
-      @click="handleSelect(item, index)"
-      @keydown="handleKeydown($event, item, index)"
+      v-if="loading"
+      class="base-timeline__item base-timeline__item--state"
+      aria-live="polite"
     >
-      <span class="base-timeline__line" aria-hidden="true"></span>
       <span class="base-timeline__marker" aria-hidden="true">
-        <BaseIcon v-if="marker === 'icon' && item.icon" :name="item.icon" size="12" aria-hidden="true" />
-        <span v-else-if="marker === 'number'" class="base-timeline__number">{{ index + 1 }}</span>
+        <BaseIcon name="LoaderCircle" size="13" aria-hidden="true" />
       </span>
       <div class="base-timeline__content">
-        <slot :item="item" :index="index">
-          <div class="base-timeline__header">
-            <div class="base-timeline__title-group">
-              <strong>{{ item.title }}</strong>
-              <span v-if="item.meta" class="base-timeline__meta">{{ item.meta }}</span>
-            </div>
-            <time v-if="item.time">{{ item.time }}</time>
-          </div>
-          <p v-if="item.description">{{ item.description }}</p>
-          <div v-if="item.tag || $slots.actions" class="base-timeline__footer">
-            <span v-if="item.tag" class="base-timeline__tag">{{ item.tag }}</span>
-            <div v-if="$slots.actions" class="base-timeline__actions">
-              <slot name="actions" :item="item" :index="index"></slot>
-            </div>
-          </div>
-        </slot>
+        <span class="base-timeline__state-text">{{ resolvedLoadingText }}</span>
       </div>
     </li>
+    <li
+      v-else-if="!hasItems"
+      class="base-timeline__item base-timeline__item--state"
+    >
+      <span class="base-timeline__marker" aria-hidden="true">
+        <BaseIcon name="Inbox" size="13" aria-hidden="true" />
+      </span>
+      <div class="base-timeline__content">
+        <span class="base-timeline__state-text">{{ resolvedEmptyText }}</span>
+      </div>
+    </li>
+    <template v-else>
+      <li
+        v-for="(entry, visualIndex) in renderedEntries"
+        :key="entry.item.key"
+        class="base-timeline__item"
+        :class="[
+          `base-timeline__item--${entry.item.type || 'neutral'}`,
+          {
+            'is-clickable': canSelect(entry.item),
+            'is-disabled': entry.item.disabled,
+            'is-selected': selectedKey === entry.item.key,
+          },
+        ]"
+        :role="clickable ? 'button' : undefined"
+        :tabindex="canSelect(entry.item) ? 0 : undefined"
+        :aria-disabled="entry.item.disabled ? 'true' : undefined"
+        :aria-current="selectedKey === entry.item.key ? 'step' : undefined"
+        @click="handleSelect(entry.item, entry.index)"
+        @keydown="handleKeydown($event, entry.item, entry.index)"
+      >
+        <span class="base-timeline__line" aria-hidden="true"></span>
+        <span class="base-timeline__marker" aria-hidden="true">
+          <BaseIcon v-if="marker === 'icon' && entry.item.icon" :name="entry.item.icon" size="12" aria-hidden="true" />
+          <span v-else-if="marker === 'number'" class="base-timeline__number">{{ visualIndex + 1 }}</span>
+        </span>
+        <div class="base-timeline__content">
+          <slot :item="entry.item" :index="entry.index">
+            <div class="base-timeline__header">
+              <div class="base-timeline__title-group">
+                <strong>{{ entry.item.title }}</strong>
+                <span v-if="entry.item.meta" class="base-timeline__meta">{{ entry.item.meta }}</span>
+              </div>
+              <time v-if="entry.item.time">{{ entry.item.time }}</time>
+            </div>
+            <p v-if="entry.item.description" :style="descriptionStyle">{{ entry.item.description }}</p>
+            <div v-if="entry.item.tag || $slots.actions" class="base-timeline__footer">
+              <span v-if="entry.item.tag" class="base-timeline__tag">{{ entry.item.tag }}</span>
+              <div v-if="$slots.actions" class="base-timeline__actions">
+                <slot name="actions" :item="entry.item" :index="entry.index"></slot>
+              </div>
+            </div>
+          </slot>
+        </div>
+      </li>
+    </template>
   </ol>
 </template>
 
@@ -156,6 +214,16 @@ const handleKeydown = (event: KeyboardEvent, item: TimelineItem, index: number) 
   box-shadow: 0 0 0 3px rgba(var(--color-primary), 0.14);
 }
 
+.base-timeline__item.is-selected .base-timeline__content {
+  border-color: rgb(var(--color-primary) / 0.42);
+  background-color: rgb(var(--color-primary) / 0.05);
+}
+
+.base-timeline__item.is-selected .base-timeline__marker {
+  background-color: rgb(var(--color-primary));
+  color: #fff;
+}
+
 .base-timeline__line {
   @apply absolute left-3 top-6 h-[calc(100%+0.75rem)] w-px bg-slate-200 dark:bg-slate-800;
 }
@@ -174,6 +242,15 @@ const handleKeydown = (event: KeyboardEvent, item: TimelineItem, index: number) 
   @apply h-2 w-2 rounded-full;
   background-color: var(--timeline-color);
   content: "";
+}
+
+.base-timeline__item--state .base-timeline__marker {
+  border-color: rgb(var(--color-primary) / 0.28);
+  color: rgb(var(--color-primary));
+}
+
+.base-timeline.is-loading .base-timeline__item--state .base-timeline__marker :deep(svg) {
+  animation: base-timeline-spin 0.9s linear infinite;
 }
 
 .base-timeline__number {
@@ -204,6 +281,15 @@ const handleKeydown = (event: KeyboardEvent, item: TimelineItem, index: number) 
   @apply border-slate-300 bg-slate-50 dark:border-slate-700 dark:bg-slate-950;
 }
 
+.base-timeline__item.is-selected.is-clickable:hover .base-timeline__content {
+  border-color: rgb(var(--color-primary) / 0.42);
+  background-color: rgb(var(--color-primary) / 0.07);
+}
+
+.base-timeline__state-text {
+  @apply block text-xs font-black text-slate-500 dark:text-slate-400;
+}
+
 .base-timeline__header {
   @apply flex min-w-0 items-start justify-between gap-3;
 }
@@ -214,6 +300,10 @@ const handleKeydown = (event: KeyboardEvent, item: TimelineItem, index: number) 
 
 .base-timeline__header strong {
   @apply block truncate text-xs font-black text-slate-800 dark:text-slate-100;
+}
+
+.base-timeline--wrap-title .base-timeline__header strong {
+  @apply whitespace-normal break-words;
 }
 
 .base-timeline__header time {
@@ -228,8 +318,12 @@ const handleKeydown = (event: KeyboardEvent, item: TimelineItem, index: number) 
   @apply mt-1 text-[10px] font-bold leading-5 text-slate-400 dark:text-slate-500;
   display: -webkit-box;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
   overflow: hidden;
+}
+
+.base-timeline--wrap-description .base-timeline__content p {
+  display: block;
+  overflow: visible;
 }
 
 .base-timeline__footer {
@@ -310,8 +404,16 @@ const handleKeydown = (event: KeyboardEvent, item: TimelineItem, index: number) 
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .base-timeline__content {
+  .base-timeline__content,
+  .base-timeline__item--state .base-timeline__marker :deep(svg) {
     transition: none !important;
+    animation: none !important;
+  }
+}
+
+@keyframes base-timeline-spin {
+  to {
+    transform: rotate(360deg);
   }
 }
 </style>

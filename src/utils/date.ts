@@ -1,8 +1,25 @@
+import { floorToInteger, isFiniteNumber, isNaNNumber, normalizeModuloIndex, toIntegerAtLeast } from "./number";
+
 export type DateInput = Date | string | number;
 
 export interface DateRangeLike<T = DateInput | null | undefined> {
   start?: T;
   end?: T;
+}
+
+export interface NormalizedDateRange {
+  start: string;
+  end: string;
+}
+
+export interface DateRangeBoundaryDates {
+  start: Date | null;
+  end: Date | null;
+}
+
+export interface DateRangeDurationOptions {
+  inclusive?: boolean;
+  absolute?: boolean;
 }
 
 export interface WeekdayLabelOptions {
@@ -11,11 +28,17 @@ export interface WeekdayLabelOptions {
   format?: Intl.DateTimeFormatOptions["weekday"];
 }
 
+export type TimestampMsFallback = number | (() => number);
+
 const DATE_TOKEN_REGEXP = /YYYY|MM|DD|HH|mm|ss|SSS/g;
 
 export function toDate(value: DateInput): Date | null {
   const date = value instanceof Date ? new Date(value.getTime()) : new Date(value);
-  return Number.isNaN(date.getTime()) ? null : date;
+  return isNaNNumber(date.getTime()) ? null : date;
+}
+
+export function getCurrentDate(): Date {
+  return new Date();
 }
 
 export function isValidDate(value: unknown): value is DateInput {
@@ -56,6 +79,42 @@ export function formatDateTime(value: DateInput, fallback = "--"): string {
   return formatDate(value, "YYYY-MM-DD HH:mm:ss", fallback);
 }
 
+export function formatCurrentDate(pattern = "YYYY-MM-DD HH:mm:ss", fallback = "--"): string {
+  return formatDate(getCurrentDate(), pattern, fallback);
+}
+
+export function formatCurrentDateTime(fallback = "--"): string {
+  return formatCurrentDate("YYYY-MM-DD HH:mm:ss", fallback);
+}
+
+export function formatLocaleDateTime(
+  value: DateInput = getCurrentDate(),
+  locales?: Intl.LocalesArgument,
+  options?: Intl.DateTimeFormatOptions,
+  fallback = "--"
+): string {
+  const date = toDate(value);
+  return date ? date.toLocaleString(locales, options) : fallback;
+}
+
+export function formatCurrentLocaleDateTime(
+  locales?: Intl.LocalesArgument,
+  options?: Intl.DateTimeFormatOptions,
+  fallback = "--"
+): string {
+  return formatLocaleDateTime(getCurrentDate(), locales, options, fallback);
+}
+
+export function formatMonthYear(
+  value: DateInput = getCurrentDate(),
+  locale = "zh-CN",
+  options: Intl.DateTimeFormatOptions = {},
+  fallback = "--"
+): string {
+  const date = toDate(value);
+  return date ? new Intl.DateTimeFormat(locale, { month: "long", year: "numeric", ...options }).format(date) : fallback;
+}
+
 export function formatTimeOnly(value: DateInput, fallback = "--"): string {
   return formatDate(value, "HH:mm:ss", fallback);
 }
@@ -74,12 +133,33 @@ export function formatIsoDateTime(value: DateInput = new Date(), separator: "T" 
   return isoText ? isoText.replace("T", separator).slice(0, 19) : fallback;
 }
 
+export function formatCurrentIsoDateTime(separator: "T" | " " = "T", fallback = ""): string {
+  return formatIsoDateTime(getCurrentDate(), separator, fallback);
+}
+
 export function normalizeDateInputText(value: string): string {
   return value.trim().replace(/[\\/]+/g, "-").replace(/\s+/g, " ");
 }
 
 export function parseDateInput(value: string): Date | null {
   return toDate(normalizeDateInputText(value));
+}
+
+export function parseDateValue(value: DateInput | null | undefined): Date | null {
+  if (value === undefined || value === null || value === "") {
+    return null;
+  }
+
+  return typeof value === "string" ? parseDateInput(value) : toDate(value);
+}
+
+export function normalizeDateValue(value: DateInput | null | undefined, fallback = ""): string {
+  if (value === undefined || value === null || value === "") {
+    return fallback;
+  }
+
+  const date = parseDateValue(value);
+  return date ? formatDateOnly(date, fallback) : String(value);
 }
 
 export function getTodayString(): string {
@@ -204,15 +284,15 @@ export function compareDates(left: DateInput, right: DateInput, fallback = 0): n
 }
 
 export function isDateInRange(value: DateInput, start?: DateInput | null, end?: DateInput | null, inclusive = true): boolean {
-  const date = toDate(value);
+  const date = parseDateValue(value);
 
   if (!date) {
     return false;
   }
 
   const timestamp = date.getTime();
-  const startTime = start === undefined || start === null ? null : toDate(start)?.getTime();
-  const endTime = end === undefined || end === null ? null : toDate(end)?.getTime();
+  const startTime = parseDateValue(start)?.getTime();
+  const endTime = parseDateValue(end)?.getTime();
 
   if (startTime !== null && startTime !== undefined && (inclusive ? timestamp < startTime : timestamp <= startTime)) {
     return false;
@@ -225,8 +305,34 @@ export function isDateInRange(value: DateInput, start?: DateInput | null, end?: 
   return true;
 }
 
+export function isDateValuePresent(value: unknown): boolean {
+  return value !== undefined && value !== null && value !== "";
+}
+
 export function isDateRangeComplete(range: DateRangeLike): boolean {
-  return range.start !== undefined && range.start !== null && range.start !== "" && range.end !== undefined && range.end !== null && range.end !== "";
+  return isDateValuePresent(range.start) && isDateValuePresent(range.end);
+}
+
+export function isDateRangeEmpty(range: DateRangeLike): boolean {
+  return !isDateValuePresent(range.start) && !isDateValuePresent(range.end);
+}
+
+export function isDateRangePartiallyFilled(range: DateRangeLike): boolean {
+  return !isDateRangeEmpty(range) && !isDateRangeComplete(range);
+}
+
+export function normalizeDateRange(range: DateRangeLike, fallback = ""): NormalizedDateRange {
+  return {
+    start: normalizeDateValue(range.start ?? null, fallback),
+    end: normalizeDateValue(range.end ?? null, fallback),
+  };
+}
+
+export function getDateRangeBoundaryDates(range: DateRangeLike): DateRangeBoundaryDates {
+  return {
+    start: parseDateValue(range.start ?? null),
+    end: parseDateValue(range.end ?? null),
+  };
 }
 
 export function isDateRangeOrdered(range: DateRangeLike, inclusive = true): boolean {
@@ -234,8 +340,7 @@ export function isDateRangeOrdered(range: DateRangeLike, inclusive = true): bool
     return true;
   }
 
-  const start = toDate(range.start as DateInput);
-  const end = toDate(range.end as DateInput);
+  const { start, end } = getDateRangeBoundaryDates(range);
 
   if (!start || !end) {
     return false;
@@ -246,6 +351,26 @@ export function isDateRangeOrdered(range: DateRangeLike, inclusive = true): bool
 
 export function isSameDateRange<T extends DateRangeLike>(left: T, right: T): boolean {
   return left.start === right.start && left.end === right.end;
+}
+
+export function getDateRangeDurationDays(range: DateRangeLike, options: DateRangeDurationOptions = {}): number | null {
+  if (!isDateRangeComplete(range)) {
+    return null;
+  }
+
+  const { start, end } = getDateRangeBoundaryDates(range);
+
+  if (!start || !end) {
+    return null;
+  }
+
+  const diff = diffDays(end, start);
+  if (diff === null) {
+    return null;
+  }
+
+  const value = (options.absolute ?? true) ? Math.abs(diff) : diff;
+  return value + (options.inclusive ? 1 : 0);
 }
 
 export function diffDays(left: DateInput, right: DateInput): number | null {
@@ -266,8 +391,8 @@ export function getMonthCalendarDates(value: DateInput, firstDayOfWeek = 1, week
     return [];
   }
 
-  const safeFirstDayOfWeek = ((Math.floor(firstDayOfWeek) % 7) + 7) % 7;
-  const safeWeekCount = Math.max(1, Math.floor(weekCount));
+  const safeFirstDayOfWeek = normalizeModuloIndex(firstDayOfWeek, 7);
+  const safeWeekCount = toIntegerAtLeast(weekCount, 1);
   const offset = (firstDay.getDay() - safeFirstDayOfWeek + 7) % 7;
   const cursor = new Date(firstDay);
   cursor.setDate(firstDay.getDate() - offset);
@@ -280,7 +405,7 @@ export function getMonthCalendarDates(value: DateInput, firstDayOfWeek = 1, week
 }
 
 export function getWeekdayLabels(locale = "zh-CN", options: WeekdayLabelOptions = {}): string[] {
-  const firstDayOfWeek = ((Math.floor(options.firstDayOfWeek ?? 1) % 7) + 7) % 7;
+  const firstDayOfWeek = normalizeModuloIndex(options.firstDayOfWeek ?? 1, 7);
   const stripZhWeekPrefix = options.stripZhWeekPrefix ?? true;
   const labels = Array.from({ length: 7 }, (_, index) => {
     const date = new Date(2026, 5, 7 + index);
@@ -302,23 +427,43 @@ export function toUnixTimestamp(value: DateInput, unit: "second" | "millisecond"
     return null;
   }
 
-  return unit === "millisecond" ? date.getTime() : Math.floor(date.getTime() / 1000);
+  return unit === "millisecond" ? date.getTime() : floorToInteger(date.getTime() / 1000);
 }
 
 export function getCurrentUnixTimestamp(unit: "second" | "millisecond" = "second"): number {
-  return unit === "millisecond" ? Date.now() : Math.floor(Date.now() / 1000);
+  return unit === "millisecond" ? Date.now() : floorToInteger(Date.now() / 1000);
+}
+
+export function getCurrentTimestampMs(): number {
+  return Date.now();
+}
+
+function resolveTimestampMsFallback(fallback: TimestampMsFallback): number {
+  return typeof fallback === "function" ? fallback() : fallback;
+}
+
+export function normalizeTimestampMs(value: unknown, fallback: TimestampMsFallback = getCurrentTimestampMs): number {
+  return Number(value || resolveTimestampMsFallback(fallback));
+}
+
+export function getElapsedMs(startTimestampMs: number, currentTimestampMs = getCurrentTimestampMs()): number {
+  return Math.max(0, currentTimestampMs - startTimestampMs);
+}
+
+export function hasTimeElapsed(startTimestampMs: number, durationMs: number, currentTimestampMs = getCurrentTimestampMs()): boolean {
+  return getElapsedMs(startTimestampMs, currentTimestampMs) >= Math.max(0, durationMs);
 }
 
 export function normalizeUnixTimestamp(value: number, unit: "second" | "millisecond" = "second"): number | null {
-  if (!Number.isFinite(value)) {
+  if (!isFiniteNumber(value)) {
     return null;
   }
 
   if (unit === "millisecond") {
-    return Math.abs(value) < 1_000_000_000_000 ? Math.floor(value * 1000) : Math.floor(value);
+    return Math.abs(value) < 1_000_000_000_000 ? floorToInteger(value * 1000) : floorToInteger(value);
   }
 
-  return Math.abs(value) >= 1_000_000_000_000 ? Math.floor(value / 1000) : Math.floor(value);
+  return Math.abs(value) >= 1_000_000_000_000 ? floorToInteger(value / 1000) : floorToInteger(value);
 }
 
 export function fromUnixTimestamp(value: number, unit: "second" | "millisecond" = "second"): Date | null {

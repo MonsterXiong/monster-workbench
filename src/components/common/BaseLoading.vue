@@ -1,19 +1,22 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { Loader2 } from "lucide-vue-next";
 import { useI18n } from "../../composables/useI18n";
-import { clampNumber } from "../../utils";
+import { clampNumber, clearTimeoutHandle, resetTimeoutHandle, type TimeoutHandle } from "../../utils";
 
 type LoadingType = "spinner" | "dots" | "ring" | "skeleton";
 type LoadingSize = "xs" | "sm" | "md" | "lg";
 type LoadingSurface = "plain" | "card" | "muted";
 type LoadingDirection = "vertical" | "horizontal";
 type LoadingAlign = "center" | "start";
+type LoadingTone = "primary" | "success" | "warning" | "danger" | "neutral";
 
 interface Props {
   type?: LoadingType;
   size?: LoadingSize;
+  tone?: LoadingTone;
   text?: string;
+  description?: string;
   ariaLabel?: string;
   surface?: LoadingSurface;
   direction?: LoadingDirection;
@@ -23,12 +26,18 @@ interface Props {
   skeletonLines?: number;
   minHeight?: string;
   showText?: boolean;
+  showIndicator?: boolean;
+  animated?: boolean;
+  delay?: number;
+  wrapText?: boolean;
 }
 
 const props = withDefaults(defineProps<Props>(), {
   type: "spinner",
   size: "md",
+  tone: "primary",
   text: "",
+  description: "",
   ariaLabel: "",
   surface: "plain",
   direction: "vertical",
@@ -38,15 +47,45 @@ const props = withDefaults(defineProps<Props>(), {
   skeletonLines: 3,
   minHeight: "",
   showText: true,
+  showIndicator: true,
+  animated: true,
+  delay: 0,
+  wrapText: false,
 });
 
 const { t } = useI18n();
 const resolvedLabel = computed(() => props.ariaLabel || props.text || t("common.loading"));
 const resolvedSkeletonLines = computed(() => clampNumber(props.skeletonLines, 1, 8, 3, 0));
+const normalizedDelay = computed(() => clampNumber(props.delay, 0, 3000, 0, 0));
+const isVisible = ref(normalizedDelay.value <= 0);
+let delayTimer: TimeoutHandle | null = null;
+
+const resetDelay = () => {
+  clearTimeoutHandle(delayTimer);
+  delayTimer = null;
+  if (normalizedDelay.value <= 0) {
+    isVisible.value = true;
+    return;
+  }
+
+  isVisible.value = false;
+  delayTimer = resetTimeoutHandle(delayTimer, () => {
+    isVisible.value = true;
+    delayTimer = null;
+  }, normalizedDelay.value);
+};
+
+watch(normalizedDelay, resetDelay, { immediate: true });
+
+onBeforeUnmount(() => {
+  clearTimeoutHandle(delayTimer);
+  delayTimer = null;
+});
 </script>
 
 <template>
   <div
+    v-if="isVisible"
     class="base-loading"
     :class="[
       `base-loading--${size}`,
@@ -54,9 +93,12 @@ const resolvedSkeletonLines = computed(() => clampNumber(props.skeletonLines, 1,
       `base-loading--${surface}`,
       `base-loading--${direction}`,
       `base-loading--${align}`,
+      `base-loading--tone-${tone}`,
       {
         'base-loading--bordered': bordered,
         'base-loading--compact': compact,
+        'base-loading--static': !animated,
+        'base-loading--wrap-text': wrapText,
       },
     ]"
     :style="{ minHeight: minHeight || undefined }"
@@ -66,23 +108,31 @@ const resolvedSkeletonLines = computed(() => clampNumber(props.skeletonLines, 1,
     :aria-label="resolvedLabel"
   >
     <template v-if="type === 'skeleton'">
-      <div class="base-loading__skeleton" aria-hidden="true">
+      <div v-if="showIndicator" class="base-loading__skeleton" aria-hidden="true">
         <div v-for="line in resolvedSkeletonLines" :key="line" :class="`is-line-${line}`"></div>
       </div>
       <span v-if="showText && text" class="base-loading__text">
         {{ text }}
       </span>
+      <span v-if="showText && description" class="base-loading__description">
+        {{ description }}
+      </span>
     </template>
     <template v-else>
-      <Loader2 v-if="type === 'spinner'" class="base-loading__spinner" aria-hidden="true" />
-      <span v-else-if="type === 'ring'" class="base-loading__ring" aria-hidden="true"></span>
-      <span v-else class="base-loading__dots" aria-hidden="true">
-        <i></i>
-        <i></i>
-        <i></i>
-      </span>
-      <span v-if="text" class="base-loading__text">
+      <template v-if="showIndicator">
+        <Loader2 v-if="type === 'spinner'" class="base-loading__spinner" aria-hidden="true" />
+        <span v-else-if="type === 'ring'" class="base-loading__ring" aria-hidden="true"></span>
+        <span v-else class="base-loading__dots" aria-hidden="true">
+          <i></i>
+          <i></i>
+          <i></i>
+        </span>
+      </template>
+      <span v-if="showText && text" class="base-loading__text">
         {{ text }}
+      </span>
+      <span v-if="showText && description" class="base-loading__description">
+        {{ description }}
       </span>
     </template>
     <span class="sr-only">{{ resolvedLabel }}</span>
@@ -135,7 +185,8 @@ const resolvedSkeletonLines = computed(() => clampNumber(props.skeletonLines, 1,
 }
 
 .base-loading__spinner {
-  @apply animate-spin text-primary;
+  color: var(--loading-color);
+  @apply animate-spin;
 }
 
 .base-loading--xs .base-loading__spinner,
@@ -159,7 +210,8 @@ const resolvedSkeletonLines = computed(() => clampNumber(props.skeletonLines, 1,
 }
 
 .base-loading__ring {
-  @apply inline-flex animate-spin rounded-full border-2 border-slate-200 border-t-primary dark:border-slate-800;
+  border-top-color: var(--loading-color);
+  @apply inline-flex animate-spin rounded-full border-2 border-slate-200 dark:border-slate-800;
 }
 
 .base-loading__dots {
@@ -167,7 +219,8 @@ const resolvedSkeletonLines = computed(() => clampNumber(props.skeletonLines, 1,
 }
 
 .base-loading__dots i {
-  @apply block rounded-full bg-primary;
+  background-color: var(--loading-color);
+  @apply block rounded-full;
   animation: base-loading-dot 0.9s ease-in-out infinite;
 }
 
@@ -199,6 +252,17 @@ const resolvedSkeletonLines = computed(() => clampNumber(props.skeletonLines, 1,
   @apply text-xs font-medium text-slate-400 dark:text-slate-500;
 }
 
+.base-loading__description {
+  @apply max-w-full truncate text-[11px] font-medium leading-5 text-slate-400 dark:text-slate-500;
+}
+
+.base-loading--wrap-text .base-loading__text,
+.base-loading--wrap-text .base-loading__description {
+  @apply whitespace-normal break-words;
+  overflow: visible;
+  text-overflow: clip;
+}
+
 .base-loading--lg .base-loading__text {
   @apply text-sm;
 }
@@ -208,7 +272,11 @@ const resolvedSkeletonLines = computed(() => clampNumber(props.skeletonLines, 1,
 }
 
 .base-loading__skeleton div {
-  @apply h-4 animate-pulse rounded bg-slate-100 dark:bg-slate-800;
+  @apply h-4 rounded bg-slate-100 dark:bg-slate-800;
+}
+
+.base-loading:not(.base-loading--static) .base-loading__skeleton div {
+  @apply animate-pulse;
 }
 
 .base-loading__skeleton div.is-line-1 {
@@ -258,5 +326,32 @@ const resolvedSkeletonLines = computed(() => clampNumber(props.skeletonLines, 1,
   .base-loading__skeleton div {
     animation: none;
   }
+}
+
+.base-loading--static .base-loading__spinner,
+.base-loading--static .base-loading__ring,
+.base-loading--static .base-loading__dots i,
+.base-loading--static .base-loading__skeleton div {
+  animation: none;
+}
+
+.base-loading--tone-primary {
+  --loading-color: rgb(var(--color-primary));
+}
+
+.base-loading--tone-success {
+  --loading-color: #10b981;
+}
+
+.base-loading--tone-warning {
+  --loading-color: #f59e0b;
+}
+
+.base-loading--tone-danger {
+  --loading-color: #ef4444;
+}
+
+.base-loading--tone-neutral {
+  --loading-color: #64748b;
 }
 </style>

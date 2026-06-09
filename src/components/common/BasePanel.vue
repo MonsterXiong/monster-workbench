@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, useId } from "vue";
 import { useI18n } from "../../composables/useI18n";
+import { isActivationKey } from "../../utils";
 
 type PanelSize = "sm" | "md" | "lg";
 type PanelLevel = 2 | 3 | 4 | 5 | 6;
@@ -93,7 +94,7 @@ const handleClick = (event: MouseEvent) => {
 
 const handleKeydown = (event: KeyboardEvent) => {
   emit("keydown", event);
-  if (!isInteractive.value || (event.key !== "Enter" && event.key !== " ")) return;
+  if (!isInteractive.value || !isActivationKey(event)) return;
   if (shouldIgnorePanelClick(event)) return;
   event.preventDefault();
   emit("click", event as unknown as MouseEvent);

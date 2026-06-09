@@ -9,7 +9,7 @@ import {
 import { useDragSort } from "../../../composables/useDragSort";
 import { toRef } from "vue";
 import { useI18n } from "../../../composables/useI18n";
-import { formatTemplate } from "../../../utils";
+import { formatTemplate, getInitials, hasItem } from "../../../utils";
 
 const { t } = useI18n();
 
@@ -63,7 +63,7 @@ function getCategoryName(cat: string): string {
         :key="item.id"
         class="nav-card group"
         :class="{
-          'ring-2 ring-blue-500/40 shadow-blue-500/5 bg-blue-50/20': selectedIds.includes(item.id!),
+          'ring-2 ring-blue-500/40 shadow-blue-500/5 bg-blue-50/20': hasItem(selectedIds, item.id!),
           'is-sorting opacity-40 scale-95 border-dashed border-blue-400/60 bg-blue-50/10 cursor-grabbing': isSortMode && isDraggingIndex === index,
           'hover:shadow-none hover:transform-none cursor-grab': isSortMode
         }"
@@ -85,7 +85,7 @@ function getCategoryName(cat: string): string {
           <input
             type="checkbox"
             class="checkbox cursor-pointer"
-            :checked="selectedIds.includes(item.id!)"
+            :checked="hasItem(selectedIds, item.id!)"
             @change="emit('toggleSelection', item.id!)"
           />
         </div>
@@ -107,7 +107,7 @@ function getCategoryName(cat: string): string {
               <img :src="resolveImageUrl(item.logo_path)" class="h-full w-full object-contain" />
             </div>
             <div v-else class="h-7 w-7 rounded-lg bg-gradient-to-br from-blue-500 to-indigo-500 flex items-center justify-center shrink-0 shadow-sm">
-              <span class="text-[10px] font-black text-white">{{ item.title?.charAt(0) || '?' }}</span>
+              <span class="text-[10px] font-black text-white">{{ getInitials(item.title || "", "?", 1) }}</span>
             </div>
             <h3 class="text-xs font-black text-slate-900 dark:text-slate-100 truncate transition" :class="{ 'group-hover:text-primary': !isSortMode }">
               {{ item.title }}

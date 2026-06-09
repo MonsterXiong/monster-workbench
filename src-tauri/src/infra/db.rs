@@ -1,8 +1,8 @@
+use crate::infra::path::PathProvider;
+use crate::infra::{AppError, AppResult};
 use std::fs;
 use std::io::Read;
 use std::path::Path;
-use crate::infra::{AppError, AppResult};
-use crate::infra::path::PathProvider;
 use tauri::AppHandle;
 
 pub struct DbInfra {
@@ -15,22 +15,34 @@ const SQLITE_HEADER: &[u8; 16] = b"SQLite format 3\0";
 
 impl DbInfra {
     pub fn new(app_handle: AppHandle, path_provider: PathProvider) -> Self {
-        Self { app_handle, path_provider }
+        Self {
+            app_handle,
+            path_provider,
+        }
     }
 
     /// 备份导出数据库物理文件到指定位置
     pub fn export_db(&self, target_path: &str) -> AppResult<()> {
         let src_db = self.path_provider.get_db_file_path()?;
         if !src_db.exists() {
-            return Err(AppError::Database("本地 SQLite 数据库文件尚未创建".to_string()));
+            return Err(AppError::Database(
+                "本地 SQLite 数据库文件尚未创建".to_string(),
+            ));
         }
 
         let dest = Path::new(target_path);
-        if dest.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
-            return Err(AppError::Database("非法的备份目标路径包含 '..'".to_string()));
+        if dest
+            .components()
+            .any(|c| matches!(c, std::path::Component::ParentDir))
+        {
+            return Err(AppError::Database(
+                "非法的备份目标路径包含 '..'".to_string(),
+            ));
         }
         if dest.extension().map(|e| e.to_string_lossy().to_lowercase()) != Some("db".into()) {
-            return Err(AppError::Database("备份目标文件必须以 '.db' 为后缀".to_string()));
+            return Err(AppError::Database(
+                "备份目标文件必须以 '.db' 为后缀".to_string(),
+            ));
         }
 
         if let Some(parent) = dest.parent() {
@@ -44,11 +56,20 @@ impl DbInfra {
     /// 从备份覆盖数据库物理文件，自动安全重启以释放连接
     pub fn import_db(&self, src_path: &str) -> AppResult<()> {
         let backup = Path::new(src_path);
-        if backup.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+        if backup
+            .components()
+            .any(|c| matches!(c, std::path::Component::ParentDir))
+        {
             return Err(AppError::Database("非法的备份源路径包含 '..'".to_string()));
         }
-        if backup.extension().map(|e| e.to_string_lossy().to_lowercase()) != Some("db".into()) {
-            return Err(AppError::Database("备份源文件必须以 '.db' 为后缀".to_string()));
+        if backup
+            .extension()
+            .map(|e| e.to_string_lossy().to_lowercase())
+            != Some("db".into())
+        {
+            return Err(AppError::Database(
+                "备份源文件必须以 '.db' 为后缀".to_string(),
+            ));
         }
 
         if !backup.exists() {
@@ -56,11 +77,15 @@ impl DbInfra {
         }
 
         if !backup.is_file() {
-            return Err(AppError::Database("选择的数据库备份路径不是文件".to_string()));
+            return Err(AppError::Database(
+                "选择的数据库备份路径不是文件".to_string(),
+            ));
         }
         let metadata = fs::metadata(backup)?;
         if metadata.len() > MAX_DB_IMPORT_BYTES {
-            return Err(AppError::Database("数据库备份文件过大，已拒绝导入".to_string()));
+            return Err(AppError::Database(
+                "数据库备份文件过大，已拒绝导入".to_string(),
+            ));
         }
         ensure_sqlite_file(backup)?;
 

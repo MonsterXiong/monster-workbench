@@ -3,18 +3,23 @@ import { callTauri, convertFileSrc } from "./tauri";
 import { systemService } from "./system.service";
 import {
   buildUrlWithQuery,
+  createSearchTextMatcher,
+  downloadTextFile,
   filterByOptionalValues,
   firstOf,
   getCurrentIsoString,
   getNextNumberBy,
   findByValue,
   findIndexByValue,
+  isBlank,
+  joinPathIfPresent,
   keySetBy,
-  matchesSearchTextFields,
   normalizeStringKey,
+  openExternalUrl,
   paginateArray,
   removeByValue,
   removeByValues,
+  readBrowserTextFile,
   safeJsonStringifyPretty,
   sortByMany,
   tryJsonParse,
@@ -74,38 +79,6 @@ let mockDb: NavigationItem[] = [
   { id: 8, title: "Bilibili", url: "https://www.bilibili.com", description: "A popular video sharing and anime streaming community.", category: "Leisure", is_featured: 0, is_hot: 0, clicks: 95 }
 ];
 
-function downloadTextFile(fileName: string, contents: string, mimeType: string) {
-  const blob = new Blob([contents], { type: mimeType });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = fileName;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-}
-
-function readBrowserTextFile(accept: string, readFailedMessage: string): Promise<string> {
-  return new Promise<string>((resolve, reject) => {
-    const input = document.createElement("input");
-    input.type = "file";
-    input.accept = accept;
-    input.onchange = (event: Event) => {
-      const file = (event.target as HTMLInputElement).files?.[0];
-      if (!file) return;
-
-      const reader = new FileReader();
-      reader.onload = (readerEvent: ProgressEvent<FileReader>) => {
-        resolve(String(readerEvent.target?.result ?? ""));
-      };
-      reader.onerror = () => reject(new Error(readFailedMessage));
-      reader.readAsText(file);
-    };
-    input.click();
-  });
-}
-
 function assertNavigationBackupItem(item: unknown): item is NavigationItem {
   return Boolean(
     item &&
@@ -116,7 +89,7 @@ function assertNavigationBackupItem(item: unknown): item is NavigationItem {
 }
 
 function parseNavigationBackup(rawContent: string): NavigationItem[] {
-  if (!rawContent.trim()) {
+  if (isBlank(rawContent)) {
     throw new NavigationBackupValidationError("empty");
   }
 
@@ -186,7 +159,7 @@ function buildNavigationImageUrl(appDataPath: string, relPath: string): string {
   if (!isTauriRuntime()) {
     return buildUrlWithQuery("https://api.dicebear.com/7.x/identicon/svg", { params: { seed: relPath } });
   }
-  return convertFileSrc(`${appDataPath}/${relPath}`);
+  return convertFileSrc(joinPathIfPresent(appDataPath, relPath));
 }
 
 async function openNavigationUrl(url: string): Promise<void> {
@@ -195,7 +168,7 @@ async function openNavigationUrl(url: string): Promise<void> {
     return;
   }
 
-  window.open(url, "_blank", "noopener,noreferrer");
+  openExternalUrl(url);
 }
 
 export const navigationService = {
@@ -232,13 +205,11 @@ export const navigationService = {
     if (!isTauriRuntime()) {
       // 浏览器降级 Mock 过滤与分页
       let filtered = [...mockDb];
-      if (keyword) {
-        filtered = filtered.filter((item) => matchesSearchTextFields(item, keyword, [
-          (navigation) => navigation.title,
-          (navigation) => navigation.description,
-          (navigation) => navigation.url,
-        ]));
-      }
+      filtered = filtered.filter(createSearchTextMatcher<NavigationItem>(keyword ?? "", [
+        (navigation) => navigation.title,
+        (navigation) => navigation.description,
+        (navigation) => navigation.url,
+      ]));
       filtered = filterByOptionalValues(filtered, [
         { getValue: (item) => item.category, value: category },
         { getValue: (item) => item.is_featured, value: isFeatured, isActive: (value) => value !== undefined },

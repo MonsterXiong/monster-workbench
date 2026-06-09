@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, useId } from "vue";
 import type { DescriptionListItem } from "./BaseDescriptionList.vue";
+import { isActivationKey } from "../../utils";
 
 interface Props {
   title: string;
@@ -58,7 +59,7 @@ const handleClick = (event: MouseEvent) => {
 
 const handleKeydown = (event: KeyboardEvent) => {
   emit("keydown", event);
-  if (!isInteractive.value || (event.key !== "Enter" && event.key !== " ")) return;
+  if (!isInteractive.value || !isActivationKey(event)) return;
   event.preventDefault();
   emit("click", event);
 };

@@ -3,20 +3,27 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } fro
 import { useI18n } from "../../composables/useI18n";
 import {
   addMonths,
+  addDays,
+  addDomEventListener,
   applyObjectPatch,
-  compareDates,
-  formatDateOnly,
+  firstItem,
+  formatMonthYear,
+  getKeyboardBoundaryPosition,
+  getCurrentDate,
   getMonthCalendarDates,
+  getEventTargetValue,
   getTodayString,
   getWeekdayLabels,
-  isDateInRange,
-  isDateRangeOrdered,
+  isActivationKey,
+  isEventTargetInsideElement,
+  isEscapeKey,
+  isKeyboardKey,
   isSameDateRange,
   isSameMonth,
   joinAriaIds,
-  normalizeDateInputText,
+  mergeDomEventCleanups,
   startOfMonth,
-  toDate,
+  type DomEventCleanup,
 } from "../../utils";
 
 export interface DateRangeValue {
@@ -105,118 +112,245 @@ const errorId = `${rangeId}-error`;
 const hintId = `${rangeId}-hint`;
 const panelId = `${rangeId}-calendar`;
 const rootRef = ref<HTMLElement | null>(null);
+const startInputRef = ref<HTMLInputElement | null>(null);
+const endInputRef = ref<HTMLInputElement | null>(null);
 const activeField = ref<DateRangeField | null>(null);
-const viewMonth = ref<Date>(new Date());
+const viewMonth = ref<Date>(getCurrentDate());
+const focusedDayValue = ref("");
+const inputValue = ref<DateRangeValue>({ start: props.modelValue.start, end: props.modelValue.end });
 const startLabel = computed(() => `${props.label ? `${props.label} ` : ""}${props.startPlaceholder || t("common.startDate")}`);
 const endLabel = computed(() => `${props.label ? `${props.label} ` : ""}${props.endPlaceholder || t("common.endDate")}`);
 const clearLabel = computed(() => `${t("common.clear")} ${props.label || t("common.dateRange")}`);
 const isReadonly = computed(() => props.disabled || props.readonly);
 const todayValue = computed(() => getTodayString());
+const strictDateRegExp = /^(\d{4})-(\d{1,2})-(\d{1,2})$/;
+
+function formatDateValue(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function parseDateValue(value: Date | string | number | null | undefined): Date | null {
+  if (value === undefined || value === null || value === "") return null;
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : new Date(value.getFullYear(), value.getMonth(), value.getDate());
+  }
+
+  if (typeof value === "number") {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? null : new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  }
+
+  const normalizedText = value.trim().replace(/[\\/]+/g, "-");
+  const match = strictDateRegExp.exec(normalizedText);
+  if (!match) return null;
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(year, month - 1, day);
+
+  return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day ? date : null;
+}
+
+function normalizeDateValue(value: Date | string | number | null | undefined, fallback = ""): string {
+  if (value === undefined || value === null || value === "") return fallback;
+  const date = parseDateValue(value);
+  return date ? formatDateValue(date) : String(value).trim();
+}
+
+function compareDateValues(left: Date | string | number | null | undefined, right: Date | string | number | null | undefined, fallback = 0): number {
+  const leftDate = parseDateValue(left);
+  const rightDate = parseDateValue(right);
+  return leftDate && rightDate ? leftDate.getTime() - rightDate.getTime() : fallback;
+}
+
+function isDateValueInRange(value: Date | string | number | null | undefined, start?: string | null, end?: string | null): boolean {
+  const date = parseDateValue(value);
+  if (!date) return false;
+
+  if (start && compareDateValues(date, start) < 0) return false;
+  if (end && compareDateValues(date, end) > 0) return false;
+
+  return true;
+}
+
+function isDateRangeValueOrdered(range: DateRangeValue): boolean {
+  if (!range.start || !range.end) return true;
+  const startDate = parseDateValue(range.start);
+  const endDate = parseDateValue(range.end);
+  return Boolean(startDate && endDate && startDate.getTime() <= endDate.getTime());
+}
+
+const normalizedStart = computed(() => normalizeDateValue(inputValue.value.start));
+const normalizedEnd = computed(() => normalizeDateValue(inputValue.value.end));
+const rangeStartDate = computed(() => parseDateValue(inputValue.value.start));
+const rangeEndDate = computed(() => parseDateValue(inputValue.value.end));
+const invalidInputError = computed(() => {
+  if ((inputValue.value.start && !rangeStartDate.value) || (inputValue.value.end && !rangeEndDate.value)) {
+    return t("common.dateRangeInvalidFormat");
+  }
+
+  return "";
+});
 const orderError = computed(() => {
   if (!props.validateOrder) return "";
-  return isDateRangeOrdered(props.modelValue) ? "" : t("common.dateRangeInvalid");
+  return isDateRangeValueOrdered(inputValue.value) ? "" : t("common.dateRangeInvalid");
 });
-const resolvedError = computed(() => props.error || orderError.value);
+const rawMin = computed(() => normalizeDateValue(props.min));
+const rawMax = computed(() => normalizeDateValue(props.max));
+const validMin = computed(() => (parseDateValue(rawMin.value) ? rawMin.value : ""));
+const validMax = computed(() => (parseDateValue(rawMax.value) ? rawMax.value : ""));
+const boundaryMin = computed(() => (validMin.value && validMax.value && compareDateValues(validMin.value, validMax.value) > 0 ? validMax.value : validMin.value));
+const boundaryMax = computed(() => (validMin.value && validMax.value && compareDateValues(validMin.value, validMax.value) > 0 ? validMin.value : validMax.value));
+const boundaryError = computed(() => {
+  const values = [normalizedStart.value, normalizedEnd.value].filter(Boolean);
+  if (!values.length || (!boundaryMin.value && !boundaryMax.value)) return "";
+  return values.every((value) => isDateValueInRange(value, boundaryMin.value || null, boundaryMax.value || null)) ? "" : t("common.dateRangeOutOfRange");
+});
+const resolvedError = computed(() => props.error || invalidInputError.value || orderError.value || boundaryError.value);
 const describedBy = computed(() => {
-  return joinAriaIds([resolvedError.value ? errorId : undefined, props.min || props.max ? hintId : undefined]);
+  return joinAriaIds([resolvedError.value ? errorId : undefined, boundaryMin.value || boundaryMax.value ? hintId : undefined]);
 });
 const calendarPanelOpen = computed(() => props.showCalendar && activeField.value !== null && !isReadonly.value);
 const panelLabelText = computed(() => props.panelLabel || `${props.label || t("common.dateRange")} ${activeField.value === "end" ? t("common.endDate") : t("common.startDate")}`);
-const monthLabel = computed(() => new Intl.DateTimeFormat(locale.value, { month: "long", year: "numeric" }).format(viewMonth.value));
+const monthLabel = computed(() => formatMonthYear(viewMonth.value, locale.value));
 const previousMonthLabel = computed(() => (locale.value === "en-US" ? "Previous month" : "上个月"));
 const nextMonthLabel = computed(() => (locale.value === "en-US" ? "Next month" : "下个月"));
 const todayLabel = computed(() => (locale.value === "en-US" ? "Today" : "今天"));
 const weekdayLabels = computed(() => getWeekdayLabels(locale.value, { firstDayOfWeek: props.firstDayOfWeek }));
-const rangeStartDate = computed(() => parseDateValue(props.modelValue.start));
-const rangeEndDate = computed(() => parseDateValue(props.modelValue.end));
-const normalizedStart = computed(() => normalizeDateValue(props.modelValue.start));
-const normalizedEnd = computed(() => normalizeDateValue(props.modelValue.end));
-
-function parseDateValue(value: string): Date | null {
-  if (!value) return null;
-  return toDate(normalizeDateInputText(value));
-}
-
-function normalizeDateValue(value: string): string {
-  const date = parseDateValue(value);
-  return date ? formatDateOnly(date, "") : value;
-}
-
-function compareDateValue(left: string, right: string): number {
-  return compareDates(left, right);
-}
+let stopDocumentListeners: DomEventCleanup | null = null;
 
 function syncViewMonth(field: DateRangeField | null = activeField.value) {
-  const currentValue = field ? props.modelValue[field] : props.modelValue.start || props.modelValue.end;
-  const currentDate = parseDateValue(currentValue) || rangeStartDate.value || rangeEndDate.value || parseDateValue(todayValue.value) || new Date();
+  const currentValue = field ? inputValue.value[field] : inputValue.value.start || inputValue.value.end;
+  const currentDate = parseDateValue(currentValue) || rangeStartDate.value || rangeEndDate.value || parseDateValue(todayValue.value) || getCurrentDate();
   viewMonth.value = startOfMonth(currentDate) ?? currentDate;
 }
 
 function buildDay(date: Date): CalendarDay {
-  const value = formatDateOnly(date, "");
+  const value = normalizeDateValue(date);
   const inMonth = isSameMonth(date, viewMonth.value);
-  const hasOrderedRange = Boolean(normalizedStart.value && normalizedEnd.value && compareDateValue(normalizedStart.value, normalizedEnd.value) <= 0);
+  const hasOrderedRange = Boolean(normalizedStart.value && normalizedEnd.value && compareDateValues(normalizedStart.value, normalizedEnd.value) <= 0);
   return {
     key: value,
     label: String(date.getDate()),
     value,
     inMonth,
-    disabled: !isDateInRange(value, props.min || null, props.max || null),
+    disabled: !isDateValueInRange(value, boundaryMin.value || null, boundaryMax.value || null),
     isToday: value === todayValue.value,
     isStart: value === normalizedStart.value,
     isEnd: value === normalizedEnd.value,
-    isInRange: hasOrderedRange && compareDateValue(value, normalizedStart.value) >= 0 && compareDateValue(value, normalizedEnd.value) <= 0,
+    isInRange: hasOrderedRange && compareDateValues(value, normalizedStart.value) >= 0 && compareDateValues(value, normalizedEnd.value) <= 0,
   };
 }
 
 const calendarDays = computed(() => {
   return getMonthCalendarDates(viewMonth.value, props.firstDayOfWeek).map(buildDay);
 });
+const enabledCalendarDays = computed(() => calendarDays.value.filter((day) => !day.disabled));
+const canSelectToday = computed(() => isDateValueInRange(todayValue.value, boundaryMin.value || null, boundaryMax.value || null));
+const canGoToMonth = (offset: number) => {
+  const nextMonth = startOfMonth(addMonths(viewMonth.value, offset) ?? viewMonth.value) ?? viewMonth.value;
+  return getMonthCalendarDates(nextMonth, props.firstDayOfWeek).some((date) => isDateValueInRange(date, boundaryMin.value || null, boundaryMax.value || null));
+};
+
+const getFocusableDayValue = (preferredValue = "") => {
+  const activeValue = activeField.value === "end" ? normalizedEnd.value : normalizedStart.value;
+  const candidates = [preferredValue, activeValue, normalizedStart.value, normalizedEnd.value, todayValue.value].filter(Boolean);
+  const matchedCandidate = candidates.find((value) => enabledCalendarDays.value.some((day) => day.value === value));
+  return matchedCandidate || firstItem(enabledCalendarDays.value)?.value || "";
+};
+
+const focusDayButton = (value = focusedDayValue.value) => {
+  if (!value) return;
+  void nextTick(() => {
+    rootRef.value?.querySelector<HTMLButtonElement>(`[data-date="${value}"]`)?.focus();
+  });
+};
+
+const syncFocusedDay = (preferredValue = focusedDayValue.value) => {
+  focusedDayValue.value = getFocusableDayValue(preferredValue);
+};
+
+const focusInput = (field: DateRangeField | null = activeField.value) => {
+  const target = field === "end" ? endInputRef.value : startInputRef.value;
+  target?.focus();
+};
+
+const closePanel = (returnFocus = false) => {
+  const previousField = activeField.value;
+  activeField.value = null;
+  if (returnFocus) {
+    void nextTick(() => focusInput(previousField));
+  }
+};
 
 const updateValue = (patch: Partial<DateRangeValue>) => {
   if (isReadonly.value) return;
   const nextValue = applyObjectPatch(props.modelValue, patch);
+  inputValue.value = nextValue;
   emit("update:modelValue", nextValue);
   emit("change", nextValue);
 };
 
 const applyPreset = (preset: DateRangePreset) => {
-  if (isReadonly.value) return;
-  const nextValue = { start: preset.start, end: preset.end };
+  if (isReadonly.value || !isPresetAllowed(preset)) return;
+  const nextValue = { start: normalizeDateValue(preset.start), end: normalizeDateValue(preset.end) };
+  inputValue.value = nextValue;
   emit("update:modelValue", nextValue);
   emit("change", nextValue);
   emit("preset", preset);
-  activeField.value = null;
+  closePanel(true);
 };
 
 const clear = () => {
   if (isReadonly.value) return;
   const nextValue = { start: "", end: "" };
+  inputValue.value = nextValue;
   emit("update:modelValue", nextValue);
   emit("change", nextValue);
   emit("clear");
-  activeField.value = null;
+  closePanel();
 };
 
 const handleInput = (field: DateRangeField, event: Event) => {
-  const value = (event.target as HTMLInputElement).value;
+  const value = getEventTargetValue(event);
+  inputValue.value = applyObjectPatch(inputValue.value, { [field]: value });
   emit("input", field, value);
-  updateValue({ [field]: value });
+};
+
+const commitField = (field: DateRangeField) => {
+  const value = inputValue.value[field];
+  const normalized = normalizeDateValue(value);
+  if (!value) {
+    updateValue({ [field]: "" });
+  } else if (parseDateValue(normalized)) {
+    updateValue({ [field]: normalized });
+  }
 };
 
 const handleBlur = (field: DateRangeField, event: FocusEvent) => {
-  const value = (event.target as HTMLInputElement).value;
-  const normalized = normalizeDateValue(value);
-  if (normalized && normalized !== value) {
-    updateValue({ [field]: normalized });
-  }
+  commitField(field);
   emit("blur", field, event);
+};
+
+const handleInputKeydown = (field: DateRangeField, event: KeyboardEvent) => {
+  if (isKeyboardKey(event, "Enter")) {
+    event.preventDefault();
+    commitField(field);
+  } else if (isEscapeKey(event)) {
+    inputValue.value = { ...props.modelValue };
+    closePanel();
+  }
 };
 
 const openPanel = (field: DateRangeField) => {
   if (!props.showCalendar || isReadonly.value) return;
   activeField.value = field;
   syncViewMonth(field);
+  void nextTick(() => syncFocusedDay(inputValue.value[field]));
 };
 
 const selectDay = (day: CalendarDay) => {
@@ -224,11 +358,11 @@ const selectDay = (day: CalendarDay) => {
   const field = activeField.value || "start";
   const patch: Partial<DateRangeValue> = { [field]: day.value };
 
-  if (field === "start" && normalizedEnd.value && compareDateValue(day.value, normalizedEnd.value) > 0) {
+  if (field === "start" && normalizedEnd.value && compareDateValues(day.value, normalizedEnd.value) > 0) {
     patch.end = "";
   }
 
-  if (field === "end" && normalizedStart.value && compareDateValue(day.value, normalizedStart.value) < 0) {
+  if (field === "end" && normalizedStart.value && compareDateValues(day.value, normalizedStart.value) < 0) {
     patch.start = day.value;
     patch.end = "";
     activeField.value = "end";
@@ -239,52 +373,165 @@ const selectDay = (day: CalendarDay) => {
   updateValue(patch);
   if (field === "start") {
     viewMonth.value = startOfMonth(parseDateValue(day.value) ?? viewMonth.value) ?? viewMonth.value;
+  } else {
+    closePanel(true);
   }
 };
 
 const goToMonth = (offset: number) => {
+  if (!canGoToMonth(offset)) return;
   viewMonth.value = startOfMonth(addMonths(viewMonth.value, offset) ?? viewMonth.value) ?? viewMonth.value;
+  void nextTick(() => syncFocusedDay());
 };
 
 const selectToday = () => {
-  const today = buildDay(parseDateValue(todayValue.value) ?? new Date());
+  if (!canSelectToday.value) return;
+  const today = buildDay(parseDateValue(todayValue.value) ?? getCurrentDate());
   if (today.disabled) return;
   selectDay(today);
 };
 
 const handleDocumentClick = (event: MouseEvent) => {
-  const target = event.target as Node;
-  if (!rootRef.value?.contains(target)) {
-    activeField.value = null;
+  if (!isEventTargetInsideElement(event, rootRef.value)) {
+    closePanel();
   }
 };
 
 const handleKeydown = (event: KeyboardEvent) => {
-  if (event.key === "Escape") {
-    activeField.value = null;
+  if (isEscapeKey(event)) {
+    closePanel(true);
+  }
+};
+
+const moveFocusedDay = (day: CalendarDay, offset: number) => {
+  const nextDate = addDays(parseDateValue(day.value) ?? day.value, offset);
+  const nextValue = normalizeDateValue(nextDate);
+
+  if (!nextDate || !nextValue || !isDateValueInRange(nextValue, boundaryMin.value || null, boundaryMax.value || null)) return;
+
+  viewMonth.value = startOfMonth(nextDate) ?? viewMonth.value;
+  void nextTick(() => {
+    syncFocusedDay(nextValue);
+    focusDayButton();
+  });
+};
+
+const handleDayKeydown = (day: CalendarDay, event: KeyboardEvent) => {
+  if (day.disabled) return;
+
+  if (isActivationKey(event)) {
+    event.preventDefault();
+    selectDay(day);
+    return;
+  }
+
+  if (isKeyboardKey(event, "ArrowLeft")) {
+    event.preventDefault();
+    moveFocusedDay(day, -1);
+    return;
+  }
+
+  if (isKeyboardKey(event, "ArrowRight")) {
+    event.preventDefault();
+    moveFocusedDay(day, 1);
+    return;
+  }
+
+  if (isKeyboardKey(event, "ArrowUp")) {
+    event.preventDefault();
+    moveFocusedDay(day, -7);
+    return;
+  }
+
+  if (isKeyboardKey(event, "ArrowDown")) {
+    event.preventDefault();
+    moveFocusedDay(day, 7);
+    return;
+  }
+
+  if (isKeyboardKey(event, "PageUp")) {
+    event.preventDefault();
+    if (!canGoToMonth(-1)) return;
+    const nextDate = addMonths(parseDateValue(day.value) ?? day.value, -1);
+    viewMonth.value = startOfMonth(nextDate ?? viewMonth.value) ?? viewMonth.value;
+    void nextTick(() => {
+      syncFocusedDay(normalizeDateValue(nextDate));
+      focusDayButton();
+    });
+    return;
+  }
+
+  if (isKeyboardKey(event, "PageDown")) {
+    event.preventDefault();
+    if (!canGoToMonth(1)) return;
+    const nextDate = addMonths(parseDateValue(day.value) ?? day.value, 1);
+    viewMonth.value = startOfMonth(nextDate ?? viewMonth.value) ?? viewMonth.value;
+    void nextTick(() => {
+      syncFocusedDay(normalizeDateValue(nextDate));
+      focusDayButton();
+    });
+    return;
+  }
+
+  const boundaryPosition = getKeyboardBoundaryPosition(event);
+  if (boundaryPosition) {
+    event.preventDefault();
+    const index = calendarDays.value.findIndex((item) => item.value === day.value);
+    const weekStart = Math.max(0, index - (index % 7));
+    const weekEnd = Math.min(calendarDays.value.length - 1, weekStart + 6);
+    const weekDays = calendarDays.value.slice(weekStart, weekEnd + 1).filter((item) => !item.disabled);
+    const nextDay = boundaryPosition === "first" ? firstItem(weekDays) : weekDays[weekDays.length - 1];
+    if (!nextDay) return;
+    focusedDayValue.value = nextDay.value;
+    focusDayButton();
   }
 };
 
 const isPresetActive = (preset: DateRangePreset) => isSameDateRange(props.modelValue, preset);
+const isPresetAllowed = (preset: DateRangePreset) => {
+  const normalizedPreset = {
+    start: normalizeDateValue(preset.start),
+    end: normalizeDateValue(preset.end),
+  };
+
+  if (!isDateRangeValueOrdered(normalizedPreset)) return false;
+
+  return [normalizedPreset.start, normalizedPreset.end]
+    .filter(Boolean)
+    .every((value) => isDateValueInRange(value, boundaryMin.value || null, boundaryMax.value || null));
+};
+
+watch(
+  () => [props.modelValue.start, props.modelValue.end] as const,
+  ([start, end]) => {
+    inputValue.value = { start, end };
+  },
+  { immediate: true }
+);
 
 watch(
   () => [props.modelValue.start, props.modelValue.end],
   () => {
     if (calendarPanelOpen.value) {
-      void nextTick(() => syncViewMonth());
+      void nextTick(() => {
+        syncViewMonth();
+        syncFocusedDay();
+      });
     }
   },
 );
 
 onMounted(() => {
-  document.addEventListener("click", handleDocumentClick);
-  document.addEventListener("keydown", handleKeydown);
+  stopDocumentListeners = mergeDomEventCleanups([
+    addDomEventListener(document, "click", handleDocumentClick),
+    addDomEventListener(document, "keydown", handleKeydown),
+  ]);
   syncViewMonth();
 });
 
 onBeforeUnmount(() => {
-  document.removeEventListener("click", handleDocumentClick);
-  document.removeEventListener("keydown", handleKeydown);
+  stopDocumentListeners?.();
+  stopDocumentListeners = null;
 });
 </script>
 
@@ -325,71 +572,79 @@ onBeforeUnmount(() => {
       <label :class="{ 'is-active': activeField === 'start' }" @click="openPanel('start')">
         <BaseIcon name="CalendarDays" size="15" aria-hidden="true" />
         <input
+          ref="startInputRef"
           type="text"
-          :value="modelValue.start"
+          :value="inputValue.start"
           :placeholder="startPlaceholder || t('common.startDate')"
           :aria-label="startLabel"
           :aria-invalid="resolvedError ? 'true' : undefined"
           :aria-describedby="describedBy"
+          :aria-haspopup="showCalendar ? 'dialog' : undefined"
           :aria-controls="calendarPanelOpen ? panelId : undefined"
           :aria-expanded="activeField === 'start'"
           autocomplete="off"
           inputmode="numeric"
           pattern="\\d{4}-\\d{2}-\\d{2}"
-          :min="min || undefined"
-          :max="modelValue.end || max || undefined"
+          :min="boundaryMin || undefined"
+          :max="normalizedEnd || boundaryMax || undefined"
           :disabled="disabled"
           :readonly="readonly"
           @input="handleInput('start', $event)"
           @focus="openPanel('start'); emit('focus', 'start', $event)"
           @blur="handleBlur('start', $event)"
+          @keydown="handleInputKeydown('start', $event)"
         />
       </label>
       <span class="base-date-range__separator" aria-hidden="true">{{ t("common.to") }}</span>
       <label :class="{ 'is-active': activeField === 'end' }" @click="openPanel('end')">
         <BaseIcon name="CalendarCheck" size="15" aria-hidden="true" />
         <input
+          ref="endInputRef"
           type="text"
-          :value="modelValue.end"
+          :value="inputValue.end"
           :placeholder="endPlaceholder || t('common.endDate')"
           :aria-label="endLabel"
           :aria-invalid="resolvedError ? 'true' : undefined"
           :aria-describedby="describedBy"
+          :aria-haspopup="showCalendar ? 'dialog' : undefined"
           :aria-controls="calendarPanelOpen ? panelId : undefined"
           :aria-expanded="activeField === 'end'"
           autocomplete="off"
           inputmode="numeric"
           pattern="\\d{4}-\\d{2}-\\d{2}"
-          :min="modelValue.start || min || undefined"
-          :max="max || undefined"
+          :min="normalizedStart || boundaryMin || undefined"
+          :max="boundaryMax || undefined"
           :disabled="disabled"
           :readonly="readonly"
           @input="handleInput('end', $event)"
           @focus="openPanel('end'); emit('focus', 'end', $event)"
           @blur="handleBlur('end', $event)"
+          @keydown="handleInputKeydown('end', $event)"
         />
       </label>
     </div>
 
     <div v-if="calendarPanelOpen" :id="panelId" class="base-date-range__calendar" role="dialog" :aria-label="panelLabelText" @click.stop>
       <div class="base-date-range__calendar-header">
-        <button type="button" :aria-label="previousMonthLabel" @click="goToMonth(-1)">
+        <button type="button" :disabled="!canGoToMonth(-1)" :aria-label="previousMonthLabel" @click="goToMonth(-1)">
           <BaseIcon name="ChevronLeft" size="15" aria-hidden="true" />
         </button>
         <div class="base-date-range__calendar-title">
           <span>{{ monthLabel }}</span>
           <small>{{ activeField === "end" ? t("common.endDate") : t("common.startDate") }}</small>
         </div>
-        <button type="button" :aria-label="nextMonthLabel" @click="goToMonth(1)">
+        <button type="button" :disabled="!canGoToMonth(1)" :aria-label="nextMonthLabel" @click="goToMonth(1)">
           <BaseIcon name="ChevronRight" size="15" aria-hidden="true" />
         </button>
       </div>
 
       <div class="base-date-range__calendar-meta">
-        <BaseBadge type="primary" variant="outline">{{ normalizedStart || t("common.startDate") }}</BaseBadge>
-        <BaseIcon name="ArrowRight" size="13" aria-hidden="true" />
-        <BaseBadge type="success" variant="outline">{{ normalizedEnd || t("common.endDate") }}</BaseBadge>
-        <button type="button" @click="selectToday">
+        <div class="base-date-range__calendar-range">
+          <BaseBadge type="primary" variant="outline">{{ normalizedStart || t("common.startDate") }}</BaseBadge>
+          <BaseIcon name="ArrowRight" size="13" aria-hidden="true" />
+          <BaseBadge type="success" variant="outline">{{ normalizedEnd || t("common.endDate") }}</BaseBadge>
+        </div>
+        <button type="button" :disabled="!canSelectToday" @click="selectToday">
           {{ todayLabel }}
         </button>
       </div>
@@ -398,13 +653,14 @@ onBeforeUnmount(() => {
         <span v-for="weekday in weekdayLabels" :key="weekday">{{ weekday }}</span>
       </div>
 
-      <div class="base-date-range__days" role="grid">
+      <div class="base-date-range__days" role="group" :aria-label="monthLabel">
         <button
           v-for="day in calendarDays"
           :key="day.key"
           type="button"
-          role="gridcell"
+          :data-date="day.value"
           :disabled="day.disabled"
+          :tabindex="day.value === focusedDayValue ? 0 : -1"
           :title="day.value"
           :aria-label="day.value"
           :aria-current="day.isToday ? 'date' : undefined"
@@ -416,15 +672,17 @@ onBeforeUnmount(() => {
             'is-end': day.isEnd,
             'is-in-range': day.isInRange
           }"
+          @focus="focusedDayValue = day.value"
+          @keydown="handleDayKeydown(day, $event)"
           @click="selectDay(day)"
         >
-          {{ day.label }}
+          <span>{{ day.label }}</span>
         </button>
       </div>
     </div>
 
-    <p v-if="min || max" :id="hintId" class="base-date-range__hint">
-      {{ min || "..." }} - {{ max || "..." }}
+    <p v-if="boundaryMin || boundaryMax" :id="hintId" class="base-date-range__hint">
+      {{ boundaryMin || "..." }} - {{ boundaryMax || "..." }}
     </p>
 
     <div v-if="presets.length" class="base-date-range__presets">
@@ -432,7 +690,7 @@ onBeforeUnmount(() => {
         v-for="preset in presets"
         :key="preset.key"
         type="button"
-        :disabled="isReadonly"
+        :disabled="isReadonly || !isPresetAllowed(preset)"
         :title="preset.label"
         :aria-pressed="isPresetActive(preset)"
         :class="{ 'is-active': isPresetActive(preset) }"
@@ -448,7 +706,7 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .base-date-range {
-  @apply min-w-0 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition dark:border-slate-800 dark:bg-slate-900;
+  @apply relative min-w-0 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition dark:border-slate-800 dark:bg-slate-900;
   background-image:
     linear-gradient(135deg, rgb(var(--color-primary) / 0.045), transparent 34%),
     linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.9));
@@ -546,11 +804,15 @@ onBeforeUnmount(() => {
 }
 
 .base-date-range__calendar {
-  @apply mt-3 rounded-xl border border-slate-200 bg-white p-3 shadow-lg shadow-slate-900/10 dark:border-slate-800 dark:bg-slate-900 dark:shadow-black/30;
+  @apply mt-3 overflow-hidden rounded-2xl border border-slate-200 bg-white p-0 shadow-lg shadow-slate-900/10 dark:border-slate-800 dark:bg-slate-900 dark:shadow-black/30;
+  background-image:
+    linear-gradient(135deg, rgb(var(--color-primary) / 0.055), transparent 32%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.96));
 }
 
 .base-date-range__calendar-header {
-  @apply grid grid-cols-[2rem_minmax(0,1fr)_2rem] items-center gap-2;
+  @apply grid grid-cols-[2rem_minmax(0,1fr)_2rem] items-center gap-2 border-b border-slate-100 px-3 py-3 dark:border-slate-800;
+  background-color: rgba(248, 250, 252, 0.72);
 }
 
 .base-date-range__calendar-header button,
@@ -571,24 +833,49 @@ onBeforeUnmount(() => {
 }
 
 .base-date-range__calendar-meta {
-  @apply mt-3 flex min-w-0 flex-wrap items-center gap-2 rounded-lg border border-slate-100 bg-slate-50 p-2 dark:border-slate-800 dark:bg-slate-950;
+  @apply m-3 flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-100 bg-white p-2 shadow-sm dark:border-slate-800 dark:bg-slate-950;
+}
+
+.base-date-range__calendar-range {
+  @apply flex min-w-0 flex-1 flex-wrap items-center gap-2;
 }
 
 .base-date-range__weekdays,
 .base-date-range__days {
-  @apply mt-3 grid grid-cols-7 gap-1;
+  @apply mx-3 grid grid-cols-7;
 }
 
 .base-date-range__weekdays span {
-  @apply text-center text-[10px] font-black text-slate-400 dark:text-slate-500;
+  @apply pb-1 text-center text-[10px] font-black text-slate-400 dark:text-slate-500;
 }
 
 .base-date-range__days {
-  @apply mt-1;
+  @apply mb-3 overflow-hidden rounded-xl border border-slate-100 bg-slate-50 p-1 dark:border-slate-800 dark:bg-slate-950;
 }
 
 .base-date-range__days button {
-  @apply relative flex aspect-square min-h-8 items-center justify-center rounded-lg text-xs font-black text-slate-600 transition hover:bg-slate-100 hover:text-slate-900 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-opacity-20 disabled:cursor-not-allowed disabled:text-slate-300 disabled:opacity-50 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-slate-100 dark:disabled:text-slate-700;
+  @apply relative flex h-9 min-h-9 items-center justify-center text-xs font-black text-slate-600 transition focus:outline-none focus:ring-2 focus:ring-primary focus:ring-opacity-20 disabled:cursor-not-allowed disabled:text-slate-300 disabled:opacity-50 dark:text-slate-300 dark:disabled:text-slate-700;
+}
+
+.base-date-range__days button::before {
+  @apply absolute inset-y-1 left-0 right-0;
+  content: "";
+}
+
+.base-date-range__days button:nth-child(7n + 1)::before {
+  @apply rounded-l-lg;
+}
+
+.base-date-range__days button:nth-child(7n)::before {
+  @apply rounded-r-lg;
+}
+
+.base-date-range__days button > span {
+  @apply relative z-10 flex h-7 w-7 items-center justify-center rounded-lg transition;
+}
+
+.base-date-range__days button:not(.is-start):not(.is-end):not(:disabled):hover > span {
+  @apply bg-white text-slate-900 shadow-sm dark:bg-slate-800 dark:text-slate-100;
 }
 
 .base-date-range__days button.is-muted {
@@ -596,14 +883,36 @@ onBeforeUnmount(() => {
 }
 
 .base-date-range__days button.is-in-range {
-  background-color: rgb(var(--color-primary) / 0.08);
   @apply text-primary;
+}
+
+.base-date-range__days button.is-in-range::before {
+  background-color: rgb(var(--color-primary) / 0.1);
 }
 
 .base-date-range__days button.is-start,
 .base-date-range__days button.is-end {
+  @apply text-white;
+}
+
+.base-date-range__days button.is-start::before {
+  left: 50%;
+  background-color: rgb(var(--color-primary) / 0.1);
+}
+
+.base-date-range__days button.is-end::before {
+  right: 50%;
+  background-color: rgb(var(--color-primary) / 0.1);
+}
+
+.base-date-range__days button.is-start.is-end::before {
+  display: none;
+}
+
+.base-date-range__days button.is-start > span,
+.base-date-range__days button.is-end > span {
   background-color: rgb(var(--color-primary));
-  @apply text-white shadow-sm;
+  @apply shadow-sm;
 }
 
 .base-date-range__days button.is-today::after {
@@ -656,6 +965,16 @@ onBeforeUnmount(() => {
 
 :global(.dark) .base-date-range__inputs input {
   color-scheme: dark;
+}
+
+:global(.dark) .base-date-range__calendar {
+  background-image:
+    linear-gradient(135deg, rgb(var(--color-primary) / 0.1), transparent 32%),
+    linear-gradient(180deg, rgba(15, 23, 42, 0.98), rgba(2, 6, 23, 0.94));
+}
+
+:global(.dark) .base-date-range__calendar-header {
+  background-color: rgba(15, 23, 42, 0.74);
 }
 
 @media (prefers-reduced-motion: reduce) {

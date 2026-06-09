@@ -201,7 +201,7 @@ watch(
 
 <style scoped>
 .base-field-group {
-  @apply min-w-0 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900;
+  @apply min-w-0 max-w-full rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900;
 }
 
 .base-field-group--sm,
@@ -325,7 +325,7 @@ watch(
 }
 
 .base-field-group__fieldset {
-  @apply min-w-0 border-0 p-0;
+  @apply m-0 min-w-0 border-0 p-0;
 }
 
 .base-field-group__fieldset:disabled {
@@ -378,12 +378,26 @@ watch(
 }
 
 .base-field-group__footer {
-  @apply mt-4 border-t border-slate-200 pt-3 dark:border-slate-800;
+  @apply mt-5 border-t pt-4 pb-1;
+  border-color: rgb(226 232 240 / 0.72);
 }
 
 .base-field-group--compact .base-field-group__footer,
 .base-field-group--sm .base-field-group__footer {
-  @apply mt-3 pt-2.5;
+  @apply mt-4 pt-3 pb-0.5;
+}
+
+.base-field-group--lg .base-field-group__footer {
+  @apply mt-6 pt-4 pb-1.5;
+}
+
+.base-field-group--plain .base-field-group__footer,
+.base-field-group--unpadded .base-field-group__footer {
+  @apply pb-0;
+}
+
+:global(.dark) .base-field-group__footer {
+  border-color: rgb(30 41 59 / 0.82);
 }
 
 @media (max-width: 640px) {

@@ -1,4 +1,5 @@
 import { ref } from "vue";
+import { stringifyErrorMessage } from "../utils";
 
 export function useTauriCommand<T = any, Args extends any[] = any[]>(
   commandFn: (...args: Args) => Promise<T>
@@ -15,7 +16,7 @@ export function useTauriCommand<T = any, Args extends any[] = any[]>(
       data.value = result as any; // 强转类型
       return result;
     } catch (err: any) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = stringifyErrorMessage(err);
       error.value = msg;
       return null;
     } finally {

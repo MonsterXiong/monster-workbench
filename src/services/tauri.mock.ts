@@ -1,14 +1,19 @@
 import { ensureBrowserMessage } from "./runtime";
 import {
+  pushLimitedItem,
   drop,
   filterByOptionalValues,
   filterBySearchTextFields,
   findByValue,
   findIndexByValue,
-  formatIsoDateTime,
+  formatCurrentIsoDateTime,
+  createTimeout,
+  getCurrentTimestampMs,
   getNextNumberBy,
+  joinLines,
   mapValuesToArray,
   paginateArray,
+  redactSensitiveObjectDeep,
   removeByValue,
   removeByValues,
   safeJsonStringify,
@@ -82,10 +87,14 @@ const mockLogs = [
 
 const mockAiQueueStatus = {
   running: null,
+  runningItems: [],
   queued: [],
   pendingCount: 0,
-  queueLimit: 8,
-  availableSlots: 8,
+  queueLimit: 16,
+  runningCount: 0,
+  runningLimit: 6,
+  availableRunningSlots: 6,
+  availableSlots: 16,
   isSaturated: false,
   waitTimeoutMs: 90000
 };
@@ -94,6 +103,8 @@ const mockAiTasks = new Map<string, any>();
 const MOCK_AI_TASK_LIMIT = 40;
 const MOCK_IMAGE_DATA_URL =
   "data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%201024%201024%22%3E%3Cdefs%3E%3ClinearGradient%20id%3D%22g%22%20x1%3D%220%22%20x2%3D%221%22%20y1%3D%220%22%20y2%3D%221%22%3E%3Cstop%20stop-color%3D%22%2310b981%22/%3E%3Cstop%20offset%3D%221%22%20stop-color%3D%22%232563eb%22/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect%20width%3D%221024%22%20height%3D%221024%22%20rx%3D%2280%22%20fill%3D%22url(%23g)%22/%3E%3Ccircle%20cx%3D%22512%22%20cy%3D%22440%22%20r%3D%22140%22%20fill%3D%22white%22%20opacity%3D%22.88%22/%3E%3Crect%20x%3D%22272%22%20y%3D%22616%22%20width%3D%22480%22%20height%3D%2272%22%20rx%3D%2236%22%20fill%3D%22white%22%20opacity%3D%22.88%22/%3E%3Ctext%20x%3D%22512%22%20y%3D%22804%22%20text-anchor%3D%22middle%22%20font-family%3D%22Arial%2Csans-serif%22%20font-size%3D%2256%22%20font-weight%3D%22700%22%20fill%3D%22white%22%3EMock%20Image%3C/text%3E%3C/svg%3E";
+const MOCK_IMAGE_DATA_URL_ALT =
+  "data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%201024%201024%22%3E%3Cdefs%3E%3ClinearGradient%20id%3D%22g%22%20x1%3D%221%22%20x2%3D%220%22%20y1%3D%220%22%20y2%3D%221%22%3E%3Cstop%20stop-color%3D%22%23f59e0b%22/%3E%3Cstop%20offset%3D%221%22%20stop-color%3D%22%238b5cf6%22/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect%20width%3D%221024%22%20height%3D%221024%22%20rx%3D%2280%22%20fill%3D%22url(%23g)%22/%3E%3Ccircle%20cx%3D%22512%22%20cy%3D%22388%22%20r%3D%22118%22%20fill%3D%22white%22%20opacity%3D%22.9%22/%3E%3Crect%20x%3D%22304%22%20y%3D%22572%22%20width%3D%22416%22%20height%3D%22104%22%20rx%3D%2252%22%20fill%3D%22white%22%20opacity%3D%22.9%22/%3E%3Ctext%20x%3D%22512%22%20y%3D%22804%22%20text-anchor%3D%22middle%22%20font-family%3D%22Arial%2Csans-serif%22%20font-size%3D%2256%22%20font-weight%3D%22700%22%20fill%3D%22white%22%3EMock%202%3C/text%3E%3C/svg%3E";
 
 function trimMockAiTasks() {
   const tasks = sortByMany(mapValuesToArray(mockAiTasks), [
@@ -107,7 +118,7 @@ function trimMockAiTasks() {
 function createMockAiResultBase(args: Record<string, unknown>, action: string) {
   const config = args.config as any;
   return {
-    requestId: `mock-ai-${Date.now()}`,
+    requestId: `mock-ai-${getCurrentTimestampMs()}`,
     action,
     provider: config?.provider || "custom",
     baseUrl: config?.baseUrl || "https://mock.local/v1",
@@ -134,16 +145,27 @@ function createMockAiResult(args: Record<string, unknown>, action: string) {
   }
 
   if (action === "image") {
+    const prompt = String((args.config as any)?.imagePrompt || "").toLowerCase();
+    const requestedImageSize = (args.config as any)?.imageSize || "1024x1024";
+    const shouldMockFallback = prompt.includes("fallback") && requestedImageSize !== "1024x1024";
+    const shouldMockMultiImage = prompt.includes("multi");
+    const actualImageSize = shouldMockFallback ? "1024x1024" : requestedImageSize;
     return {
       ...createMockAiResultBase(args, "image"),
       ok: true,
       model: (args.config as any)?.imageModel || "mock-image-1",
       latencyMs: 260,
       totalLatencyMs: 260,
-      message: "浏览器 Mock 生图测试成功",
-      imageUrls: [MOCK_IMAGE_DATA_URL],
+      message: shouldMockFallback
+        ? `浏览器 Mock 生图测试成功，所选尺寸暂不稳定，已自动降级为 ${actualImageSize}`
+        : "浏览器 Mock 生图测试成功",
+      imageUrls: shouldMockMultiImage ? [MOCK_IMAGE_DATA_URL, MOCK_IMAGE_DATA_URL_ALT] : [MOCK_IMAGE_DATA_URL],
       imagePaths: [],
       savedFiles: [],
+      requestedImageSize,
+      actualImageSize,
+      fallbackImageSize: shouldMockFallback ? actualImageSize : null,
+      imageAttempts: shouldMockFallback ? 2 : 1,
       rawPreview: "{\"data\":[{\"url\":\"mock://image\"}]}"
     };
   }
@@ -165,7 +187,7 @@ export async function mockCallTauri<T = unknown>(
   args: Record<string, unknown> = {}
 ): Promise<T> {
   if (import.meta.env.DEV) {
-    console.debug(`[MOCK_IPC] ${command}`, args);
+    console.debug(`[MOCK_IPC] ${command}`, redactSensitiveObjectDeep(args));
   }
 
   switch (command) {
@@ -198,37 +220,62 @@ export async function mockCallTauri<T = unknown>(
 
     case "enqueue_ai_provider_test": {
       const action = String(args.action || "chat");
-      const requestId = `mock-ai-task-${Date.now()}`;
+      const now = getCurrentTimestampMs();
+      const requestId = `mock-ai-task-${now}`;
       const result = {
         ...createMockAiResult(args, action),
         requestId
       };
+      const isImageTask = action === "image";
       const task = {
         requestId,
         action,
-        status: "success",
-        createdAtMs: Date.now(),
-        startedAtMs: Date.now(),
-        finishedAtMs: Date.now(),
+        status: isImageTask ? "running" : "success",
+        createdAtMs: now,
+        startedAtMs: now,
+        finishedAtMs: isImageTask ? null : now,
         queueWaitMs: 0,
-        totalLatencyMs: result.totalLatencyMs,
-        result,
+        totalLatencyMs: isImageTask ? null : result.totalLatencyMs,
+        result: isImageTask ? null : result,
         error: null
       };
       mockAiTasks.set(requestId, task);
+      if (isImageTask) {
+        createTimeout(() => {
+          const currentTask = mockAiTasks.get(requestId);
+          if (!currentTask || currentTask.status !== "running") {
+            return;
+          }
+          const finishedAt = getCurrentTimestampMs();
+          mockAiTasks.set(requestId, {
+            ...currentTask,
+            status: "success",
+            finishedAtMs: finishedAt,
+            totalLatencyMs: finishedAt - now,
+            result: {
+              ...result,
+              latencyMs: finishedAt - now,
+              totalLatencyMs: finishedAt - now,
+            },
+          });
+          trimMockAiTasks();
+        }, 1400);
+      }
       trimMockAiTasks();
       return task as T;
     }
 
-    case "get_ai_provider_test_task":
+    case "get_ai_provider_test_task": {
+      const now = getCurrentTimestampMs();
       return (mockAiTasks.get(args.requestId as string) || {
         requestId: args.requestId,
         action: "chat",
         status: "failed",
-        createdAtMs: Date.now(),
-        finishedAtMs: Date.now(),
+        createdAtMs: now,
+        finishedAtMs: now,
         error: "浏览器 Mock 未找到该 AI 测试任务"
       }) as T;
+    }
 
     case "list_ai_provider_test_tasks":
       return take(sortByMany(mapValuesToArray(mockAiTasks), [
@@ -243,12 +290,12 @@ export async function mockCallTauri<T = unknown>(
 
     case "cancel_ai_provider_test_task": {
       const task = mockAiTasks.get(args.requestId as string);
-      if (!task || task.status !== "queued") {
+      if (!task || (task.status !== "queued" && task.status !== "running")) {
         return false as T;
       }
       task.status = "failed";
-      task.finishedAtMs = Date.now();
-      task.error = "浏览器 Mock 已取消排队任务";
+      task.finishedAtMs = getCurrentTimestampMs();
+      task.error = "浏览器 Mock 已取消 AI 测试任务";
       return true as T;
     }
 
@@ -304,7 +351,7 @@ export async function mockCallTauri<T = unknown>(
         is_featured: newItem.is_featured || 0,
         is_hot: newItem.is_hot || 0,
         clicks: 0,
-        created_at: formatIsoDateTime(new Date(), " "),
+        created_at: formatCurrentIsoDateTime(" "),
         logo_path: newItem.logo_path || null,
         bg_path: newItem.bg_path || null,
         sort_order: nextSortOrder
@@ -410,15 +457,12 @@ export async function mockCallTauri<T = unknown>(
     // 日志系统
     case "write_log_entry": {
       const line = args.line as string;
-      mockLogs.push(line);
-      if (mockLogs.length > 200) {
-        mockLogs.shift();
-      }
+      pushLimitedItem(mockLogs, line, 200);
       return null as T;
     }
 
     case "read_log_file":
-      return mockLogs.join("\n") as T;
+      return joinLines(mockLogs) as T;
 
     case "clear_all_logs":
       mockLogs.length = 0;

@@ -8,6 +8,7 @@ import { useToast } from "../../composables/useToast";
 import { useConfirm } from "../../composables/useConfirm";
 import { useLoading } from "../../composables/useLoading";
 import { useI18n } from "../../composables/useI18n";
+import { getErrorMessage } from "../../utils";
 
 // 引入局部拆分出来的子面板组件
 import SettingsAppearancePanel from "./components/SettingsAppearancePanel.vue";
@@ -49,11 +50,10 @@ async function handleExportBackup() {
     );
   } catch (err) {
     triggerToast(
-      err instanceof Error
-        ? err.message
-        : settingStore.isDesktopRuntime
-          ? t('settings.data.dbBackupFailed')
-          : t('settings.data.browserBackupFailed'),
+      getErrorMessage(
+        err,
+        settingStore.isDesktopRuntime ? t('settings.data.dbBackupFailed') : t('settings.data.browserBackupFailed')
+      ),
       "error"
     );
   } finally {
@@ -81,11 +81,7 @@ async function handleImportBackup() {
     if (result === "cancelled") return;
   } catch (err) {
     triggerToast(
-      err instanceof Error
-        ? err.message
-        : isTauri
-          ? t('settings.data.restoreFailed')
-          : t('settings.data.restoreFailedBrowser'),
+      getErrorMessage(err, isTauri ? t('settings.data.restoreFailed') : t('settings.data.restoreFailedBrowser')),
       "error"
     );
   } finally {
@@ -108,7 +104,7 @@ async function handleResetApp() {
   try {
     await settingStore.resetApp();
   } catch (err) {
-    triggerToast(err instanceof Error ? err.message : t('settings.data.resetFailed'), "error");
+    triggerToast(getErrorMessage(err, t('settings.data.resetFailed')), "error");
   } finally {
     hideLoading();
   }

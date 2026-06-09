@@ -22,7 +22,7 @@ import PlaygroundLayoutDemos from "./components/PlaygroundLayoutDemos.vue";
 import PlaygroundLoadingDemos from "./components/PlaygroundLoadingDemos.vue";
 import PlaygroundNavigationDemos from "./components/PlaygroundNavigationDemos.vue";
 import PlaygroundWorkflowDemos from "./components/PlaygroundWorkflowDemos.vue";
-import { findByValue } from "../../utils";
+import { findByValue, firstItem, hasItem } from "../../utils";
 
 type ComponentGroupKey =
   | "foundation"
@@ -84,6 +84,7 @@ const componentGroups: ComponentGroup[] = [
       { key: "choice-controls", name: "BaseSelect / BaseCheckbox / BaseRadioGroup / BaseSwitch", title: "选择开关", description: "下拉、勾选、单选、开关和禁用态。" },
       { key: "form-shell", name: "BaseForm / BaseFormItem", title: "表单容器", description: "标题、列布局、提交、底部动作区。" },
       { key: "form-item", name: "BaseFormItem", title: "表单字段", description: "标签、说明、帮助、错误、成功和跨列布局。" },
+      { key: "tag-input", name: "BaseTagInput", title: "标签输入", description: "添加、粘贴、去重、重复、清空和状态。" },
       { key: "path-selector", name: "AppPathSelector", title: "路径选择", description: "目录 / 文件模式、桌面运行选择、浏览器降级。" },
       { key: "image-uploader", name: "AppImageUploader", title: "图片上传", description: "上传、预览、清空、封面裁切。" },
       { key: "date-range", name: "BaseDateRange", title: "日期范围", description: "时间筛选、快捷范围、错误态和禁用态。" },
@@ -112,7 +113,8 @@ const componentGroups: ComponentGroup[] = [
       { key: "info-card", name: "BaseInfoCard", title: "信息卡片", description: "标题、说明、元信息、动作区和可点击态。" },
       { key: "avatar-divider", name: "BaseAvatar / BaseDivider", title: "头像分隔", description: "成员身份、在线状态、横向与纵向分隔。" },
       { key: "code-copy", name: "BaseCodeBlock / BaseCopyButton", title: "代码复制", description: "代码块、行号、换行、复制反馈和错误兜底。" },
-      { key: "tooltip-upload", name: "BaseTooltip / BaseUpload", title: "提示上传", description: "悬浮说明、方向、拖拽上传和文件选择事件。" },
+      { key: "tooltip-upload", name: "BaseTooltip", title: "悬浮提示", description: "悬浮说明、方向、禁用和多行提示。" },
+      { key: "upload", name: "BaseUpload", title: "文件上传", description: "拖拽、点击、限制、状态和拒绝事件。" },
     ],
   },
   {
@@ -197,6 +199,7 @@ const coveredComponentKeys = [
   "choice-controls",
   "form-shell",
   "form-item",
+  "tag-input",
   "path-selector",
   "image-uploader",
   "date-range",
@@ -206,6 +209,7 @@ const coveredComponentKeys = [
   "avatar-divider",
   "code-copy",
   "tooltip-upload",
+  "upload",
   "alert",
   "toast-message",
   "dialog",
@@ -234,11 +238,11 @@ const playgroundPanes = [
   { key: "detail", size: 82, minSize: 74, maxSize: 86, label: "组件详情" },
 ];
 
-const activeGroup = computed(() => findByValue(componentGroups, (group) => group.key, activeGroupKey.value) ?? componentGroups[0]);
+const activeGroup = computed(() => findByValue(componentGroups, (group) => group.key, activeGroupKey.value) ?? firstItem(componentGroups)!);
 const activeEntry = computed(
-  () => findByValue(activeGroup.value.components, (component) => component.key, activeComponentKey.value) ?? activeGroup.value.components[0]
+  () => findByValue(activeGroup.value.components, (component) => component.key, activeComponentKey.value) ?? firstItem(activeGroup.value.components)!
 );
-const hasActiveDemo = computed(() => coveredComponentKeys.includes(activeComponentKey.value));
+const hasActiveDemo = computed(() => hasItem(coveredComponentKeys, activeComponentKey.value));
 
 const detailBreadcrumbs = computed(() => [
   { key: activeGroup.value.key, label: activeGroup.value.title, icon: "Folder" },
@@ -249,7 +253,7 @@ const selectGroup = (key: string) => {
   const nextGroup = findByValue(componentGroups, (group) => group.key, key);
   if (!nextGroup) return;
   activeGroupKey.value = nextGroup.key;
-  activeComponentKey.value = nextGroup.components[0]?.key ?? "";
+  activeComponentKey.value = firstItem(nextGroup.components)?.key ?? "";
 };
 
 const selectComponent = (key: string) => {

@@ -6,7 +6,7 @@ import { useToast } from "../../../composables/useToast";
 import { useConfirm } from "../../../composables/useConfirm";
 import { useLoading } from "../../../composables/useLoading";
 import { useSystemStore } from "../../../stores/system";
-import { getLogLevelFromText } from "../../../utils";
+import { getErrorMessage, getLogLevelFromText, isWindowsUserAgent } from "../../../utils";
 
 const { triggerToast } = useToast();
 const { confirm } = useConfirm();
@@ -23,7 +23,7 @@ const {
 const appVersion = computed(() => isDesktopRuntime.value ? "V0.0.3-Native" : "V0.0.3-Browser (Mock)");
 const platform = computed(() => {
   if (!isDesktopRuntime.value) return "Chrome / WebView2 (浏览器预览)";
-  return window.navigator.userAgent.includes("Windows") ? "Windows 桌面客户端" : "其他桌面端";
+  return isWindowsUserAgent() ? "Windows 桌面客户端" : "其他桌面端";
 });
 const dbPath = computed(() => isDesktopRuntime.value ? localPath.value : "localStorage::database");
 const dbStatusText = computed(() => {
@@ -68,7 +68,7 @@ async function handleClearLogs() {
     await systemStore.clearLogs();
     triggerToast("成功清除所有物理日志", "success");
   } catch (err) {
-    triggerToast(err instanceof Error ? err.message : "清空失败", "error");
+    triggerToast(getErrorMessage(err, "清空失败"), "error");
   } finally {
     hideLoading();
   }
@@ -82,7 +82,7 @@ async function handleExportDiagnostics() {
     if (result === "cancelled") return;
     triggerToast("一键诊断导出成功", "success");
   } catch (err) {
-    triggerToast(err instanceof Error ? err.message : "导出失败", "error");
+    triggerToast(getErrorMessage(err, "导出失败"), "error");
   } finally {
     hideLoading();
   }

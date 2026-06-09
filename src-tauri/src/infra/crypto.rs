@@ -1,4 +1,3 @@
-
 pub struct CryptoInfra;
 
 impl CryptoInfra {

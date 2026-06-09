@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { useI18n } from "../../composables/useI18n";
+import { toIntegerAtLeast } from "../../utils";
 
 export interface KeyValueItem {
   key: string;
@@ -22,6 +23,12 @@ interface Props {
   loading?: boolean;
   disabled?: boolean;
   emptyText?: string;
+  emptyIcon?: string;
+  loadingText?: string;
+  skeletonRows?: number;
+  wrapLabel?: boolean;
+  wrapValue?: boolean;
+  wrapDescription?: boolean;
   ariaLabel?: string;
 }
 
@@ -34,12 +41,20 @@ const props = withDefaults(defineProps<Props>(), {
   loading: false,
   disabled: false,
   emptyText: "",
+  emptyIcon: "ListTodo",
+  loadingText: "",
+  skeletonRows: 3,
+  wrapLabel: false,
+  wrapValue: false,
+  wrapDescription: false,
   ariaLabel: "",
 });
 
 const { t } = useI18n();
 const resolvedSize = computed(() => (props.compact ? "sm" : props.size));
 const isEmpty = computed(() => !props.loading && props.items.length === 0);
+const skeletonCount = computed(() => toIntegerAtLeast(props.skeletonRows, 1, 3));
+const resolvedLoadingText = computed(() => props.loadingText || t("common.loading"));
 </script>
 
 <template>
@@ -51,6 +66,9 @@ const isEmpty = computed(() => !props.loading && props.items.length === 0);
       `base-key-value-list--${surface}`,
       {
         'is-bordered': bordered,
+        'base-key-value-list--wrap-label': wrapLabel,
+        'base-key-value-list--wrap-value': wrapValue,
+        'base-key-value-list--wrap-description': wrapDescription,
         'is-loading': loading,
         'is-disabled': disabled,
         'is-empty': isEmpty,
@@ -61,7 +79,8 @@ const isEmpty = computed(() => !props.loading && props.items.length === 0);
     :aria-disabled="disabled ? 'true' : undefined"
   >
     <template v-if="loading">
-      <div v-for="index in 3" :key="index" class="base-key-value-list__item base-key-value-list__item--skeleton" aria-hidden="true">
+      <div class="sr-only" role="status" aria-live="polite">{{ resolvedLoadingText }}</div>
+      <div v-for="index in skeletonCount" :key="index" class="base-key-value-list__item base-key-value-list__item--skeleton" aria-hidden="true">
         <span></span>
         <strong></strong>
         <em></em>
@@ -69,7 +88,7 @@ const isEmpty = computed(() => !props.loading && props.items.length === 0);
     </template>
 
     <div v-else-if="isEmpty" class="base-key-value-list__empty" role="status">
-      <BaseIcon name="ListTodo" size="18" aria-hidden="true" />
+      <BaseIcon :name="emptyIcon" size="18" aria-hidden="true" />
       <span>{{ emptyText || t("common.noData") }}</span>
     </div>
 
@@ -101,7 +120,7 @@ const isEmpty = computed(() => !props.loading && props.items.length === 0);
 }
 
 .base-key-value-list.is-disabled {
-  @apply opacity-70;
+  @apply pointer-events-none opacity-70;
 }
 
 .base-key-value-list--cols-1 {
@@ -168,6 +187,13 @@ const isEmpty = computed(() => !props.loading && props.items.length === 0);
   @apply truncate text-[10px] font-bold text-slate-400 dark:text-slate-500;
 }
 
+.base-key-value-list--wrap-label .base-key-value-list__label {
+  @apply whitespace-normal;
+  overflow: visible;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+}
+
 .base-key-value-list--lg .base-key-value-list__label {
   @apply text-xs;
 }
@@ -176,12 +202,26 @@ const isEmpty = computed(() => !props.loading && props.items.length === 0);
   @apply mt-1 truncate text-sm font-black text-slate-800 dark:text-slate-100;
 }
 
+.base-key-value-list--wrap-value .base-key-value-list__value {
+  @apply whitespace-normal;
+  overflow: visible;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+}
+
 .base-key-value-list--lg .base-key-value-list__value {
   @apply text-base;
 }
 
 .base-key-value-list__description {
   @apply mt-0.5 truncate text-[10px] font-bold text-slate-400 dark:text-slate-500;
+}
+
+.base-key-value-list--wrap-description .base-key-value-list__description {
+  @apply whitespace-normal;
+  overflow: visible;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
 }
 
 .base-key-value-list--lg .base-key-value-list__description {

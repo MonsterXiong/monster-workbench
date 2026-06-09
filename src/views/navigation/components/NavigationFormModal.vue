@@ -5,7 +5,7 @@ import { useNavigationStore } from "../../../stores/navigation";
 import { useToast } from "../../../composables/useToast";
 import AppImageUploader from "../../../components/common/AppImageUploader.vue";
 import { useI18n } from "../../../composables/useI18n";
-import { ensureHttpProtocol } from "../../../utils";
+import { ensureHttpProtocol, getEventTargetValue, isBlank, toTrimmedString } from "../../../utils";
 
 const navigationStore = useNavigationStore();
 const { triggerToast } = useToast();
@@ -64,11 +64,11 @@ const categoryOptions = computed(() => {
 
 // 保存表单
 async function handleSave() {
-  if (!props.form.title.trim()) {
+  if (isBlank(props.form.title)) {
     triggerToast(t('navigation.nameRequired'));
     return;
   }
-  if (!props.form.url.trim()) {
+  if (isBlank(props.form.url)) {
     triggerToast(t('navigation.urlRequired'));
     return;
   }
@@ -77,7 +77,7 @@ async function handleSave() {
 
   let finalCategory = props.form.category;
   if (isCustomCategory.value) {
-    const customCat = customCategoryName.value.trim();
+    const customCat = toTrimmedString(customCategoryName.value);
     if (!customCat) {
       triggerToast(t('navigation.customCategoryRequired'));
       return;
@@ -89,9 +89,9 @@ async function handleSave() {
     if (props.isEdit && props.currentId !== undefined) {
       await navigationStore.update({
         id: props.currentId,
-        title: props.form.title.trim(),
+        title: toTrimmedString(props.form.title),
         url: targetUrl,
-        description: props.form.description.trim(),
+        description: toTrimmedString(props.form.description),
         category: finalCategory,
         is_featured: props.form.is_featured,
         is_hot: props.form.is_hot,
@@ -102,9 +102,9 @@ async function handleSave() {
       triggerToast(t('navigation.modifySuccess'), "success");
     } else {
       await navigationStore.add({
-        title: props.form.title.trim(),
+        title: toTrimmedString(props.form.title),
         url: targetUrl,
-        description: props.form.description.trim(),
+        description: toTrimmedString(props.form.description),
         category: finalCategory,
         is_featured: props.form.is_featured,
         is_hot: props.form.is_hot,
@@ -271,7 +271,7 @@ function closeModal() {
           rows="3"
           :placeholder="t('navigation.descPlaceholder')"
           class="workbench-textarea p-3 text-xs leading-5 resize-none h-20"
-          @input="emit('update:form', { ...form, description: ($event.target as HTMLTextAreaElement).value })"
+          @input="emit('update:form', { ...form, description: getEventTargetValue($event) })"
         ></textarea>
       </div>
     </div>

@@ -8,7 +8,7 @@ import { updaterService } from "../services/updater.service";
 import { getTranslation } from "../locales";
 import { useSettingStore } from "./settings";
 import { useTaskStore } from "./task";
-import { formatTemplate } from "../utils";
+import { createInterval, formatTemplate, getCurrentTimestampMs, stringifyErrorMessage } from "../utils";
 
 let autoCheckInitialized = false;
 
@@ -70,7 +70,7 @@ export const useUpdateStore = defineStore("update", {
       } catch (error: any) {
         console.error("[ERR_UPDATE_CHECK] 检查更新失败:", error);
         if (!silent) {
-          this.message = `${t("updater.failed")}: ${error.message || error}`;
+          this.message = `${t("updater.failed")}: ${stringifyErrorMessage(error)}`;
         }
       } finally {
         this.checking = false;
@@ -97,7 +97,7 @@ export const useUpdateStore = defineStore("update", {
         });
       } catch (error: any) {
         console.error("[ERR_UPDATE_INSTALL] 应用更新安装失败:", error);
-        this.message = `${t("common.error")}: ${error.message || error}`;
+        this.message = `${t("common.error")}: ${stringifyErrorMessage(error)}`;
         this.updating = false;
       }
     },
@@ -115,7 +115,7 @@ export const useUpdateStore = defineStore("update", {
      */
     async triggerDummyDownload() {
       const taskStore = useTaskStore();
-      const taskId = `update-${Date.now()}`;
+      const taskId = `update-${getCurrentTimestampMs()}`;
       const taskName = "系统更新包下载";
       taskStore.addTask(taskId, taskName);
       await updaterService.triggerUpdateDownload(taskId, taskName);
@@ -132,7 +132,7 @@ export const useUpdateStore = defineStore("update", {
       this.checkUpdate(true);
 
       // 2. 每小时 (3600000ms) 自动轮询执行静默检查更新
-      setInterval(() => {
+      createInterval(() => {
         this.checkUpdate(true);
       }, 3600000);
     },

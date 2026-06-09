@@ -5,7 +5,17 @@ import {
   type UploadedFileInfo,
 } from "../services/file-manager.service";
 import { useAppStore } from "./app";
-import { filterBySearchTextFields, getFileNames, toggleAllSelection, toggleSelectionKey, uniqueArray } from "../utils";
+import {
+  clearSelection,
+  filterBySearchTextFields,
+  getDragEventFiles,
+  getFileNames,
+  hasFiles,
+  isRelatedTargetInsideCurrentTarget,
+  toggleAllSelection,
+  toggleSelectionKey,
+  uniqueArray,
+} from "../utils";
 
 export type FileTypeFilter = "image" | "file" | undefined;
 
@@ -161,7 +171,7 @@ export const useFileManagerStore = defineStore("file-manager", () => {
       )
     );
 
-    selectedPaths.value = [];
+    selectedPaths.value = clearSelection<string>();
     isBatchMode.value = false;
     await fetchFiles();
   }
@@ -176,12 +186,12 @@ export const useFileManagerStore = defineStore("file-manager", () => {
 
   function enterBatchMode() {
     isBatchMode.value = true;
-    selectedPaths.value = [];
+    selectedPaths.value = clearSelection<string>();
   }
 
   function exitBatchMode() {
     isBatchMode.value = false;
-    selectedPaths.value = [];
+    selectedPaths.value = clearSelection<string>();
   }
 
   function clearKeyword() {
@@ -199,10 +209,7 @@ export const useFileManagerStore = defineStore("file-manager", () => {
 
   function handleWebDragLeave(event: DragEvent) {
     event.preventDefault();
-    if (
-      event.relatedTarget === null ||
-      !(event.currentTarget as HTMLElement).contains(event.relatedTarget as HTMLElement)
-    ) {
+    if (!isRelatedTargetInsideCurrentTarget(event)) {
       isDragging.value = false;
     }
   }
@@ -211,8 +218,8 @@ export const useFileManagerStore = defineStore("file-manager", () => {
     event.preventDefault();
     isDragging.value = false;
 
-    const filesList = event.dataTransfer?.files;
-    if (!filesList || filesList.length === 0) return null;
+    const filesList = getDragEventFiles(event);
+    if (!hasFiles(filesList)) return null;
 
     const paths = getFileNames(filesList);
     return batchUploadFiles(paths);

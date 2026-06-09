@@ -20,6 +20,7 @@ interface Props {
   bordered?: boolean;
   disabled?: boolean;
   minHeight?: string;
+  actionsLabel?: string;
   ariaLabel?: string;
 }
 
@@ -35,6 +36,7 @@ const props = withDefaults(defineProps<Props>(), {
   bordered: false,
   disabled: false,
   minHeight: "",
+  actionsLabel: "",
   ariaLabel: "",
 });
 
@@ -50,6 +52,7 @@ const iconSize = computed(() => {
   return 30;
 });
 const labelledBy = computed(() => (!props.ariaLabel && props.title ? titleId.value : undefined));
+const resolvedActionsLabel = computed(() => props.actionsLabel || `${props.title || props.ariaLabel || "空态"} 操作`);
 </script>
 
 <template>
@@ -81,7 +84,7 @@ const labelledBy = computed(() => (!props.ariaLabel && props.title ? titleId.val
     <p :id="descriptionId" class="base-empty__description">
       {{ resolvedDescription }}
     </p>
-    <div v-if="$slots.default" class="base-empty__actions">
+    <div v-if="$slots.default" class="base-empty__actions" role="group" :aria-label="resolvedActionsLabel">
       <slot></slot>
     </div>
   </div>
@@ -162,7 +165,8 @@ const labelledBy = computed(() => (!props.ariaLabel && props.title ? titleId.val
 }
 
 .base-empty__title {
-  @apply max-w-sm text-sm font-black text-slate-800 dark:text-slate-100;
+  @apply min-w-0 max-w-sm text-sm font-black text-slate-800 dark:text-slate-100;
+  overflow-wrap: anywhere;
 }
 
 .base-empty--lg .base-empty__title {
@@ -170,7 +174,8 @@ const labelledBy = computed(() => (!props.ariaLabel && props.title ? titleId.val
 }
 
 .base-empty__description {
-  @apply mt-1 max-w-sm text-sm font-medium leading-6 text-slate-500 dark:text-slate-400;
+  @apply mt-1 min-w-0 max-w-sm text-sm font-medium leading-6 text-slate-500 dark:text-slate-400;
+  overflow-wrap: anywhere;
 }
 
 .base-empty--sm .base-empty__description {
@@ -178,7 +183,7 @@ const labelledBy = computed(() => (!props.ariaLabel && props.title ? titleId.val
 }
 
 .base-empty__actions {
-  @apply mt-4 flex flex-wrap items-center justify-center gap-2;
+  @apply mt-4 flex max-w-full flex-wrap items-center justify-center gap-2;
 }
 
 .base-empty--start .base-empty__actions {

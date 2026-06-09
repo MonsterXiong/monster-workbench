@@ -1,6 +1,7 @@
 import { computed, ref } from "vue";
 import { storeToRefs } from "pinia";
 import { useUpdateStore } from "../stores/update";
+import { getErrorMessage } from "../utils";
 
 export function useAppUpdater() {
   const updateStore = useUpdateStore();
@@ -20,7 +21,7 @@ export function useAppUpdater() {
     } catch (err: any) {
       console.error("[ERR_UPDATER_CHECK] 底座检查更新异常:", err);
       if (!silent) {
-        errorMsg.value = err?.message || "检查更新失败";
+        errorMsg.value = getErrorMessage(err, "检查更新失败");
       }
     }
   };

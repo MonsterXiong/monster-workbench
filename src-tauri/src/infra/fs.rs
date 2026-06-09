@@ -1,8 +1,8 @@
+use crate::infra::path::PathProvider;
+use crate::infra::{AppError, AppResult};
 use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use crate::infra::{AppError, AppResult};
-use crate::infra::path::PathProvider;
 
 pub struct FsInfra {
     path_provider: PathProvider,
@@ -51,7 +51,11 @@ impl FsInfra {
     }
 
     /// 批量物理创建目录与文件结构
-    pub fn create_directory_structure(&self, root_path: Option<String>, items: Vec<PathItem>) -> AppResult<()> {
+    pub fn create_directory_structure(
+        &self,
+        root_path: Option<String>,
+        items: Vec<PathItem>,
+    ) -> AppResult<()> {
         let base_path = match root_path {
             Some(ref r) if !r.trim().is_empty() => PathBuf::from(r),
             _ => self.path_provider.get_app_local_data_dir()?,
@@ -60,8 +64,15 @@ impl FsInfra {
         for item in items {
             let clean_path = item.path.trim_start_matches('/').trim_start_matches('\\');
             let path_buf = PathBuf::from(clean_path);
-            if path_buf.components().any(|c| matches!(c, std::path::Component::ParentDir | std::path::Component::RootDir)) {
-                return Err(AppError::Io("检测到非法路径遍历组件 (.. 或根路径)".to_string()));
+            if path_buf.components().any(|c| {
+                matches!(
+                    c,
+                    std::path::Component::ParentDir | std::path::Component::RootDir
+                )
+            }) {
+                return Err(AppError::Io(
+                    "检测到非法路径遍历组件 (.. 或根路径)".to_string(),
+                ));
             }
             let full_path = base_path.join(path_buf);
             if item.is_file {
@@ -79,7 +90,12 @@ impl FsInfra {
     }
 
     /// 读取物理目录并生成对应的树形结构字符串
-    pub fn read_directory_tree(&self, dir_path: &str, skip_dirs: Vec<String>, max_depth: u32) -> AppResult<String> {
+    pub fn read_directory_tree(
+        &self,
+        dir_path: &str,
+        skip_dirs: Vec<String>,
+        max_depth: u32,
+    ) -> AppResult<String> {
         let root = Path::new(dir_path);
         if !root.exists() {
             return Err(AppError::Io("选择的文件夹路径不存在".to_string()));
@@ -88,7 +104,8 @@ impl FsInfra {
             return Err(AppError::Io("选择的路径不是一个有效的文件夹".to_string()));
         }
 
-        let root_name = root.file_name()
+        let root_name = root
+            .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| "Root".to_string());
 
@@ -108,7 +125,14 @@ impl FsInfra {
         }
         let safe_max_depth = max_depth.min(MAX_DIRECTORY_TREE_DEPTH);
 
-        self.build_tree_string(root, &mut output, "", &effective_skip_dirs, safe_max_depth, 0)?;
+        self.build_tree_string(
+            root,
+            &mut output,
+            "",
+            &effective_skip_dirs,
+            safe_max_depth,
+            0,
+        )?;
 
         Ok(output)
     }
@@ -127,10 +151,7 @@ impl FsInfra {
         }
 
         let entries = fs::read_dir(dir)?;
-        let mut paths: Vec<_> = entries
-            .filter_map(|e| e.ok())
-            .map(|e| e.path())
-            .collect();
+        let mut paths: Vec<_> = entries.filter_map(|e| e.ok()).map(|e| e.path()).collect();
 
         paths.sort_by(|a, b| {
             let a_is_dir = a.is_dir();
@@ -155,7 +176,8 @@ impl FsInfra {
             }
 
             let is_last = index == count - 1;
-            let name = path.file_name()
+            let name = path
+                .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_default();
 
@@ -178,14 +200,23 @@ impl FsInfra {
             output.push('\n');
 
             if is_dir {
-                let should_skip = skip_dirs.iter().any(|d| d.trim().eq_ignore_ascii_case(&name));
+                let should_skip = skip_dirs
+                    .iter()
+                    .any(|d| d.trim().eq_ignore_ascii_case(&name));
                 if !should_skip {
                     let next_prefix = if is_last {
                         format!("{}    ", prefix)
                     } else {
                         format!("{}│   ", prefix)
                     };
-                    self.build_tree_string(path, output, &next_prefix, skip_dirs, max_depth, current_depth + 1)?;
+                    self.build_tree_string(
+                        path,
+                        output,
+                        &next_prefix,
+                        skip_dirs,
+                        max_depth,
+                        current_depth + 1,
+                    )?;
                 }
             }
         }

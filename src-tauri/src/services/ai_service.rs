@@ -86,9 +86,14 @@ impl AiProviderService {
         let total_started = Instant::now();
         let request_id = format!("ai-direct-{}", now_ms());
         tauri::async_runtime::spawn_blocking(move || {
+            let queue_config = provider_test_queue_config(&action, &config);
             let wait_timeout = provider_test_queue_wait_timeout(&action, &config);
-            let permit =
-                ai_provider_test_queue().enter(action.clone(), request_id.clone(), wait_timeout)?;
+            let permit = ai_provider_test_queue().enter_with_config(
+                action.clone(),
+                request_id.clone(),
+                wait_timeout,
+                queue_config,
+            )?;
             let service = AiProviderService::new(app_handle);
             let mut result = service
                 .test_provider(config, action, Some(request_id), None)
@@ -107,8 +112,14 @@ impl AiProviderService {
         let task = ai_provider_task_registry().enqueue(action.clone())?;
         let app_handle = self.app_handle.clone();
         let request_id = task.request_id.clone();
+        let queue_config = provider_test_queue_config(&action, &config);
         let wait_timeout = provider_test_queue_wait_timeout(&action, &config);
-        let ticket = match ai_provider_test_queue().enqueue(action.clone(), request_id.clone(), wait_timeout) {
+        let ticket = match ai_provider_test_queue().enqueue_with_config(
+            action.clone(),
+            request_id.clone(),
+            wait_timeout,
+            queue_config,
+        ) {
             Ok(ticket) => ticket,
             Err(error) => {
                 ai_provider_task_registry().remove(&request_id);
@@ -129,7 +140,12 @@ impl AiProviderService {
                 Ok(permit) => {
                     ai_provider_task_registry().mark_running(&request_id, permit.queue_wait_ms());
                     let service = AiProviderService::new(app_handle);
-                    match service.test_provider(config, action, Some(request_id.clone()), Some(cancel_token)) {
+                    match service.test_provider(
+                        config,
+                        action,
+                        Some(request_id.clone()),
+                        Some(cancel_token),
+                    ) {
                         Ok(mut result) => {
                             result.queue_wait_ms = Some(permit.queue_wait_ms());
                             ai_provider_task_registry().complete(
@@ -173,11 +189,7 @@ impl AiProviderService {
         let cancelled_count = cancelled_request_ids.len();
         for request_id in cancelled_request_ids {
             ai_provider_cancel_registry().remove(&request_id);
-            ai_provider_task_registry().fail(
-                &request_id,
-                "AI 模型连接测试已取消".to_string(),
-                0,
-            );
+            ai_provider_task_registry().fail(&request_id, "AI 模型连接测试已取消".to_string(), 0);
         }
         Ok(cancelled_count)
     }
@@ -186,11 +198,7 @@ impl AiProviderService {
         let cancelled = ai_provider_test_queue().cancel_queued_request(request_id)?;
         if cancelled {
             ai_provider_cancel_registry().remove(request_id);
-            ai_provider_task_registry().fail(
-                request_id,
-                "AI 模型连接测试已取消".to_string(),
-                0,
-            );
+            ai_provider_task_registry().fail(request_id, "AI 模型连接测试已取消".to_string(), 0);
             return Ok(true);
         }
 
@@ -263,10 +271,9 @@ impl AiProviderService {
                 return Err(AppError::Process("AI 模型测试任务已被中止".to_string()));
             }
 
-            if let Some(status) = child
-                .try_wait()
-                .map_err(|error| AppError::Process(format!("读取 AI sidecar 状态失败: {}", error)))?
-            {
+            if let Some(status) = child.try_wait().map_err(|error| {
+                AppError::Process(format!("读取 AI sidecar 状态失败: {}", error))
+            })? {
                 exit_status = status;
                 break;
             }
@@ -323,9 +330,7 @@ impl AiProviderService {
             return Ok(resource_path);
         }
 
-        Err(AppError::Io(
-            "未找到 Python AI sidecar 脚本".to_string(),
-        ))
+        Err(AppError::Io("未找到 Python AI sidecar 脚本".to_string()))
     }
 
     fn resolve_generated_output_dir(&self) -> AppResult<PathBuf> {
@@ -401,12 +406,31 @@ fn preserve_python_sidecar_env(command: &mut Command) {
 static AI_PROVIDER_TEST_QUEUE: OnceLock<AiProviderTestQueue> = OnceLock::new();
 static AI_PROVIDER_TEST_TASKS: OnceLock<AiProviderTaskRegistry> = OnceLock::new();
 static AI_PROVIDER_TEST_CANCELS: OnceLock<AiProviderCancelRegistry> = OnceLock::new();
-const AI_PROVIDER_TEST_QUEUE_LIMIT: usize = 8;
+const AI_PROVIDER_TEST_QUEUE_LIMIT: usize = 16;
+const AI_PROVIDER_TEST_RUNNING_LIMIT: usize = 6;
+const AI_PROVIDER_TEST_MAX_CONFIG_CONCURRENCY: usize = 6;
 const AI_PROVIDER_TEST_QUEUE_WAIT_TIMEOUT: Duration = Duration::from_secs(90);
 const AI_PROVIDER_IMAGE_QUEUE_WAIT_SLACK: Duration = Duration::from_secs(30);
 const AI_PROVIDER_FINISHED_TASK_LIMIT: usize = 40;
-const AI_PROVIDER_IMAGE_REQUEST_TIMEOUT_MS: u64 = 600_000;
+const AI_PROVIDER_IMAGE_REQUEST_TIMEOUT_MS: u64 = 43_200_000;
 const AI_PROVIDER_IMAGE_SIDECAR_TIMEOUT_SLACK_MS: u64 = 15_000;
+
+#[derive(Debug, Clone)]
+struct AiProviderQueueConfig {
+    queue_key: String,
+    queue_mode: String,
+    concurrency_limit: usize,
+}
+
+impl AiProviderQueueConfig {
+    fn serial_global() -> Self {
+        Self {
+            queue_key: "__global__".to_string(),
+            queue_mode: "serial".to_string(),
+            concurrency_limit: 1,
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -419,15 +443,21 @@ pub struct AiProviderQueueItem {
     wait_ms: u128,
     remaining_wait_ms: u128,
     wait_timeout_ms: u128,
+    queue_mode: String,
+    concurrency_limit: usize,
 }
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AiProviderQueueStatus {
     running: Option<AiProviderQueueItem>,
+    running_items: Vec<AiProviderQueueItem>,
     queued: Vec<AiProviderQueueItem>,
     pending_count: usize,
     queue_limit: usize,
+    running_count: usize,
+    running_limit: usize,
+    available_running_slots: usize,
     available_slots: usize,
     is_saturated: bool,
     wait_timeout_ms: u128,
@@ -442,8 +472,10 @@ struct AiProviderTestQueue {
 struct AiProviderQueueState {
     next_id: u64,
     running: Option<AiProviderQueueItem>,
+    extra_running: Vec<AiProviderQueueItem>,
     queued: VecDeque<AiProviderQueueItem>,
     cancelled_ids: HashSet<u64>,
+    metadata_by_id: HashMap<u64, AiProviderQueueConfig>,
 }
 
 #[derive(Debug)]
@@ -472,34 +504,68 @@ impl AiProviderTestQueue {
             state: Mutex::new(AiProviderQueueState {
                 next_id: 1,
                 running: None,
+                extra_running: Vec::new(),
                 queued: VecDeque::new(),
                 cancelled_ids: HashSet::new(),
+                metadata_by_id: HashMap::new(),
             }),
             ready: Condvar::new(),
         }
     }
 
+    #[cfg(test)]
     fn enter(
         &self,
         action: String,
         request_id: String,
         wait_timeout: Duration,
     ) -> Result<AiProviderQueuePermit, String> {
-        let ticket = self.enqueue(action, request_id, wait_timeout)?;
+        self.enter_with_config(
+            action,
+            request_id,
+            wait_timeout,
+            AiProviderQueueConfig::serial_global(),
+        )
+    }
+
+    fn enter_with_config(
+        &self,
+        action: String,
+        request_id: String,
+        wait_timeout: Duration,
+        queue_config: AiProviderQueueConfig,
+    ) -> Result<AiProviderQueuePermit, String> {
+        let ticket = self.enqueue_with_config(action, request_id, wait_timeout, queue_config)?;
         self.wait_for_turn(ticket)
     }
 
+    #[cfg(test)]
     fn enqueue(
         &self,
         action: String,
         request_id: String,
         wait_timeout: Duration,
     ) -> Result<AiProviderQueueTicket, String> {
+        self.enqueue_with_config(
+            action,
+            request_id,
+            wait_timeout,
+            AiProviderQueueConfig::serial_global(),
+        )
+    }
+
+    fn enqueue_with_config(
+        &self,
+        action: String,
+        request_id: String,
+        wait_timeout: Duration,
+        queue_config: AiProviderQueueConfig,
+    ) -> Result<AiProviderQueueTicket, String> {
         let mut state = self
             .state
             .lock()
             .map_err(|_| "AI 模型测试队列状态异常".to_string())?;
-        let pending_count = state.queued.len() + usize::from(state.running.is_some());
+        let pending_count = state.queued.len() + running_items_len(&state);
         if pending_count >= AI_PROVIDER_TEST_QUEUE_LIMIT {
             return Err(format!(
                 "AI 模型测试队列已满，最多允许 {} 个任务同时排队，请稍后再试",
@@ -519,7 +585,10 @@ impl AiProviderTestQueue {
             wait_ms: 0,
             remaining_wait_ms: wait_timeout.as_millis(),
             wait_timeout_ms: wait_timeout.as_millis(),
+            queue_mode: queue_config.queue_mode.clone(),
+            concurrency_limit: queue_config.concurrency_limit,
         });
+        state.metadata_by_id.insert(id, queue_config);
 
         self.ready.notify_all();
         Ok(AiProviderQueueTicket {
@@ -529,7 +598,10 @@ impl AiProviderTestQueue {
         })
     }
 
-    fn wait_for_turn(&self, ticket: AiProviderQueueTicket) -> Result<AiProviderQueuePermit, String> {
+    fn wait_for_turn(
+        &self,
+        ticket: AiProviderQueueTicket,
+    ) -> Result<AiProviderQueuePermit, String> {
         let mut state = self
             .state
             .lock()
@@ -540,12 +612,11 @@ impl AiProviderTestQueue {
                 return Err("AI 模型测试排队任务已被取消".to_string());
             }
 
-            if now_ms().saturating_sub(ticket.created_at_ms)
-                > ticket.wait_timeout.as_millis()
-            {
+            if now_ms().saturating_sub(ticket.created_at_ms) > ticket.wait_timeout.as_millis() {
                 if let Some(index) = state.queued.iter().position(|item| item.id == ticket.id) {
                     state.queued.remove(index);
                 }
+                state.metadata_by_id.remove(&ticket.id);
                 self.ready.notify_all();
                 return Err(format!(
                     "AI 模型测试排队超过 {} 秒，已自动取消，请稍后重试",
@@ -553,21 +624,26 @@ impl AiProviderTestQueue {
                 ));
             }
 
-            let is_next = state
-                .queued
-                .front()
+            let runnable_index = next_runnable_queue_index(&state);
+            if runnable_index
+                .and_then(|index| state.queued.get(index))
                 .map(|item| item.id == ticket.id)
-                .unwrap_or(false);
-            if state.running.is_none() && is_next {
+                .unwrap_or(false)
+            {
+                let index = runnable_index.ok_or_else(|| "AI 模型测试队列状态异常".to_string())?;
                 let mut item = state
                     .queued
-                    .pop_front()
+                    .remove(index)
                     .ok_or_else(|| "AI 模型测试队列状态异常".to_string())?;
                 let started_at_ms = now_ms();
                 item.started_at_ms = Some(started_at_ms);
                 item.wait_ms = started_at_ms.saturating_sub(ticket.created_at_ms);
                 item.remaining_wait_ms = 0;
-                state.running = Some(item);
+                if state.running.is_none() {
+                    state.running = Some(item);
+                } else {
+                    state.extra_running.push(item);
+                }
                 return Ok(AiProviderQueuePermit {
                     id: ticket.id,
                     created_at_ms: ticket.created_at_ms,
@@ -585,9 +661,17 @@ impl AiProviderTestQueue {
 
     fn leave(&self, id: u64) {
         if let Ok(mut state) = self.state.lock() {
-            if state.running.as_ref().map(|item| item.id == id).unwrap_or(false) {
+            if state
+                .running
+                .as_ref()
+                .map(|item| item.id == id)
+                .unwrap_or(false)
+            {
                 state.running = None;
+            } else if let Some(index) = state.extra_running.iter().position(|item| item.id == id) {
+                state.extra_running.remove(index);
             }
+            state.metadata_by_id.remove(&id);
             self.ready.notify_all();
         }
     }
@@ -599,23 +683,30 @@ impl AiProviderTestQueue {
             .map_err(|_| "AI 模型测试队列状态异常".to_string())?;
         let now = now_ms();
         let wait_timeout_ms = AI_PROVIDER_TEST_QUEUE_WAIT_TIMEOUT.as_millis();
-        let running = state
-            .running
-            .clone()
-            .map(|item| annotate_queue_item(item, now));
+        let running_items = collect_running_items(&state)
+            .into_iter()
+            .map(|item| annotate_queue_item(item, now))
+            .collect::<Vec<_>>();
+        let running = running_items.first().cloned();
         let queued = state
             .queued
             .iter()
             .cloned()
             .map(|item| annotate_queue_item(item, now))
             .collect::<Vec<_>>();
-        let pending_count = queued.len() + usize::from(state.running.is_some());
+        let running_count = running_items.len();
+        let pending_count = queued.len() + running_count;
         let available_slots = AI_PROVIDER_TEST_QUEUE_LIMIT.saturating_sub(pending_count);
+        let available_running_slots = AI_PROVIDER_TEST_RUNNING_LIMIT.saturating_sub(running_count);
         Ok(AiProviderQueueStatus {
             running,
+            running_items,
             queued,
             pending_count,
             queue_limit: AI_PROVIDER_TEST_QUEUE_LIMIT,
+            running_count,
+            running_limit: AI_PROVIDER_TEST_RUNNING_LIMIT,
+            available_running_slots,
             available_slots,
             is_saturated: available_slots == 0,
             wait_timeout_ms,
@@ -634,6 +725,9 @@ impl AiProviderTestQueue {
             .map(|item| item.request_id.clone())
             .collect::<Vec<_>>();
         state.queued.clear();
+        for id in &cancelled_ids {
+            state.metadata_by_id.remove(id);
+        }
         state.cancelled_ids.extend(cancelled_ids);
         self.ready.notify_all();
         Ok(cancelled_request_ids)
@@ -655,9 +749,57 @@ impl AiProviderTestQueue {
             return Ok(false);
         };
         state.cancelled_ids.insert(item.id);
+        state.metadata_by_id.remove(&item.id);
         self.ready.notify_all();
         Ok(true)
     }
+}
+
+fn running_items_len(state: &AiProviderQueueState) -> usize {
+    usize::from(state.running.is_some()) + state.extra_running.len()
+}
+
+fn collect_running_items(state: &AiProviderQueueState) -> Vec<AiProviderQueueItem> {
+    let mut items = Vec::with_capacity(running_items_len(state));
+    if let Some(item) = &state.running {
+        items.push(item.clone());
+    }
+    items.extend(state.extra_running.iter().cloned());
+    items
+}
+
+fn queue_config_for_item(
+    state: &AiProviderQueueState,
+    item: &AiProviderQueueItem,
+) -> AiProviderQueueConfig {
+    state
+        .metadata_by_id
+        .get(&item.id)
+        .cloned()
+        .unwrap_or_else(AiProviderQueueConfig::serial_global)
+}
+
+fn running_count_for_queue_key(state: &AiProviderQueueState, queue_key: &str) -> usize {
+    collect_running_items(state)
+        .iter()
+        .filter(|item| queue_config_for_item(state, item).queue_key == queue_key)
+        .count()
+}
+
+fn can_run_queue_item(state: &AiProviderQueueState, item: &AiProviderQueueItem) -> bool {
+    if running_items_len(state) >= AI_PROVIDER_TEST_RUNNING_LIMIT {
+        return false;
+    }
+
+    let queue_config = queue_config_for_item(state, item);
+    running_count_for_queue_key(state, &queue_config.queue_key) < queue_config.concurrency_limit
+}
+
+fn next_runnable_queue_index(state: &AiProviderQueueState) -> Option<usize> {
+    state
+        .queued
+        .iter()
+        .position(|item| can_run_queue_item(state, item))
 }
 
 fn annotate_queue_item(mut item: AiProviderQueueItem, now_ms: u128) -> AiProviderQueueItem {
@@ -673,16 +815,61 @@ fn annotate_queue_item(mut item: AiProviderQueueItem, now_ms: u128) -> AiProvide
     item
 }
 
+fn provider_test_queue_config(action: &str, config: &AiProviderConfig) -> AiProviderQueueConfig {
+    let queue_mode = if config.queue_mode == "concurrent" {
+        "concurrent"
+    } else {
+        "serial"
+    };
+    let concurrency_limit = if queue_mode == "concurrent" {
+        config
+            .max_concurrency
+            .clamp(2, AI_PROVIDER_TEST_MAX_CONFIG_CONCURRENCY)
+    } else {
+        1
+    };
+    let queue_key = normalize_queue_key(action, config);
+
+    AiProviderQueueConfig {
+        queue_key,
+        queue_mode: queue_mode.to_string(),
+        concurrency_limit,
+    }
+}
+
+fn normalize_queue_key(action: &str, config: &AiProviderConfig) -> String {
+    let candidate = config.queue_key.trim();
+    if !candidate.is_empty() {
+        return candidate.chars().take(128).collect();
+    }
+
+    let model = if action == "image" {
+        config.image_model.trim()
+    } else {
+        config.model.trim()
+    };
+
+    format!(
+        "{}:{}:{}",
+        config.provider.trim(),
+        config.base_url.trim(),
+        model
+    )
+    .chars()
+    .take(512)
+    .collect()
+}
+
 fn provider_test_queue_wait_timeout(action: &str, config: &AiProviderConfig) -> Duration {
     if action == "image" {
         let request_timeout_ms = config.timeout_ms.clamp(
             AI_PROVIDER_IMAGE_REQUEST_TIMEOUT_MS,
             AI_PROVIDER_IMAGE_REQUEST_TIMEOUT_MS,
         );
-        let sidecar_timeout = Duration::from_millis(
-            request_timeout_ms + AI_PROVIDER_IMAGE_SIDECAR_TIMEOUT_SLACK_MS,
-        );
-        return (sidecar_timeout + AI_PROVIDER_IMAGE_QUEUE_WAIT_SLACK) * AI_PROVIDER_TEST_QUEUE_LIMIT as u32;
+        let sidecar_timeout =
+            Duration::from_millis(request_timeout_ms + AI_PROVIDER_IMAGE_SIDECAR_TIMEOUT_SLACK_MS);
+        return (sidecar_timeout + AI_PROVIDER_IMAGE_QUEUE_WAIT_SLACK)
+            * AI_PROVIDER_TEST_QUEUE_LIMIT as u32;
     }
 
     AI_PROVIDER_TEST_QUEUE_WAIT_TIMEOUT
@@ -773,7 +960,11 @@ impl AiProviderTaskRegistry {
                 task.status = if result.ok { "success" } else { "failed" }.to_string();
                 task.finished_at_ms = Some(now_ms());
                 task.total_latency_ms = Some(total_latency_ms);
-                task.error = if result.ok { None } else { Some(result.message.clone()) };
+                task.error = if result.ok {
+                    None
+                } else {
+                    Some(result.message.clone())
+                };
                 task.result = Some(result);
             }
             trim_finished_tasks(&mut state);
@@ -932,6 +1123,21 @@ mod queue_tests {
             image_prompt: "blue robot".to_string(),
             image_size: "1024x1024".to_string(),
             timeout_ms,
+            queue_mode: "serial".to_string(),
+            max_concurrency: 3,
+            queue_key: String::new(),
+        }
+    }
+
+    fn test_queue_config(key: &str, concurrency_limit: usize) -> AiProviderQueueConfig {
+        AiProviderQueueConfig {
+            queue_key: key.to_string(),
+            queue_mode: if concurrency_limit > 1 {
+                "concurrent".to_string()
+            } else {
+                "serial".to_string()
+            },
+            concurrency_limit,
         }
     }
 
@@ -953,6 +1159,10 @@ mod queue_tests {
             image_urls: None,
             image_paths: None,
             saved_files: None,
+            requested_image_size: None,
+            actual_image_size: None,
+            fallback_image_size: None,
+            image_attempts: None,
             raw_preview: None,
         }
     }
@@ -986,7 +1196,11 @@ mod queue_tests {
             .enqueue("image".to_string())
             .expect("task should enqueue");
 
-        registry.fail(&task.request_id, "AI 模型测试排队任务已被取消".to_string(), 0);
+        registry.fail(
+            &task.request_id,
+            "AI 模型测试排队任务已被取消".to_string(),
+            0,
+        );
 
         let restored = registry
             .get(&task.request_id)
@@ -1053,7 +1267,11 @@ mod queue_tests {
             let task = registry
                 .enqueue("models".to_string())
                 .expect("finished task should enqueue");
-            registry.complete(&task.request_id, test_result(&task.request_id), index as u64);
+            registry.complete(
+                &task.request_id,
+                test_result(&task.request_id),
+                index as u64,
+            );
             std::thread::sleep(Duration::from_millis(1));
         }
 
@@ -1070,8 +1288,12 @@ mod queue_tests {
         assert_eq!(restored_queued.status, "queued");
         assert_eq!(restored_running.status, "running");
         assert_eq!(restored_running.queue_wait_ms, Some(20));
-        assert!(recent.iter().any(|task| task.request_id == queued.request_id));
-        assert!(recent.iter().any(|task| task.request_id == running.request_id));
+        assert!(recent
+            .iter()
+            .any(|task| task.request_id == queued.request_id));
+        assert!(recent
+            .iter()
+            .any(|task| task.request_id == running.request_id));
     }
 
     #[test]
@@ -1148,12 +1370,9 @@ mod queue_tests {
         assert!(wait_timeout > AI_PROVIDER_TEST_QUEUE_WAIT_TIMEOUT);
         assert_eq!(
             wait_timeout,
-            (
-                Duration::from_millis(
-                    AI_PROVIDER_IMAGE_REQUEST_TIMEOUT_MS
-                        + AI_PROVIDER_IMAGE_SIDECAR_TIMEOUT_SLACK_MS
-                ) + AI_PROVIDER_IMAGE_QUEUE_WAIT_SLACK
-            )
+            (Duration::from_millis(
+                AI_PROVIDER_IMAGE_REQUEST_TIMEOUT_MS + AI_PROVIDER_IMAGE_SIDECAR_TIMEOUT_SLACK_MS
+            ) + AI_PROVIDER_IMAGE_QUEUE_WAIT_SLACK)
                 * AI_PROVIDER_TEST_QUEUE_LIMIT as u32
         );
     }
@@ -1173,10 +1392,137 @@ mod queue_tests {
     }
 
     #[test]
+    fn queue_allows_different_serial_configs_to_run_together() {
+        let queue = AiProviderTestQueue::new();
+        let first = queue
+            .enter_with_config(
+                "image".to_string(),
+                "image-a".to_string(),
+                AI_PROVIDER_TEST_QUEUE_WAIT_TIMEOUT,
+                test_queue_config("config-a", 1),
+            )
+            .expect("first config should run");
+        let second = queue
+            .enter_with_config(
+                "image".to_string(),
+                "image-b".to_string(),
+                AI_PROVIDER_TEST_QUEUE_WAIT_TIMEOUT,
+                test_queue_config("config-b", 1),
+            )
+            .expect("different serial config should run in another slot");
+
+        let status = queue.status().expect("queue status should be readable");
+        assert_eq!(status.running_count, 2);
+        assert_eq!(status.running_items.len(), 2);
+        assert_eq!(
+            status.available_running_slots,
+            AI_PROVIDER_TEST_RUNNING_LIMIT - 2
+        );
+
+        queue.leave(first.id);
+        queue.leave(second.id);
+    }
+
+    #[test]
+    fn queue_allows_same_config_when_concurrency_limit_has_capacity() {
+        let queue = AiProviderTestQueue::new();
+        let first = queue
+            .enter_with_config(
+                "image".to_string(),
+                "image-a".to_string(),
+                AI_PROVIDER_TEST_QUEUE_WAIT_TIMEOUT,
+                test_queue_config("config-a", 2),
+            )
+            .expect("first high-concurrency item should run");
+        let second = queue
+            .enter_with_config(
+                "image".to_string(),
+                "image-b".to_string(),
+                AI_PROVIDER_TEST_QUEUE_WAIT_TIMEOUT,
+                test_queue_config("config-a", 2),
+            )
+            .expect("same config should use second high-concurrency slot");
+
+        let status = queue.status().expect("queue status should be readable");
+        assert_eq!(status.running_count, 2);
+        assert!(status.queued.is_empty());
+        assert!(status
+            .running_items
+            .iter()
+            .all(|item| item.concurrency_limit == 2));
+
+        queue.leave(first.id);
+        queue.leave(second.id);
+    }
+
+    #[test]
+    fn queue_keeps_same_serial_config_waiting_until_slot_leaves() {
+        let queue = Arc::new(AiProviderTestQueue::new());
+        let running = queue
+            .enter_with_config(
+                "image".to_string(),
+                "image-a".to_string(),
+                AI_PROVIDER_TEST_QUEUE_WAIT_TIMEOUT,
+                test_queue_config("config-a", 1),
+            )
+            .expect("first serial config item should run");
+        let waiting_queue = Arc::clone(&queue);
+        let (ready_tx, ready_rx) = mpsc::channel();
+        let (result_tx, result_rx) = mpsc::channel();
+
+        let handle = thread::spawn(move || {
+            ready_tx.send(()).expect("ready signal should send");
+            let result = waiting_queue.enter_with_config(
+                "image".to_string(),
+                "image-b".to_string(),
+                AI_PROVIDER_TEST_QUEUE_WAIT_TIMEOUT,
+                test_queue_config("config-a", 1),
+            );
+            result_tx
+                .send(result.map(|permit| permit.id))
+                .expect("queue result should send");
+        });
+
+        ready_rx.recv().expect("waiting thread should start");
+        for _ in 0..20 {
+            if queue.status().expect("queue status").queued.len() == 1 {
+                break;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(
+            queue
+                .status()
+                .expect("queue status should be readable")
+                .queued
+                .len(),
+            1
+        );
+
+        queue.leave(running.id);
+        let next_id = result_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("waiting request should wake after running leaves")
+            .expect("queued request should enter running slot");
+
+        queue.leave(next_id);
+        handle.join().expect("waiting thread should join");
+        assert!(queue
+            .status()
+            .expect("queue status should be readable")
+            .queued
+            .is_empty());
+    }
+
+    #[test]
     fn queue_limits_pending_items() {
         let queue = AiProviderTestQueue::new();
         let _running = queue
-            .enter("image".to_string(), "test-image".to_string(), AI_PROVIDER_TEST_QUEUE_WAIT_TIMEOUT)
+            .enter(
+                "image".to_string(),
+                "test-image".to_string(),
+                AI_PROVIDER_TEST_QUEUE_WAIT_TIMEOUT,
+            )
             .expect("first item should run");
         for _ in 1..AI_PROVIDER_TEST_QUEUE_LIMIT {
             let mut state = queue.state.lock().expect("queue state should lock");
@@ -1191,11 +1537,17 @@ mod queue_tests {
                 wait_ms: 0,
                 remaining_wait_ms: AI_PROVIDER_TEST_QUEUE_WAIT_TIMEOUT.as_millis(),
                 wait_timeout_ms: AI_PROVIDER_TEST_QUEUE_WAIT_TIMEOUT.as_millis(),
+                queue_mode: "serial".to_string(),
+                concurrency_limit: 1,
             });
         }
 
         let error = queue
-            .enter("image".to_string(), "test-image".to_string(), AI_PROVIDER_TEST_QUEUE_WAIT_TIMEOUT)
+            .enter(
+                "image".to_string(),
+                "test-image".to_string(),
+                AI_PROVIDER_TEST_QUEUE_WAIT_TIMEOUT,
+            )
             .expect_err("queue should reject items over limit");
         assert!(error.contains("队列已满"));
     }
@@ -1232,7 +1584,11 @@ mod queue_tests {
     fn queue_status_reports_running_and_queued_items() {
         let queue = AiProviderTestQueue::new();
         let running = queue
-            .enter("models".to_string(), "test-models".to_string(), AI_PROVIDER_TEST_QUEUE_WAIT_TIMEOUT)
+            .enter(
+                "models".to_string(),
+                "test-models".to_string(),
+                AI_PROVIDER_TEST_QUEUE_WAIT_TIMEOUT,
+            )
             .expect("first item should run");
         {
             let mut state = queue.state.lock().expect("queue state should lock");
@@ -1247,6 +1603,8 @@ mod queue_tests {
                 wait_ms: 0,
                 remaining_wait_ms: AI_PROVIDER_TEST_QUEUE_WAIT_TIMEOUT.as_millis(),
                 wait_timeout_ms: AI_PROVIDER_TEST_QUEUE_WAIT_TIMEOUT.as_millis(),
+                queue_mode: "serial".to_string(),
+                concurrency_limit: 1,
             });
         }
 
@@ -1275,7 +1633,11 @@ mod queue_tests {
     fn queue_cancel_queued_items_keeps_running_item() {
         let queue = AiProviderTestQueue::new();
         let running = queue
-            .enter("models".to_string(), "test-models".to_string(), AI_PROVIDER_TEST_QUEUE_WAIT_TIMEOUT)
+            .enter(
+                "models".to_string(),
+                "test-models".to_string(),
+                AI_PROVIDER_TEST_QUEUE_WAIT_TIMEOUT,
+            )
             .expect("first item should run");
         {
             let mut state = queue.state.lock().expect("queue state should lock");
@@ -1291,6 +1653,8 @@ mod queue_tests {
                     wait_ms: 0,
                     remaining_wait_ms: AI_PROVIDER_TEST_QUEUE_WAIT_TIMEOUT.as_millis(),
                     wait_timeout_ms: AI_PROVIDER_TEST_QUEUE_WAIT_TIMEOUT.as_millis(),
+                    queue_mode: "serial".to_string(),
+                    concurrency_limit: 1,
                 });
             }
         }
@@ -1339,9 +1703,7 @@ mod queue_tests {
                     .request_id;
                 (permit.id, running_request_id)
             });
-            result_tx
-                .send(result)
-                .expect("queue result should send");
+            result_tx.send(result).expect("queue result should send");
         });
 
         ready_rx.recv().expect("waiting thread should start");
@@ -1391,6 +1753,8 @@ mod queue_tests {
                 wait_ms: 0,
                 remaining_wait_ms: AI_PROVIDER_TEST_QUEUE_WAIT_TIMEOUT.as_millis(),
                 wait_timeout_ms: AI_PROVIDER_TEST_QUEUE_WAIT_TIMEOUT.as_millis(),
+                queue_mode: "serial".to_string(),
+                concurrency_limit: 1,
             });
         }
 
@@ -1423,6 +1787,8 @@ mod queue_tests {
                     wait_ms: 0,
                     remaining_wait_ms: AI_PROVIDER_TEST_QUEUE_WAIT_TIMEOUT.as_millis(),
                     wait_timeout_ms: AI_PROVIDER_TEST_QUEUE_WAIT_TIMEOUT.as_millis(),
+                    queue_mode: "serial".to_string(),
+                    concurrency_limit: 1,
                 });
             }
         }
@@ -1434,7 +1800,10 @@ mod queue_tests {
 
         assert!(cancelled);
         assert_eq!(status.pending_count, 2);
-        assert_eq!(status.running.expect("running item").request_id, "running-request");
+        assert_eq!(
+            status.running.expect("running item").request_id,
+            "running-request"
+        );
         assert_eq!(status.queued.len(), 1);
         assert_eq!(status.queued[0].request_id, "queued-two");
         assert!(!queue
@@ -1446,7 +1815,11 @@ mod queue_tests {
     fn queue_status_marks_saturated_when_full() {
         let queue = AiProviderTestQueue::new();
         let _running = queue
-            .enter("models".to_string(), "test-models".to_string(), AI_PROVIDER_TEST_QUEUE_WAIT_TIMEOUT)
+            .enter(
+                "models".to_string(),
+                "test-models".to_string(),
+                AI_PROVIDER_TEST_QUEUE_WAIT_TIMEOUT,
+            )
             .expect("first item should run");
         {
             let mut state = queue.state.lock().expect("queue state should lock");
@@ -1462,6 +1835,8 @@ mod queue_tests {
                     wait_ms: 0,
                     remaining_wait_ms: AI_PROVIDER_TEST_QUEUE_WAIT_TIMEOUT.as_millis(),
                     wait_timeout_ms: AI_PROVIDER_TEST_QUEUE_WAIT_TIMEOUT.as_millis(),
+                    queue_mode: "serial".to_string(),
+                    concurrency_limit: 1,
                 });
             }
         }
@@ -1476,7 +1851,11 @@ mod queue_tests {
     fn queue_cancel_wakes_waiting_request() {
         let queue = Arc::new(AiProviderTestQueue::new());
         let _running = queue
-            .enter("models".to_string(), "test-models".to_string(), AI_PROVIDER_TEST_QUEUE_WAIT_TIMEOUT)
+            .enter(
+                "models".to_string(),
+                "test-models".to_string(),
+                AI_PROVIDER_TEST_QUEUE_WAIT_TIMEOUT,
+            )
             .expect("first item should run");
         let waiting_queue = Arc::clone(&queue);
         let (ready_tx, ready_rx) = mpsc::channel();
@@ -1484,7 +1863,11 @@ mod queue_tests {
 
         let handle = thread::spawn(move || {
             ready_tx.send(()).expect("ready signal should send");
-            let result = waiting_queue.enter("image".to_string(), "test-image".to_string(), AI_PROVIDER_TEST_QUEUE_WAIT_TIMEOUT);
+            let result = waiting_queue.enter(
+                "image".to_string(),
+                "test-image".to_string(),
+                AI_PROVIDER_TEST_QUEUE_WAIT_TIMEOUT,
+            );
             result_tx
                 .send(result.map(|permit| permit.id))
                 .expect("queue result should send");
@@ -1503,7 +1886,9 @@ mod queue_tests {
         let result = result_rx
             .recv_timeout(Duration::from_secs(1))
             .expect("waiting request should wake after cancellation");
-        assert!(result.expect_err("waiting request should be cancelled").contains("已被取消"));
+        assert!(result
+            .expect_err("waiting request should be cancelled")
+            .contains("已被取消"));
         handle.join().expect("waiting thread should join");
     }
 
@@ -1511,7 +1896,11 @@ mod queue_tests {
     fn queue_wait_timeout_removes_stale_request() {
         let queue = Arc::new(AiProviderTestQueue::new());
         let _running = queue
-            .enter("models".to_string(), "test-models".to_string(), AI_PROVIDER_TEST_QUEUE_WAIT_TIMEOUT)
+            .enter(
+                "models".to_string(),
+                "test-models".to_string(),
+                AI_PROVIDER_TEST_QUEUE_WAIT_TIMEOUT,
+            )
             .expect("first item should run");
         let waiting_queue = Arc::clone(&queue);
         let (ready_tx, ready_rx) = mpsc::channel();
@@ -1542,14 +1931,15 @@ mod queue_tests {
         let result = result_rx
             .recv_timeout(Duration::from_secs(2))
             .expect("waiting request should wake after timeout");
-        assert!(result.expect_err("waiting request should time out").contains("自动取消"));
+        assert!(result
+            .expect_err("waiting request should time out")
+            .contains("自动取消"));
 
         let status = queue.status().expect("queue status should be readable");
         assert!(status.queued.is_empty());
         handle.join().expect("waiting thread should join");
     }
 }
-
 
 #[cfg(test)]
 fn command_has_env(command: &Command, key: &str) -> bool {
@@ -1640,16 +2030,25 @@ fn validate_provider_config(config: &AiProviderConfig, action: &str) -> AppResul
         return Err(AppError::Config("不支持的 AI 模型提供商".to_string()));
     }
 
+    if !matches!(config.queue_mode.as_str(), "serial" | "concurrent") {
+        return Err(AppError::Config("不支持的 AI 队列模式".to_string()));
+    }
+
+    if config.max_concurrency == 0
+        || config.max_concurrency > AI_PROVIDER_TEST_MAX_CONFIG_CONCURRENCY
+    {
+        return Err(AppError::Config(format!(
+            "AI 并发槽位必须在 1 到 {} 之间",
+            AI_PROVIDER_TEST_MAX_CONFIG_CONCURRENCY
+        )));
+    }
+
     validate_text_len(
         "提供商显示名称",
         &config.display_name,
         AI_PROVIDER_DISPLAY_NAME_MAX_CHARS,
     )?;
-    validate_text_len(
-        "Base URL",
-        &config.base_url,
-        AI_PROVIDER_BASE_URL_MAX_CHARS,
-    )?;
+    validate_text_len("Base URL", &config.base_url, AI_PROVIDER_BASE_URL_MAX_CHARS)?;
     validate_text_len("API Key", &config.api_key, AI_PROVIDER_API_KEY_MAX_CHARS)?;
     validate_text_len("模型名称", &config.model, AI_PROVIDER_MODEL_MAX_CHARS)?;
     validate_text_len(
@@ -1739,6 +2138,18 @@ fn validate_provider_config(config: &AiProviderConfig, action: &str) -> AppResul
                 | "1648x3840"
                 | "3840x1280"
                 | "1280x3840"
+                | "3840x960"
+                | "960x3840"
+                | "3840x768"
+                | "768x3840"
+                | "3840x640"
+                | "640x3840"
+                | "7680x960"
+                | "960x7680"
+                | "7680x640"
+                | "640x7680"
+                | "7680x480"
+                | "480x7680"
         ) {
             return Err(AppError::Config("不支持的生图尺寸".to_string()));
         }
@@ -1868,6 +2279,14 @@ struct GeneratedFileMeta {
     modified_at: SystemTime,
 }
 
+fn default_queue_mode() -> String {
+    "serial".to_string()
+}
+
+fn default_max_concurrency() -> usize {
+    3
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AiProviderConfig {
@@ -1882,6 +2301,12 @@ pub struct AiProviderConfig {
     pub image_prompt: String,
     pub image_size: String,
     pub timeout_ms: u64,
+    #[serde(default = "default_queue_mode")]
+    pub queue_mode: String,
+    #[serde(default = "default_max_concurrency")]
+    pub max_concurrency: usize,
+    #[serde(default)]
+    pub queue_key: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1903,6 +2328,10 @@ pub struct AiProviderTestResult {
     pub image_urls: Option<Vec<String>>,
     pub image_paths: Option<Vec<String>>,
     pub saved_files: Option<Vec<AiProviderSavedFile>>,
+    pub requested_image_size: Option<String>,
+    pub actual_image_size: Option<String>,
+    pub fallback_image_size: Option<String>,
+    pub image_attempts: Option<u32>,
     pub raw_preview: Option<String>,
 }
 
@@ -1948,6 +2377,9 @@ mod tests {
             image_prompt: "blue robot".to_string(),
             image_size: "1024x1024".to_string(),
             timeout_ms: 5_000,
+            queue_mode: "serial".to_string(),
+            max_concurrency: 3,
+            queue_key: String::new(),
         }
     }
 
@@ -2004,6 +2436,10 @@ mod tests {
             image_urls: None,
             image_paths: None,
             saved_files: None,
+            requested_image_size: None,
+            actual_image_size: None,
+            fallback_image_size: None,
+            image_attempts: None,
             raw_preview: Some("{}".to_string()),
         })
         .expect("result should serialize");
@@ -2055,7 +2491,9 @@ mod tests {
         let remaining = collect_generated_files(&dir).expect("files should be readable");
         assert_eq!(remaining.len(), GENERATED_IMAGE_MAX_FILES);
         assert!(!dir.join("file-00.png").exists());
-        assert!(dir.join(format!("file-{:02}.png", GENERATED_IMAGE_MAX_FILES + 2)).exists());
+        assert!(dir
+            .join(format!("file-{:02}.png", GENERATED_IMAGE_MAX_FILES + 2))
+            .exists());
 
         fs::remove_dir_all(&dir).expect("temp dir should clean");
     }
@@ -2131,6 +2569,26 @@ mod tests {
     }
 
     #[test]
+    fn validate_provider_config_accepts_extreme_image_sizes() {
+        for size in [
+            "3840x640",
+            "640x3840",
+            "7680x960",
+            "960x7680",
+            "7680x640",
+            "640x7680",
+            "7680x480",
+            "480x7680",
+        ] {
+            let mut config = make_config();
+            config.image_size = size.to_string();
+
+            validate_provider_config(&config, "image")
+                .unwrap_or_else(|error| panic!("{size} should be accepted: {error:?}"));
+        }
+    }
+
+    #[test]
     fn is_file_expired_uses_generated_image_max_age_boundary() {
         let now = SystemTime::now();
         let expired = now - GENERATED_IMAGE_MAX_AGE - Duration::from_secs(1);
@@ -2175,10 +2633,7 @@ mod tests {
         assert!(command_has_env(&command, "PYTHONNOUSERSITE"));
         assert!(!command_has_env(&command, "PYTHONPATH"));
         assert!(!command_has_env(&command, "PYTHONHOME"));
-        assert_eq!(
-            command.get_current_dir(),
-            script_path.parent()
-        );
+        assert_eq!(command.get_current_dir(), script_path.parent());
         assert_eq!(
             command.get_args().collect::<Vec<_>>(),
             vec![std::ffi::OsStr::new(args[0].as_str())]

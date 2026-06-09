@@ -1,6 +1,6 @@
-import { ensureBrowserMessage, isTauriRuntime } from "./runtime";
+import { isTauriRuntime } from "./runtime";
 import { callTauri, convertFileSrc } from "./tauri";
-import { includesAllText, tryJsonParseObject } from "../utils";
+import { includesAllText, stringifyErrorMessage, toError, tryJsonParseObject } from "../utils";
 import type {
   AiProviderBackendQueueStatus,
   AiProviderConfig,
@@ -9,11 +9,10 @@ import type {
   AiProviderTestTask,
 } from "../types/ai";
 
-const AI_PROVIDER_TEST_LABEL = "\u0041\u0049 \u6a21\u578b\u63d0\u4f9b\u5546\u6d4b\u8bd5";
 const AI_PROVIDER_TEST_FAILED = "\u0041\u0049 \u6a21\u578b\u6d4b\u8bd5\u5931\u8d25";
 
 function normalizeAiError(err: unknown): Error {
-  const message = err instanceof Error ? err.message : String(err);
+  const message = stringifyErrorMessage(err);
   const parsed = tryJsonParseObject<{ message?: unknown; detail?: unknown }>(message);
 
   if (parsed.ok && parsed.data) {
@@ -22,7 +21,7 @@ function normalizeAiError(err: unknown): Error {
     return new Error(`[ERR_AI_PROVIDER_TEST] ${summary}${detail}`);
   }
 
-  return err instanceof Error ? err : new Error(message);
+  return toError(err, message);
 }
 
 function normalizeAiResultImages(result: AiProviderTestResult): AiProviderTestResult {
@@ -48,15 +47,11 @@ function normalizeAiTask(task: AiProviderTestTask): AiProviderTestTask {
 
 export const aiService = {
   async testProvider(config: AiProviderConfig, action: AiProviderTestAction): Promise<AiProviderTestResult> {
-    if (!isTauriRuntime()) {
-      throw new Error("[ERR_AI_TEST_BROWSER] " + ensureBrowserMessage(AI_PROVIDER_TEST_LABEL));
-    }
-
     try {
       const result = await callTauri<AiProviderTestResult>("test_ai_provider", { config, action });
       return normalizeAiResultImages(result);
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = stringifyErrorMessage(err);
       if (includesAllText(message, ["test_ai_provider", "not found"])) {
         throw new Error("[ERR_AI_COMMAND_MISSING] \u0041\u0049 \u6a21\u578b\u6d4b\u8bd5\u547d\u4ee4\u672a\u6ce8\u518c\uff0c\u8bf7\u91cd\u542f Tauri \u5f00\u53d1\u8fdb\u7a0b\u540e\u91cd\u8bd5");
       }
@@ -65,15 +60,11 @@ export const aiService = {
   },
 
   async enqueueProviderTest(config: AiProviderConfig, action: AiProviderTestAction): Promise<AiProviderTestTask> {
-    if (!isTauriRuntime()) {
-      throw new Error("[ERR_AI_TEST_BROWSER] " + ensureBrowserMessage(AI_PROVIDER_TEST_LABEL));
-    }
-
     try {
       const task = await callTauri<AiProviderTestTask>("enqueue_ai_provider_test", { config, action });
       return normalizeAiTask(task);
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = stringifyErrorMessage(err);
       if (includesAllText(message, ["enqueue_ai_provider_test", "not found"])) {
         throw new Error("[ERR_AI_COMMAND_MISSING] \u0041\u0049 \u6a21\u578b\u6d4b\u8bd5\u961f\u5217\u547d\u4ee4\u672a\u6ce8\u518c\uff0c\u8bf7\u91cd\u542f Tauri \u5f00\u53d1\u8fdb\u7a0b\u540e\u91cd\u8bd5");
       }
@@ -82,10 +73,6 @@ export const aiService = {
   },
 
   async getProviderTestTask(requestId: string): Promise<AiProviderTestTask> {
-    if (!isTauriRuntime()) {
-      throw new Error("[ERR_AI_TEST_BROWSER] " + ensureBrowserMessage(AI_PROVIDER_TEST_LABEL));
-    }
-
     return normalizeAiTask(await callTauri<AiProviderTestTask>("get_ai_provider_test_task", { requestId }));
   },
 
@@ -102,10 +89,14 @@ export const aiService = {
     if (!isTauriRuntime()) {
       return {
         running: null,
+        runningItems: [],
         queued: [],
         pendingCount: 0,
-        queueLimit: 8,
-        availableSlots: 8,
+        queueLimit: 16,
+        runningCount: 0,
+        runningLimit: 6,
+        availableRunningSlots: 6,
+        availableSlots: 16,
         isSaturated: false,
         waitTimeoutMs: 90000,
       };
@@ -115,18 +106,10 @@ export const aiService = {
   },
 
   async cancelProviderQueuedTests(): Promise<number> {
-    if (!isTauriRuntime()) {
-      return 0;
-    }
-
     return await callTauri<number>("cancel_ai_provider_queued_tests");
   },
 
   async cancelProviderTestTask(requestId: string): Promise<boolean> {
-    if (!isTauriRuntime()) {
-      return false;
-    }
-
     return await callTauri<boolean>("cancel_ai_provider_test_task", { requestId });
   },
 };

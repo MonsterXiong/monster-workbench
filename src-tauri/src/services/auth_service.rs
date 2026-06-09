@@ -98,8 +98,8 @@ mod tests {
 
     #[test]
     fn config_invalid_json_returns_config_error() {
-        let err = verify_admin_password_config("{", "admin888")
-            .expect_err("invalid config should fail");
+        let err =
+            verify_admin_password_config("{", "admin888").expect_err("invalid config should fail");
 
         assert!(matches!(err, AppError::Config(_)));
     }

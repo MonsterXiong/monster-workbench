@@ -1,22 +1,45 @@
 import { ref } from "vue";
 import type { WindowAction } from "../types/system";
 import {
+  appendLimitedItem,
   buildDatedFileName,
+  downloadTextFile,
   getCurrentUnixTimestamp,
+  getErrorMessage,
   getFileExtensionWithDot,
   getSafeFileName,
+  getCurrentDate,
   getYearMonthPath,
+  formatLocaleDateTime,
+  getUserAgent,
+  hasItem,
+  createUuid,
   equalsIgnoreCase,
   normalizeStringKey,
-  objectEntries,
+  openExternalUrl,
+  randomInt,
+  readBrowserTextFile as readSelectedBrowserTextFile,
+  clearStorage,
+  getStorageItem,
+  getStorageRecord,
+  removeStorageWhere,
+  reloadPageAfterDelay,
+  isHttpUrl,
+  joinLines,
   safeJsonParse,
   safeJsonStringifyPretty,
+  setStorageItem,
+  setStorageItems,
   tryJsonParseObject,
 } from "../utils";
 import { ensureBrowserMessage, isTauriRuntime } from "./runtime";
 import { callTauri } from "./tauri";
 
 const BROWSER_FILE_KEY = "monster-workbench-browser-file";
+
+function isBrowserBackupStorageKey(key: string): boolean {
+  return key.startsWith("monster-") || key === "monster_workbench_db_mock";
+}
 
 // 浏览器 Mock 物理日志存储（最多 500 条）
 export const mockLogs = ref<string[]>([
@@ -42,7 +65,7 @@ export const systemService = {
 
   async writeTestFile(content: string): Promise<string> {
     if (!isTauriRuntime()) {
-      localStorage.setItem(BROWSER_FILE_KEY, content);
+      setStorageItem(BROWSER_FILE_KEY, content);
       return "Browser Preview Cache";
     }
 
@@ -51,7 +74,7 @@ export const systemService = {
 
   async readTestFile(): Promise<string> {
     if (!isTauriRuntime()) {
-      return localStorage.getItem(BROWSER_FILE_KEY) ?? "No Content";
+      return getStorageItem(BROWSER_FILE_KEY, "No Content");
     }
 
     return callTauri<string>("read_file_data");
@@ -59,8 +82,8 @@ export const systemService = {
 
   async openPath(path: string): Promise<void> {
     if (!isTauriRuntime()) {
-      if (path.startsWith("http")) {
-        window.open(path, "_blank", "noopener,noreferrer");
+      if (isHttpUrl(path)) {
+        openExternalUrl(path);
         return;
       }
 
@@ -140,7 +163,7 @@ export const systemService = {
       // 提取文件名与扩展名
       const fileName = getSafeFileName(srcPath, "mock_file");
       const fileExt = getFileExtensionWithDot(fileName) || (fileType === "image" ? ".png" : ".txt");
-      const uuidName = crypto.randomUUID();
+      const uuidName = createUuid();
       const mockPath = `uploads/${fileType === "image" ? "images" : "files"}/2026/06/${uuidName}${fileExt}`;
 
       // 动态导入以防止循环依赖，将 Mock 文件入库内存池
@@ -148,7 +171,7 @@ export const systemService = {
         mockFiles.value.unshift({
           rel_path: mockPath,
           file_name: fileName,
-          file_size: 1024 * Math.floor(Math.random() * 300 + 12),
+          file_size: 1024 * randomInt(12, 311),
           file_type: fileType,
           modified: getCurrentUnixTimestamp()
         });
@@ -158,7 +181,7 @@ export const systemService = {
     }
 
     const yearMonth = getYearMonthPath();
-    const uuidName = crypto.randomUUID();
+    const uuidName = createUuid();
 
     return callTauri<string>("upload_file", {
       srcPath,
@@ -179,24 +202,10 @@ export const systemService = {
   async exportDatabase(targetPath: string): Promise<void> {
     if (!isTauriRuntime()) {
       // Web 端备份降级：搜集搜寻以 monster- 开头的所有 LocalStorage 数据
-      const backup: Record<string, string> = {};
-      for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i);
-        if (key && (key.startsWith("monster-") || key === "monster_workbench_db_mock")) {
-          backup[key] = localStorage.getItem(key) ?? "";
-        }
-      }
+      const backup = getStorageRecord((entry) => isBrowserBackupStorageKey(entry.key));
 
       const jsonStr = safeJsonStringifyPretty(backup, "{}");
-      const blob = new Blob([jsonStr], { type: "application/json" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `monster_workbench_backup.json`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      downloadTextFile("monster_workbench_backup.json", jsonStr, "application/json");
       return;
     }
     return callTauri<void>("export_database", { targetPath });
@@ -211,26 +220,15 @@ export const systemService = {
         }
 
         // 物理清理并覆盖 LocalStorage 状态
-        const keysToRemove: string[] = [];
-        for (let i = 0; i < localStorage.length; i++) {
-          const key = localStorage.key(i);
-          if (key && (key.startsWith("monster-") || key === "monster_workbench_db_mock")) {
-            keysToRemove.push(key);
-          }
-        }
-        keysToRemove.forEach(k => localStorage.removeItem(k));
+        removeStorageWhere((entry) => isBrowserBackupStorageKey(entry.key));
 
         const backup = backupResult.data;
-        objectEntries(backup).forEach(([key, val]) => {
-          localStorage.setItem(key, val);
-        });
+        setStorageItems(backup);
 
-        setTimeout(() => {
-          window.location.reload();
-        }, 500);
+        reloadPageAfterDelay(500);
         return;
       } catch (err) {
-        throw new Error(err instanceof Error ? err.message : "[ERR_SYS_BACKUP_PARSE] 恢复备份失败：备份数据 JSON 解析异常");
+        throw new Error(getErrorMessage(err, "[ERR_SYS_BACKUP_PARSE] 恢复备份失败：备份数据 JSON 解析异常"));
       }
     }
     return callTauri<void>("import_database", { srcPath: srcPathOrJson });
@@ -238,10 +236,8 @@ export const systemService = {
 
   async resetDatabase(): Promise<void> {
     if (!isTauriRuntime()) {
-      localStorage.clear();
-      setTimeout(() => {
-        window.location.reload();
-      }, 500);
+      clearStorage();
+      reloadPageAfterDelay(500);
       return;
     }
     return callTauri<void>("reset_database");
@@ -250,7 +246,7 @@ export const systemService = {
   async isProcessRunning(name: string): Promise<boolean> {
     if (!isTauriRuntime()) {
       // 浏览器 Mock 环境下，判断特定名字是否占用
-      return ["monster-tools.exe", "nginx.exe", "node.exe"].includes(normalizeStringKey(name));
+      return hasItem(["monster-tools.exe", "nginx.exe", "node.exe"], normalizeStringKey(name));
     }
     return callTauri<boolean>("is_process_running", { name });
   },
@@ -277,10 +273,7 @@ export const systemService = {
 
   async writeLogEntry(fileName: string, line: string): Promise<void> {
     if (!isTauriRuntime()) {
-      mockLogs.value.push(line);
-      if (mockLogs.value.length > 500) {
-        mockLogs.value.shift();
-      }
+      mockLogs.value = appendLimitedItem(mockLogs.value, line, 500);
       return;
     }
     return callTauri<void>("write_log_entry", { fileName, line });
@@ -288,7 +281,7 @@ export const systemService = {
 
   async readLogFile(fileName: string): Promise<string> {
     if (!isTauriRuntime()) {
-      return mockLogs.value.join("\n");
+      return joinLines(mockLogs.value);
     }
     return callTauri<string>("read_log_file", { fileName });
   },
@@ -304,50 +297,34 @@ export const systemService = {
   async exportLogFile(fileName: string, targetPath: string): Promise<void> {
     if (!isTauriRuntime()) {
       // 浏览器 Mock 导出日志
-      const logText = mockLogs.value.join("\n");
-      const blob = new Blob([logText], { type: "text/plain" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = fileName;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      const logText = joinLines(mockLogs.value);
+      downloadTextFile(fileName, logText, "text/plain");
       return;
     }
     return callTauri<void>("export_log_file", { fileName, targetPath });
   },
 
   async exportSystemDiagnostics(targetPath: string): Promise<void> {
-    const now = new Date();
-    const currentTime = now.toLocaleString();
+    const now = getCurrentDate();
+    const currentTime = formatLocaleDateTime(now);
     if (!isTauriRuntime()) {
-      const meta = [
+      const meta = joinLines([
         "==================================================",
         "        MONSTER WORKBENCH SYSTEM DIAGNOSTICS      ",
         "==================================================",
         `Generated Time: ${currentTime}`,
         "App Version: 0.0.3-mock",
-        `OS Platform: ${navigator.userAgent}`,
+        `OS Platform: ${getUserAgent()}`,
         "CPU Architecture: mock-browser-arch",
         "Database Path: localStorage::monster_workbench",
         "Database Size: ~10 KB",
         "\n==================================================",
         "              CLIENT EXCEPTION LOGS               ",
         "=================================================="
-      ].join("\n");
-      const logText = mockLogs.value.join("\n");
-      const fullText = `${meta}\n${logText}`;
-      const blob = new Blob([fullText], { type: "text/plain" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = buildDatedFileName("monster_workbench_diagnostics", "txt", now);
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      ]);
+      const logText = joinLines(mockLogs.value);
+      const fullText = joinLines([meta, logText]);
+      downloadTextFile(buildDatedFileName("monster_workbench_diagnostics", "txt", now), fullText, "text/plain");
       return;
     }
     return callTauri<void>("export_system_diagnostics", { targetPath, currentTime });
@@ -366,23 +343,7 @@ export const systemService = {
   },
 
   async readBrowserTextFile(accept: string, failedMessage: string): Promise<string> {
-    return new Promise<string>((resolve, reject) => {
-      const input = document.createElement("input");
-      input.type = "file";
-      input.accept = accept;
-      input.onchange = (event: Event) => {
-        const file = (event.target as HTMLInputElement).files?.[0];
-        if (!file) return;
-
-        const reader = new FileReader();
-        reader.onload = (readerEvent: ProgressEvent<FileReader>) => {
-          resolve(String(readerEvent.target?.result ?? ""));
-        };
-        reader.onerror = () => reject(new Error(failedMessage));
-        reader.readAsText(file);
-      };
-      input.click();
-    });
+    return readSelectedBrowserTextFile(accept, failedMessage);
   },
 
   async writeTextFile(path: string, contents: string): Promise<void> {

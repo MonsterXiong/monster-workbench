@@ -23,6 +23,7 @@ interface Props {
   disabled?: boolean;
   retryDisabled?: boolean;
   minHeight?: string;
+  extraLabel?: string;
   ariaLabel?: string;
 }
 
@@ -41,6 +42,7 @@ const props = withDefaults(defineProps<Props>(), {
   disabled: false,
   retryDisabled: false,
   minHeight: "",
+  extraLabel: "",
   ariaLabel: "",
 });
 
@@ -57,6 +59,7 @@ const iconSize = computed(() => {
 });
 const labelledBy = computed(() => (!props.ariaLabel ? titleId.value : undefined));
 const isRetryDisabled = computed(() => props.disabled || props.retryDisabled);
+const resolvedExtraLabel = computed(() => props.extraLabel || `${props.title || props.ariaLabel || "错误反馈"} 附加信息`);
 const retryButtonType = computed(() => {
   if (props.tone === "warning") return "warning";
   if (props.tone === "neutral") return "neutral";
@@ -113,7 +116,7 @@ const handleRetry = () => {
     >
       {{ retryText || t('common.retry') }}
     </BaseButton>
-    <div v-if="$slots.default" class="base-error__extra">
+    <div v-if="$slots.default" class="base-error__extra" role="group" :aria-label="resolvedExtraLabel">
       <slot></slot>
     </div>
   </div>
@@ -181,7 +184,8 @@ const handleRetry = () => {
 }
 
 .base-error__title {
-  @apply text-sm font-black text-slate-800 dark:text-slate-100;
+  @apply min-w-0 max-w-sm text-sm font-black text-slate-800 dark:text-slate-100;
+  overflow-wrap: anywhere;
 }
 
 .base-error--lg .base-error__title {
@@ -189,7 +193,8 @@ const handleRetry = () => {
 }
 
 .base-error__message {
-  @apply mt-1 max-w-sm text-xs font-medium leading-6 text-slate-500 dark:text-slate-400;
+  @apply mt-1 min-w-0 max-w-sm text-xs font-medium leading-6 text-slate-500 dark:text-slate-400;
+  overflow-wrap: anywhere;
 }
 
 .base-error--lg .base-error__message {
@@ -201,7 +206,7 @@ const handleRetry = () => {
 }
 
 .base-error__extra {
-  @apply mt-3 flex flex-wrap items-center justify-center gap-2;
+  @apply mt-3 flex max-w-full flex-wrap items-center justify-center gap-2;
 }
 
 .base-error--start .base-error__extra {
@@ -209,7 +214,7 @@ const handleRetry = () => {
 }
 
 .base-error.is-disabled {
-  @apply opacity-65;
+  @apply pointer-events-none opacity-65;
 }
 
 .base-error.is-disabled .base-error__retry {

@@ -4,7 +4,7 @@ import { systemService } from "../services/system.service";
 import { logger } from "../services/logger";
 import { isTauriRuntime } from "../services/runtime";
 import { useErrorMonitorStore } from "./error-monitor";
-import { compactArray, hasLogLevel, splitLines, takeRight, toReversedArray } from "../utils";
+import { compactArray, filterLogLinesByLevel, getErrorMessage, sleep, splitLines, takeRight, toReversedArray } from "../utils";
 
 export type SystemTab = "terminal" | "errors";
 export type SystemLogFilter = "all" | "debug" | "info" | "warn" | "error";
@@ -24,7 +24,7 @@ export const useSystemStore = defineStore("system", () => {
 
   const filteredLogLines = computed(() => {
     if (activeFilter.value === "all") return logLines.value;
-    return logLines.value.filter((line) => hasLogLevel(line, activeFilter.value));
+    return filterLogLinesByLevel(logLines.value, activeFilter.value);
   });
 
   const recentLogLines = computed(() => toReversedArray(takeRight(compactArray(logLines.value), 10)));
@@ -33,7 +33,7 @@ export const useSystemStore = defineStore("system", () => {
     try {
       localPath.value = await systemService.getAppDataDir();
     } catch (err: any) {
-      localPath.value = err?.message || fallbackPath;
+      localPath.value = getErrorMessage(err, fallbackPath);
     }
 
     dbStatus.value = "checking";
@@ -108,7 +108,7 @@ export const useSystemStore = defineStore("system", () => {
   }
 
   async function reportLogs() {
-    await new Promise(resolve => window.setTimeout(resolve, 900));
+    await sleep(900);
   }
 
   return {

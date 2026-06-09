@@ -15,10 +15,10 @@ src-tauri/src/
 ├─ services/                  # 服务层：核心业务逻辑实现
 │  ├─ mod.rs                  # 模块聚合导出
 │  └─ system_service.rs       # 系统业务服务（SystemService）
-├─ infra/                     # 底座基础设施：路径、文件、数据库文件、日志等能力
-└─ repository/                # 仓储层：新增复杂业务数据库读写时使用
-   └─ mod.rs                  # 模块聚合导出（按需新增）
+└─ infra/                     # 底座基础设施：路径、文件、数据库、日志等能力
 ```
+
+需要独立仓储层时再新增 `repository/`，不要预先建立空目录或空模块。
 
 ---
 
@@ -26,7 +26,7 @@ src-tauri/src/
 
 必须保持以下调用方向（与前端分层对称）：
 
-`main.rs（注册）-> commands/*（薄代理）-> services/*（业务逻辑）-> infra/* / repository/*（底座能力与数据持久化）`
+`main.rs（注册）-> commands/*（薄代理）-> services/*（业务逻辑）-> infra/* / repository/*（按需，底座能力与数据持久化）`
 
 | 层级 | 职责 | 禁止事项 |
 |---|---|---|
@@ -34,9 +34,9 @@ src-tauri/src/
 | **commands/** | 接收 IPC 参数、从 `State` 取出服务实例、调用 service 方法并透传返回值 | 禁止在命令函数中编写超过 5 行的业务逻辑，必须委托给 service |
 | **services/** | 核心业务实现：文件操作、路径计算、进程管理、数据转换等 | 禁止直接依赖 `tauri::command` 宏 |
 | **infra/** | 路径、文件、日志、数据库文件备份等底座基础能力 | 禁止包含页面业务流程 |
-| **repository/** | 新增复杂业务数据读写、查询与迁移 | 禁止包含非数据持久化的业务逻辑 |
+| **repository/**（按需） | 复杂业务数据读写、查询与迁移 | 禁止包含非数据持久化的业务逻辑 |
 
-数据库与持久化能力应优先通过 Rust Command / Service / Repository 暴露给前端。当前已移除前端 SQL 插件与 SQL capability，禁止重新引入 `@tauri-apps/plugin-sql`、`tauri-plugin-sql` 或任何前端 SQL 直驱通道。
+数据库与持久化能力应优先通过 Rust Command / Service / Repository 暴露给前端。禁止引入 `@tauri-apps/plugin-sql`、`tauri-plugin-sql` 或任何前端 SQL 直驱通道。
 
 文件读写能力必须由 Rust Command / Service 做路径、扩展名、大小与沙箱校验后暴露给前端。禁止直接依赖、注册或开放 `@tauri-apps/plugin-fs`、`tauri-plugin-fs`、`fs:default`，禁止把 `assetProtocol.scope` 放宽到整个 `$HOME/**/*`。
 
@@ -49,7 +49,7 @@ src-tauri/src/
 - **命令注册**：所有新增命令必须在 `main.rs` 的 `invoke_handler(tauri::generate_handler![...])` 中注册，否则前端 `invoke()` 将静默失败。
 - **返回值约定**：
   - 成功返回数据：`Result<T, String>` 其中 `T` 为 `String`（JSON 序列化）、`()` 或可序列化的 struct。
-  - 错误一律返回 `Err(String)`，错误消息**必须使用中文**。
+  - 错误返回 `Err(String)`；如果 service 返回 `AppResult<T>`，Command 层统一通过 `e.to_json_string()` 转成前端可解析的错误字符串。
 
 示例（标准命令函数）：
 
@@ -60,10 +60,12 @@ pub fn upload_file(
     file_type: String,
     year_month: String,
     uuid_name: String,
-    state: SystemState<'_>
+    state: FileState<'_>
 ) -> Result<String, String> {
     let service = state.lock().unwrap_or_else(|e| e.into_inner());
-    service.upload_file(&src_path, &file_type, &year_month, &uuid_name)
+    service
+        .upload_file(&src_path, &file_type, &year_month, &uuid_name)
+        .map_err(|e| e.to_json_string())
 }
 ```
 
@@ -71,8 +73,8 @@ pub fn upload_file(
 
 ## 4. 服务层（services/）规范
 
-- **结构体注入 AppHandle**：服务通过 `SystemService::new(app_handle)` 构造，内部持有 `AppHandle` 以访问 Tauri 路径、对话框、opener 等原生能力。
-- **方法签名**：所有公开方法统一返回 `Result<T, String>`，内部错误通过 `.map_err(|e| format!("中文描述: {}", e))` 转换。
+- **结构体按需注入底座能力**：服务构造函数按职责注入 `AppHandle`、`PathProvider` 或其他基础设施；不需要原生窗口、路径或事件能力的服务不要强行持有 `AppHandle`。
+- **方法签名**：业务 service 的公开方法优先返回 `AppResult<T>`，内部错误通过 `AppError` 承载中文上下文；队列、并发任务等局部内部结构可在边界内使用 `Result<T, String>`，但错误字符串必须是中文。
 - **跨平台处理**：涉及操作系统差异的逻辑（如进程查杀），必须使用 `#[cfg(target_os = "windows")]` / `#[cfg(not(target_os = "windows"))]` 条件编译，非支持平台返回友好错误或空结果。
 - **路径安全**：
   - 涉及用户输入的路径参数，必须进行 `..` 路径穿透检测和前缀白名单校验。
@@ -95,10 +97,8 @@ pub fn upload_file(
 
 为确保 Cargo 编译速度和二进制包体积，遵循以下硬性约束：
 
-- **最小依赖原则**：仅保留以下核心依赖，禁止引入无关外部库：
-  - `tauri` + 官方插件（`dialog`、`fs`、`opener`、`process`、`updater`、`sql`）
-  - `serde` + `serde_json`（序列化基础）
-- **严禁引入**：`reqwest`、`zip`、`sha2`、`hex`、`tokio`（单独引入）等与基础功能无关的重量级依赖。
+- **最小依赖原则**：仅保留有明确业务必要的依赖；当前核心依赖包括 `tauri`、官方插件（`dialog`、`opener`、`process`、`updater`）、`rusqlite`、`serde`、`serde_json`。
+- **严禁引入**：`reqwest`、`zip`、`sha2`、`hex`、`tokio`（单独引入）、前端 SQL/FS 直驱插件等与基础能力边界冲突或显著增重的依赖。
 - 优先使用 `std` 标准库解决问题（如 `std::fs`、`std::process::Command`、`std::path`）。
 
 ---
@@ -106,7 +106,7 @@ pub fn upload_file(
 ## 7. 错误处理规范
 
 - 所有面向前端的错误消息**必须使用简体中文**。
-- 使用 `.map_err(|e| format!("操作描述失败: {}", e))` 模式统一转换。
+- 优先使用 `AppResult<T>` / `AppError` 承载错误；Command 层通过 `e.to_json_string()` 转换给前端。局部直接返回 `Result<T, String>` 时，错误字符串必须保留中文操作上下文。
 - 禁止在 command/service 层使用 `.unwrap()` 或 `panic!()`；Mutex 锁获取统一使用 `unwrap_or_else(|e| e.into_inner())`，避免锁毒化后直接引发应用崩溃。
 - 文件不存在、权限不足等常见错误，给出具体的中文提示而非原始英文 OS 错误。
 

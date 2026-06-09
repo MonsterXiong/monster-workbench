@@ -1,4 +1,10 @@
+import { getCurrentTimestampMs } from "./date";
+import { toIntegerAtLeast, toNonNegativeInteger } from "./number";
+
 export type AnyFunction = (this: any, ...args: any[]) => unknown;
+export type TimeoutHandle = ReturnType<typeof window.setTimeout>;
+export type IntervalHandle = ReturnType<typeof window.setInterval>;
+export type AnimationFrameHandle = ReturnType<typeof window.requestAnimationFrame>;
 
 export interface RetryOptions {
   retries?: number;
@@ -6,38 +12,86 @@ export interface RetryOptions {
   shouldRetry?: (error: unknown, attempt: number) => boolean;
 }
 
+export function normalizeDelayMs(delayMs: number): number {
+  return Math.max(0, delayMs);
+}
+
+export function createTimeout(callback: () => void, delayMs: number): TimeoutHandle {
+  return window.setTimeout(callback, normalizeDelayMs(delayMs));
+}
+
+export function createInterval(callback: () => void, intervalMs: number): IntervalHandle {
+  return window.setInterval(callback, normalizeDelayMs(intervalMs));
+}
+
+export function clearTimeoutHandle(timer: TimeoutHandle | null | undefined): void {
+  if (timer !== null && timer !== undefined) {
+    window.clearTimeout(timer);
+  }
+}
+
+export function clearIntervalHandle(timer: IntervalHandle | null | undefined): void {
+  if (timer !== null && timer !== undefined) {
+    window.clearInterval(timer);
+  }
+}
+
+export function createAnimationFrame(callback: FrameRequestCallback): AnimationFrameHandle {
+  return window.requestAnimationFrame(callback);
+}
+
+export function clearAnimationFrameHandle(frame: AnimationFrameHandle | null | undefined): void {
+  if (frame !== null && frame !== undefined) {
+    window.cancelAnimationFrame(frame);
+  }
+}
+
+export function resetTimeoutHandle(
+  timer: TimeoutHandle | null | undefined,
+  callback: () => void,
+  delayMs: number
+): TimeoutHandle {
+  clearTimeoutHandle(timer);
+  return createTimeout(callback, delayMs);
+}
+
+export function clearTimeoutMap<K>(timers: Map<K, TimeoutHandle>): void {
+  timers.forEach((timer) => clearTimeoutHandle(timer));
+  timers.clear();
+}
+
 export function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => window.setTimeout(resolve, Math.max(0, ms)));
+  return new Promise((resolve) => createTimeout(resolve, ms));
+}
+
+export function nextAnimationFrame(): Promise<number> {
+  return new Promise((resolve) => createAnimationFrame(resolve));
 }
 
 export function debounce<T extends AnyFunction>(fn: T, delay = 300): (this: ThisParameterType<T>, ...args: Parameters<T>) => void {
-  let timer: ReturnType<typeof window.setTimeout> | null = null;
+  let timer: TimeoutHandle | null = null;
 
   return function (this: ThisParameterType<T>, ...args: Parameters<T>) {
-    if (timer) {
-      window.clearTimeout(timer);
-    }
+    clearTimeoutHandle(timer);
 
-    timer = window.setTimeout(() => {
+    timer = createTimeout(() => {
       fn.apply(this, args);
       timer = null;
-    }, Math.max(0, delay));
+    }, delay);
   };
 }
 
 export function throttle<T extends AnyFunction>(fn: T, interval = 300): (this: ThisParameterType<T>, ...args: Parameters<T>) => void {
   let lastRun = 0;
-  let timer: ReturnType<typeof window.setTimeout> | null = null;
+  let timer: TimeoutHandle | null = null;
 
   return function (this: ThisParameterType<T>, ...args: Parameters<T>) {
-    const now = Date.now();
-    const remaining = Math.max(0, interval - (now - lastRun));
+    const now = getCurrentTimestampMs();
+    const remaining = normalizeDelayMs(interval - (now - lastRun));
 
     if (remaining === 0) {
-      if (timer) {
-        window.clearTimeout(timer);
-        timer = null;
-      }
+      clearTimeoutHandle(timer);
+      timer = null;
 
       lastRun = now;
       fn.apply(this, args);
@@ -45,8 +99,8 @@ export function throttle<T extends AnyFunction>(fn: T, interval = 300): (this: T
     }
 
     if (!timer) {
-      timer = window.setTimeout(() => {
-        lastRun = Date.now();
+      timer = createTimeout(() => {
+        lastRun = getCurrentTimestampMs();
         timer = null;
         fn.apply(this, args);
       }, remaining);
@@ -64,32 +118,30 @@ export function throttleLeading<T extends AnyFunction>(fn: T, interval = 300): (
 
     fn.apply(this, args);
     inThrottle = true;
-    window.setTimeout(() => {
+    createTimeout(() => {
       inThrottle = false;
-    }, Math.max(0, interval));
+    }, interval);
   };
 }
 
 export async function withTimeout<T>(task: Promise<T>, timeoutMs: number, message = "Operation timed out"): Promise<T> {
-  let timer: ReturnType<typeof window.setTimeout> | null = null;
+  let timer: TimeoutHandle | null = null;
 
   try {
     return await Promise.race([
       task,
       new Promise<never>((_, reject) => {
-        timer = window.setTimeout(() => reject(new Error(message)), Math.max(0, timeoutMs));
+        timer = createTimeout(() => reject(new Error(message)), timeoutMs);
       }),
     ]);
   } finally {
-    if (timer) {
-      window.clearTimeout(timer);
-    }
+    clearTimeoutHandle(timer);
   }
 }
 
 export async function retry<T>(task: (attempt: number) => Promise<T>, options: RetryOptions = {}): Promise<T> {
-  const retries = Math.max(0, Math.floor(options.retries ?? 2));
-  const delayMs = Math.max(0, options.delayMs ?? 300);
+  const retries = toNonNegativeInteger(options.retries ?? 2);
+  const delayMs = normalizeDelayMs(options.delayMs ?? 300);
 
   for (let attempt = 0; attempt <= retries; attempt += 1) {
     try {
@@ -110,11 +162,46 @@ export async function retry<T>(task: (attempt: number) => Promise<T>, options: R
   throw new Error("Retry failed");
 }
 
+export function normalizeConcurrency(concurrency: number, itemCount?: number): number {
+  const safeConcurrency = toIntegerAtLeast(concurrency, 1);
+
+  if (itemCount === undefined) {
+    return safeConcurrency;
+  }
+
+  const safeItemCount = toNonNegativeInteger(itemCount);
+  return safeItemCount === 0 ? 1 : Math.min(safeConcurrency, safeItemCount);
+}
+
+export async function runAllSettled<T, R>(
+  items: readonly T[],
+  task: (item: T, index: number) => Promise<R>
+): Promise<Array<PromiseSettledResult<R>>> {
+  return Promise.allSettled(items.map((item, index) => task(item, index)));
+}
+
 export async function runSequential<T, R>(items: readonly T[], task: (item: T, index: number) => Promise<R>): Promise<R[]> {
   const results: R[] = [];
 
   for (let index = 0; index < items.length; index += 1) {
     results.push(await task(items[index], index));
+  }
+
+  return results;
+}
+
+export async function runSequentialSettled<T, R>(
+  items: readonly T[],
+  task: (item: T, index: number) => Promise<R>
+): Promise<Array<PromiseSettledResult<R>>> {
+  const results: Array<PromiseSettledResult<R>> = [];
+
+  for (let index = 0; index < items.length; index += 1) {
+    try {
+      results.push({ status: "fulfilled", value: await task(items[index], index) });
+    } catch (error) {
+      results.push({ status: "rejected", reason: error });
+    }
   }
 
   return results;
@@ -126,7 +213,7 @@ export async function runConcurrent<T, R>(
   concurrency = 4
 ): Promise<R[]> {
   const results = new Array<R>(items.length);
-  const workerCount = Math.max(1, Math.min(items.length, Math.floor(concurrency)));
+  const workerCount = normalizeConcurrency(concurrency, items.length);
   let nextIndex = 0;
 
   const worker = async () => {
@@ -134,6 +221,32 @@ export async function runConcurrent<T, R>(
       const index = nextIndex;
       nextIndex += 1;
       results[index] = await task(items[index], index);
+    }
+  };
+
+  await Promise.all(Array.from({ length: workerCount }, worker));
+  return results;
+}
+
+export async function runConcurrentSettled<T, R>(
+  items: readonly T[],
+  task: (item: T, index: number) => Promise<R>,
+  concurrency = 4
+): Promise<Array<PromiseSettledResult<R>>> {
+  const results = new Array<PromiseSettledResult<R>>(items.length);
+  const workerCount = normalizeConcurrency(concurrency, items.length);
+  let nextIndex = 0;
+
+  const worker = async () => {
+    while (nextIndex < items.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+
+      try {
+        results[index] = { status: "fulfilled", value: await task(items[index], index) };
+      } catch (error) {
+        results[index] = { status: "rejected", reason: error };
+      }
     }
   };
 

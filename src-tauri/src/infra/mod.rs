@@ -1,12 +1,12 @@
-pub mod path;
+#[allow(dead_code)]
+pub mod crypto;
 pub mod db;
 pub mod db_nav;
 pub mod fs;
 #[allow(dead_code)]
 pub mod http;
-#[allow(dead_code)]
-pub mod crypto;
 pub mod logger;
+pub mod path;
 pub mod sensitive;
 
 use serde::Serialize;

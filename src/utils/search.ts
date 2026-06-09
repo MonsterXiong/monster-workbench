@@ -1,4 +1,5 @@
-import { escapeRegExp, normalizeWhitespace } from "./string";
+import { sortBy, uniqueArray } from "./array";
+import { escapeRegExp, normalizeStringList, normalizeWhitespace, splitWords } from "./string";
 
 export interface SearchMatchPart {
   text: string;
@@ -9,7 +10,32 @@ export interface KeywordMatchOptions {
   matchAll?: boolean;
 }
 
+export type SearchField<T> = (item: T) => unknown;
+export type SearchMatcher<T> = (item: T) => boolean;
+
 const DIACRITIC_REGEXP = /[\u0300-\u036f]/g;
+
+function flattenSearchFieldValue(value: unknown): unknown[] {
+  if (Array.isArray(value)) {
+    return value.flatMap((item) => flattenSearchFieldValue(item));
+  }
+
+  return [value];
+}
+
+export function joinSearchValueText(value: unknown, separator = " "): string {
+  return flattenSearchFieldValue(value)
+    .map((item) => String(item ?? ""))
+    .join(separator);
+}
+
+export function joinSearchFieldText<T>(
+  item: T,
+  fields: ReadonlyArray<SearchField<T>>,
+  separator = " "
+): string {
+  return fields.map((field) => joinSearchValueText(field(item), separator)).join(separator);
+}
 
 export function normalizeSearchText(value: unknown): string {
   return normalizeWhitespace(String(value ?? ""))
@@ -19,7 +45,7 @@ export function normalizeSearchText(value: unknown): string {
 }
 
 export function tokenizeKeyword(keyword: string): string[] {
-  return normalizeSearchText(keyword).split(/\s+/).filter(Boolean);
+  return splitWords(normalizeSearchText(keyword));
 }
 
 export function normalizeSearchTokens(value: string | readonly string[]): string[] {
@@ -27,7 +53,7 @@ export function normalizeSearchTokens(value: string | readonly string[]): string
     ? tokenizeKeyword(value)
     : value.flatMap((item) => tokenizeKeyword(item));
 
-  return Array.from(new Set(tokens));
+  return uniqueArray(tokens);
 }
 
 export function matchesTokens(value: unknown, tokens: readonly string[], options: KeywordMatchOptions = {}): boolean {
@@ -43,48 +69,64 @@ export function matchesTokens(value: unknown, tokens: readonly string[], options
 export function matchesSearchFields<T>(
   item: T,
   keyword: string,
-  fields: ReadonlyArray<(item: T) => unknown>,
+  fields: ReadonlyArray<SearchField<T>>,
   options: KeywordMatchOptions = {}
 ): boolean {
+  return createSearchMatcher(keyword, fields, options)(item);
+}
+
+export function createSearchMatcher<T>(
+  keyword: string,
+  fields: ReadonlyArray<SearchField<T>>,
+  options: KeywordMatchOptions = {}
+): SearchMatcher<T> {
   const tokens = tokenizeKeyword(keyword);
 
   if (tokens.length === 0) {
-    return true;
+    return () => true;
   }
 
-  const fieldText = fields.map((field) => field(item)).join(" ");
-  return matchesTokens(fieldText, tokens, options);
+  return (item) => {
+    return matchesTokens(joinSearchFieldText(item, fields), tokens, options);
+  };
 }
 
 export function matchesSearchTextFields<T>(
   item: T,
   keyword: string,
-  fields: ReadonlyArray<(item: T) => unknown>
+  fields: ReadonlyArray<SearchField<T>>
 ): boolean {
+  return createSearchTextMatcher(keyword, fields)(item);
+}
+
+export function createSearchTextMatcher<T>(
+  keyword: string,
+  fields: ReadonlyArray<SearchField<T>>
+): SearchMatcher<T> {
   const normalizedKeyword = normalizeSearchText(keyword);
 
   if (!normalizedKeyword) {
-    return true;
+    return () => true;
   }
 
-  return fields.some((field) => normalizeSearchText(field(item)).includes(normalizedKeyword));
+  return (item) => normalizeSearchText(joinSearchFieldText(item, fields)).includes(normalizedKeyword);
 }
 
 export function filterBySearchFields<T>(
   items: readonly T[],
   keyword: string,
-  fields: ReadonlyArray<(item: T) => unknown>,
+  fields: ReadonlyArray<SearchField<T>>,
   options: KeywordMatchOptions = {}
 ): T[] {
-  return items.filter((item) => matchesSearchFields(item, keyword, fields, options));
+  return items.filter(createSearchMatcher(keyword, fields, options));
 }
 
 export function filterBySearchTextFields<T>(
   items: readonly T[],
   keyword: string,
-  fields: ReadonlyArray<(item: T) => unknown>
+  fields: ReadonlyArray<SearchField<T>>
 ): T[] {
-  return items.filter((item) => matchesSearchTextFields(item, keyword, fields));
+  return items.filter(createSearchTextMatcher(keyword, fields));
 }
 
 export function splitTextByKeyword(value: string, keyword: string): SearchMatchPart[] {
@@ -109,8 +151,11 @@ export function splitTextByKeyword(value: string, keyword: string): SearchMatchP
 }
 
 export function splitTextByTokens(value: string, tokens: readonly string[]): SearchMatchPart[] {
-  const normalizedTokens = Array.from(new Set(tokens.map((token) => token.trim()).filter(Boolean)))
-    .sort((left, right) => right.length - left.length);
+  const normalizedTokens = sortBy(
+    uniqueArray(normalizeStringList(tokens)),
+    (token) => token.length,
+    "desc"
+  );
 
   if (normalizedTokens.length === 0) {
     return [{ text: value, matched: false }];

@@ -1,5 +1,6 @@
 export type AiProviderType = "openai" | "deepseek" | "siliconflow" | "custom";
 export type AiProviderTestAction = "models" | "chat" | "image";
+export type AiProviderQueueMode = "serial" | "concurrent";
 export type AiProviderTestQueueStatus = "queued" | "running" | "success" | "failed";
 export type AiPromptType = "chat" | "image";
 export type AiSessionType = AiPromptType;
@@ -18,6 +19,9 @@ export interface AiProviderConfig {
   imagePrompt: string;
   imageSize: string;
   timeoutMs: number;
+  queueMode: AiProviderQueueMode;
+  maxConcurrency: number;
+  queueKey?: string;
 }
 
 export interface AiModelConfig extends AiProviderConfig {
@@ -44,6 +48,10 @@ export interface AiProviderTestResult {
   imageUrls?: string[];
   imagePaths?: string[];
   savedFiles?: AiProviderSavedFile[];
+  requestedImageSize?: string | null;
+  actualImageSize?: string | null;
+  fallbackImageSize?: string | null;
+  imageAttempts?: number | null;
   rawPreview?: string;
 }
 
@@ -57,6 +65,7 @@ export interface AiProviderTestQueueItem {
   id: string;
   action: AiProviderTestAction;
   status: AiProviderTestQueueStatus;
+  queueKey?: string;
   createdAt: number;
   startedAt?: number;
   finishedAt?: number;
@@ -86,13 +95,19 @@ export interface AiProviderBackendQueueItem {
   waitMs: number;
   remainingWaitMs: number;
   waitTimeoutMs: number;
+  queueMode?: AiProviderQueueMode;
+  concurrencyLimit?: number;
 }
 
 export interface AiProviderBackendQueueStatus {
   running?: AiProviderBackendQueueItem | null;
+  runningItems?: AiProviderBackendQueueItem[];
   queued: AiProviderBackendQueueItem[];
   pendingCount: number;
   queueLimit: number;
+  runningCount?: number;
+  runningLimit?: number;
+  availableRunningSlots?: number;
   availableSlots: number;
   isSaturated: boolean;
   waitTimeoutMs: number;
@@ -135,10 +150,15 @@ export interface AiSessionMessage {
   role: AiSessionMessageRole;
   status: AiSessionMessageStatus;
   content: string;
+  requestId?: string;
   modelConfigId: string;
   model: string;
   error?: string;
   imageSize?: string;
+  requestedImageSize?: string;
+  actualImageSize?: string;
+  fallbackImageSize?: string;
+  imageAttempts?: number;
   imageUrls?: string[];
   imagePaths?: string[];
   savedFiles?: AiProviderSavedFile[];

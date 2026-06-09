@@ -1,9 +1,9 @@
+pub mod ai;
 pub mod app;
-pub mod file;
+pub mod auth;
 pub mod config;
 pub mod database;
-pub mod auth;
-pub mod updater;
-pub mod system;
+pub mod file;
 pub mod navigation;
-pub mod ai;
+pub mod system;
+pub mod updater;

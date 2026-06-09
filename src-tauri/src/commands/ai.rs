@@ -1,8 +1,5 @@
 use crate::services::ai_service::{
-    AiProviderConfig,
-    AiProviderQueueStatus,
-    AiProviderService,
-    AiProviderTestResult,
+    AiProviderConfig, AiProviderQueueStatus, AiProviderService, AiProviderTestResult,
     AiProviderTestTask,
 };
 use std::sync::Mutex;

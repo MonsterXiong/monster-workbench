@@ -1,7 +1,17 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, useId, watch, type CSSProperties } from "vue";
 import { useI18n } from "../../composables/useI18n";
-import { clampNumber, hasItem } from "../../utils";
+import {
+  addDomEventListener,
+  clampNumber,
+  clearTimeoutHandle,
+  getKeyboardBoundaryPosition,
+  getKeyboardNavigationDirection,
+  mergeDomEventCleanups,
+  resetTimeoutHandle,
+  type DomEventCleanup,
+  type TimeoutHandle,
+} from "../../utils";
 
 type Side = "left" | "right";
 type ThreeColumnLayoutSize = "sm" | "md" | "lg";
@@ -71,7 +81,8 @@ const draggingSide = ref<Side | null>(null);
 const rootRef = ref<HTMLElement | null>(null);
 const dragStartX = ref(0);
 const didDrag = ref(false);
-let resetDragStateTimer: number | undefined;
+let resetDragStateTimer: TimeoutHandle | null = null;
+let stopDragListeners: DomEventCleanup | null = null;
 const { t } = useI18n();
 const layoutId = useId();
 const leftPaneId = computed(() => `${layoutId}-left`);
@@ -134,13 +145,12 @@ const handlePointerMove = (event: PointerEvent) => {
 const stopDrag = () => {
   const side = draggingSide.value;
   draggingSide.value = null;
-  document.removeEventListener("pointermove", handlePointerMove);
-  document.removeEventListener("pointerup", stopDrag);
-  document.removeEventListener("pointercancel", stopDrag);
+  stopDragListeners?.();
+  stopDragListeners = null;
   if (didDrag.value) {
-    window.clearTimeout(resetDragStateTimer);
-    resetDragStateTimer = window.setTimeout(() => {
+    resetDragStateTimer = resetTimeoutHandle(resetDragStateTimer, () => {
       didDrag.value = false;
+      resetDragStateTimer = null;
     }, 120);
   }
   if (side) {
@@ -154,9 +164,12 @@ const startDrag = (side: Side, event: PointerEvent) => {
   draggingSide.value = side;
   dragStartX.value = event.clientX;
   didDrag.value = false;
-  document.addEventListener("pointermove", handlePointerMove);
-  document.addEventListener("pointerup", stopDrag);
-  document.addEventListener("pointercancel", stopDrag);
+  stopDragListeners?.();
+  stopDragListeners = mergeDomEventCleanups([
+    addDomEventListener(document, "pointermove", handlePointerMove),
+    addDomEventListener(document, "pointerup", stopDrag),
+    addDomEventListener(document, "pointercancel", stopDrag),
+  ]);
   emit("resize-start", { side, leftWidth: localLeftWidth.value, rightWidth: localRightWidth.value });
 };
 
@@ -177,25 +190,30 @@ const collapse = (side: Side) => {
 
 const resizeByKeyboard = (side: Side, event: KeyboardEvent) => {
   if (props.disabled) return;
-  const keys = ["ArrowLeft", "ArrowRight", "Home", "End"];
-  if (!hasItem(keys, event.key)) return;
+  const boundaryPosition = getKeyboardBoundaryPosition(event);
+  const direction = getKeyboardNavigationDirection(event, {
+    forwardKeys: side === "left" ? ["ArrowRight"] : ["ArrowLeft"],
+    backwardKeys: side === "left" ? ["ArrowLeft"] : ["ArrowRight"],
+  });
+  if (!boundaryPosition && !direction) return;
   event.preventDefault();
+  const keyboardDelta = props.resizeStep * (direction ?? 0);
 
   if (side === "left") {
     const nextValue =
-      event.key === "Home"
+      boundaryPosition === "first"
         ? props.minLeftWidth
-        : event.key === "End"
+        : boundaryPosition === "last"
           ? props.maxLeftWidth
-          : localLeftWidth.value + (event.key === "ArrowRight" ? props.resizeStep : -props.resizeStep);
+          : localLeftWidth.value + keyboardDelta;
     localLeftWidth.value = clampNumber(nextValue, props.minLeftWidth, props.maxLeftWidth);
   } else {
     const nextValue =
-      event.key === "Home"
+      boundaryPosition === "first"
         ? props.minRightWidth
-        : event.key === "End"
+        : boundaryPosition === "last"
           ? props.maxRightWidth
-          : localRightWidth.value + (event.key === "ArrowLeft" ? props.resizeStep : -props.resizeStep);
+          : localRightWidth.value + keyboardDelta;
     localRightWidth.value = clampNumber(nextValue, props.minRightWidth, props.maxRightWidth);
   }
 
@@ -214,8 +232,9 @@ const expand = (side: Side) => {
 };
 
 onBeforeUnmount(() => {
-  window.clearTimeout(resetDragStateTimer);
   stopDrag();
+  clearTimeoutHandle(resetDragStateTimer);
+  resetDragStateTimer = null;
 });
 </script>
 

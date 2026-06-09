@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref } from "vue";
 import type { ComponentPublicInstance } from "vue";
-import { filterByFalsyValue, findByValue, findLastItem, findNextCircularItem } from "../../utils";
+import { filterByFalsyValue, findByValue, findNextCircularItem, firstItem, getKeyboardBoundaryPosition, getKeyboardNavigationDirection, lastItem } from "../../utils";
 import BaseIcon from "./BaseIcon.vue";
 
 interface TabItem {
@@ -61,7 +61,7 @@ const enabledTabs = computed(() => filterByFalsyValue(props.tabs, (tab) => tab.d
 
 const focusableKey = computed(() => {
   if (props.disabled) return undefined;
-  return findByValue(enabledTabs.value, (tab) => tab.key, props.modelValue)?.key ?? enabledTabs.value[0]?.key;
+  return findByValue(enabledTabs.value, (tab) => tab.key, props.modelValue)?.key ?? firstItem(enabledTabs.value)?.key;
 });
 
 const isTabDisabled = (tab: TabItem) => Boolean(props.disabled || tab.disabled);
@@ -109,22 +109,24 @@ const moveTab = (direction: 1 | -1) => {
 const handleKeydown = (event: KeyboardEvent) => {
   if (props.disabled) return;
 
-  if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+  const direction = getKeyboardNavigationDirection(event);
+  if (direction) {
     event.preventDefault();
-    moveTab(1);
+    moveTab(direction);
+    return;
   }
-  if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+
+  const boundaryPosition = getKeyboardBoundaryPosition(event);
+  if (boundaryPosition === "first") {
     event.preventDefault();
-    moveTab(-1);
-  }
-  if (event.key === "Home") {
-    event.preventDefault();
-    const firstTab = enabledTabs.value[0];
+    const firstTab = firstItem(enabledTabs.value);
     if (firstTab) selectTab(firstTab, { focus: true });
+    return;
   }
-  if (event.key === "End") {
+
+  if (boundaryPosition === "last") {
     event.preventDefault();
-    const lastTab = findLastItem(enabledTabs.value, (tab) => !tab.disabled);
+    const lastTab = lastItem(enabledTabs.value);
     if (lastTab) selectTab(lastTab, { focus: true });
   }
 };

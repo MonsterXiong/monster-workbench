@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from "vue";
-import { getNextClampedIndex, hasItem, reduceTree, removeByValue, uniqueArray } from "../../utils";
+import { filterTreeNodeKeys, getFirstTruthyRecordValue, getKeyboardBoundaryPosition, getKeyboardNavigationDirection, getNextClampedIndex, hasItem, isHTMLElement, isKeyboardKey, queryVisibleElements, setSelectionKey, uniqueArray } from "../../utils";
 
 type TreeSize = "sm" | "md" | "lg";
 type TreeSurface = "card" | "muted" | "plain";
@@ -75,20 +75,9 @@ defineSlots<{
 }>();
 
 const isRoot = () => props.level === 1;
-const getNodeKey = (node: TreeNode) => String(node[props.nodeKey] || node.path || node.name);
+const getNodeKey = (node: TreeNode) => String(getFirstTruthyRecordValue(node, [props.nodeKey, "path", "name"], ""));
 const collectExpandedKeys = (nodes: TreeNode[]): string[] => {
-  return reduceTree(
-    nodes,
-    (keys, node) => {
-      if (node.expanded) {
-        keys.push(getNodeKey(node));
-      }
-
-      return keys;
-    },
-    [] as string[],
-    (node) => node.children
-  );
+  return filterTreeNodeKeys(nodes, (node) => Boolean(node.expanded), (node) => node.children, getNodeKey);
 };
 
 const initialExpandedKeys = () => uniqueArray([...collectExpandedKeys(props.data), ...props.defaultExpandedKeys]);
@@ -124,9 +113,7 @@ const commitExpandedKeys = (keys: string[]) => {
 
 const setNodeExpanded = (node: TreeNode, expanded: boolean) => {
   const key = getNodeKey(node);
-  const nextKeys = expanded
-    ? uniqueArray([...expandedKeysSource.value, key])
-    : removeByValue(expandedKeysSource.value, (item) => item, key);
+  const nextKeys = setSelectionKey(expandedKeysSource.value, key, expanded);
 
   commitExpandedKeys(nextKeys);
   emit("node-toggle", { node, expanded });
@@ -147,14 +134,12 @@ const handleNodeClick = (node: TreeNode) => {
 };
 
 const getTreeRoot = (target: EventTarget | null) => {
-  return target instanceof HTMLElement ? target.closest<HTMLElement>('[role="tree"]') : null;
+  return isHTMLElement(target) ? target.closest<HTMLElement>('[role="tree"]') : null;
 };
 
 const getVisibleTreeItems = (target: EventTarget | null) => {
   const root = getTreeRoot(target);
-  if (!root) return [];
-
-  return Array.from(root.querySelectorAll<HTMLButtonElement>('.base-tree__node:not(:disabled)')).filter((item) => item.offsetParent !== null);
+  return queryVisibleElements<HTMLButtonElement>(root, ".base-tree__node:not(:disabled)");
 };
 
 const focusTreeItem = (items: HTMLButtonElement[], index: number) => {
@@ -178,28 +163,31 @@ const focusSibling = (event: KeyboardEvent, offset: 1 | -1) => {
 const handleNodeKeydown = (event: KeyboardEvent, node: TreeNode) => {
   if (isNodeDisabled(node)) return;
 
-  if (event.key === "ArrowDown") {
+  const verticalDirection = getKeyboardNavigationDirection(event, {
+    forwardKeys: ["ArrowDown"],
+    backwardKeys: ["ArrowUp"],
+  });
+  if (verticalDirection) {
     event.preventDefault();
-    focusSibling(event, 1);
+    focusSibling(event, verticalDirection);
+    return;
   }
 
-  if (event.key === "ArrowUp") {
-    event.preventDefault();
-    focusSibling(event, -1);
-  }
-
-  if (event.key === "Home") {
+  const boundaryPosition = getKeyboardBoundaryPosition(event);
+  if (boundaryPosition === "first") {
     event.preventDefault();
     focusTreeItem(getVisibleTreeItems(event.currentTarget), 0);
+    return;
   }
 
-  if (event.key === "End") {
+  if (boundaryPosition === "last") {
     event.preventDefault();
     const items = getVisibleTreeItems(event.currentTarget);
     focusTreeItem(items, items.length - 1);
+    return;
   }
 
-  if (event.key === "ArrowRight" && hasChildren(node)) {
+  if (isKeyboardKey(event, "ArrowRight") && hasChildren(node)) {
     event.preventDefault();
     if (!isNodeExpanded(node)) {
       setNodeExpanded(node, true);
@@ -209,7 +197,7 @@ const handleNodeKeydown = (event: KeyboardEvent, node: TreeNode) => {
     focusSibling(event, 1);
   }
 
-  if (event.key === "ArrowLeft" && hasChildren(node) && isNodeExpanded(node)) {
+  if (isKeyboardKey(event, "ArrowLeft") && hasChildren(node) && isNodeExpanded(node)) {
     event.preventDefault();
     setNodeExpanded(node, false);
   }

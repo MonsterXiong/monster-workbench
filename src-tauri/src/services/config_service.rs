@@ -1,6 +1,6 @@
-use std::fs;
 use crate::infra::path::PathProvider;
 use crate::infra::{AppError, AppResult};
+use std::fs;
 
 pub struct ConfigService {
     path_provider: PathProvider,

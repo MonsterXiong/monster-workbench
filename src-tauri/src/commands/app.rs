@@ -1,6 +1,6 @@
 use crate::services::app_service::AppService;
-use tauri::State;
 use std::sync::Mutex;
+use tauri::State;
 
 type AppState<'a> = State<'a, Mutex<AppService>>;
 

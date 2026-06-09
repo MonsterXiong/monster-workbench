@@ -42,7 +42,7 @@ const handleAction = (item: { id: string; onAction?: () => void }) => {
         v-for="item in messages"
         :key="item.id"
         class="base-message__item"
-        :class="[`base-message__item--${item.type}`]"
+        :class="[`base-message__item--${item.type}`, { 'base-message__item--wrap': item.wrap }]"
         :role="item.type === 'error' || item.type === 'warning' ? 'alert' : 'status'"
         aria-atomic="true"
       >
@@ -50,6 +50,7 @@ const handleAction = (item: { id: string; onAction?: () => void }) => {
         <div class="base-message__body">
           <strong v-if="item.title" class="base-message__title">{{ item.title }}</strong>
           <span class="base-message__text">{{ item.msg }}</span>
+          <span v-if="item.description" class="base-message__description">{{ item.description }}</span>
         </div>
         <button
           v-if="item.actionText"
@@ -69,6 +70,12 @@ const handleAction = (item: { id: string; onAction?: () => void }) => {
         >
           <BaseIcon name="X" :size="14" aria-hidden="true" />
         </button>
+        <span
+          v-if="item.showProgress && item.duration > 0"
+          class="base-message__progress"
+          :style="{ animationDuration: `${item.duration}ms` }"
+          aria-hidden="true"
+        ></span>
       </div>
     </transition-group>
   </div>
@@ -80,7 +87,7 @@ const handleAction = (item: { id: string; onAction?: () => void }) => {
 }
 
 .base-message__item {
-  @apply pointer-events-auto flex w-full select-none items-start justify-between gap-3 rounded-2xl border px-4 py-3 text-xs font-bold shadow-lg backdrop-blur-md transition-all;
+  @apply pointer-events-auto relative flex w-full select-none items-start justify-between gap-3 overflow-hidden rounded-2xl border px-4 py-3 text-xs font-bold shadow-lg backdrop-blur-md transition-all;
 }
 
 .base-message__icon {
@@ -100,7 +107,19 @@ const handleAction = (item: { id: string; onAction?: () => void }) => {
   @apply block min-w-0 break-words leading-5;
 }
 
-.base-message__title + .base-message__text {
+.base-message__description {
+  @apply mt-0.5 block min-w-0 truncate text-[11px] leading-5 opacity-80;
+}
+
+.base-message__item--wrap .base-message__title,
+.base-message__item--wrap .base-message__description {
+  @apply whitespace-normal break-words;
+  overflow: visible;
+  text-overflow: clip;
+}
+
+.base-message__title + .base-message__text,
+.base-message__text + .base-message__description {
   @apply mt-0.5;
 }
 
@@ -116,6 +135,14 @@ const handleAction = (item: { id: string; onAction?: () => void }) => {
 
 .base-message__close {
   @apply flex h-6 w-6 shrink-0 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 dark:text-slate-500 dark:hover:bg-slate-800 dark:hover:text-slate-300;
+}
+
+.base-message__progress {
+  @apply pointer-events-none absolute inset-x-0 bottom-0 h-0.5 origin-left;
+  background-color: var(--message-fg);
+  animation-name: base-message-progress;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
 }
 
 .base-message__item--info {
@@ -200,6 +227,19 @@ const handleAction = (item: { id: string; onAction?: () => void }) => {
   .msg-list-enter-from,
   .msg-list-leave-to {
     transform: none !important;
+  }
+
+  .base-message__progress {
+    animation: none !important;
+  }
+}
+
+@keyframes base-message-progress {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
   }
 }
 </style>

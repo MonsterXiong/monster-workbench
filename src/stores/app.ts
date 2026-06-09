@@ -1,6 +1,6 @@
 import { defineStore } from "pinia";
 import { appService } from "../services/app.service";
-import { safeJsonParse, safeJsonStringify } from "../utils";
+import { applyObjectPatch, getStorageItem, getStorageJson, setStorageItem, setStorageJson } from "../utils";
 
 export type LayoutPrefs = {
   sidebarCollapsed: boolean;
@@ -37,7 +37,7 @@ export const useAppStore = defineStore("app", {
       }
 
       try {
-        const customPath = localStorage.getItem("monster-workbench-custom-local-path");
+        const customPath = getStorageItem("monster-workbench-custom-local-path", "", { emptyAsMissing: true });
         if (customPath) {
           this.localPath = customPath;
         } else {
@@ -48,13 +48,7 @@ export const useAppStore = defineStore("app", {
       }
 
       try {
-        const raw = localStorage.getItem(STORAGE_KEY);
-        if (raw) {
-          this.layoutPrefs = {
-            ...this.layoutPrefs,
-            ...safeJsonParse<Partial<LayoutPrefs>>(raw, {}),
-          };
-        }
+        this.layoutPrefs = applyObjectPatch(this.layoutPrefs, getStorageJson<Partial<LayoutPrefs>>(STORAGE_KEY, {}));
       } catch {
         // ignore malformed local config
       }
@@ -63,17 +57,14 @@ export const useAppStore = defineStore("app", {
     },
 
     updateLayoutPrefs(patch: Partial<LayoutPrefs>) {
-      this.layoutPrefs = {
-        ...this.layoutPrefs,
-        ...patch,
-      };
+      this.layoutPrefs = applyObjectPatch(this.layoutPrefs, patch);
 
-      localStorage.setItem(STORAGE_KEY, safeJsonStringify(this.layoutPrefs));
+      setStorageJson(STORAGE_KEY, this.layoutPrefs);
     },
 
     updateLocalPath(path: string) {
       this.localPath = path;
-      localStorage.setItem("monster-workbench-custom-local-path", path);
+      setStorageItem("monster-workbench-custom-local-path", path);
     },
   },
 });

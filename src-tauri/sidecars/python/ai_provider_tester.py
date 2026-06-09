@@ -11,9 +11,22 @@ import urllib.parse
 import urllib.request
 import uuid
 
+SECRET_KEYS = {"api_key", "apikey", "apiKey", "authorization", "token", "secret", "password"}
+
+
+def read_positive_int_env(name, default):
+    try:
+        value = int(os.environ.get(name) or "")
+        if value > 0:
+            return value
+    except Exception:
+        pass
+    return default
+
+
 MAX_RESPONSE_BYTES = 4 * 1024 * 1024
-MAX_IMAGE_RESPONSE_BYTES = 64 * 1024 * 1024
-MAX_DECODED_IMAGE_BYTES = 32 * 1024 * 1024
+MAX_IMAGE_RESPONSE_BYTES = read_positive_int_env("AI_PROVIDER_MAX_IMAGE_RESPONSE_BYTES", 192 * 1024 * 1024)
+MAX_DECODED_IMAGE_BYTES = read_positive_int_env("AI_PROVIDER_MAX_DECODED_IMAGE_BYTES", 96 * 1024 * 1024)
 MAX_PREVIEW_CHARS = 4096
 MAX_MODELS = 200
 MAX_MODEL_ID_CHARS = 256
@@ -21,7 +34,6 @@ MAX_TEXT_CHARS = 8192
 MAX_IMAGE_ITEMS = 4
 MAX_IMAGE_URL_CHARS = 2048
 MAX_RAW_STRING_CHARS = 512
-SECRET_KEYS = {"api_key", "apikey", "apiKey", "authorization", "token", "secret", "password"}
 
 
 def normalize_base_url(base_url):
@@ -224,7 +236,22 @@ def support_prefix(model, model_listed):
 
 def is_remote_disconnect(error):
     text = str(error).lower()
-    return "10054" in text or "forcibly closed" in text or "connection reset" in text or "econnreset" in text
+    return (
+        "10054" in text
+        or "forcibly closed" in text
+        or "connection reset" in text
+        or "econnreset" in text
+        or "remote end closed connection" in text
+        or "remote disconnected" in text
+    )
+
+
+def should_retry_image_generation_error(error):
+    if is_remote_disconnect(error):
+        return True
+    if isinstance(error, urllib.error.HTTPError):
+        return error.code in (400, 413, 422)
+    return False
 
 
 def request_image_generation(base_url, headers, body, timeout):
@@ -260,7 +287,7 @@ def request_image_generation_with_recovery(base_url, headers, body, timeout):
             return status, parsed, fallback_size, index + 1
         except Exception as error:
             last_error = error
-            if not is_remote_disconnect(error):
+            if not should_retry_image_generation_error(error):
                 raise
     raise last_error
 
@@ -496,12 +523,20 @@ def main():
                 "imageUrls": image_urls,
                 "imagePaths": image_paths,
                 "savedFiles": saved_files,
+                "requestedImageSize": image_size,
+                "actualImageSize": fallback_size or image_size,
+                "fallbackImageSize": fallback_size,
+                "imageAttempts": image_attempts,
                 "rawPreview": raw_preview(parsed)
             }
-            if fallback_size and image_paths:
-                result["message"] = "生图测试成功，所选尺寸暂不稳定，已自动降级为 {0} 并保存 {1} 张图片到本地".format(fallback_size, len(image_paths))
-            elif image_attempts > 1 and image_paths:
-                result["message"] = "生图测试成功，远程服务首次断开后已自动重试并保存 {0} 张图片到本地".format(len(image_paths))
+            if fallback_size and (image_paths or image_urls):
+                result["message"] = "生图测试成功，所选尺寸暂不稳定，已自动降级为 {0}".format(fallback_size)
+                if image_paths:
+                    result["message"] += " 并保存 {0} 张图片到本地".format(len(image_paths))
+            elif image_attempts > 1 and (image_paths or image_urls):
+                result["message"] = "生图测试成功，远程服务首次断开后已自动重试"
+                if image_paths:
+                    result["message"] += "并保存 {0} 张图片到本地".format(len(image_paths))
         else:
             body = {
                 "model": model,

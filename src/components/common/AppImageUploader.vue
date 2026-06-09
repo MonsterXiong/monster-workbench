@@ -8,7 +8,7 @@ import { UploadCloud, Image as ImageIcon, X } from "lucide-vue-next";
 import { useFileManagerStore } from "../../stores/file-manager";
 import { useToast } from "../../composables/useToast";
 import { useI18n } from "../../composables/useI18n";
-import { createRandomId } from "../../utils";
+import { createRandomId, getErrorMessage } from "../../utils";
 
 const props = withDefaults(
   defineProps<{
@@ -52,7 +52,7 @@ async function handleUpload() {
       triggerToast(t('common.uploader.success'), "success");
     }
   } catch (err) {
-    triggerToast(err instanceof Error ? err.message : t('common.uploader.failed'), "error");
+    triggerToast(getErrorMessage(err, t('common.uploader.failed')), "error");
   } finally {
     uploading.value = false;
   }

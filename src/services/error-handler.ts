@@ -2,7 +2,7 @@ import { type App } from "vue";
 import { logger } from "./logger";
 import { useToast } from "../composables/useToast";
 import { useLoading } from "../composables/useLoading";
-import { includesAnyText, safeJsonStringify } from "../utils";
+import { getCurrentTimestampMs, getErrorMessage, getErrorStack, includesAnyText, safeJsonStringify } from "../utils";
 
 export type ErrorType =
   | "RUNTIME"     // JS 运行时错误
@@ -37,7 +37,7 @@ export class AppError extends Error {
 const lastToastTime: Record<string, number> = {};
 
 function triggerSafeToast(msg: string) {
-  const now = Date.now();
+  const now = getCurrentTimestampMs();
   const lastTime = lastToastTime[msg] ?? 0;
   if (now - lastTime > 2000) {
     lastToastTime[msg] = now;
@@ -80,14 +80,14 @@ export const ErrorHandler = {
 
     // 1. 解析错误类型与细节
     if (err instanceof AppError) {
-      message = err.message;
+      message = getErrorMessage(err, message);
       type = err.type;
       severity = err.severity;
-      stack = err.stack ?? "";
+      stack = getErrorStack(err);
       details = { ...details, ...err.details };
     } else if (err instanceof Error) {
-      message = err.message;
-      stack = err.stack ?? "";
+      message = getErrorMessage(err, message);
+      stack = getErrorStack(err);
 
       // 智能识别系统错误类别
       if (includesAnyText(message, ["network", "fetch", "timeout"], { ignoreCase: true })) {

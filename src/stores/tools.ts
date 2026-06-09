@@ -2,43 +2,43 @@ import { defineStore } from "pinia";
 import { ref, watch } from "vue";
 import { toolsService } from "../services/tools.service";
 import type { PortProcessInfo, ProcessInstanceInfo } from "../services/tools.service";
-import { sleep, toInteger, toIntegerInRange } from "../utils";
+import { getStorageBoolean, getStorageIntegerInRange, getStorageItem, setStorageItems, sleep, toInteger, toTrimmedString } from "../utils";
 
 export const useToolsStore = defineStore("tools", () => {
   // 1. 目录结构生成 (DirGenerator)
   const dirGenerator = ref({
-    rootPath: localStorage.getItem("tool_dg_rootPath") || "",
-    includeTopDir: localStorage.getItem("tool_dg_includeTopDir") !== "false",
-    treeInput: localStorage.getItem("tool_dg_treeInput") || "",
+    rootPath: getStorageItem("tool_dg_rootPath"),
+    includeTopDir: getStorageBoolean("tool_dg_includeTopDir", true),
+    treeInput: getStorageItem("tool_dg_treeInput"),
   });
 
   // 2. 目录结构读取 (DirReader)
   const dirReader = ref({
-    rootPath: localStorage.getItem("tool_dr_rootPath") || "",
-    excludeDirsInput: localStorage.getItem("tool_dr_excludeDirsInput") || "node_modules, .git, dist",
-    maxDepth: toIntegerInRange(localStorage.getItem("tool_dr_maxDepth"), 1, 99, 10),
-    treeOutput: localStorage.getItem("tool_dr_treeOutput") || "",
+    rootPath: getStorageItem("tool_dr_rootPath"),
+    excludeDirsInput: getStorageItem("tool_dr_excludeDirsInput", "node_modules, .git, dist", { emptyAsMissing: true }),
+    maxDepth: getStorageIntegerInRange("tool_dr_maxDepth", 1, 99, 10),
+    treeOutput: getStorageItem("tool_dr_treeOutput"),
   });
 
   // 3. 端口进程排查 (PortCleaner)
   const portCleaner = ref({
-    portInput: localStorage.getItem("tool_pc_portInput") || "",
-    processNameInput: localStorage.getItem("tool_pc_processNameInput") || "",
+    portInput: getStorageItem("tool_pc_portInput"),
+    processNameInput: getStorageItem("tool_pc_processNameInput"),
   });
 
   // 4. JSON美化 (JsonFormatter)
   const jsonFormatter = ref({
-    jsonInput: localStorage.getItem("tool_jf_jsonInput") || "",
+    jsonInput: getStorageItem("tool_jf_jsonInput"),
   });
 
   // 5. Base64编解码 (Base64Converter)
   const base64Converter = ref({
-    base64Input: localStorage.getItem("tool_b64_base64Input") || "",
+    base64Input: getStorageItem("tool_b64_base64Input"),
   });
 
   // 6. 时间戳转换 (TimestampConverter)
   const timestampConverter = ref({
-    timestampInput: localStorage.getItem("tool_tc_timestampInput") || "",
+    timestampInput: getStorageItem("tool_tc_timestampInput"),
   });
 
   const dirGeneratorDefaultPath = ref("");
@@ -105,7 +105,7 @@ export const useToolsStore = defineStore("tools", () => {
     queryInstancesLoading.value = true;
     hasQueriedInstances.value = true;
     try {
-      processInstances.value = await toolsService.findProcessByName(portCleaner.value.processNameInput.trim());
+      processInstances.value = await toolsService.findProcessByName(toTrimmedString(portCleaner.value.processNameInput));
     } finally {
       queryInstancesLoading.value = false;
     }
@@ -137,7 +137,7 @@ export const useToolsStore = defineStore("tools", () => {
   }
 
   async function killAllProcessInstances() {
-    const name = portCleaner.value.processNameInput.trim();
+    const name = toTrimmedString(portCleaner.value.processNameInput);
     if (!name) return;
 
     killAllLoading.value = true;
@@ -157,9 +157,11 @@ export const useToolsStore = defineStore("tools", () => {
   watch(
     () => dirGenerator.value,
     (val) => {
-      localStorage.setItem("tool_dg_rootPath", val.rootPath);
-      localStorage.setItem("tool_dg_includeTopDir", String(val.includeTopDir));
-      localStorage.setItem("tool_dg_treeInput", val.treeInput);
+      setStorageItems({
+        tool_dg_rootPath: val.rootPath,
+        tool_dg_includeTopDir: val.includeTopDir,
+        tool_dg_treeInput: val.treeInput,
+      });
     },
     { deep: true }
   );
@@ -167,10 +169,12 @@ export const useToolsStore = defineStore("tools", () => {
   watch(
     () => dirReader.value,
     (val) => {
-      localStorage.setItem("tool_dr_rootPath", val.rootPath);
-      localStorage.setItem("tool_dr_excludeDirsInput", val.excludeDirsInput);
-      localStorage.setItem("tool_dr_maxDepth", String(val.maxDepth));
-      localStorage.setItem("tool_dr_treeOutput", val.treeOutput);
+      setStorageItems({
+        tool_dr_rootPath: val.rootPath,
+        tool_dr_excludeDirsInput: val.excludeDirsInput,
+        tool_dr_maxDepth: val.maxDepth,
+        tool_dr_treeOutput: val.treeOutput,
+      });
     },
     { deep: true }
   );
@@ -178,8 +182,10 @@ export const useToolsStore = defineStore("tools", () => {
   watch(
     () => portCleaner.value,
     (val) => {
-      localStorage.setItem("tool_pc_portInput", val.portInput);
-      localStorage.setItem("tool_pc_processNameInput", val.processNameInput);
+      setStorageItems({
+        tool_pc_portInput: val.portInput,
+        tool_pc_processNameInput: val.processNameInput,
+      });
     },
     { deep: true }
   );
@@ -187,7 +193,7 @@ export const useToolsStore = defineStore("tools", () => {
   watch(
     () => jsonFormatter.value,
     (val) => {
-      localStorage.setItem("tool_jf_jsonInput", val.jsonInput);
+      setStorageItems({ tool_jf_jsonInput: val.jsonInput });
     },
     { deep: true }
   );
@@ -195,7 +201,7 @@ export const useToolsStore = defineStore("tools", () => {
   watch(
     () => base64Converter.value,
     (val) => {
-      localStorage.setItem("tool_b64_base64Input", val.base64Input);
+      setStorageItems({ tool_b64_base64Input: val.base64Input });
     },
     { deep: true }
   );
@@ -203,7 +209,7 @@ export const useToolsStore = defineStore("tools", () => {
   watch(
     () => timestampConverter.value,
     (val) => {
-      localStorage.setItem("tool_tc_timestampInput", val.timestampInput);
+      setStorageItems({ tool_tc_timestampInput: val.timestampInput });
     },
     { deep: true }
   );

@@ -1,11 +1,11 @@
+use crate::infra::fs::FsInfra;
+pub use crate::infra::fs::PathItem;
+use crate::infra::path::PathProvider;
+use crate::infra::{AppError, AppResult};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use tauri::AppHandle;
 use tauri_plugin_dialog::DialogExt;
-pub use crate::infra::fs::PathItem;
-use crate::infra::fs::FsInfra;
-use crate::infra::path::PathProvider;
-use crate::infra::{AppError, AppResult};
 
 pub struct FileService {
     app_handle: AppHandle,
@@ -15,7 +15,8 @@ pub struct FileService {
 
 const MAX_IMAGE_UPLOAD_BYTES: u64 = 20 * 1024 * 1024;
 const MAX_FILE_UPLOAD_BYTES: u64 = 100 * 1024 * 1024;
-const IMAGE_UPLOAD_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "gif", "webp", "bmp", "svg", "ico"];
+const IMAGE_UPLOAD_EXTENSIONS: &[&str] =
+    &["jpg", "jpeg", "png", "gif", "webp", "bmp", "svg", "ico"];
 const DENIED_FILE_UPLOAD_EXTENSIONS: &[&str] = &[
     "bat", "cmd", "com", "dll", "exe", "jar", "js", "lnk", "msi", "ps1", "reg", "scr", "vbs",
 ];
@@ -23,15 +24,16 @@ const DENIED_FILE_UPLOAD_EXTENSIONS: &[&str] = &[
 impl FileService {
     pub fn new(app_handle: AppHandle, path_provider: PathProvider) -> Self {
         let fs_infra = FsInfra::new(path_provider.clone());
-        Self { app_handle, path_provider, fs_infra }
+        Self {
+            app_handle,
+            path_provider,
+            fs_infra,
+        }
     }
 
     /// 调起本地对话框，选择文件夹路径
     pub fn select_folder(&self) -> AppResult<Option<String>> {
-        let folder = self.app_handle
-            .dialog()
-            .file()
-            .blocking_pick_folder();
+        let folder = self.app_handle.dialog().file().blocking_pick_folder();
 
         let path_str = folder
             .and_then(|f| f.into_path().ok())
@@ -42,10 +44,7 @@ impl FileService {
 
     /// 调起本地对话框，选择文件路径
     pub fn select_file(&self) -> AppResult<Option<String>> {
-        let file = self.app_handle
-            .dialog()
-            .file()
-            .blocking_pick_file();
+        let file = self.app_handle.dialog().file().blocking_pick_file();
 
         let path_str = file
             .and_then(|f| f.into_path().ok())
@@ -79,7 +78,9 @@ impl FileService {
             _ => unreachable!(),
         };
         if source_metadata.len() > max_upload_size {
-            return Err(AppError::Permission("上传文件超过允许大小，已拒绝写入".to_string()));
+            return Err(AppError::Permission(
+                "上传文件超过允许大小，已拒绝写入".to_string(),
+            ));
         }
         if !is_valid_uuid_name(uuid_name) {
             return Err(AppError::Io("上传文件名参数不合法".to_string()));
@@ -143,7 +144,8 @@ impl FileService {
             }
         }
 
-        serde_json::to_string(&results).map_err(|e| AppError::Unknown(format!("序列化文件列表失败: {}", e)))
+        serde_json::to_string(&results)
+            .map_err(|e| AppError::Unknown(format!("序列化文件列表失败: {}", e)))
     }
 
     fn collect_files_recursive(
@@ -235,15 +237,13 @@ impl FileService {
         skip_dirs: Vec<String>,
         max_depth: u32,
     ) -> AppResult<String> {
-        self.fs_infra.read_directory_tree(dir_path, skip_dirs, max_depth)
+        self.fs_infra
+            .read_directory_tree(dir_path, skip_dirs, max_depth)
     }
 }
 
 fn is_valid_uuid_name(value: &str) -> bool {
-    !value.is_empty()
-        && value
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '-')
+    !value.is_empty() && value.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
 }
 
 fn is_valid_year_month(value: &str) -> bool {
@@ -264,15 +264,19 @@ fn is_valid_year_month(value: &str) -> bool {
 fn validate_upload_extension(file_type: &str, ext: &str) -> AppResult<()> {
     let normalized = ext.trim().to_ascii_lowercase();
     if normalized.is_empty() {
-        return Err(AppError::Permission("上传文件必须包含明确的扩展名".to_string()));
+        return Err(AppError::Permission(
+            "上传文件必须包含明确的扩展名".to_string(),
+        ));
     }
 
     match file_type {
         "image" if IMAGE_UPLOAD_EXTENSIONS.contains(&normalized.as_str()) => Ok(()),
-        "image" => Err(AppError::Permission("图片上传仅允许常见图片格式".to_string())),
-        "file" if DENIED_FILE_UPLOAD_EXTENSIONS.contains(&normalized.as_str()) => {
-            Err(AppError::Permission("出于安全原因，禁止上传可执行或脚本类文件".to_string()))
-        }
+        "image" => Err(AppError::Permission(
+            "图片上传仅允许常见图片格式".to_string(),
+        )),
+        "file" if DENIED_FILE_UPLOAD_EXTENSIONS.contains(&normalized.as_str()) => Err(
+            AppError::Permission("出于安全原因，禁止上传可执行或脚本类文件".to_string()),
+        ),
         "file" => Ok(()),
         _ => Err(AppError::Permission("不支持的上传类型".to_string())),
     }
@@ -288,13 +292,17 @@ fn normalize_upload_relative_path(rel_path: &str) -> AppResult<PathBuf> {
             Component::ParentDir | Component::RootDir | Component::Prefix(_)
         )
     }) {
-        return Err(AppError::Permission("非法上传文件路径：不允许目录跳转或绝对路径".to_string()));
+        return Err(AppError::Permission(
+            "非法上传文件路径：不允许目录跳转或绝对路径".to_string(),
+        ));
     }
 
     let mut components = normalized.split('/').filter(|part| !part.is_empty());
     match (components.next(), components.next()) {
         (Some("uploads"), Some("images" | "files")) => Ok(path),
-        _ => Err(AppError::Permission("非法上传文件路径：必须位于 uploads/images 或 uploads/files".to_string())),
+        _ => Err(AppError::Permission(
+            "非法上传文件路径：必须位于 uploads/images 或 uploads/files".to_string(),
+        )),
     }
 }
 
@@ -319,8 +327,14 @@ mod tests {
         let file = normalize_upload_relative_path("uploads/files/2026/06/doc.pdf")
             .expect("file upload path should be accepted");
 
-        assert_eq!(image.to_string_lossy().replace('\\', "/"), "uploads/images/2026/06/pic.png");
-        assert_eq!(file.to_string_lossy().replace('\\', "/"), "uploads/files/2026/06/doc.pdf");
+        assert_eq!(
+            image.to_string_lossy().replace('\\', "/"),
+            "uploads/images/2026/06/pic.png"
+        );
+        assert_eq!(
+            file.to_string_lossy().replace('\\', "/"),
+            "uploads/files/2026/06/doc.pdf"
+        );
     }
 
     #[test]

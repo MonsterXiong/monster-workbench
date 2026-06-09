@@ -4,7 +4,7 @@ import { Code, Trash2, Copy, AlertTriangle } from "lucide-vue-next";
 import { storeToRefs } from "pinia";
 import { useToolsStore } from "../../../stores/tools";
 import { useI18n } from "../../../composables/useI18n";
-import { formatJsonText, minifyJsonText } from "../../../utils";
+import { getErrorMessage, isBlank, tryFormatJsonText, tryMinifyJsonText } from "../../../utils";
 
 const emit = defineEmits<{
   (e: "copy", text: string): void;
@@ -20,28 +20,24 @@ const jsonError = ref("");
 
 function handleFormatJson(spacing = 2) {
   jsonError.value = "";
-  if (!jsonFormatter.value.jsonInput.trim()) {
+  if (isBlank(jsonFormatter.value.jsonInput)) {
     jsonOutput.value = "";
     return;
   }
-  try {
-    jsonOutput.value = formatJsonText(jsonFormatter.value.jsonInput, spacing);
-  } catch (err) {
-    jsonError.value = err instanceof Error ? err.message : t("tools.jsonFormat.invalidJson");
-  }
+  const result = tryFormatJsonText(jsonFormatter.value.jsonInput, spacing);
+  jsonOutput.value = result.data ?? "";
+  jsonError.value = result.error ? getErrorMessage(result.error, t("tools.jsonFormat.invalidJson")) : "";
 }
 
 function handleMinifyJson() {
   jsonError.value = "";
-  if (!jsonFormatter.value.jsonInput.trim()) {
+  if (isBlank(jsonFormatter.value.jsonInput)) {
     jsonOutput.value = "";
     return;
   }
-  try {
-    jsonOutput.value = minifyJsonText(jsonFormatter.value.jsonInput);
-  } catch (err) {
-    jsonError.value = err instanceof Error ? err.message : t("tools.jsonFormat.invalidJson");
-  }
+  const result = tryMinifyJsonText(jsonFormatter.value.jsonInput);
+  jsonOutput.value = result.data ?? "";
+  jsonError.value = result.error ? getErrorMessage(result.error, t("tools.jsonFormat.invalidJson")) : "";
 }
 
 function handleClearJson() {

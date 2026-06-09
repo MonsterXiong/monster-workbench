@@ -1,25 +1,25 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod commands;
 mod infra;
 mod services;
-mod commands;
 
-use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 use tauri::menu::{Menu, MenuItem};
-use tauri::tray::{TrayIconBuilder, TrayIconEvent, MouseButton, MouseButtonState};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 
 use infra::path::PathProvider;
 
+use services::ai_service::AiProviderService;
 use services::app_service::AppService;
+use services::auth_service::AuthService;
 use services::config_service::ConfigService;
 use services::database_service::DatabaseService;
 use services::file_service::FileService;
 use services::log_service::LogService;
+use services::navigation_service::NavigationService;
 use services::system_service::SystemService;
 use services::task_service::TaskService;
-use services::auth_service::AuthService;
-use services::navigation_service::NavigationService;
-use services::ai_service::AiProviderService;
 
 fn create_main_window(app: &AppHandle) -> tauri::Result<()> {
     WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
@@ -77,7 +77,6 @@ fn main() {
             app.manage(std::sync::Mutex::new(navigation_service));
             app.manage(std::sync::Mutex::new(ai_provider_service));
 
-
             // 3. 创建托盘菜单
             let quit_i = MenuItem::with_id(app.handle(), "quit", "退出应用", true, None::<&str>)?;
             let show_i = MenuItem::with_id(app.handle(), "show", "显示窗口", true, None::<&str>)?;
@@ -90,26 +89,25 @@ fn main() {
             }
             let _tray = tray_builder
                 .menu(&tray_menu)
-                .on_menu_event(|app, event| {
-                    match event.id.as_ref() {
-                        "quit" => {
-                            app.exit(0);
-                        }
-                        "show" => {
-                            if let Some(window) = app.get_webview_window("main") {
-                                let _ = window.show();
-                                let _ = window.set_focus();
-                            }
-                        }
-                        _ => {}
+                .on_menu_event(|app, event| match event.id.as_ref() {
+                    "quit" => {
+                        app.exit(0);
                     }
+                    "show" => {
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                        }
+                    }
+                    _ => {}
                 })
                 .on_tray_icon_event(|tray, event| {
                     if let TrayIconEvent::Click {
                         button: MouseButton::Left,
                         button_state: MouseButtonState::Up,
                         ..
-                    } = event {
+                    } = event
+                    {
                         let app = tray.app_handle();
                         if let Some(window) = app.get_webview_window("main") {
                             let _ = window.show();
@@ -131,7 +129,6 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             commands::app::get_app_paths,
             commands::app::get_app_version,
-
             commands::file::select_folder,
             commands::file::select_file,
             commands::file::upload_file,
@@ -141,19 +138,14 @@ fn main() {
             commands::file::read_file_data,
             commands::file::create_directory_structure,
             commands::file::read_directory_tree,
-
             commands::config::get_preference_config,
             commands::config::save_preference_config,
-
             commands::database::export_database,
             commands::database::import_database,
             commands::database::reset_database,
             commands::database::check_db_status,
-
             commands::auth::verify_admin_password,
-
             commands::updater::trigger_update_download,
-
             commands::system::open_system_path,
             commands::system::control_window,
             commands::system::find_port_process,
@@ -168,7 +160,6 @@ fn main() {
             commands::system::clear_all_logs,
             commands::system::export_log_file,
             commands::system::export_system_diagnostics,
-
             commands::navigation::init_navigation_db,
             commands::navigation::get_navigation_list,
             commands::navigation::add_navigation,
@@ -183,7 +174,6 @@ fn main() {
             commands::navigation::save_navigation_sort_order,
             commands::navigation::get_all_navigation_list,
             commands::navigation::import_navigation_list,
-
             commands::ai::test_ai_provider,
             commands::ai::enqueue_ai_provider_test,
             commands::ai::get_ai_provider_test_task,

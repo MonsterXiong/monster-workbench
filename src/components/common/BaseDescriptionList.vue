@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { useI18n } from "../../composables/useI18n";
+import { toIntegerAtLeast } from "../../utils";
 
 export interface DescriptionListItem {
   key: string;
@@ -21,6 +22,12 @@ interface Props {
   loading?: boolean;
   disabled?: boolean;
   emptyText?: string;
+  emptyIcon?: string;
+  loadingText?: string;
+  skeletonRows?: number;
+  wrapLabel?: boolean;
+  wrapValue?: boolean;
+  wrapDescription?: boolean;
   ariaLabel?: string;
 }
 
@@ -33,12 +40,20 @@ const props = withDefaults(defineProps<Props>(), {
   loading: false,
   disabled: false,
   emptyText: "",
+  emptyIcon: "ListTodo",
+  loadingText: "",
+  skeletonRows: 4,
+  wrapLabel: false,
+  wrapValue: false,
+  wrapDescription: false,
   ariaLabel: "",
 });
 
 const { t } = useI18n();
 const resolvedSize = computed(() => (props.compact ? "sm" : props.size));
 const isEmpty = computed(() => !props.loading && props.items.length === 0);
+const skeletonCount = computed(() => toIntegerAtLeast(props.skeletonRows, 1, 4));
+const resolvedLoadingText = computed(() => props.loadingText || t("common.loading"));
 </script>
 
 <template>
@@ -50,6 +65,9 @@ const isEmpty = computed(() => !props.loading && props.items.length === 0);
       `base-description-list--${surface}`,
       {
         'base-description-list--bordered': bordered,
+        'base-description-list--wrap-label': wrapLabel,
+        'base-description-list--wrap-value': wrapValue,
+        'base-description-list--wrap-description': wrapDescription,
         'is-loading': loading,
         'is-disabled': disabled,
         'is-empty': isEmpty,
@@ -60,7 +78,8 @@ const isEmpty = computed(() => !props.loading && props.items.length === 0);
     :aria-disabled="disabled ? 'true' : undefined"
   >
     <template v-if="loading">
-      <div v-for="index in 4" :key="index" class="base-description-list__item base-description-list__item--skeleton" aria-hidden="true">
+      <div class="sr-only" role="status" aria-live="polite">{{ resolvedLoadingText }}</div>
+      <div v-for="index in skeletonCount" :key="index" class="base-description-list__item base-description-list__item--skeleton" aria-hidden="true">
         <span></span>
         <strong></strong>
         <em></em>
@@ -68,7 +87,7 @@ const isEmpty = computed(() => !props.loading && props.items.length === 0);
     </template>
 
     <div v-else-if="isEmpty" class="base-description-list__empty" role="status">
-      <BaseIcon name="ListTodo" size="18" aria-hidden="true" />
+      <BaseIcon :name="emptyIcon" size="18" aria-hidden="true" />
       <span>{{ emptyText || t("common.noData") }}</span>
     </div>
 
@@ -111,7 +130,7 @@ const isEmpty = computed(() => !props.loading && props.items.length === 0);
 }
 
 .base-description-list.is-disabled {
-  @apply opacity-70;
+  @apply pointer-events-none opacity-70;
 }
 
 .base-description-list.is-loading {
@@ -166,8 +185,22 @@ const isEmpty = computed(() => !props.loading && props.items.length === 0);
   @apply truncate;
 }
 
+.base-description-list--wrap-label dt span {
+  @apply whitespace-normal;
+  overflow: visible;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+}
+
 .base-description-list dd {
   @apply mt-1 truncate text-sm font-black text-slate-800 dark:text-slate-100;
+}
+
+.base-description-list--wrap-value dd {
+  @apply whitespace-normal;
+  overflow: visible;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
 }
 
 .base-description-list--lg dd {
@@ -176,6 +209,13 @@ const isEmpty = computed(() => !props.loading && props.items.length === 0);
 
 .base-description-list p {
   @apply mt-0.5 truncate text-[10px] font-bold text-slate-400 dark:text-slate-500;
+}
+
+.base-description-list--wrap-description p {
+  @apply whitespace-normal;
+  overflow: visible;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
 }
 
 .base-description-list--lg p {

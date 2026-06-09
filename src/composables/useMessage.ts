@@ -1,5 +1,5 @@
 import { ref } from "vue";
-import { createTimestampId, findIndexByValue } from "../utils";
+import { clearTimeoutHandle, clearTimeoutMap, createTimeout, createTimestampId, findIndexByValue, type TimeoutHandle } from "../utils";
 
 export type MessageType = "success" | "error" | "warning" | "info";
 
@@ -9,24 +9,30 @@ export interface MessageItem {
   type: MessageType;
   duration: number;
   title?: string;
+  description?: string;
   icon?: string;
   closable: boolean;
   actionText?: string;
   onAction?: () => void;
+  showProgress: boolean;
+  wrap: boolean;
 }
 
 export interface MessageOptions {
   duration?: number;
   title?: string;
+  description?: string;
   icon?: string;
   closable?: boolean;
   actionText?: string;
   onAction?: () => void;
+  showProgress?: boolean;
+  wrap?: boolean;
 }
 
 /** 全局 Message 队列状态（单例） */
 const messages = ref<MessageItem[]>([]);
-const timers = new Map<string, ReturnType<typeof setTimeout>>();
+const timers = new Map<string, TimeoutHandle>();
 
 /**
  * 全局 Message 提示服务的 composable
@@ -48,15 +54,18 @@ export function useMessage() {
       type,
       duration,
       title: options.title,
+      description: options.description,
       icon: options.icon,
       closable: options.closable ?? true,
       actionText: options.actionText,
       onAction: options.onAction,
+      showProgress: options.showProgress ?? duration > 0,
+      wrap: options.wrap ?? false,
     };
     messages.value.push(item);
 
     if (duration > 0) {
-      const timer = setTimeout(() => {
+      const timer = createTimeout(() => {
         removeMessage(id);
       }, duration);
       timers.set(id, timer);
@@ -69,10 +78,8 @@ export function useMessage() {
    */
   function removeMessage(id: string) {
     const timer = timers.get(id);
-    if (timer) {
-      clearTimeout(timer);
-      timers.delete(id);
-    }
+    clearTimeoutHandle(timer);
+    timers.delete(id);
 
     const index = findIndexByValue(messages.value, (message) => message.id, id);
     if (index !== -1) {
@@ -81,8 +88,7 @@ export function useMessage() {
   }
 
   function clearMessages() {
-    timers.forEach((timer) => clearTimeout(timer));
-    timers.clear();
+    clearTimeoutMap(timers);
     messages.value = [];
   }
 

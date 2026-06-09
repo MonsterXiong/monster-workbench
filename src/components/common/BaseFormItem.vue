@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { computed, useId } from "vue";
+import { useI18n } from "../../composables/useI18n";
 import { joinAriaIds } from "../../utils";
+
+type FormItemSpan = 1 | 2 | 3 | 4;
 
 interface Props {
   label?: string;
@@ -8,12 +11,19 @@ interface Props {
   help?: string;
   error?: string;
   success?: string;
+  loading?: boolean;
+  loadingText?: string;
   required?: boolean;
   disabled?: boolean;
   readonly?: boolean;
   compact?: boolean;
   horizontal?: boolean;
-  span?: 1 | 2;
+  span?: FormItemSpan;
+  hideLabel?: boolean;
+  labelAlign?: "start" | "center";
+  labelWidth?: string;
+  truncateLabel?: boolean;
+  wrapDescription?: boolean;
   forId?: string;
   optionalText?: string;
   ariaLabel?: string;
@@ -25,48 +35,72 @@ const props = withDefaults(defineProps<Props>(), {
   help: "",
   error: "",
   success: "",
+  loading: false,
+  loadingText: "",
   required: false,
   disabled: false,
   readonly: false,
   compact: false,
   horizontal: false,
   span: 1,
+  hideLabel: false,
+  labelAlign: "start",
+  labelWidth: "160px",
+  truncateLabel: false,
+  wrapDescription: false,
   forId: "",
   optionalText: "",
   ariaLabel: "",
 });
 
+const { t } = useI18n();
 const fieldId = useId();
 const labelId = `${fieldId}-label`;
 const descriptionId = `${fieldId}-description`;
 const messageId = `${fieldId}-message`;
-const hasMessage = computed(() => Boolean(props.error || props.success || props.help));
+const hasMessage = computed(() => Boolean(props.error || props.success || props.help || props.loading));
+const resolvedLoadingText = computed(() => props.loadingText || t("common.loading"));
 const describedBy = computed(() => {
   return joinAriaIds([props.description ? descriptionId : undefined, hasMessage.value ? messageId : undefined]);
 });
+const rootStyle = computed(() => ({
+  "--base-form-item-label-width": props.labelWidth,
+}));
 </script>
 
 <template>
   <div
     class="base-form-item"
+    :style="rootStyle"
     :class="{
       'base-form-item--compact': compact,
       'base-form-item--horizontal': horizontal,
       'base-form-item--span-2': span === 2,
+      'base-form-item--span-3': span === 3,
+      'base-form-item--span-4': span === 4,
+      'base-form-item--label-center': labelAlign === 'center',
+      'base-form-item--truncate-label': truncateLabel,
+      'base-form-item--wrap-description': wrapDescription,
       'is-error': Boolean(error),
       'is-success': Boolean(success) && !error,
       'is-disabled': disabled,
       'is-readonly': readonly,
+      'is-loading': loading,
     }"
     role="group"
     :aria-label="ariaLabel || undefined"
     :aria-labelledby="(label || $slots.label) ? labelId : undefined"
     :aria-describedby="describedBy"
     :aria-invalid="error ? 'true' : undefined"
+    :aria-busy="loading ? 'true' : undefined"
     :aria-disabled="disabled ? 'true' : undefined"
     :aria-readonly="readonly ? 'true' : undefined"
   >
-    <div v-if="label || description || $slots.label || $slots.meta" class="base-form-item__label-wrap">
+    <div
+      v-if="label || description || $slots.label || $slots.meta"
+      class="base-form-item__label-wrap"
+      :class="{ 'base-form-item__label-wrap--hidden': hideLabel }"
+    >
       <label v-if="label || $slots.label" :id="labelId" class="base-form-item__label" :for="forId || undefined">
         <span class="base-form-item__label-text" :class="{ 'is-required': required }">
           <slot name="label">{{ label }}</slot>
@@ -91,6 +125,10 @@ const describedBy = computed(() => {
           <BaseIcon name="CircleCheck" size="13" aria-hidden="true" />
           {{ success }}
         </span>
+        <span v-else-if="loading" :id="messageId" class="base-form-item__message base-form-item__message--loading" role="status">
+          <BaseIcon name="LoaderCircle" size="13" aria-hidden="true" />
+          {{ resolvedLoadingText }}
+        </span>
         <span v-else-if="help" :id="messageId" class="base-form-item__message base-form-item__message--help">
           {{ help }}
         </span>
@@ -111,6 +149,14 @@ const describedBy = computed(() => {
   @apply md:col-span-2;
 }
 
+.base-form-item--span-3 {
+  @apply xl:col-span-3;
+}
+
+.base-form-item--span-4 {
+  @apply xl:col-span-4;
+}
+
 .base-form-item--compact {
   @apply gap-1;
 }
@@ -123,12 +169,25 @@ const describedBy = computed(() => {
   @apply opacity-90;
 }
 
+.base-form-item.is-loading .base-form-item__field {
+  @apply opacity-90;
+}
+
 .base-form-item--horizontal {
-  @apply grid gap-2 md:grid-cols-[160px_minmax(0,1fr)] md:items-start;
+  @apply grid gap-2 md:items-start;
+  grid-template-columns: var(--base-form-item-label-width) minmax(0, 1fr);
+}
+
+.base-form-item--label-center {
+  @apply md:items-center;
 }
 
 .base-form-item__label-wrap {
   @apply min-w-0;
+}
+
+.base-form-item__label-wrap--hidden {
+  @apply sr-only;
 }
 
 .base-form-item__label {
@@ -136,7 +195,11 @@ const describedBy = computed(() => {
 }
 
 .base-form-item__label-text {
-  @apply min-w-0 truncate text-sm font-bold text-slate-700 dark:text-slate-300;
+  @apply min-w-0 break-words text-sm font-bold leading-5 text-slate-700 dark:text-slate-300;
+}
+
+.base-form-item--truncate-label .base-form-item__label-text {
+  @apply truncate;
 }
 
 .base-form-item--compact .base-form-item__label-text {
@@ -159,6 +222,11 @@ const describedBy = computed(() => {
   @apply mt-0.5 text-xs leading-5 text-slate-400 dark:text-slate-500;
 }
 
+.base-form-item--wrap-description .base-form-item__description,
+.base-form-item__description {
+  @apply break-words;
+}
+
 .base-form-item__field {
   @apply min-w-0;
 }
@@ -173,6 +241,14 @@ const describedBy = computed(() => {
 
 .base-form-item__message--success {
   @apply text-emerald-600 dark:text-emerald-400;
+}
+
+.base-form-item__message--loading {
+  color: rgb(var(--color-primary));
+}
+
+.base-form-item__message--loading :deep(svg) {
+  animation: base-form-item-spin 0.9s linear infinite;
 }
 
 .base-form-item__message--help {
@@ -196,8 +272,22 @@ const describedBy = computed(() => {
 
 @media (prefers-reduced-motion: reduce) {
   .form-message-fade-enter-active,
-  .form-message-fade-leave-active {
+  .form-message-fade-leave-active,
+  .base-form-item__message--loading :deep(svg) {
     transition: none !important;
+    animation: none !important;
+  }
+}
+
+@media (max-width: 767px) {
+  .base-form-item--horizontal {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@keyframes base-form-item-spin {
+  to {
+    transform: rotate(360deg);
   }
 }
 </style>

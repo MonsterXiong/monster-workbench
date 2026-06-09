@@ -4,6 +4,7 @@ import { FolderSearch2, FileSearch } from "lucide-vue-next";
 import { useSystemStore } from "../../stores/system";
 import { useToast } from "../../composables/useToast";
 import { useI18n } from "../../composables/useI18n";
+import { getErrorMessage, getEventTargetValue } from "../../utils";
 
 const props = withDefaults(
   defineProps<{
@@ -40,7 +41,7 @@ async function handleSelect() {
     }
   } catch (err) {
     triggerToast(
-      err instanceof Error ? err.message : t("common.pathSelector.failed"),
+      getErrorMessage(err, t("common.pathSelector.failed")),
       "error"
     );
   }
@@ -55,7 +56,7 @@ async function handleSelect() {
       :placeholder="placeholder || t('common.pathSelector.placeholder')"
       :aria-label="inputLabel"
       class="workbench-input h-10 flex-1 text-xs font-mono"
-      @input="emit('update:modelValue', ($event.target as HTMLInputElement).value)"
+      @input="emit('update:modelValue', getEventTargetValue($event))"
     />
     <button
       class="workbench-btn border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700/50 text-slate-700 dark:text-slate-300 h-10 px-3.5 text-xs font-bold shrink-0 shadow-sm flex items-center gap-1.5"

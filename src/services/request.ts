@@ -1,5 +1,14 @@
 import { useToast } from "../composables/useToast";
-import { buildUrlWithQuery, safeJsonStringify } from "../utils";
+import {
+  buildUrlWithQuery,
+  clearTimeoutHandle,
+  createTimeout,
+  getErrorMessage,
+  isAbortError,
+  isJsonMimeType,
+  isNativeRequestBody,
+  safeJsonStringify,
+} from "../utils";
 
 export interface RequestOptions extends Omit<RequestInit, "body"> {
   timeout?: number;
@@ -29,7 +38,7 @@ function buildUrl(
 async function parseResponse<T>(response: Response): Promise<T> {
   const contentType = response.headers.get("content-type") ?? "";
 
-  if (contentType.includes("application/json")) {
+  if (isJsonMimeType(contentType)) {
     return (await response.json()) as T;
   }
 
@@ -57,11 +66,11 @@ class RequestClient {
   async request<T>(url: string, options: RequestOptions = {}): Promise<ApiResponse<T>> {
     const { timeout = 15000, params, headers, body, showToastOnError, ...rest } = options;
     const controller = new AbortController();
-    const timer = window.setTimeout(() => controller.abort(), timeout);
+    const timer = createTimeout(() => controller.abort(), timeout);
     const finalUrl = buildUrl(url, this.baseURL, params);
 
     const finalBody =
-      body && typeof body === "object" && !(body instanceof FormData) && !(body instanceof URLSearchParams)
+      body && typeof body === "object" && !isNativeRequestBody(body)
         ? safeJsonStringify(body)
         : (body ?? null);
 
@@ -99,11 +108,12 @@ class RequestClient {
     } catch (error) {
       let errMsg = "";
       let status = 0;
-      if (error instanceof DOMException && error.name === "AbortError") {
+      if (isAbortError(error)) {
         errMsg = "[ERR_HTTP_TIMEOUT] 网络请求超时，请稍后再试";
         status = 408;
       } else {
-        errMsg = error instanceof Error ? `[ERR_HTTP_FAILED] ${error.message}` : "[ERR_HTTP_NETWORK] 网络连接请求失败";
+        const message = getErrorMessage(error, "");
+        errMsg = message ? `[ERR_HTTP_FAILED] ${message}` : "[ERR_HTTP_NETWORK] 网络连接请求失败";
       }
 
       if (showToastOnError) {
@@ -117,7 +127,7 @@ class RequestClient {
         message: errMsg,
       };
     } finally {
-      window.clearTimeout(timer);
+      clearTimeoutHandle(timer);
     }
   }
 

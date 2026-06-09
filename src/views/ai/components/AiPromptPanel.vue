@@ -4,7 +4,7 @@ import { Check, FilePenLine, Plus, ScrollText, Sparkles, Trash2 } from "lucide-v
 import { useAiStore } from "../../../stores/ai";
 import { useI18n } from "../../../composables/useI18n";
 import { useToast } from "../../../composables/useToast";
-import { findByValue, hasByValue, mapToMap } from "../../../utils";
+import { findByValue, firstItem, getErrorMessage, hasByValue, mapToMap } from "../../../utils";
 import type { AiPromptItem, AiPromptType } from "../../../types/ai";
 
 const aiStore = useAiStore();
@@ -41,7 +41,7 @@ const filterCategoryOptions = computed(() => [
 const prompts = computed(() => aiStore.getPrompts(activeType.value, filterCategoryId.value));
 const categoryNameMap = computed(() => mapToMap(aiStore.promptLibrary.categories, (item) => item.id, (item) => item.name));
 const dialogTitle = computed(() => (editingId.value ? t("aiPage.prompts.editDialog") : t("aiPage.prompts.createDialog")));
-const selectedPrompt = computed(() => findByValue(prompts.value, (prompt) => prompt.id, selectedPromptId.value) ?? prompts.value[0] ?? null);
+const selectedPrompt = computed(() => findByValue(prompts.value, (prompt) => prompt.id, selectedPromptId.value) ?? firstItem(prompts.value) ?? null);
 
 watch(activeType, () => {
   filterCategoryId.value = "";
@@ -52,7 +52,7 @@ watch(
   prompts,
   (items) => {
     if (!hasByValue(items, (prompt) => prompt.id, selectedPromptId.value)) {
-      selectedPromptId.value = items[0]?.id || "";
+      selectedPromptId.value = firstItem(items)?.id || "";
     }
   },
   { immediate: true }
@@ -67,7 +67,7 @@ function resetDraft() {
   draft.title = "";
   draft.content = "";
   draft.newCategoryName = "";
-  draft.categoryId = categoryOptions.value[0]?.value || "";
+  draft.categoryId = firstItem(categoryOptions.value)?.value || "";
 }
 
 function openCreate() {
@@ -99,7 +99,7 @@ async function savePrompt() {
     dialogVisible.value = false;
     resetDraft();
   } catch (err) {
-    triggerToast(err instanceof Error ? err.message : t("aiPage.prompts.saveFailed"), "error");
+    triggerToast(getErrorMessage(err, t("aiPage.prompts.saveFailed")), "error");
   }
 }
 
@@ -108,7 +108,7 @@ async function deletePrompt(promptId: string) {
     await aiStore.deletePrompt(promptId);
     triggerToast(t("aiPage.prompts.deleted"), "success");
   } catch (err) {
-    triggerToast(err instanceof Error ? err.message : t("aiPage.prompts.deleteFailed"), "error");
+    triggerToast(getErrorMessage(err, t("aiPage.prompts.deleteFailed")), "error");
   }
 }
 
@@ -118,7 +118,7 @@ async function usePrompt(promptId: string) {
     triggerToast(t("aiPage.prompts.applied"), "success");
     emit("use", prompt.type);
   } catch (err) {
-    triggerToast(err instanceof Error ? err.message : t("aiPage.prompts.applyFailed"), "error");
+    triggerToast(getErrorMessage(err, t("aiPage.prompts.applyFailed")), "error");
   }
 }
 </script>

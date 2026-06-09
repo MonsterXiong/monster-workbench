@@ -3,7 +3,7 @@ import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { AlertTriangle, Bot, MessageSquareText, Plus, Send, UserRound } from "lucide-vue-next";
 import { useAiStore } from "../../../stores/ai";
 import { useI18n } from "../../../composables/useI18n";
-import { joinBy } from "../../../utils";
+import { getErrorMessage, isBlank, joinBy, toTrimmedString } from "../../../utils";
 import type { ActionMenuItem } from "../../../components/common/BaseActionMenu.vue";
 import type { AiConversationSession } from "../../../types/ai";
 
@@ -22,7 +22,7 @@ const emit = defineEmits<{
 
 const session = computed(() => aiStore.activeChatSession);
 const messages = computed(() => session.value?.messages || []);
-const isBusy = computed(() => Boolean(aiStore.getActionQueueStatus("chat")) || aiStore.activeAction === "chat");
+const isBusy = computed(() => aiStore.isActionBusy("chat", aiStore.activeModelConfigIds.chat));
 const scrollAnchor = computed(() => joinBy(messages.value, (message) => `${message.id}:${message.status}`, "|"));
 const sessionActions = computed<ActionMenuItem[]>(() => [
   { key: "rename", label: t("aiPage.sessions.rename"), icon: "Pencil" },
@@ -30,9 +30,9 @@ const sessionActions = computed<ActionMenuItem[]>(() => [
   { key: "delete", label: t("common.delete"), icon: "Trash2", type: "danger", divided: true },
 ]);
 
-onMounted(() => {
+onMounted(async () => {
   if (!aiStore.isLoaded) {
-    void aiStore.loadConfig();
+    await aiStore.loadConfig();
   }
   if (!aiStore.activeChatSession) {
     aiStore.createSession("chat");
@@ -63,7 +63,7 @@ function consumePendingPrompt() {
 }
 
 async function handleSend() {
-  const content = input.value.trim();
+  const content = toTrimmedString(input.value);
   if (!content || isBusy.value) {
     return;
   }
@@ -71,7 +71,7 @@ async function handleSend() {
   try {
     await aiStore.sendChatMessage(content, aiStore.activeModelConfigIds.chat);
   } catch (err) {
-    emit("failed", err instanceof Error ? err.message : t("settings.aiProvider.testFailed"));
+    emit("failed", getErrorMessage(err, t("settings.aiProvider.testFailed")));
   }
 }
 
@@ -82,7 +82,7 @@ async function handleDeleteSession(sessionId: string) {
       aiStore.createSession("chat");
     }
   } catch (err) {
-    emit("failed", err instanceof Error ? err.message : t("settings.aiProvider.saveFailed"));
+    emit("failed", getErrorMessage(err, t("settings.aiProvider.saveFailed")));
   }
 }
 
@@ -97,7 +97,7 @@ async function saveSessionName() {
     await aiStore.renameSession(renamingSessionId.value, renameDraft.value);
     renameDialogVisible.value = false;
   } catch (err) {
-    emit("failed", err instanceof Error ? err.message : t("settings.aiProvider.saveFailed"));
+    emit("failed", getErrorMessage(err, t("settings.aiProvider.saveFailed")));
   }
 }
 
@@ -115,7 +115,7 @@ async function handleSessionAction(action: ActionMenuItem, target: AiConversatio
       await handleDeleteSession(target.id);
     }
   } catch (err) {
-    emit("failed", err instanceof Error ? err.message : t("settings.aiProvider.saveFailed"));
+    emit("failed", getErrorMessage(err, t("settings.aiProvider.saveFailed")));
   }
 }
 </script>
@@ -227,7 +227,7 @@ async function handleSessionAction(action: ActionMenuItem, target: AiConversatio
               size="sm"
               class="send-btn"
               :loading="Boolean(isBusy)"
-              :disabled="!input.trim() || Boolean(isBusy)"
+              :disabled="isBlank(input) || Boolean(isBusy)"
               @click="handleSend"
             >
               <template #icon><Send class="h-3.5 w-3.5" /></template>

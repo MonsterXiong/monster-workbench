@@ -1,3 +1,9 @@
+import { toSortedArray } from "./array";
+import { toNonNegativeInteger } from "./number";
+
+export type TreeChildrenGetter<T> = (item: T) => readonly T[] | undefined;
+export type TreeKeyGetter<T, K extends PropertyKey> = (item: T) => K;
+
 export interface FlattenTreeItem<T> {
   node: T;
   depth: number;
@@ -5,6 +11,8 @@ export interface FlattenTreeItem<T> {
   parent: T | null;
   path: number[];
 }
+
+export type TreeNodeMeta<T> = Omit<FlattenTreeItem<T>, "node">;
 
 export interface TreeFlatListItem<T, K extends PropertyKey> extends FlattenTreeItem<T> {
   id: K;
@@ -21,6 +29,18 @@ export interface TreeFlatListOptions<T, K extends PropertyKey> {
 
 export interface TreeSearchResult<T> extends FlattenTreeItem<T> {
   ancestors: T[];
+}
+
+export interface TreeDepthGroup<T> {
+  depth: number;
+  items: Array<FlattenTreeItem<T>>;
+}
+
+export interface TreeStats {
+  nodeCount: number;
+  leafCount: number;
+  branchCount: number;
+  depth: number;
 }
 
 export interface ListToTreeOptions<T, K extends PropertyKey, C extends string = "children"> {
@@ -65,16 +85,28 @@ export interface ParsedTreePathItem {
   is_file: boolean;
 }
 
+export function getTreeChildren<T>(item: T, getChildren: TreeChildrenGetter<T>): readonly T[] {
+  return getChildren(item) ?? [];
+}
+
+export function hasTreeChildren<T>(item: T, getChildren: TreeChildrenGetter<T>): boolean {
+  return getTreeChildren(item, getChildren).length > 0;
+}
+
+export function isTreeLeafNode<T>(item: T, getChildren: TreeChildrenGetter<T>): boolean {
+  return !hasTreeChildren(item, getChildren);
+}
+
 export function flattenTree<T>(
   items: readonly T[],
-  getChildren: (item: T) => readonly T[] | undefined,
+  getChildren: TreeChildrenGetter<T>,
   depth = 0,
   parent: T | null = null,
   parentPath: number[] = []
 ): Array<FlattenTreeItem<T>> {
   return items.flatMap((node, index) => {
     const path = [...parentPath, index];
-    const children = getChildren(node) ?? [];
+    const children = getTreeChildren(node, getChildren);
 
     return [
       { node, depth, index, parent, path },
@@ -85,6 +117,18 @@ export function flattenTree<T>(
 
 export function treeToList<T>(items: readonly T[], getChildren: (item: T) => readonly T[] | undefined): T[] {
   return flattenTree(items, getChildren).map((item) => item.node);
+}
+
+export function treeToListWithoutChildren<T extends object, C extends string = "children">(
+  items: readonly T[],
+  getChildren: (item: T) => readonly T[] | undefined,
+  childrenKey = "children" as C
+): Array<Omit<T, C>> {
+  return treeToList(items, getChildren).map((item) => {
+    const result = { ...(item as Record<string, unknown>) };
+    delete result[childrenKey];
+    return result as Omit<T, C>;
+  });
 }
 
 export function treeToMappedList<T, R>(
@@ -107,7 +151,7 @@ export function treeToFlatList<T, K extends PropertyKey>(
     const path = [...parentPath, index];
     const meta = { depth, index, parent, path };
     const id = options.getId(node, meta);
-    const children = options.getChildren(node) ?? [];
+    const children = getTreeChildren(node, options.getChildren);
 
     return [
       { node, ...meta, id, parentId },
@@ -144,6 +188,80 @@ export function treeToParentIdMap<T, K extends PropertyKey>(items: readonly T[],
   return result;
 }
 
+export function treeToChildrenIdMap<T, K extends PropertyKey>(items: readonly T[], options: TreeFlatListOptions<T, K>): Map<K, K[]> {
+  const result = new Map<K, K[]>();
+
+  for (const item of treeToFlatList(items, options)) {
+    if (!result.has(item.id)) {
+      result.set(item.id, []);
+    }
+
+    if (item.parentId !== null && result.has(item.parentId)) {
+      result.set(item.parentId, [...(result.get(item.parentId) ?? []), item.id]);
+    }
+  }
+
+  return result;
+}
+
+export function treeToKeyList<T, K extends PropertyKey>(
+  items: readonly T[],
+  getChildren: TreeChildrenGetter<T>,
+  getKey: TreeKeyGetter<T, K>
+): K[] {
+  return treeToList(items, getChildren).map((item) => getKey(item));
+}
+
+export function filterTreeNodeKeys<T, K extends PropertyKey>(
+  items: readonly T[],
+  predicate: (item: T, meta: TreeNodeMeta<T>) => boolean,
+  getChildren: TreeChildrenGetter<T>,
+  getKey: TreeKeyGetter<T, K>
+): K[] {
+  return flattenTree(items, getChildren)
+    .filter(({ node, ...meta }) => predicate(node, meta))
+    .map(({ node }) => getKey(node));
+}
+
+export function getTreePathKeys<T, K extends PropertyKey>(
+  items: readonly T[],
+  predicate: (item: T) => boolean,
+  getChildren: TreeChildrenGetter<T>,
+  getKey: TreeKeyGetter<T, K>
+): K[] {
+  return getTreeNodePath(items, predicate, getChildren).map((item) => getKey(item));
+}
+
+export function getTreePathKeysByValue<T, K extends PropertyKey, V>(
+  items: readonly T[],
+  getValue: (item: T, meta: TreeNodeMeta<T>) => V,
+  targetValue: V,
+  getChildren: TreeChildrenGetter<T>,
+  getKey: TreeKeyGetter<T, K>
+): K[] {
+  const match = findTreeNodeByValue(items, getValue, targetValue, getChildren);
+  return match ? [...match.ancestors, match.node].map((item) => getKey(item)) : [];
+}
+
+export function getTreeAncestorKeysByValue<T, K extends PropertyKey, V>(
+  items: readonly T[],
+  getValue: (item: T, meta: TreeNodeMeta<T>) => V,
+  targetValue: V,
+  getChildren: TreeChildrenGetter<T>,
+  getKey: TreeKeyGetter<T, K>
+): K[] {
+  const match = findTreeNodeByValue(items, getValue, targetValue, getChildren);
+  return match ? match.ancestors.map((item) => getKey(item)) : [];
+}
+
+export function getTreeDescendantKeys<T, K extends PropertyKey>(
+  item: T,
+  getChildren: TreeChildrenGetter<T>,
+  getKey: TreeKeyGetter<T, K>
+): K[] {
+  return getTreeDescendants(item, getChildren).map((node) => getKey(node));
+}
+
 export function walkTree<T>(
   items: readonly T[],
   visitor: (item: T, meta: Omit<FlattenTreeItem<T>, "node">) => void,
@@ -155,7 +273,7 @@ export function walkTree<T>(
   items.forEach((node, index) => {
     const path = [...parentPath, index];
     visitor(node, { depth, index, parent, path });
-    walkTree(getChildren(node) ?? [], visitor, getChildren, depth + 1, node, path);
+    walkTree(getTreeChildren(node, getChildren), visitor, getChildren, depth + 1, node, path);
   });
 }
 
@@ -174,6 +292,14 @@ export function reduceTree<T, R>(
 
 export function countTreeNodes<T>(items: readonly T[], getChildren: (item: T) => readonly T[] | undefined): number {
   return reduceTree(items, (count) => count + 1, 0, getChildren);
+}
+
+export function countTreeLeafNodes<T>(items: readonly T[], getChildren: TreeChildrenGetter<T>): number {
+  return reduceTree(items, (count, item) => count + (isTreeLeafNode(item, getChildren) ? 1 : 0), 0, getChildren);
+}
+
+export function countTreeBranchNodes<T>(items: readonly T[], getChildren: TreeChildrenGetter<T>): number {
+  return reduceTree(items, (count, item) => count + (hasTreeChildren(item, getChildren) ? 1 : 0), 0, getChildren);
 }
 
 export function someTree<T>(
@@ -211,7 +337,7 @@ export function findTreeNode<T>(
     }
 
     const match = findTreeNode(
-      getChildren(node) ?? [],
+      getTreeChildren(node, getChildren),
       predicate,
       getChildren,
       depth + 1,
@@ -296,14 +422,14 @@ export function getTreeNodeByPath<T>(
     }
 
     currentNode = currentItems[index];
-    currentItems = getChildren(currentNode) ?? [];
+    currentItems = getTreeChildren(currentNode, getChildren);
   }
 
   return currentNode ?? null;
 }
 
 export function getTreeDescendants<T>(item: T, getChildren: (item: T) => readonly T[] | undefined): T[] {
-  return treeToList(getChildren(item) ?? [], getChildren);
+  return treeToList(getTreeChildren(item, getChildren), getChildren);
 }
 
 export function getTreeSiblings<T>(
@@ -316,13 +442,19 @@ export function getTreeSiblings<T>(
     return [];
   }
 
-  const siblings = match.parent ? getChildren(match.parent) ?? [] : items;
+  const siblings = match.parent ? getTreeChildren(match.parent, getChildren) : items;
   return siblings.filter((_, index) => index !== match.index);
 }
 
 export function getTreeLeafNodes<T>(items: readonly T[], getChildren: (item: T) => readonly T[] | undefined): T[] {
   return flattenTree(items, getChildren)
-    .filter(({ node }) => (getChildren(node) ?? []).length === 0)
+    .filter(({ node }) => isTreeLeafNode(node, getChildren))
+    .map(({ node }) => node);
+}
+
+export function getTreeBranchNodes<T>(items: readonly T[], getChildren: TreeChildrenGetter<T>): T[] {
+  return flattenTree(items, getChildren)
+    .filter(({ node }) => hasTreeChildren(node, getChildren))
     .map(({ node }) => node);
 }
 
@@ -455,7 +587,7 @@ export function mapTree<T, R>(
 ): R[] {
   return items.map((item) => {
     const mapped = mapper(item, depth, parent);
-    const children = getChildren(item) ?? [];
+    const children = getTreeChildren(item, getChildren);
     return setChildren(mapped, mapTree(children, mapper, getChildren, setChildren, depth + 1, item));
   });
 }
@@ -469,7 +601,7 @@ export function filterTree<T>(
   parent: T | null = null
 ): T[] {
   return items.flatMap((item) => {
-    const filteredChildren = filterTree(getChildren(item) ?? [], predicate, getChildren, setChildren, depth + 1, item);
+    const filteredChildren = filterTree(getTreeChildren(item, getChildren), predicate, getChildren, setChildren, depth + 1, item);
     const matched = predicate(item, depth, parent);
 
     if (!matched && filteredChildren.length === 0) {
@@ -489,7 +621,7 @@ export function updateTreeNode<T>(
 ): T[] {
   return items.map((item) => {
     const updatedItem = predicate(item) ? updater(item) : item;
-    const children = getChildren(updatedItem) ?? [];
+    const children = getTreeChildren(updatedItem, getChildren);
     return setChildren(updatedItem, updateTreeNode(children, predicate, updater, getChildren, setChildren));
   });
 }
@@ -505,7 +637,7 @@ export function removeTreeNode<T>(
       return [];
     }
 
-    const children = getChildren(item) ?? [];
+    const children = getTreeChildren(item, getChildren);
     return [setChildren(item, removeTreeNode(children, predicate, getChildren, setChildren))];
   });
 }
@@ -516,9 +648,8 @@ export function sortTree<T>(
   getChildren: (item: T) => readonly T[] | undefined,
   setChildren: (item: T, children: T[]) => T
 ): T[] {
-  return [...items]
-    .sort(compare)
-    .map((item) => setChildren(item, sortTree(getChildren(item) ?? [], compare, getChildren, setChildren)));
+  return toSortedArray(items, compare)
+    .map((item) => setChildren(item, sortTree(getTreeChildren(item, getChildren), compare, getChildren, setChildren)));
 }
 
 export function getTreeDepth<T>(items: readonly T[], getChildren: (item: T) => readonly T[] | undefined): number {
@@ -526,7 +657,36 @@ export function getTreeDepth<T>(items: readonly T[], getChildren: (item: T) => r
     return 0;
   }
 
-  return Math.max(...items.map((item) => 1 + getTreeDepth(getChildren(item) ?? [], getChildren)));
+  return Math.max(...items.map((item) => 1 + getTreeDepth(getTreeChildren(item, getChildren), getChildren)));
+}
+
+export function groupTreeByDepth<T>(items: readonly T[], getChildren: TreeChildrenGetter<T>): Map<number, Array<FlattenTreeItem<T>>> {
+  const groups = new Map<number, Array<FlattenTreeItem<T>>>();
+
+  for (const item of flattenTree(items, getChildren)) {
+    groups.set(item.depth, [...(groups.get(item.depth) ?? []), item]);
+  }
+
+  return groups;
+}
+
+export function treeToDepthGroups<T>(items: readonly T[], getChildren: TreeChildrenGetter<T>): Array<TreeDepthGroup<T>> {
+  return Array.from(groupTreeByDepth(items, getChildren).entries()).map(([depth, groupItems]) => ({
+    depth,
+    items: groupItems,
+  }));
+}
+
+export function getTreeStats<T>(items: readonly T[], getChildren: TreeChildrenGetter<T>): TreeStats {
+  const nodeCount = countTreeNodes(items, getChildren);
+  const leafCount = countTreeLeafNodes(items, getChildren);
+
+  return {
+    nodeCount,
+    leafCount,
+    branchCount: nodeCount - leafCount,
+    depth: getTreeDepth(items, getChildren),
+  };
 }
 
 export function removeTopPathSegment(items: readonly ParsedTreePathItem[]): ParsedTreePathItem[] {
@@ -557,7 +717,7 @@ export function parseTreeTextToPathItems(text: string): ParsedTreePathItem[] {
     if (!name) continue;
 
     const prefixLength = Math.max(0, line.length - line.trimStart().length || line.indexOf(name));
-    const depth = Math.max(0, Math.floor(prefixLength / 4));
+    const depth = toNonNegativeInteger(prefixLength / 4);
     const cleanName = name.replace(/[/\\]+$/, "");
 
     pathStack.splice(depth);

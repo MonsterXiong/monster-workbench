@@ -1,5 +1,5 @@
-pub use crate::infra::db_nav::{NavigationItem, PagedResult, SortOrderItem};
 use crate::infra::db_nav::DbNavInfra;
+pub use crate::infra::db_nav::{NavigationItem, PagedResult, SortOrderItem};
 use crate::infra::path::PathProvider;
 use crate::infra::AppResult;
 
@@ -87,11 +87,7 @@ impl NavigationService {
         DbNavInfra::clear_file_references(&db_dir, rel_path)
     }
 
-    pub fn check_file_references(
-        &self,
-        _db_dir: &str,
-        rel_path: &str,
-    ) -> AppResult<Vec<String>> {
+    pub fn check_file_references(&self, _db_dir: &str, rel_path: &str) -> AppResult<Vec<String>> {
         let db_dir = self.navigation_db_dir()?;
         DbNavInfra::check_file_references(&db_dir, rel_path)
     }

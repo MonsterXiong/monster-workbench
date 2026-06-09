@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, useSlots } from "vue";
 import { useI18n } from "../../composables/useI18n";
 
 type ToolbarSize = "sm" | "md" | "lg";
@@ -19,6 +19,9 @@ interface Props {
   disabled?: boolean;
   loading?: boolean;
   loadingText?: string;
+  emptyText?: string;
+  emptyIcon?: string;
+  stickyOffset?: number | string;
   role?: string;
   ariaLabel?: string;
   leftLabel?: string;
@@ -38,6 +41,9 @@ const props = withDefaults(defineProps<Props>(), {
   disabled: false,
   loading: false,
   loadingText: "",
+  emptyText: "",
+  emptyIcon: "Inbox",
+  stickyOffset: 0,
   role: "toolbar",
   ariaLabel: "",
   leftLabel: "",
@@ -46,8 +52,13 @@ const props = withDefaults(defineProps<Props>(), {
 });
 
 const { t } = useI18n();
+const slots = useSlots();
 const toolbarLabel = computed(() => props.ariaLabel || (props.role === "toolbar" ? t("common.toolbar") : ""));
 const resolvedLoadingText = computed(() => props.loadingText || t("common.loading"));
+const resolvedEmptyText = computed(() => props.emptyText || t("common.noData"));
+const hasToolbarContent = computed(() => Boolean(slots.left || slots.default || slots.right));
+const formatCssSize = (value: number | string) => (typeof value === "number" ? `${value}px` : value);
+const toolbarStyle = computed(() => ({ "--base-toolbar-sticky-top": formatCssSize(props.stickyOffset) } as Record<string, string>));
 </script>
 
 <template>
@@ -69,8 +80,9 @@ const resolvedLoadingText = computed(() => props.loadingText || t("common.loadin
     ]"
     :role="role || undefined"
     :aria-label="toolbarLabel || undefined"
-    :aria-disabled="disabled ? 'true' : undefined"
+    :aria-disabled="disabled || loading ? 'true' : undefined"
     :aria-busy="loading ? 'true' : undefined"
+    :style="toolbarStyle"
   >
     <div
       v-if="$slots.left"
@@ -95,6 +107,10 @@ const resolvedLoadingText = computed(() => props.loadingText || t("common.loadin
       :aria-label="rightLabel || undefined"
     >
       <slot name="right"></slot>
+    </div>
+    <div v-if="!hasToolbarContent" class="base-toolbar__empty" role="status">
+      <BaseIcon :name="emptyIcon" size="15" aria-hidden="true" />
+      <span>{{ resolvedEmptyText }}</span>
     </div>
     <div v-if="loading" class="base-toolbar__loading" role="status" aria-live="polite">
       <BaseIcon name="LoaderCircle" size="14" aria-hidden="true" />
@@ -151,7 +167,8 @@ const resolvedLoadingText = computed(() => props.loadingText || t("common.loadin
 }
 
 .base-toolbar--sticky {
-  @apply sticky top-0 z-20;
+  top: var(--base-toolbar-sticky-top, 0);
+  @apply sticky z-20;
 }
 
 .base-toolbar--divided {
@@ -167,7 +184,11 @@ const resolvedLoadingText = computed(() => props.loadingText || t("common.loadin
 }
 
 .base-toolbar__group {
-  @apply flex min-w-0 flex-wrap items-center gap-2;
+  @apply flex min-w-0 max-w-full flex-wrap items-center gap-2;
+}
+
+.base-toolbar.is-loading .base-toolbar__group {
+  @apply pointer-events-none opacity-50;
 }
 
 .base-toolbar--nowrap .base-toolbar__group {
@@ -201,6 +222,11 @@ const resolvedLoadingText = computed(() => props.loadingText || t("common.loadin
 
 .base-toolbar__loading {
   @apply absolute inset-0 z-10 flex items-center justify-center gap-2 rounded-[inherit] bg-white/80 text-xs font-black text-primary backdrop-blur-sm dark:bg-slate-900/80;
+}
+
+.base-toolbar__empty {
+  @apply flex min-h-8 min-w-0 flex-1 items-center justify-center gap-2 rounded-xl border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-center text-xs font-bold text-slate-400 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-500;
+  overflow-wrap: anywhere;
 }
 
 .base-toolbar__loading :deep(svg) {

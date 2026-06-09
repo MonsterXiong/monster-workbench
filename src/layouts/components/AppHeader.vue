@@ -18,6 +18,7 @@ import {
 
 import { useTaskStore } from "../../stores/task";
 import { useI18n } from "../../composables/useI18n";
+import { addDomEventListener, countWhere, isEventTargetInsideElement, type DomEventCleanup } from "../../utils";
 
 const showUserMenu = ref(false);
 const userMenuRef = ref<HTMLElement | null>(null);
@@ -30,10 +31,11 @@ const showLangMenu = ref(false);
 const langMenuRef = ref<HTMLElement | null>(null);
 
 const taskStore = useTaskStore();
+let stopOutsideClickListener: DomEventCleanup | null = null;
 
 // 计算进行中的任务数
 const runningTasksCount = computed(() => {
-  return taskStore.tasks.filter(t => t.status === "running").length;
+  return countWhere(taskStore.tasks, (task) => task.status === "running");
 });
 
 // 计算所有任务总数
@@ -65,24 +67,24 @@ function changeLang(lang: string) {
 }
 
 function handleOutsideClick(event: MouseEvent) {
-  const target = event.target as Node;
-  if (userMenuRef.value && !userMenuRef.value.contains(target)) {
+  if (userMenuRef.value && !isEventTargetInsideElement(event, userMenuRef.value)) {
     showUserMenu.value = false;
   }
-  if (notificationMenuRef.value && !notificationMenuRef.value.contains(target)) {
+  if (notificationMenuRef.value && !isEventTargetInsideElement(event, notificationMenuRef.value)) {
     showNotificationMenu.value = false;
   }
-  if (langMenuRef.value && !langMenuRef.value.contains(target)) {
+  if (langMenuRef.value && !isEventTargetInsideElement(event, langMenuRef.value)) {
     showLangMenu.value = false;
   }
 }
 
 onMounted(() => {
-  document.addEventListener("click", handleOutsideClick);
+  stopOutsideClickListener = addDomEventListener(document, "click", handleOutsideClick);
 });
 
 onUnmounted(() => {
-  document.removeEventListener("click", handleOutsideClick);
+  stopOutsideClickListener?.();
+  stopOutsideClickListener = null;
 });
 </script>
 

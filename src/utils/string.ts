@@ -1,3 +1,5 @@
+import { isNonEmptyValue } from "./value";
+
 export function isBlank(value: unknown): boolean {
   return typeof value !== "string" || value.trim().length === 0;
 }
@@ -23,11 +25,14 @@ export function normalizeStringKey(value: unknown): string {
   return normalizeWhitespace(String(value ?? "")).toLowerCase();
 }
 
-export function joinNonEmptyStrings(values: readonly unknown[], separator = " "): string {
+export function normalizeStringList(values: readonly unknown[]): string[] {
   return values
     .map((value) => (typeof value === "string" ? value.trim() : String(value ?? "").trim()))
-    .filter(Boolean)
-    .join(separator);
+    .filter(isNonEmptyValue);
+}
+
+export function joinNonEmptyStrings(values: readonly unknown[], separator = " "): string {
+  return normalizeStringList(values).join(separator);
 }
 
 export function joinAriaIds(values: readonly (string | null | undefined | false)[]): string | undefined {
@@ -46,9 +51,18 @@ export interface SplitOnceResult {
   found: boolean;
 }
 
+export interface ExtractBetweenResult {
+  value: string;
+  found: boolean;
+}
+
 export interface IncludesAnyTextOptions {
   ignoreCase?: boolean;
   trimKeyword?: boolean;
+}
+
+export interface IndentLinesOptions {
+  skipEmpty?: boolean;
 }
 
 function normalizeTextListMatchValue(value: string, ignoreCase: boolean): string {
@@ -67,16 +81,79 @@ function getTextListMatchOptions(options: IncludesAnyTextOptions): Required<Incl
   };
 }
 
+export function normalizeLineBreaks(value: string): string {
+  return value.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+}
+
 export function splitLines(value: string, options: SplitLinesOptions = {}): string[] {
   const trim = options.trim ?? false;
   const keepEmpty = options.keepEmpty ?? true;
 
-  return value
-    .replace(/\r\n/g, "\n")
-    .replace(/\r/g, "\n")
+  return normalizeLineBreaks(value)
     .split("\n")
     .map((line) => (trim ? line.trim() : line))
     .filter((line) => keepEmpty || line.trim().length > 0);
+}
+
+export function joinLines(values: readonly unknown[]): string {
+  return values.map((value) => String(value ?? "")).join("\n");
+}
+
+export function joinTruthyLines(values: readonly unknown[]): string {
+  return values.filter(Boolean).map(String).join("\n");
+}
+
+export function joinNonEmptyLines(values: readonly unknown[], trim = false): string {
+  const lines = values
+    .map((value) => String(value ?? ""))
+    .map((line) => (trim ? line.trim() : line))
+    .filter((line) => line.length > 0);
+
+  return joinLines(lines);
+}
+
+export function joinTrimmedNonEmptyLines(values: readonly unknown[]): string {
+  return joinNonEmptyLines(values, true);
+}
+
+export function trimLines(value: string, options: Omit<SplitLinesOptions, "trim"> = {}): string {
+  return joinLines(splitLines(value, { ...options, trim: true }));
+}
+
+export function removeEmptyLines(value: string, trim = false): string {
+  return joinLines(splitLines(value, { trim, keepEmpty: false }));
+}
+
+export function indentLines(value: string, indent = "  ", options: IndentLinesOptions = {}): string {
+  return splitLines(value).map((line) => {
+    if (options.skipEmpty && line.length === 0) {
+      return line;
+    }
+
+    return `${indent}${line}`;
+  }).join("\n");
+}
+
+export function unindentLines(value: string): string {
+  const lines = splitLines(value);
+  const indents = lines
+    .filter((line) => line.trim().length > 0)
+    .map((line) => line.match(/^\s*/)?.[0].length ?? 0);
+  const minIndent = indents.length > 0 ? Math.min(...indents) : 0;
+
+  if (minIndent === 0) {
+    return joinLines(lines);
+  }
+
+  return joinLines(lines.map((line) => (line.trim().length > 0 ? line.slice(minIndent) : line)));
+}
+
+export function replaceAllText(value: string, search: string, replacement: string): string {
+  return search ? value.split(search).join(replacement) : value;
+}
+
+export function splitWords(value: string): string[] {
+  return normalizeWhitespace(value).split(" ").filter(isNonEmptyValue);
 }
 
 export function splitOnce(value: string, marker: string): SplitOnceResult {
@@ -104,6 +181,46 @@ export function splitOnce(value: string, marker: string): SplitOnceResult {
   };
 }
 
+export function isTextWrappedWith(value: string, prefix: string, suffix = prefix): boolean {
+  return Boolean(prefix || suffix) && value.startsWith(prefix) && value.endsWith(suffix);
+}
+
+export function extractTextBetween(value: string, prefix: string, suffix: string): ExtractBetweenResult {
+  if (!prefix && !suffix) {
+    return {
+      value,
+      found: true,
+    };
+  }
+
+  if ((prefix && !value.startsWith(prefix)) || (suffix && !value.endsWith(suffix))) {
+    return {
+      value: "",
+      found: false,
+    };
+  }
+
+  const start = prefix.length;
+  const end = suffix ? value.length - suffix.length : value.length;
+
+  if (end < start) {
+    return {
+      value: "",
+      found: false,
+    };
+  }
+
+  return {
+    value: value.slice(start, end),
+    found: true,
+  };
+}
+
+export function removeTextWrapper(value: string, prefix: string, suffix = prefix): string {
+  const result = extractTextBetween(value, prefix, suffix);
+  return result.found ? result.value : value;
+}
+
 export function joinTextList(values: readonly unknown[], separator = "\u3001"): string {
   return joinNonEmptyStrings(values, separator);
 }
@@ -115,6 +232,15 @@ export function truncateText(value: string, maxLength: number, suffix = "..."): 
 
   const safeLength = Math.max(0, maxLength - suffix.length);
   return `${value.slice(0, safeLength)}${suffix}`;
+}
+
+export function getFirstCharacter(value: string, fallback = ""): string {
+  return value.trim().charAt(0) || fallback;
+}
+
+export function getLastCharacter(value: string, fallback = ""): string {
+  const cleanValue = value.trim();
+  return cleanValue ? cleanValue.charAt(cleanValue.length - 1) : fallback;
 }
 
 export function capitalize(value: string): string {
@@ -133,6 +259,30 @@ export function lowerFirst(value: string): string {
   return `${value.charAt(0).toLowerCase()}${value.slice(1)}`;
 }
 
+export function ensurePrefix(value: string, prefix: string): string {
+  if (!prefix || value.startsWith(prefix)) {
+    return value;
+  }
+
+  return `${prefix}${value}`;
+}
+
+export function ensureSuffix(value: string, suffix: string): string {
+  if (!suffix || value.endsWith(suffix)) {
+    return value;
+  }
+
+  return `${value}${suffix}`;
+}
+
+export function removePrefix(value: string, prefix: string): string {
+  return prefix && value.startsWith(prefix) ? value.slice(prefix.length) : value;
+}
+
+export function removeSuffix(value: string, suffix: string): string {
+  return suffix && value.endsWith(suffix) ? value.slice(0, -suffix.length) : value;
+}
+
 export function getInitials(value: string, fallback = "?", maxLength = 2): string {
   const cleanValue = value.trim();
 
@@ -140,7 +290,7 @@ export function getInitials(value: string, fallback = "?", maxLength = 2): strin
     return fallback;
   }
 
-  const parts = cleanValue.split(/\s+/).filter(Boolean);
+  const parts = splitWords(cleanValue);
 
   if (parts.length > 1) {
     return parts
@@ -165,7 +315,7 @@ export function camelCase(value: string): string {
   const words = normalizeWhitespace(value)
     .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
     .split(/[^a-zA-Z0-9]+/)
-    .filter(Boolean);
+    .filter(isNonEmptyValue);
 
   return words
     .map((word, index) => {
@@ -177,6 +327,12 @@ export function camelCase(value: string): string {
 
 export function snakeCase(value: string): string {
   return kebabCase(value).replace(/-/g, "_");
+}
+
+export function titleCase(value: string): string {
+  return splitWords(value)
+    .map((word) => capitalize(word.toLowerCase()))
+    .join(" ");
 }
 
 export function equalsIgnoreCase(left: string, right: string): boolean {
@@ -253,14 +409,14 @@ export function escapeRegExp(value: string): string {
 
 export function splitBySeparators(value: string, separators: ReadonlyArray<string> = [",", "\uFF0C", "\n"], normalize = true): string[] {
   if (separators.length === 0) {
-    return [normalize ? value.trim() : value].filter(Boolean);
+    return [normalize ? value.trim() : value].filter(isNonEmptyValue);
   }
 
   const pattern = new RegExp(separators.map(escapeRegExp).join("|"));
   return value
     .split(pattern)
     .map((item) => (normalize ? item.trim() : item))
-    .filter((item) => item.length > 0);
+    .filter(isNonEmptyValue);
 }
 
 export function matchesKeyword<T>(item: T, keyword: string, fields: ReadonlyArray<(item: T) => unknown>): boolean {
