@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
-import { AlertTriangle, Bot, ChevronDown, ChevronLeft, ChevronRight, Image, Maximize2, Plus, RotateCcw, Send, Sparkles, UserRound, XCircle } from "lucide-vue-next";
+import { AlertTriangle, Bot, ChevronDown, ChevronLeft, ChevronRight, FolderOpen, Image, Maximize2, Plus, RotateCcw, Send, Sparkles, UserRound, XCircle } from "lucide-vue-next";
 import { useAiStore } from "../../../stores/ai";
 import { useI18n } from "../../../composables/useI18n";
 import type { ActionMenuItem } from "../../../components/common/BaseActionMenu.vue";
@@ -24,7 +24,6 @@ import {
   formatDuration,
   formatPositiveDuration,
   formatReducedAspectRatio,
-  formatShortIdentifier,
   formatTemplate,
   getDimensionsMaxSide,
   getDimensionsRatio,
@@ -48,7 +47,6 @@ import {
   joinNonEmptyLines,
   normalizeWhitespace,
   parseDimensionsText,
-  pickItemsByValues,
   preventAndStopDomEvent,
   replaceAllText,
   removeAnyPrefix,
@@ -120,16 +118,6 @@ const VERIFIED_IMAGE_SIZE_VALUES = [
   "1920x3840",
   "3840x1280",
   "1280x3840",
-];
-const QUICK_IMAGE_SIZE_VALUES = [
-  "1008x1792",
-  "1008x1344",
-  "1536x864",
-  "1344x1008",
-  "1024x1024",
-  "2048x2048",
-  "2160x3840",
-  "3840x2160",
 ];
 const EXPERIMENTAL_IMAGE_SIZE_VALUES = new Set<string>();
 const IMAGE_SIZE_TIER_LABELS = new Map<string, string>([
@@ -270,10 +258,6 @@ const activeSizeNotice = computed(() => {
   }
   return formatTemplate(t("aiPage.image.experimentalSizeNotice"), { size: activeSizeLabel.value });
 });
-const quickImageSizeOptions = computed(() => {
-  return pickItemsByValues(imageSizeOptions.value, (item) => item.value, QUICK_IMAGE_SIZE_VALUES);
-});
-const hasQuickImageSizePresets = computed(() => hasMultipleItems(quickImageSizeOptions.value));
 const activeImageModelName = computed(() => aiStore.activeImageConfig?.imageModel || aiStore.activeImageConfig?.model || "-");
 const stylePromptPresets = computed(() => aiStore.getPrompts("image", STYLE_PROMPT_CATEGORY_ID));
 const filteredStylePromptPresets = computed(() => {
@@ -390,6 +374,11 @@ const filteredImageSessionEmptyText = computed(() => {
   }
   return t("aiPage.image.sessionListEmpty");
 });
+const activeImageHeaderMeta = computed(() => joinBy([
+  aiStore.activeImageConfig?.name || aiStore.activeImageConfig?.displayName,
+  activeImageModelName.value,
+  isBusy.value ? imageStatusLabel.value : "",
+], (item) => item, " · "));
 
 onMounted(async () => {
   stopPreviewKeydown = addDomEventListener(window, "keydown", handlePreviewKeydown);
@@ -592,11 +581,6 @@ function undoPromptEnhance() {
   input.value = promptBeforeEnhance.value;
   selectedStylePromptId.value = stylePromptIdBeforeEnhance.value;
   clearPromptEnhanceUndo();
-  void focusImageInput();
-}
-
-function selectImageSize(size: string) {
-  aiStore.imageDraftSize = size;
   void focusImageInput();
 }
 
@@ -836,6 +820,10 @@ function getGeneratedImageSavedFilePath(message: ImageMessage, index: number) {
   return getGeneratedImageSavedFile(message, index)?.path || "";
 }
 
+function hasGeneratedImageSavedFile(message: ImageMessage, index: number) {
+  return Boolean(getGeneratedImageSavedFilePath(message, index));
+}
+
 function getGeneratedImageSavedFileName(message: ImageMessage, index: number) {
   const path = getGeneratedImageSavedFilePath(message, index);
   return path ? getSavedFileName(path) : "";
@@ -844,6 +832,30 @@ function getGeneratedImageSavedFileName(message: ImageMessage, index: number) {
 function getGeneratedImageSavedFileMeta(message: ImageMessage, index: number) {
   const file = getGeneratedImageSavedFile(message, index);
   return file ? `${file.mimeType} · ${formatBytes(file.sizeBytes)}` : "";
+}
+
+async function openGeneratedImageLocation(message: ImageMessage, index: number) {
+  const path = getGeneratedImageSavedFilePath(message, index);
+  if (!path) {
+    return;
+  }
+  try {
+    await aiStore.openImageSavedFileLocation(path);
+  } catch (err) {
+    emit("failed", getErrorMessage(err, t("settings.aiProvider.saveFailed")));
+  }
+}
+
+async function openPreviewSavedFileLocation() {
+  const path = previewSavedFile.value?.path;
+  if (!path) {
+    return;
+  }
+  try {
+    await aiStore.openImageSavedFileLocation(path);
+  } catch (err) {
+    emit("failed", getErrorMessage(err, t("settings.aiProvider.saveFailed")));
+  }
 }
 
 function hasGeneratedImages(message: ImageMessage) {
@@ -1059,10 +1071,6 @@ function scrollPreviewThumbnailIntoView(index = previewImageIndex.value) {
 
 function getSavedFileName(path: string) {
   return getSafeFileName(path, path);
-}
-
-function getShortRequestId(requestId: string | undefined) {
-  return formatShortIdentifier(requestId, 18);
 }
 
 function findImageTaskItem(message: ImageMessage) {
@@ -1334,23 +1342,6 @@ function getSessionStatusLabel(target: AiConversationSession) {
   return t("aiPage.image.completed");
 }
 
-function getSessionStatusClass(target: AiConversationSession) {
-  const status = getSessionStatusKey(target);
-  if (status === "empty") {
-    return "session-status--idle";
-  }
-  if (status === "pending") {
-    return "session-status--pending";
-  }
-  if (status === "canceled") {
-    return "session-status--canceled";
-  }
-  if (status === "failed") {
-    return "session-status--failed";
-  }
-  return "session-status--success";
-}
-
 function getSessionSizeLabel(target: AiConversationSession) {
   const latestSizeMessage = findLastItem(target.messages, (message) => Boolean(getMessageActualSize(message)));
   if (!latestSizeMessage) {
@@ -1422,13 +1413,14 @@ function getSessionPromptSummary(target: AiConversationSession) {
           <span class="session-item__prompt">{{ getSessionPromptSummary(item) }}</span>
           <span class="session-item__meta">
             {{ item.messages.length }} {{ t("aiPage.image.messageUnit") }}
-            <span v-if="getSessionSizeLabel(item)">· {{ getSessionSizeLabel(item) }}</span>
           </span>
         </div>
-        <span class="session-status" :class="getSessionStatusClass(item)">{{ getSessionStatusLabel(item) }}</span>
         <BaseActionMenu
           :actions="sessionActions"
+          class="session-action-menu"
           icon="MoreHorizontal"
+          :min-width="150"
+          :max-width="220"
           :aria-label="t('common.moreActions')"
           @click.stop
           @select="handleSessionAction($event, item)"
@@ -1446,11 +1438,7 @@ function getSessionPromptSummary(target: AiConversationSession) {
         </div>
         <div class="min-w-0 flex-1">
           <h3>{{ t("aiPage.image.title") }}</h3>
-          <p>{{ aiStore.activeImageConfig?.name || aiStore.activeImageConfig?.displayName }} · {{ activeImageModelName }}</p>
-        </div>
-        <div class="image-header__status">
-          <span class="status-pill" :class="{ 'status-pill--busy': Boolean(isBusy) }">{{ imageStatusLabel }}</span>
-          <span class="status-size">{{ activeSizeLabel }}</span>
+          <p>{{ activeImageHeaderMeta }}</p>
         </div>
       </header>
 
@@ -1496,9 +1484,6 @@ function getSessionPromptSummary(target: AiConversationSession) {
               <span v-if="message.role !== 'user' && getMessageLatencyLabel(message)">
                 {{ t("aiPage.image.latency") }} {{ getMessageLatencyLabel(message) }}
               </span>
-              <span v-if="message.requestId" :title="message.requestId">
-                {{ t("aiPage.image.requestId") }} {{ getShortRequestId(message.requestId) }}
-              </span>
             </div>
             <div class="image-bubble">
               <div v-if="message.status === 'pending' && !message.content" class="image-loading">
@@ -1519,10 +1504,6 @@ function getSessionPromptSummary(target: AiConversationSession) {
                     <span>
                       <strong>{{ t("aiPage.image.requestedSize") }}</strong>
                       <em>{{ getMessageRequestedSize(message) || message.imageSize || aiStore.imageDraftSize }}</em>
-                    </span>
-                    <span v-if="message.requestId">
-                      <strong>{{ t("aiPage.image.requestId") }}</strong>
-                      <em :title="message.requestId">{{ getShortRequestId(message.requestId) }}</em>
                     </span>
                   </div>
                   <div class="image-loading__progress" aria-hidden="true">
@@ -1593,20 +1574,6 @@ function getSessionPromptSummary(target: AiConversationSession) {
                   {{ item.label }}
                 </span>
               </div>
-              <div v-if="getMessagePrompt(message) || message.requestId" class="image-message__tools">
-                <BaseCopyButton
-                  v-if="getMessagePrompt(message)"
-                  :text="getMessagePrompt(message)"
-                  :label="t('aiPage.image.copyPrompt')"
-                  size="xs"
-                />
-                <BaseCopyButton
-                  v-if="message.requestId"
-                  :text="message.requestId"
-                  :label="t('aiPage.image.copyRequestId')"
-                  size="xs"
-                />
-              </div>
               <div v-if="getPreviewItems(message).length" class="generated-gallery">
                 <div v-if="hasMultiplePreviewItems(message) || hasMultipleSavedFiles(message)" class="generated-gallery__toolbar">
                   <strong>{{ formatTemplate(t("aiPage.image.gallerySummary"), { count: getPreviewItems(message).length }) }}</strong>
@@ -1672,11 +1639,22 @@ function getSessionPromptSummary(target: AiConversationSession) {
                     <div class="generated-frame__copy-tools">
                       <BaseCopyButton :text="url" :label="t('aiPage.image.copyImageUrl')" size="xs" />
                       <BaseCopyButton
-                        v-if="getGeneratedImageSavedFilePath(message, index)"
+                        v-if="hasGeneratedImageSavedFile(message, index)"
                         :text="getGeneratedImageSavedFilePath(message, index)"
                         :label="t('aiPage.image.copyPath')"
                         size="xs"
                       />
+                      <BaseButton
+                        v-if="hasGeneratedImageSavedFile(message, index)"
+                        type="neutral"
+                        outline
+                        size="xs"
+                        :title="t('aiPage.image.openFileLocation')"
+                        @click.stop="openGeneratedImageLocation(message, index)"
+                      >
+                        <template #icon><FolderOpen class="h-3 w-3" /></template>
+                        {{ t("aiPage.image.openFileLocationShort") }}
+                      </BaseButton>
                     </div>
                   </div>
                   <div
@@ -1688,15 +1666,6 @@ function getSessionPromptSummary(target: AiConversationSession) {
                     <span>{{ getGeneratedImageSavedFileName(message, index) }}</span>
                     <small>{{ getGeneratedImageSavedFileMeta(message, index) }}</small>
                   </div>
-                </div>
-              </div>
-              <div v-if="message.savedFiles?.length" class="saved-file-list">
-                <div v-for="file in message.savedFiles" :key="file.path" class="saved-file-item" :title="file.path">
-                  <div class="saved-file-item__info">
-                    <span>{{ getSavedFileName(file.path) }}</span>
-                    <strong>{{ file.mimeType }} · {{ formatBytes(file.sizeBytes) }}</strong>
-                  </div>
-                  <BaseCopyButton :text="file.path" :label="t('aiPage.image.copyPath')" size="xs" />
                 </div>
               </div>
               <div
@@ -1767,26 +1736,10 @@ function getSessionPromptSummary(target: AiConversationSession) {
             </div>
           </div>
           <div
-            v-if="hasQuickImageSizePresets || emptyPromptStarters.length || stylePromptPresets.length"
-            class="composer-size-presets"
-            :aria-label="t('aiPage.image.sizePresetLabel')"
+            v-if="emptyPromptStarters.length || stylePromptPresets.length"
+            class="composer-size-presets composer-size-presets--tools-only"
+            :aria-label="t('aiPage.image.promptToolsLabel')"
           >
-            <div v-if="hasQuickImageSizePresets" class="composer-size-presets__scroll">
-              <span class="composer-size-presets__label">{{ t("aiPage.image.sizePresetLabel") }}</span>
-              <button
-                v-for="option in quickImageSizeOptions"
-                :key="option.value"
-                type="button"
-                class="size-preset-chip"
-                :class="{ 'size-preset-chip--active': option.value === aiStore.imageDraftSize }"
-                :aria-pressed="option.value === aiStore.imageDraftSize"
-                :title="option.description"
-                @click="selectImageSize(option.value)"
-              >
-                <strong>{{ option.selectedLabel }}</strong>
-                <span>{{ option.meta || option.description }}</span>
-              </button>
-            </div>
             <div v-if="emptyPromptStarters.length || stylePromptPresets.length" class="composer-tools">
               <template v-if="emptyPromptStarters.length">
                 <button
@@ -1959,7 +1912,12 @@ function getSessionPromptSummary(target: AiConversationSession) {
       </template>
     </BaseDialog>
 
-    <BaseDialog v-model="previewDialogVisible" :title="t('aiPage.image.previewTitle')" width="min(1120px, 94vw)">
+    <BaseDialog
+      v-model="previewDialogVisible"
+      :title="t('aiPage.image.previewTitle')"
+      width="min(1120px, 94vw)"
+      :show-close="false"
+    >
       <div class="preview-dialog">
         <div class="preview-dialog__media">
           <div class="preview-dialog__image-stage">
@@ -2023,6 +1981,7 @@ function getSessionPromptSummary(target: AiConversationSession) {
             <div class="min-w-0">
               <span class="preview-dialog__eyebrow">{{ t("aiPage.image.previewTitle") }}</span>
               <strong>{{ previewImageTitle }}</strong>
+              <small>{{ previewMessage.model }}</small>
             </div>
             <div class="preview-dialog__actions">
               <BaseButton
@@ -2049,6 +2008,17 @@ function getSessionPromptSummary(target: AiConversationSession) {
                 :label="t('aiPage.image.copyImageUrl')"
                 size="xs"
               />
+              <BaseButton
+                v-if="previewSavedFile"
+                type="neutral"
+                outline
+                size="xs"
+                :title="t('aiPage.image.openFileLocation')"
+                @click="openPreviewSavedFileLocation"
+              >
+                <template #icon><FolderOpen class="h-3 w-3" /></template>
+                {{ t("aiPage.image.openFileLocationShort") }}
+              </BaseButton>
               <BaseCopyButton
                 :text="previewInfoText"
                 :label="t('aiPage.image.copyImageInfo')"
@@ -2059,28 +2029,20 @@ function getSessionPromptSummary(target: AiConversationSession) {
 
           <div class="preview-meta-grid">
             <div class="preview-meta-item">
-              <span>{{ t("aiPage.image.previewModel") }}</span>
-              <strong>{{ previewMessage.model }}</strong>
+              <span>{{ t("aiPage.image.actualSize") }}</span>
+              <strong>{{ getMessageActualSize(previewMessage) || "-" }}</strong>
             </div>
             <div class="preview-meta-item">
               <span>{{ t("aiPage.image.latency") }}</span>
               <strong>{{ getMessageLatencyLabel(previewMessage) || "-" }}</strong>
             </div>
             <div class="preview-meta-item">
-              <span>{{ t("aiPage.image.queueWait") }}</span>
-              <strong>{{ getMessageQueueWaitLabel(previewMessage) || "-" }}</strong>
-            </div>
-            <div class="preview-meta-item">
-              <span>{{ t("aiPage.image.actualSize") }}</span>
-              <strong>{{ getMessageActualSize(previewMessage) || "-" }}</strong>
+              <span>{{ t("aiPage.image.savedFiles") }}</span>
+              <strong>{{ previewSavedFile ? t("aiPage.image.savedFileBadge") : t("aiPage.image.previewNotSaved") }}</strong>
             </div>
             <div class="preview-meta-item">
               <span>{{ t("aiPage.image.requestedSize") }}</span>
               <strong>{{ getMessageRequestedSize(previewMessage) || "-" }}</strong>
-            </div>
-            <div class="preview-meta-item">
-              <span>{{ t("aiPage.image.requestId") }}</span>
-              <strong :title="previewMessage.requestId">{{ getShortRequestId(previewMessage.requestId) || "-" }}</strong>
             </div>
           </div>
 
@@ -2093,20 +2055,11 @@ function getSessionPromptSummary(target: AiConversationSession) {
             <span>{{ getCompatibilityNotice(previewMessage) }}</span>
           </div>
 
-          <div v-if="previewPrompt" class="preview-section">
+          <div v-if="previewPrompt" class="preview-section preview-section--prompt">
             <div class="preview-section__head">
               <span>{{ t("aiPage.image.previewPrompt") }}</span>
-              <BaseCopyButton :text="previewPrompt" :label="t('aiPage.image.copyPrompt')" size="xs" />
             </div>
             <p>{{ previewPrompt }}</p>
-          </div>
-
-          <div v-if="previewMessage.requestId" class="preview-section preview-section--compact">
-            <div class="preview-section__head">
-              <span>{{ t("aiPage.image.requestId") }}</span>
-              <BaseCopyButton :text="previewMessage.requestId" :label="t('aiPage.image.copyRequestId')" size="xs" />
-            </div>
-            <code>{{ previewMessage.requestId }}</code>
           </div>
 
           <div v-if="previewSavedFile" class="preview-section preview-section--compact">
@@ -2161,13 +2114,13 @@ function getSessionPromptSummary(target: AiConversationSession) {
   @apply flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 transition-colors hover:border-emerald-500 hover:text-emerald-600 dark:border-slate-800 dark:bg-slate-950;
 }
 .session-item {
-  @apply flex min-h-20 items-center gap-2 rounded-xl border border-transparent px-2 py-2 text-left transition-colors hover:border-slate-200 hover:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 dark:hover:border-slate-800 dark:hover:bg-slate-950;
+  @apply flex min-h-14 items-center gap-2 rounded-xl border border-transparent px-2 py-1.5 text-left transition-colors hover:border-slate-200 hover:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 dark:hover:border-slate-800 dark:hover:bg-slate-950;
 }
 .session-item--active {
   @apply border-emerald-500 bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300;
 }
 .session-thumb {
-  @apply relative flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-slate-200 bg-white text-slate-400 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-500;
+  @apply relative flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-slate-200 bg-white text-slate-400 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-500;
 }
 .session-thumb img {
   @apply h-full w-full object-cover;
@@ -2176,34 +2129,27 @@ function getSessionPromptSummary(target: AiConversationSession) {
   @apply absolute bottom-0.5 right-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-slate-950 px-1 text-[9px] font-black leading-none text-white shadow-sm ring-1 ring-white/80 dark:bg-white dark:text-slate-950 dark:ring-slate-950/80;
 }
 .session-item__title {
-  @apply truncate text-xs font-black text-slate-800 dark:text-slate-100;
+  @apply truncate text-[11px] font-black leading-4 text-slate-800 dark:text-slate-100;
 }
 .session-item__content {
-  @apply flex min-w-0 flex-1 flex-col justify-center gap-1;
+  @apply flex min-w-0 flex-1 flex-col justify-center gap-0.5;
 }
 .session-item__prompt {
-  @apply min-w-0 truncate text-[10px] font-semibold leading-4 text-slate-400 dark:text-slate-500;
+  @apply min-w-0 truncate text-[10px] font-semibold leading-3 text-slate-400 dark:text-slate-500;
 }
 .session-item__meta {
-  @apply text-[10px] font-bold text-slate-500 dark:text-slate-400;
+  @apply text-[9px] font-bold text-slate-500 dark:text-slate-400;
 }
-.session-status {
-  @apply ml-auto shrink-0 rounded-full px-2 py-0.5 text-[10px] font-black;
+.session-action-menu {
+  @apply shrink-0 opacity-70 transition-opacity;
 }
-.session-status--idle {
-  @apply bg-slate-200 text-slate-500 dark:bg-slate-800 dark:text-slate-400;
+.session-item:hover .session-action-menu,
+.session-item:focus-within .session-action-menu,
+.session-item--active .session-action-menu {
+  @apply opacity-100;
 }
-.session-status--pending {
-  @apply bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300;
-}
-.session-status--success {
-  @apply bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300;
-}
-.session-status--failed {
-  @apply bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300;
-}
-.session-status--canceled {
-  @apply bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300;
+.session-action-menu :deep(.base-action-menu__trigger) {
+  @apply h-6 w-6 rounded-md border-transparent bg-transparent p-0 text-slate-400 shadow-none hover:border-slate-200 hover:bg-white hover:text-slate-700 dark:hover:border-slate-700 dark:hover:bg-slate-900 dark:hover:text-slate-100;
 }
 .image-workspace {
   @apply flex min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950;
@@ -2219,25 +2165,6 @@ function getSessionPromptSummary(target: AiConversationSession) {
 }
 .image-header p {
   @apply mt-0.5 truncate text-[10px] font-semibold text-slate-500 dark:text-slate-400;
-}
-.image-header__status {
-  @apply flex shrink-0 items-center gap-2;
-}
-.status-pill {
-  @apply inline-flex h-7 items-center rounded-full border border-slate-200 bg-white px-3 text-[11px] font-black text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300;
-}
-.status-pill--busy {
-  border-color: rgba(5, 150, 105, 0.35);
-  background: rgba(5, 150, 105, 0.08);
-  color: #047857;
-}
-.dark .status-pill--busy {
-  border-color: rgba(52, 211, 153, 0.3);
-  background: rgba(6, 78, 59, 0.35);
-  color: #6ee7b7;
-}
-.status-size {
-  @apply inline-flex h-7 items-center rounded-full bg-slate-900 px-3 text-[11px] font-black text-white dark:bg-slate-100 dark:text-slate-900;
 }
 .image-history-shell {
   @apply relative flex min-h-0 flex-1;
@@ -2502,25 +2429,25 @@ function getSessionPromptSummary(target: AiConversationSession) {
   @apply flex shrink-0 flex-wrap items-center justify-end gap-1.5;
 }
 .generated-frame {
-  @apply relative min-w-0 overflow-hidden rounded-xl border border-slate-200 bg-slate-100 text-left shadow-sm transition hover:border-emerald-400 hover:shadow-md focus-within:ring-2 focus-within:ring-emerald-500 dark:border-slate-800 dark:bg-slate-900;
+  @apply relative min-w-0 overflow-hidden rounded-2xl bg-slate-100 text-left shadow-sm ring-1 ring-slate-200/80 transition hover:shadow-lg hover:ring-emerald-400 focus-within:ring-2 focus-within:ring-emerald-500 dark:bg-slate-900 dark:ring-slate-800;
   width: 100%;
   max-height: min(320px, 42vh);
 }
 .generated-preview-button {
-  @apply flex h-full w-full items-center justify-center bg-slate-50 p-0 text-left dark:bg-slate-950;
+  @apply flex h-full w-full items-center justify-center bg-white p-0 text-left dark:bg-slate-950;
   min-height: 164px;
 }
 .generated-image {
   @apply h-full w-full object-contain;
 }
 .generated-frame__action {
-  @apply absolute bottom-2 right-2 inline-flex items-center gap-1 rounded-full bg-slate-950/90 px-2.5 py-1 text-[10px] font-black text-white opacity-0 shadow-sm backdrop-blur transition;
+  @apply absolute bottom-2 right-2 inline-flex items-center gap-1 rounded-full bg-slate-950/85 px-2.5 py-1 text-[10px] font-black text-white opacity-0 shadow-sm backdrop-blur transition;
 }
 .generated-frame__index {
   @apply pointer-events-none absolute left-1/2 top-2 z-10 inline-flex -translate-x-1/2 items-center rounded-full border border-white/20 bg-slate-950/85 px-2.5 py-1 text-[10px] font-black text-white shadow-lg backdrop-blur;
 }
 .generated-frame__tools {
-  @apply pointer-events-none absolute inset-x-0 bottom-0 z-10 flex items-end justify-between gap-2 bg-gradient-to-t from-slate-950/80 via-slate-950/35 to-transparent p-2 pt-10 opacity-0 transition;
+  @apply pointer-events-none absolute inset-x-0 bottom-0 z-10 flex items-end justify-between gap-2 bg-gradient-to-t from-slate-950/75 via-slate-950/25 to-transparent p-2 pt-10 opacity-0 transition;
 }
 .generated-frame__quick-actions,
 .generated-frame__copy-tools {
@@ -2548,6 +2475,21 @@ function getSessionPromptSummary(target: AiConversationSession) {
 .generated-frame__copy-tools :deep(.base-copy-button) {
   @apply border-white/25 bg-slate-950/85 text-white shadow-lg hover:border-white/40 hover:bg-slate-900 hover:text-white dark:border-white/20 dark:bg-slate-950/90 dark:text-white dark:hover:border-white/40 dark:hover:bg-slate-900;
 }
+.generated-frame__copy-tools :deep(.el-button) {
+  height: 24px !important;
+  border-color: rgba(255, 255, 255, 0.25) !important;
+  background: rgba(15, 23, 42, 0.86) !important;
+  color: #ffffff !important;
+  font-size: 10px !important;
+  font-weight: 900 !important;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.24) !important;
+}
+.generated-frame__copy-tools :deep(.el-button:hover),
+.generated-frame__copy-tools :deep(.el-button:focus) {
+  border-color: rgba(255, 255, 255, 0.42) !important;
+  background: rgba(30, 41, 59, 0.92) !important;
+  color: #ffffff !important;
+}
 .generated-frame__file-badge {
   @apply absolute left-2 top-2 z-10 flex max-w-[calc(100%-72px)] min-w-0 items-center gap-1 rounded-full bg-white/90 px-2.5 py-1 text-[10px] font-bold text-slate-700 shadow-sm backdrop-blur dark:bg-slate-950/90 dark:text-slate-200;
 }
@@ -2567,21 +2509,6 @@ function getSessionPromptSummary(target: AiConversationSession) {
 .generated-frame:hover .generated-frame__tools,
 .generated-frame:focus-within .generated-frame__tools {
   opacity: 1;
-}
-.saved-file-list {
-  @apply mt-3 flex flex-col gap-2;
-}
-.saved-file-item {
-  @apply flex min-w-0 items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-900;
-}
-.saved-file-item__info {
-  @apply flex min-w-0 flex-1 flex-col gap-1;
-}
-.saved-file-item__info span {
-  @apply truncate text-[11px] font-bold text-slate-700 dark:text-slate-300;
-}
-.saved-file-item__info strong {
-  @apply text-[10px] font-semibold text-slate-500 dark:text-slate-400;
 }
 .image-message__actions {
   @apply mt-3 flex flex-wrap justify-end gap-2;
@@ -2617,42 +2544,16 @@ function getSessionPromptSummary(target: AiConversationSession) {
   @apply min-w-0 truncate;
 }
 .composer-size-presets {
-  @apply grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 border-t border-slate-200 pt-1.5 dark:border-slate-800;
+  @apply flex min-w-0 items-center justify-end gap-2 border-t border-slate-200 pt-1.5 dark:border-slate-800;
 }
-.composer-size-presets__scroll {
-  @apply flex min-w-0 items-center gap-1.5 overflow-x-auto pr-1;
-  scrollbar-width: none;
-}
-.composer-size-presets__scroll::-webkit-scrollbar {
-  display: none;
-}
-.composer-size-presets__label {
-  @apply inline-flex shrink-0 text-[11px] font-black text-slate-500 dark:text-slate-400;
+.composer-size-presets--tools-only {
+  @apply justify-end;
 }
 .composer-tools {
   @apply flex min-w-0 shrink-0 flex-wrap items-center justify-end gap-1.5;
 }
 .composer-tools-divider {
   @apply h-4 w-px shrink-0 bg-slate-200 dark:bg-slate-700;
-}
-.size-preset-chip {
-  @apply inline-flex h-9 min-w-[62px] shrink-0 flex-col items-center justify-center rounded-xl border border-slate-200 bg-white px-2 text-center shadow-sm transition hover:border-emerald-500 hover:text-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:border-emerald-400 dark:hover:text-emerald-300;
-}
-.size-preset-chip strong {
-  @apply text-[11px] font-black leading-4 text-slate-800 dark:text-slate-100;
-}
-.size-preset-chip span {
-  @apply max-w-[54px] truncate text-[9px] font-black leading-3 text-slate-400 dark:text-slate-500;
-  margin-top: 1px;
-}
-.size-preset-chip--active {
-  @apply border-emerald-500 bg-emerald-50 text-emerald-800 ring-1 ring-emerald-500 dark:border-emerald-400 dark:bg-emerald-950/40 dark:text-emerald-200;
-}
-.size-preset-chip--active strong {
-  @apply text-emerald-800 dark:text-emerald-100;
-}
-.size-preset-chip--active span {
-  @apply text-emerald-600 dark:text-emerald-300;
 }
 .style-toggle-chip {
   @apply inline-flex h-6 max-w-28 shrink-0 items-center justify-center gap-1 overflow-hidden text-ellipsis whitespace-nowrap rounded-full border border-emerald-200 bg-emerald-50 px-2.5 text-[10px] font-black text-emerald-700 shadow-sm transition hover:border-emerald-400 hover:text-emerald-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-300 dark:hover:border-emerald-500 dark:hover:text-emerald-200;
@@ -2848,15 +2749,11 @@ function getSessionPromptSummary(target: AiConversationSession) {
   }
 
   .session-item {
-    @apply min-h-16 px-2;
+    @apply min-h-12 px-2;
   }
 
   .session-thumb {
-    @apply h-9 w-9 rounded-lg;
-  }
-
-  .session-status {
-    @apply px-1.5 text-[9px];
+    @apply h-8 w-8 rounded-lg;
   }
 
   .image-history {
@@ -2894,11 +2791,7 @@ function getSessionPromptSummary(target: AiConversationSession) {
   }
 
   .composer-size-presets {
-    @apply grid-cols-1 overflow-visible;
-  }
-
-  .composer-size-presets__scroll {
-    @apply flex-wrap overflow-visible pr-0;
+    @apply justify-start overflow-visible;
   }
 
   .composer-tools {
@@ -2946,11 +2839,7 @@ function getSessionPromptSummary(target: AiConversationSession) {
   }
 
   .composer-size-presets {
-    @apply grid-cols-1 overflow-visible;
-  }
-
-  .composer-size-presets__scroll {
-    @apply flex-wrap overflow-visible pr-0;
+    @apply justify-start overflow-visible;
   }
 
   .composer-tools {
@@ -2973,10 +2862,6 @@ function getSessionPromptSummary(target: AiConversationSession) {
     align-self: flex-end;
   }
 
-  .saved-file-item {
-    @apply flex-col items-stretch;
-  }
-
   .image-loading {
     @apply flex-col items-stretch;
   }
@@ -2995,11 +2880,11 @@ function getSessionPromptSummary(target: AiConversationSession) {
   }
 }
 .preview-dialog {
-  @apply grid min-h-0 gap-4 lg:grid-cols-[minmax(0,1fr)_340px];
+  @apply grid min-h-0 gap-4 lg:grid-cols-[minmax(0,1fr)_320px];
 }
 .preview-dialog__media {
   @apply flex min-h-0 flex-col items-center justify-center gap-3 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-900;
-  max-height: 74vh;
+  max-height: 72vh;
 }
 .preview-dialog__image-stage {
   @apply relative flex min-h-0 w-full flex-1 items-center justify-center overflow-hidden rounded-xl;
@@ -3055,52 +2940,60 @@ function getSessionPromptSummary(target: AiConversationSession) {
   @apply h-full w-full rounded-md object-cover;
 }
 .preview-dialog__details {
-  @apply flex min-h-0 flex-col gap-3 overflow-auto rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950;
-  max-height: 74vh;
+  @apply flex min-h-0 flex-col gap-2.5 overflow-hidden rounded-2xl border border-slate-200 bg-white p-3.5 dark:border-slate-800 dark:bg-slate-950;
+  max-height: 72vh;
 }
 .preview-dialog__head {
-  @apply flex items-start justify-between gap-3 border-b border-slate-200 pb-3 dark:border-slate-800;
+  @apply flex flex-col items-stretch gap-2 border-b border-slate-200 pb-2.5 dark:border-slate-800;
 }
 .preview-dialog__head strong {
   @apply block truncate text-sm font-black text-slate-800 dark:text-slate-100;
 }
+.preview-dialog__head small {
+  @apply mt-0.5 block truncate text-[10px] font-bold text-slate-400 dark:text-slate-500;
+}
 .preview-dialog__actions {
-  @apply flex shrink-0 flex-wrap items-center justify-end gap-2;
+  @apply flex shrink-0 flex-wrap items-center justify-start gap-1.5;
 }
 .preview-dialog__actions :deep(.el-button) {
-  height: 26px !important;
-  font-size: 11px !important;
+  height: 24px !important;
+  font-size: 10px !important;
   font-weight: 900 !important;
 }
+.preview-dialog__actions :deep(.base-copy-button) {
+  height: 24px;
+  font-size: 10px;
+}
 .preview-dialog__eyebrow {
-  @apply mb-1 block text-[10px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500;
+  @apply mb-0.5 block text-[10px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500;
 }
 .preview-meta-grid {
-  @apply grid grid-cols-2 gap-2;
+  @apply grid grid-cols-2 gap-1.5;
 }
 .preview-meta-item {
-  @apply min-w-0 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-900;
+  @apply min-w-0 rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-2 dark:border-slate-800 dark:bg-slate-900;
 }
 .preview-meta-item span {
   @apply block text-[10px] font-black text-slate-400 dark:text-slate-500;
 }
 .preview-meta-item strong {
-  @apply mt-1 block truncate text-[12px] font-black text-slate-700 dark:text-slate-200;
+  @apply mt-0.5 block truncate text-[12px] font-black text-slate-700 dark:text-slate-200;
 }
 .preview-size-notice {
   @apply mt-0;
 }
 .preview-section {
-  @apply min-w-0 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 dark:border-slate-800 dark:bg-slate-900;
+  @apply min-w-0 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 dark:border-slate-800 dark:bg-slate-900;
 }
 .preview-section__head {
-  @apply mb-2 flex items-center justify-between gap-2;
+  @apply mb-1.5 flex items-center justify-between gap-2;
 }
 .preview-section__head span {
   @apply text-[11px] font-black text-slate-500 dark:text-slate-400;
 }
 .preview-section p {
-  @apply max-h-40 overflow-auto whitespace-pre-wrap break-words text-[12px] font-medium leading-relaxed text-slate-700 dark:text-slate-200;
+  @apply max-h-32 overflow-auto whitespace-pre-wrap break-words text-[12px] font-medium leading-relaxed text-slate-700 dark:text-slate-200;
+  scrollbar-width: thin;
 }
 .preview-section code {
   @apply block truncate rounded-lg bg-white px-2 py-1.5 text-[11px] font-bold text-slate-600 dark:bg-slate-950 dark:text-slate-300;
@@ -3110,6 +3003,9 @@ function getSessionPromptSummary(target: AiConversationSession) {
 }
 .preview-section--compact {
   @apply py-2.5;
+}
+.preview-section--prompt {
+  @apply flex min-h-0 flex-col;
 }
 
 @media (max-width: 1024px) {
@@ -3130,7 +3026,7 @@ function getSessionPromptSummary(target: AiConversationSession) {
 
   .preview-dialog__details {
     @apply overflow-auto;
-    max-height: 34vh;
+    max-height: 38vh;
   }
 }
 

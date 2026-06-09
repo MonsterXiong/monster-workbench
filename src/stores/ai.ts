@@ -2,6 +2,7 @@ import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 import { aiService } from "../services/ai.service";
 import { configService } from "../services/config.service";
+import { systemService } from "../services/system.service";
 import {
   applyObjectPatch,
   arrayIfArray,
@@ -18,6 +19,7 @@ import {
   firstItem,
   findLastItem,
   getCurrentTimestampMs,
+  getDirectoryName,
   hasTimeElapsed,
   hasByValue,
   keySetBy,
@@ -860,6 +862,14 @@ export const useAiStore = defineStore("ai", () => {
     activeSessionIds.value[copy.type] = copy.id;
     await persistAiState();
     return copy;
+  }
+
+  async function openImageSavedFileLocation(path: string) {
+    const targetPath = getDirectoryName(path) || path;
+    if (!targetPath) {
+      throw new Error("没有可打开的本地保存路径");
+    }
+    await systemService.openPath(targetPath);
   }
 
   function appendSessionMessage(
@@ -1983,6 +1993,7 @@ export const useAiStore = defineStore("ai", () => {
     deleteSession,
     renameSession,
     duplicateSession,
+    openImageSavedFileLocation,
     saveConfig,
     testProvider,
     sendChatMessage,
