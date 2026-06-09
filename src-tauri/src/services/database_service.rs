@@ -30,11 +30,18 @@ impl DatabaseService {
     }
 
     pub fn check_status(&self) -> AppResult<()> {
-        self.init_test_logs_db()
+        self.init_runtime_schema()
     }
 
-    pub fn init_test_logs_db(&self) -> AppResult<()> {
+    fn init_test_logs_db(&self) -> AppResult<()> {
         let db_path = self.path_provider.get_db_file_path()?;
         crate::infra::db_nav::DbNavInfra::init_test_logs_db(&db_path)
+    }
+
+    pub fn init_runtime_schema(&self) -> AppResult<()> {
+        let db_path = self.path_provider.get_db_file_path()?;
+        self.init_test_logs_db()?;
+        crate::infra::creative_db::CreativeDbInfra::init_schema(&db_path)?;
+        Ok(())
     }
 }

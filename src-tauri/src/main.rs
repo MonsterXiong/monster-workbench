@@ -63,7 +63,7 @@ fn main() {
             let ai_provider_service = AiProviderService::new(handle.clone());
 
             // 初始化运行时数据库表，具体 DB/Repo 细节保持在 Service 层内。
-            let _ = database_service.init_test_logs_db();
+            let _ = database_service.init_runtime_schema();
 
             // 2. 状态依赖管理注入
             app.manage(std::sync::Mutex::new(app_service));

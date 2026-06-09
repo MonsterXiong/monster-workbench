@@ -1,5 +1,7 @@
 #[allow(dead_code)]
 pub mod crypto;
+#[allow(dead_code)]
+pub mod creative_db;
 pub mod db;
 pub mod db_nav;
 pub mod fs;
