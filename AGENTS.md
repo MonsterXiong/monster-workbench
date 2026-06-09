@@ -129,3 +129,54 @@ npm run check:architecture
 | [docs/ai/review-checklist.md](docs/ai/review-checklist.md) | 任务完成后的自检 |
 | [docs/ai/decisions.md](docs/ai/decisions.md) | 架构决策背景 |
 | [docs/ai/maintenance.md](docs/ai/maintenance.md) | 新增、修改、删除规则 |
+---
+
+## 8. Codex Goal 模式与持续型 AI 创作系统改造入口
+
+本项目正在以渐进式方式，从现有 AI Provider / 对话 / 生图工作台，升级为持续型 AI 创作系统。该改造必须遵守本 `AGENTS.md` 既有分层与安全红线。
+
+### 8.1 入口文档
+
+涉及 Codex Goal、多 Agent 并行、创作任务系统、Python sidecar 常驻化、任务队列、资产库、审查返工时，必须先阅读：
+
+| 文档 | 适用场景 |
+|------|----------|
+| [docs/ai/codex-goal-ops-manual.md](docs/ai/codex-goal-ops-manual.md) | 从零到一执行 Codex Goal 推进 |
+| [docs/ai/codex-goal-mode.md](docs/ai/codex-goal-mode.md) | Goal 模式基本规则 |
+| [docs/ai/creative-architecture-guardrails.md](docs/ai/creative-architecture-guardrails.md) | 创作系统架构护栏 |
+| [docs/ai/creative-system-roadmap.md](docs/ai/creative-system-roadmap.md) | 阶段路线图 |
+| [docs/ai/creative-regression-checklist.md](docs/ai/creative-regression-checklist.md) | 回归检查清单 |
+| [docs/ai/multi-agent-operating-model.md](docs/ai/multi-agent-operating-model.md) | 多 Agent 并行协作规则 |
+| [docs/ai/phase-prompt-index.md](docs/ai/phase-prompt-index.md) | 每个阶段应对 Codex 说什么 |
+
+### 8.2 改造红线
+
+- 不推倒重来。
+- 不覆盖现有 AI Provider 测试链路。
+- Vue 不直连 Python，仍必须遵守现有标准调用链：
+  `Vue Component -> Pinia Store -> Frontend Service -> callTauri / Native Service Gateway -> Rust Command -> Rust Service -> DB/Repo`。
+- Python sidecar 常驻化必须在任务/资产持久化之后逐步引入。
+- 队列先使用 SQLite-backed 本地队列，不得提前引入 Redis / 远程 worker。
+- sub2api/cockpit 只作为 OpenAI-compatible 模型网关，不承担小说、剧本、审查、返工等业务逻辑。
+- 大图继续落盘，前端只拿 file path / asset URL / thumbnail，不传大 base64。
+- Rust 负责桌面控制面、权限、IPC、sidecar lifecycle、事件桥接，不承载复杂 AI 创作业务。
+- Python 逐步承载 workflow、worker、Provider 调用、prompt 构建、审查、返工、资产入库和一致性分析。
+- 任何阶段完成前，按任务影响范围运行 `npm run check:architecture`、`npm run typecheck`、必要时运行 `npx tauri build --no-bundle`。
+
+### 8.3 默认推进顺序
+
+除非用户明确调整，否则按以下顺序推进：
+
+1. 文档护栏与基线
+2. 最小任务/资产 SQLite 模型
+3. Rust TaskService 与 Tauri commands
+4. 任务事件桥接
+5. Rust SidecarLifecycleService
+6. Python 常驻 sidecar stub
+7. 第一个真实 creative workflow
+8. worker 队列骨架
+9. 审查与返工骨架
+10. 角色/场景/道具/分镜/小说/剧本资产域
+11. Goal 模式与多 Agent 并行创作流
+
+---
