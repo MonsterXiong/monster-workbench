@@ -779,6 +779,7 @@ export default {
       previewSavedFile: "保存文件",
       previewImageUrl: "图片地址",
       previewApiSize: "接口尺寸",
+      previewSaveStatus: "保存状态",
       previewNotSaved: "未保存",
       previewPrevious: "上一张",
       previewNext: "下一张",

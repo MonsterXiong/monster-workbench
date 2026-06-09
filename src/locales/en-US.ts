@@ -779,6 +779,7 @@ export default {
       previewSavedFile: "Saved File",
       previewImageUrl: "Image URL",
       previewApiSize: "API Size",
+      previewSaveStatus: "Save Status",
       previewNotSaved: "Not saved",
       previewPrevious: "Previous Image",
       previewNext: "Next Image",

@@ -45,7 +45,6 @@ import {
   joinLines,
   joinMappedNonEmptyLines,
   joinNonEmptyLines,
-  normalizeWhitespace,
   parseDimensionsText,
   preventAndStopDomEvent,
   replaceAllText,
@@ -1353,11 +1352,6 @@ function getSessionSizeLabel(target: AiConversationSession) {
   return getMessageActualSize(latestSizeMessage);
 }
 
-function getSessionPromptSummary(target: AiConversationSession) {
-  const latestPrompt = findLastItem(target.messages, (message) => message.role === "user" && Boolean(toTrimmedString(message.content)))?.content || "";
-  return latestPrompt ? truncateText(normalizeWhitespace(latestPrompt), 44) : t("aiPage.image.sessionPromptEmpty");
-}
-
 </script>
 
 <template>
@@ -1410,7 +1404,6 @@ function getSessionPromptSummary(target: AiConversationSession) {
         </div>
         <div class="session-item__content">
           <span class="session-item__title">{{ item.title }}</span>
-          <span class="session-item__prompt">{{ getSessionPromptSummary(item) }}</span>
           <span class="session-item__meta">
             {{ item.messages.length }} {{ t("aiPage.image.messageUnit") }}
           </span>
@@ -2037,7 +2030,7 @@ function getSessionPromptSummary(target: AiConversationSession) {
               <strong>{{ getMessageLatencyLabel(previewMessage) || "-" }}</strong>
             </div>
             <div class="preview-meta-item">
-              <span>{{ t("aiPage.image.savedFiles") }}</span>
+              <span>{{ t("aiPage.image.previewSaveStatus") }}</span>
               <strong>{{ previewSavedFile ? t("aiPage.image.savedFileBadge") : t("aiPage.image.previewNotSaved") }}</strong>
             </div>
             <div class="preview-meta-item">
@@ -2114,7 +2107,7 @@ function getSessionPromptSummary(target: AiConversationSession) {
   @apply flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 transition-colors hover:border-emerald-500 hover:text-emerald-600 dark:border-slate-800 dark:bg-slate-950;
 }
 .session-item {
-  @apply flex min-h-14 items-center gap-2 rounded-xl border border-transparent px-2 py-1.5 text-left transition-colors hover:border-slate-200 hover:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 dark:hover:border-slate-800 dark:hover:bg-slate-950;
+  @apply flex min-h-12 items-center gap-2 rounded-xl border border-transparent px-2 py-1.5 text-left transition-colors hover:border-slate-200 hover:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 dark:hover:border-slate-800 dark:hover:bg-slate-950;
 }
 .session-item--active {
   @apply border-emerald-500 bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300;
