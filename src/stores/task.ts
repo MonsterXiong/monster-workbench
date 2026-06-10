@@ -10,6 +10,7 @@ import {
   type CreateGoalMultiAgentStubInput,
   type CreativeAsset,
   type CreativeAssetLink,
+  type CreativeBatchJob,
   type CreativeBatchJobEventPayload,
   type CreativeBatchJobSnapshot,
   type CreativeGoal,
@@ -75,6 +76,16 @@ export const useTaskStore = defineStore("task", () => {
   const batchJobRunning = ref(false);
   const batchJobTaskLimit = ref(20);
   const batchJobTaskOffset = ref(0);
+  const creativeProjectIndexTasks = ref<CreativeTask[]>([]);
+  const creativeProjectIndexAssets = ref<CreativeAsset[]>([]);
+  const creativeProjectIndexGoals = ref<CreativeGoal[]>([]);
+  const creativeProjectIndexBatchJobs = ref<CreativeBatchJob[]>([]);
+  const creativeProjectHistoryTasks = ref<CreativeTask[]>([]);
+  const creativeProjectHistoryAssets = ref<CreativeAsset[]>([]);
+  const creativeProjectHistoryGoals = ref<CreativeGoal[]>([]);
+  const creativeProjectHistoryBatchJobs = ref<CreativeBatchJob[]>([]);
+  const creativeProjectHistoryLoading = ref(false);
+  const creativeProjectHistoryError = ref<string | null>(null);
   let batchJobTaskRefreshInFlight = false;
   let batchJobTaskRefreshPending = false;
   const batchJobImageItems = computed(() =>
@@ -559,6 +570,60 @@ export const useTaskStore = defineStore("task", () => {
     return batchJobSnapshot.value;
   };
 
+  const loadCreativeProjectIndex = async () => {
+    const [indexTasks, indexAssets, indexGoals, indexBatchJobs] = await Promise.all([
+      taskService.listCreativeTasks({ limit: 200 }),
+      taskService.listCreativeAssets({ limit: 200 }),
+      taskService.listCreativeGoals({ limit: 100 }),
+      taskService.listBatchJobs({ limit: 100 }),
+    ]);
+
+    creativeProjectIndexTasks.value = indexTasks;
+    creativeProjectIndexAssets.value = indexAssets;
+    creativeProjectIndexGoals.value = indexGoals;
+    creativeProjectIndexBatchJobs.value = indexBatchJobs;
+
+    return {
+      tasks: indexTasks,
+      assets: indexAssets,
+      goals: indexGoals,
+      batchJobs: indexBatchJobs,
+    };
+  };
+
+  const loadCreativeProjectHistory = async (projectId: string | null) => {
+    creativeProjectHistoryLoading.value = true;
+    creativeProjectHistoryError.value = null;
+
+    try {
+      const filter = projectId ? { projectId } : {};
+      const [historyTasks, historyAssets, historyGoals, historyBatchJobs] = await Promise.all([
+        taskService.listCreativeTasks({ ...filter, limit: 80 }),
+        taskService.listCreativeAssets({ ...filter, limit: 80 }),
+        taskService.listCreativeGoals({ ...filter, limit: 40 }),
+        taskService.listBatchJobs({ ...filter, limit: 40 }),
+      ]);
+
+      creativeProjectHistoryTasks.value = historyTasks;
+      creativeProjectHistoryAssets.value = historyAssets;
+      creativeProjectHistoryGoals.value = historyGoals;
+      creativeProjectHistoryBatchJobs.value = historyBatchJobs;
+      return {
+        tasks: historyTasks,
+        assets: historyAssets,
+        goals: historyGoals,
+        batchJobs: historyBatchJobs,
+      };
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "load creative project history failed";
+      creativeProjectHistoryError.value = message;
+      throw error;
+    } finally {
+      creativeProjectHistoryLoading.value = false;
+    }
+  };
+
   const runGenerateImagePromptWorkflow = async (
     input: GenerateImagePromptWorkflowInput
   ) => {
@@ -620,6 +685,16 @@ export const useTaskStore = defineStore("task", () => {
     batchJobError,
     batchJobRunning,
     batchJobImageItems,
+    creativeProjectIndexTasks,
+    creativeProjectIndexAssets,
+    creativeProjectIndexGoals,
+    creativeProjectIndexBatchJobs,
+    creativeProjectHistoryTasks,
+    creativeProjectHistoryAssets,
+    creativeProjectHistoryGoals,
+    creativeProjectHistoryBatchJobs,
+    creativeProjectHistoryLoading,
+    creativeProjectHistoryError,
     initCreativeTaskListeners,
     stopCreativeTaskListeners,
     initBatchJobListeners,
@@ -638,5 +713,7 @@ export const useTaskStore = defineStore("task", () => {
     pauseBatchJob,
     resumeBatchJob,
     cancelBatchJob,
+    loadCreativeProjectIndex,
+    loadCreativeProjectHistory,
   };
 });

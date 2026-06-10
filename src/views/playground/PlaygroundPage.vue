@@ -176,7 +176,7 @@ const componentGroups: ComponentGroup[] = [
 ];
 
 const activeGroupKey = ref<ComponentGroupKey>("workflow");
-const activeComponentKey = ref("creative-workflow");
+const activeComponentKey = ref("stepper");
 
 const coveredComponentKeys = [
   "buttons-badges",

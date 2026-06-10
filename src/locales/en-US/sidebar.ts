@@ -4,6 +4,7 @@ export default {
     tools: "Toolkit",
     utilsDocs: "Utils Docs",
     ai: "AI Models",
+    creative: "AI Creative",
     logoChar: "M",
     logoText: "Monster Tools",
     checkUpdate: "Click to Check Update",

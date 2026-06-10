@@ -4,6 +4,7 @@ export default {
     tools: "工具箱",
     utilsDocs: "工具函数文档",
     ai: "AI 模型",
+    creative: "AI 创作",
     logoChar: "智",
     logoText: "智汇工具箱",
     checkUpdate: "点击检查更新",
