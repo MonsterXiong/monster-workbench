@@ -8,7 +8,7 @@
 - [ ] 拆分 `useTaskStore`：优先评估 `creative-task`、`creative-asset`、`creative-goal`、`creative-batch`、`creative-project` 与 `background-task` 的边界。
 - [ ] 拆分 `useAiStore`：优先评估 provider、session、image、prompt library 与 queue 的状态边界。
 - [ ] 拆分 `commands/database.rs`：保留数据库备份/导入/重置/status，将 creative task、asset、goal、batch、sidecar、worker queue 迁出到独立 command namespace。
-- [ ] 拆分 `CreativeDbInfra`：将 schema、task、event、asset、model_run、batch、goal repo 分离，并补对应回归测试边界。
+- [ ] 拆分 `CreativeDbInfra`：已先抽出 `creative_db_support.rs` 承载 `connect`、`ensure_column` 和 `map_*` helper；下一步继续将 schema、task、event、asset、model_run、batch、goal repo 分离，并补对应回归测试边界。
 - [ ] 建立正式 SQLite migration 体系：`schema_migrations`、幂等迁移、旧库兼容测试、迁移前备份和破坏性变更审批。
 - [ ] 设计正式 `creative_projects` 与资产版本/来源治理，避免继续只依赖松散 `project_id` 字符串和 `metadata_json`。
 - [ ] 将 Python `creative_health_server.py` 从 health/workflow stub 规划为正式 workflow runtime，同时保持 Rust 作为 Vue 唯一入口。
