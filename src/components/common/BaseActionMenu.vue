@@ -171,6 +171,7 @@ onBeforeUnmount(() => {
     :popper-options="popperOptions"
     :show-arrow="false"
     :teleported="true"
+    :persistent="false"
     role="menu"
     @command="handleCommand"
     @visible-change="handleVisibleChange"

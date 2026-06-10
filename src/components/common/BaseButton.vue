@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, useSlots, useAttrs } from "vue";
+import { Comment, computed, useAttrs, useSlots } from "vue";
 import { omit } from "../../utils";
 
 defineOptions({
@@ -62,7 +62,10 @@ const elSize = computed(() => {
 const isPlain = computed(() => props.outline);
 const isText = computed(() => props.type === "ghost");
 const isLink = computed(() => props.type === "link");
-const hasDefaultSlot = computed(() => Boolean(slots.default));
+const hasDefaultSlot = computed(() => {
+  const defaultNodes = slots.default?.() ?? [];
+  return defaultNodes.some((node) => node.type !== Comment);
+});
 const accessibleLabel = computed(() => props.ariaLabel || props.title || "");
 </script>
 
@@ -154,6 +157,11 @@ const accessibleLabel = computed(() => props.ariaLabel || props.title || "");
   display: block;
   flex-shrink: 0;
   margin: auto;
+}
+
+.el-button :deep(.el-icon + span),
+.el-button :deep(svg + span) {
+  margin-left: 0 !important;
 }
 
 /* Primary 实底按钮 hover 与 active 态 */
