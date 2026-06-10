@@ -22,6 +22,7 @@ export function getBrowserPlatform(userAgent = getUserAgent()): BrowserPlatform 
   return "unknown";
 }
 
+/** 探测当前浏览器支持的高级特性能力。 */
 export function summarizeBrowserCapabilities(
   win: Window | null = getWindow(),
   nav: Navigator | null = getNavigator()
@@ -40,6 +41,7 @@ export function summarizeBrowserCapabilities(
   };
 }
 
+/** 提取浏览器核心环境指标（如内核、平台、UA）。 */
 export function summarizeBrowserEnvironment(
   win: Window | null = getWindow(),
   nav: Navigator | null = getNavigator()

@@ -9,6 +9,7 @@ import type {
   StoragePrefixSummary,
 } from "./types";
 
+/** 执行结构化特征分析并返回报告。 */
 export function summarizeStorageEntries(entries: readonly StorageEntry[], prefixSeparator = ":"): StorageEntriesSummary {
   const prefixCounts: Record<string, number> = {};
 

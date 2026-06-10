@@ -27,6 +27,7 @@ export function reverseSortDirection(direction: SortDirection = "asc"): SortDire
   return direction === "asc" ? "desc" : "asc";
 }
 
+/** 翻转当前的排序方向（asc <-> desc）。 */
 export function toggleSortDirection(direction: unknown, fallback: SortDirection = "asc"): SortDirection {
   return reverseSortDirection(normalizeSortDirection(direction, fallback));
 }
@@ -143,6 +144,7 @@ export function summarizeSortControls<K extends PropertyKey>(
   };
 }
 
+/** 分析当前的排序设置，并给出 UI 面板应该展示的状态。 */
 export function createSortControlsReport<K extends PropertyKey>(
   current: SortState<K> | null | undefined,
   keys: readonly K[],

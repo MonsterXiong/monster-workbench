@@ -23,6 +23,7 @@ export function getPageEndIndex(page: number, pageSize: number, total: number): 
   return Math.min(safeTotal, getPageStartIndex(page, pageSize, safeTotal) + toIntegerAtLeast(pageSize, 1, 1));
 }
 
+/** 执行结构化特征分析并返回报告。 */
 export function summarizePagination(
   page: number,
   pageSize: number,

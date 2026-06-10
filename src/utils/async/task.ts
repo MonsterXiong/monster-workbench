@@ -33,6 +33,7 @@ export function summarizeAsyncTaskResult<T>(result: AsyncTaskResult<T>): AsyncTa
   };
 }
 
+/** 创建一个异步任务执行状态和时间报告。 */
 export function createAsyncTaskReport<T>(
   result: AsyncTaskResult<T>,
   startedAtMs: number,

@@ -192,6 +192,7 @@ export function stringifyNormalizedQuery(
   return stringifySearchParams(normalizeSearchParams(input, options), options.prefix ?? true);
 }
 
+/** 基于参数构建一个复杂的数据实例报告。 */
 export function createQueryKey(input: SearchParamsInput, options: NormalizeSearchParamsOptions = {}): string {
   return stringifyNormalizedQuery(input, { ...options, prefix: false });
 }

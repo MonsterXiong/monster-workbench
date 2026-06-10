@@ -36,6 +36,7 @@ export function createSelectionDisplaySummary(
   };
 }
 
+/** 基于参数构建一个复杂的数据实例报告。 */
 export function createSelectionDisplaySummaryByKeys<K extends PropertyKey>(
   availableKeys: readonly K[],
   selectedKeys: readonly K[],

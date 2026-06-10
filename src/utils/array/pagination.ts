@@ -22,6 +22,7 @@ export function paginateArray<T>(items: readonly T[], page: number, pageSize: nu
   };
 }
 
+/** 对本地数组进行内存分页，并提供包含总数、页码的详细信息摘要。 */
 export function paginateArrayWithSummary<T>(
   items: readonly T[],
   page: number,
@@ -39,6 +40,7 @@ export function paginateArrayWithSummary<T>(
   };
 }
 
+/** 创建带过滤、排序、分页功能的增强数组视图报告。 */
 export function createArrayListViewReport<T>(
   items: readonly T[],
   options: ArrayListViewOptions<T> = {}

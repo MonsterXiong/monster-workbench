@@ -67,6 +67,7 @@ export function formatNormalizedErrorDisplay(error: ReturnType<typeof normalizeE
   return parts.filter(Boolean).join(options.separator ?? " ");
 }
 
+/** 组装含有追踪 ID 等高级扩展的错误报告对象。 */
 export function createErrorDisplayReport(error: unknown, options: ErrorDisplayReportOptions = {}): ErrorDisplayReport {
   const normalizedError = normalizeError(error, options.fallbackMessage);
   const message = normalizedError.message || options.fallbackMessage || "Unknown error";
@@ -88,6 +89,7 @@ export function createErrorDisplayReport(error: unknown, options: ErrorDisplayRe
   };
 }
 
+/** 批量格式化多种异构错误为统一集合报告。 */
 export function createErrorDisplayReports(errors: readonly unknown[], options: ErrorDisplayReportOptions = {}): ErrorDisplayReport[] {
   return errors.map((error) => createErrorDisplayReport(error, options));
 }

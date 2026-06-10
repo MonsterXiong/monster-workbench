@@ -27,6 +27,7 @@ export function formatDate(value: DateInput, pattern = "YYYY-MM-DD HH:mm:ss", fa
   return pattern.replace(DATE_TOKEN_REGEXP, (token) => tokenMap[token] ?? token);
 }
 
+/** 对常见日期类型执行简单的 YYYY-MM-DD 格式化。 */
 export function formatDateOnly(value: DateInput, fallback = "--"): string {
   return formatDate(value, "YYYY-MM-DD", fallback);
 }

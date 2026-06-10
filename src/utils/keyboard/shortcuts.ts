@@ -7,6 +7,7 @@ import type {
 } from "./types";
 import { formatKeyboardKey, isActivationKey, normalizeKeyboardKey, normalizeKeyboardShortcutText } from "./core";
 
+/** 内部核心工具方法。 */
 export function parseKeyboardShortcut(value: string): KeyboardShortcut {
   const parts = normalizeKeyboardShortcutText(value)
     .split("+")
@@ -60,6 +61,7 @@ export function getKeyboardShortcutSignature(shortcut: string | KeyboardShortcut
   return parts.join("+");
 }
 
+/** 执行格式化逻辑并返回可展示字符串。 */
 export function formatKeyboardShortcut(shortcut: string | KeyboardShortcut, options: FormatKeyboardShortcutOptions = {}): string {
   const parsedShortcut = normalizeKeyboardShortcut(shortcut);
   const separator = options.separator ?? " + ";
@@ -84,6 +86,7 @@ export function formatKeyboardShortcuts(
     .join(options.shortcutSeparator ?? " / ");
 }
 
+/** 内部核心工具方法。 */
 export function toAriaKeyShortcuts(shortcut: string | KeyboardShortcut): string {
   const parsedShortcut = normalizeKeyboardShortcut(shortcut);
   const parts: string[] = [];

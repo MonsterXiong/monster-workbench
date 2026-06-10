@@ -40,6 +40,7 @@ export function getContrastReadability(left: RgbColor, right: RgbColor, minRatio
   };
 }
 
+/** 对比两种颜色的亮度差异以判断是否满足可读性要求。 */
 export function summarizeColorContrast(
   foreground: string | RgbColor,
   background: string | RgbColor,
@@ -157,6 +158,7 @@ export function isDarkColor(value: string | RgbColor, threshold = 0.55): boolean
   return rgb ? getPerceivedLuminance(rgb) <= threshold : false;
 }
 
+/** 针对给定背景色智能返回适合的对比文本色（黑或白）。 */
 export function getContrastTextColor(value: string | RgbColor, light = "#ffffff", dark = "#111827"): string {
   const rgb = colorToRgb(value);
 

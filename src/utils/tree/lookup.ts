@@ -7,6 +7,7 @@ import { treeToKeyFlatList } from "./flatten";
 import { filterTree, removeTreeNode, updateTreeNode } from "./mutate";
 import { TreeChildrenGetter, TreeDiffByKeyOptions, TreeDiffByKeyResult, TreeDiffByKeyStats, TreeKeyChange, TreeKeyFlatListItem, TreeKeyGetter, TreeKeyResolveEntry, TreeKeyResolveResult, TreeKeySummary, TreeLookup, TreeLookupKeySummary, TreeNodeMeta, TreeSearchResult } from "./types";
 
+/** 基于参数构建一个复杂的数据实例报告。 */
 export function createTreeLookup<T, K extends PropertyKey>(
   items: readonly T[],
   getChildren: TreeChildrenGetter<T>,
@@ -727,6 +728,7 @@ export function filterTreeByKeys<T, K extends PropertyKey>(
   return filterTree(items, (item) => keySet.has(getKey(item)), getChildren, setChildren);
 }
 
+/** 执行结构化特征分析并返回报告。 */
 export function summarizeTreeByKey<T, K extends PropertyKey>(
   items: readonly T[],
   getChildren: TreeChildrenGetter<T>,

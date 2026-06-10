@@ -10,6 +10,7 @@ function normalizeDateBoundaryRange(range: DateBoundaryRange | null, fallback = 
   };
 }
 
+/** 根据预设快捷键（如近7天、本月）计算精确日期区间。 */
 export function getDateRangePresetValue(key: DateRangePresetKey, baseDate: DateInput = getCurrentDate()): NormalizedDateRange {
   const today = startOfDay(baseDate) ?? getCurrentDate();
 

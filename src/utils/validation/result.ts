@@ -42,6 +42,7 @@ export function appendValidationError(result: ValidationResult, error: string | 
   return error ? createValidationResult([...result.errors, error]) : createValidationResult(result.errors);
 }
 
+/** 内部核心工具方法。 */
 export function runValidators<T>(value: T, validators: readonly Validator<T>[]): ValidationResult {
   const errors = validators
     .map((validator) => validator(value))

@@ -24,6 +24,7 @@ export function summarizeValueType(value: unknown): ValueTypeSummary {
   };
 }
 
+/** 执行结构化特征分析并返回报告。 */
 export function summarizeValueTypes(values: readonly unknown[]): ValueTypeListSummary {
   const summaries = values.map(summarizeValueType);
   const typeCounts = summaries.reduce<Record<string, number>>((result, summary) => {

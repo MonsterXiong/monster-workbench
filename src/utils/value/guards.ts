@@ -1,5 +1,6 @@
 import type { EmptyValue, Primitive } from "./types";
 
+/** 内部核心工具方法。 */
 export function isNil(value: unknown): value is null | undefined {
   return value === null || value === undefined;
 }
@@ -98,6 +99,7 @@ export function isEmptyValue(value: unknown): value is EmptyValue {
   return value === null || value === undefined || value === "";
 }
 
+/** 内部核心工具方法。 */
 export function isNonEmptyValue<T>(value: T): value is Exclude<T, EmptyValue> {
   return !isEmptyValue(value);
 }

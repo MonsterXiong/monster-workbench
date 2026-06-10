@@ -63,6 +63,7 @@ export function formatTemplate(
   });
 }
 
+/** 执行格式化逻辑并返回可展示字符串。 */
 export function formatTemplateWithReport(
   template: string,
   params: Record<string, TemplateParamValue>,

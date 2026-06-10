@@ -2,6 +2,7 @@ import { compactArray, nonNullableArray, setToArray } from "./core";
 import { differenceBy } from "./diff";
 import { ArrayKeyedSetSummary, GroupByEntry, MapSummary, SetSummary } from "./types";
 
+/** 根据指定的键函数对数组元素进行去重。 */
 export function uniqueBy<T, K extends PropertyKey>(items: readonly T[], getKey: (item: T) => K): T[] {
   const seen = new Set<K>();
   const result: T[] = [];

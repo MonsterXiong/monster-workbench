@@ -20,10 +20,12 @@ export function ensureUniqueId(value: unknown, existingIds: readonly string[], s
   return baseId;
 }
 
+/** 内部核心工具方法。 */
 export function ensureUniqueDomId(value: unknown, existingIds: readonly string[], separator = "-"): string {
   return ensureUniqueId(normalizeDomId(value, "id", separator), existingIds, separator);
 }
 
+/** 执行结构化特征分析并返回报告。 */
 export function summarizeUniqueIds(values: readonly unknown[], existingIds: readonly string[] = [], separator = "-"): UniqueIdsSummary {
   const ids: string[] = [];
   const entries = values.map<UniqueIdEntry>((value, index) => {

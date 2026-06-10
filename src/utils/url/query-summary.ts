@@ -1,6 +1,7 @@
 import { searchParamsToArrayRecord } from "./search-params";
 import type { FormatUrlQuerySummaryOptions, UrlQueryDiffSummary, UrlQuerySummary } from "./types";
 
+/** 执行结构化特征分析并返回报告。 */
 export function summarizeSearchParams(searchParams: URLSearchParams): UrlQuerySummary {
   const arrayRecord = searchParamsToArrayRecord(searchParams);
   const keys = Object.keys(arrayRecord);
@@ -22,6 +23,7 @@ function areQueryParamValuesEqual(left: readonly string[], right: readonly strin
   return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
+/** 内部核心工具方法。 */
 export function diffSearchParams(before: URLSearchParams, after: URLSearchParams): UrlQueryDiffSummary {
   const beforeRecord = searchParamsToArrayRecord(before);
   const afterRecord = searchParamsToArrayRecord(after);

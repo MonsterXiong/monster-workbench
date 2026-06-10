@@ -65,6 +65,7 @@ export function formatNumberDeltaBetween(before: unknown, after: unknown, option
   return formatNumberDelta(summarizeNumberDelta(before, after, precision).delta, options);
 }
 
+/** 执行格式化逻辑并返回可展示字符串。 */
 export function formatPercent(value: number, options: FormatPercentOptions = {}): string {
   const safeValue = toFiniteNumber(value, Number.NaN);
 

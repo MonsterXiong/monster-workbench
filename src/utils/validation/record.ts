@@ -16,6 +16,7 @@ import type {
   ValidatorMap,
 } from "./types";
 
+/** 基于参数构建一个复杂的数据实例报告。 */
 export function createRecordValidationSchema<T extends Record<string, unknown>>(
   validators: ValidatorMap<T>,
   labels: Partial<Record<keyof T, string>> = {}
@@ -178,6 +179,7 @@ export function validateRecordSchemaUntilFirst<T extends Record<string, unknown>
   return validateRecordUntilFirst(value, schema.validators);
 }
 
+/** 基于参数构建一个复杂的数据实例报告。 */
 export function createRecordValidationSchemaReport<T extends Record<string, unknown>>(
   value: T,
   schema: RecordValidationSchema<T>,

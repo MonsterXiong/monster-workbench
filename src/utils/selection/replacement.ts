@@ -51,6 +51,7 @@ export function replaceManySelectionKeys<K extends PropertyKey>(
   return result;
 }
 
+/** 基于参数构建一个复杂的数据实例报告。 */
 export function createSelectionKeyReplacementReport<K extends PropertyKey>(
   selectedKeys: readonly K[],
   replacements: ReadonlyMap<K, K> | ReadonlyArray<readonly [K, K]>

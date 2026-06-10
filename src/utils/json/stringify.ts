@@ -19,6 +19,7 @@ function formatJsonOperationSummary(
   return options.successText ?? "ok";
 }
 
+/** 内部核心工具方法。 */
 export function tryJsonStringify(value: unknown, spacing?: number): JsonStringifyResult {
   try {
     const result = spacing === undefined ? JSON.stringify(value) : JSON.stringify(value, null, spacing);
@@ -34,6 +35,7 @@ export function tryJsonStringify(value: unknown, spacing?: number): JsonStringif
   }
 }
 
+/** 内部核心工具方法。 */
 export function safeJsonStringify(value: unknown, fallback = ""): string {
   const result = tryJsonStringify(value);
   return result.ok && result.data !== null ? result.data : fallback;
@@ -58,6 +60,7 @@ export function getJsonStringifyData(result: JsonStringifyResult, fallback = "")
   return result.ok && result.data !== null ? result.data : fallback;
 }
 
+/** 内部核心工具方法。 */
 export function getJsonStringifyErrorMessage(result: JsonStringifyResult, fallback = ""): string {
   return result.error?.message || fallback;
 }
@@ -70,6 +73,7 @@ export function isJsonStringifyFailure(result: JsonStringifyResult): result is J
   return !result.ok;
 }
 
+/** 内部核心工具方法。 */
 export function isJsonSerializable(value: unknown): boolean {
   return tryJsonStringify(value).ok;
 }

@@ -68,6 +68,7 @@ export function createParsedValueReport<T>(
   };
 }
 
+/** 内部核心工具方法。 */
 export function parseBooleanWithReport(input: unknown, fallback = false): ParsedValueReport<boolean> {
   return createParsedValueReport(input, parseOptionalBoolean(input), fallback, "boolean");
 }
@@ -76,6 +77,7 @@ export function parseNumberWithReport(input: unknown, fallback = 0): ParsedValue
   return createParsedValueReport(input, parseOptionalNumber(input), fallback, "number");
 }
 
+/** 内部核心工具方法。 */
 export function parseIntegerWithReport(input: unknown, fallback = 0): ParsedValueReport<number> {
   return createParsedValueReport(input, parseOptionalInteger(input), fallback, "integer");
 }
@@ -181,6 +183,7 @@ export function parseIntegerListWithReport(values: unknown, fallback = 0): Parse
   return createParsedValueListReport(inputs.map((value) => parseIntegerWithReport(value, fallback)));
 }
 
+/** 内部核心工具方法。 */
 export function parseEnumListWithReport<T extends string>(
   values: unknown,
   options: readonly T[],

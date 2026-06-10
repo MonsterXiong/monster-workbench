@@ -52,6 +52,7 @@ export function getRectViewportSpacing(
   };
 }
 
+/** 分析一个 DOMRect 当前在视口内的交叉状态与面积。 */
 export function summarizeRectInViewport(
   rect: DOMRect | null | undefined,
   root: Window | null = typeof window === "undefined" ? null : window
@@ -98,6 +99,7 @@ export function isElementPartiallyInViewport(element: Element | null | undefined
   return isRectPartiallyInViewport(getElementRect(element), root);
 }
 
+/** 判断目标元素是否在当前视口内可见。 */
 export function isElementInViewport(element: Element | null | undefined, root: Window | null = typeof window === "undefined" ? null : window): boolean {
   const rect = getElementRect(element);
 

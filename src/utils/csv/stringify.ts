@@ -21,6 +21,7 @@ export function stringifySpreadsheetCsvRow(
   return row.map((cell) => escapeCsvSpreadsheetCell(cell, normalizedDelimiter, formulaPrefix)).join(normalizedDelimiter);
 }
 
+/** 安全序列化 CSV 并转义 Excel 危险公式注入前缀。 */
 export function stringifySpreadsheetCsvRows(
   rows: readonly CsvRow[],
   options: CsvSpreadsheetStringifyRowsOptions = {}

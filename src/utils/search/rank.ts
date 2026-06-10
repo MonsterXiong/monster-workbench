@@ -78,6 +78,7 @@ export function rankSearchItems<T>(
     .sort((left, right) => right.score - left.score || left.index - right.index);
 }
 
+/** 内部核心工具方法。 */
 export function rankSearchItemsWithSummary<T>(
   items: readonly T[],
   keyword: string | readonly string[],
@@ -133,6 +134,7 @@ export function rankSearchQueryItems<T>(
   }));
 }
 
+/** 内部核心工具方法。 */
 export function partitionSearchQuery<T>(
   items: readonly T[],
   options: SearchQueryOptions<T>

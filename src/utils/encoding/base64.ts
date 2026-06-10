@@ -98,6 +98,7 @@ export function tryDecodeBase64Utf8(value: string): string | null {
   }
 }
 
+/** 更安全的 Base64 到 UTF-8 解码机制，带 fallback。 */
 export function safeDecodeBase64Utf8(value: string, options: SafeDecodeBase64Options = {}): string {
   return tryDecodeBase64Utf8(value) ?? options.fallback ?? "";
 }
@@ -114,6 +115,7 @@ export function safeDecodeBase64UrlUtf8(value: string, options: SafeDecodeBase64
   return tryDecodeBase64UrlUtf8(value) ?? options.fallback ?? "";
 }
 
+/** 对各种编码的文本块生成编码安全性与大小特征摘要。 */
 export function summarizeEncodedText(value: string): EncodedTextSummary {
   const normalizedText = value.trim();
   const bytes = textToUtf8Bytes(value);

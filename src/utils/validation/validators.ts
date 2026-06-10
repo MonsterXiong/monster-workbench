@@ -50,6 +50,7 @@ export function createConditionalValidator<T>(
   return (value) => (condition(value) ? validator(value) : null);
 }
 
+/** 基于参数构建一个复杂的数据实例报告。 */
 export function createRequiredValidator<T>(message: string): Validator<T> {
   return (value) => (isRequiredValue(value) ? null : message);
 }
@@ -62,6 +63,7 @@ export function createPatternValidator(pattern: RegExp, message: string): Valida
   return (value) => (pattern.test(value) ? null : message);
 }
 
+/** 基于参数构建一个复杂的数据实例报告。 */
 export function createEmailValidator(message: string): Validator<string> {
   return (value) => (isEmail(value) ? null : message);
 }

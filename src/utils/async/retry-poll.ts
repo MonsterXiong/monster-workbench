@@ -4,6 +4,7 @@ import { sleep } from "./sleep";
 import { normalizeDelayMs } from "./timer";
 import type { PollOptions, RetryOptions, RetryOptionsSummary } from "./types";
 
+/** 分析和汇总重试策略配置。 */
 export function summarizeRetryOptions(options: RetryOptions = {}): RetryOptionsSummary {
   const retries = toNonNegativeInteger(options.retries ?? 2);
   const delayMs = normalizeDelayMs(options.delayMs ?? 300);

@@ -74,6 +74,7 @@ export function summarizeStorageMutations(previews: readonly StorageMutationPrev
   };
 }
 
+/** 内部核心工具方法。 */
 export function previewAndSummarizeStorageMutations(
   items: Record<string, StorageValue>,
   options: StorageItemOptions = {}

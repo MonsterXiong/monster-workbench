@@ -8,6 +8,7 @@ export function isErrorLike(value: unknown): value is { message?: unknown; name?
   return typeof value === "object" && value !== null && ("message" in value || "name" in value || "code" in value || "stack" in value);
 }
 
+/** 智能从任意 error 载荷提取可读的 message 文本。 */
 export function getErrorMessage(error: unknown, fallback = "Unknown error"): string {
   if (error instanceof Error) {
     return error.message || fallback;

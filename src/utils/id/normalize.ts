@@ -13,6 +13,7 @@ export function normalizeDomIdSegment(value: unknown, fallback = "id"): string {
   return sanitizeDomIdSegment(normalizeIdPart(value)) || fallback;
 }
 
+/** 内部核心工具方法。 */
 export function normalizeDomId(value: unknown, fallback = "id", separator = "-"): string {
   return sanitizeDomIdSegment(normalizeIdPart(value), separator)
     .split(separator)

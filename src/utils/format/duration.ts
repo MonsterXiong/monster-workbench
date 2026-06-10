@@ -3,6 +3,7 @@ import { isFiniteNumber, isNaNNumber, isPositiveFiniteNumber, toFiniteNumber, to
 import { DURATION_UNITS, RELATIVE_TIME_UNITS } from "./constants";
 import type { FormatDurationOptions, FormatRelativeTimeOptions } from "./types";
 
+/** 执行格式化逻辑并返回可展示字符串。 */
 export function formatDuration(ms: number, options: FormatDurationOptions = {}): string {
   const safeMs = Math.max(0, toFiniteNumber(ms, Number.NaN));
 

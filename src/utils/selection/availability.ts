@@ -6,6 +6,7 @@ import {
 } from "./keys";
 import type { SelectionAvailabilitySummary } from "./types";
 
+/** 执行结构化特征分析并返回报告。 */
 export function summarizeSelectionAvailability<K extends PropertyKey>(
   availableKeys: readonly K[],
   selectedKeys: readonly K[],

@@ -5,6 +5,7 @@ import { normalizeHash } from "./hash";
 import { searchParamsToArrayRecord, searchParamsToRecord } from "./search-params";
 import type { UrlListSummary, UrlSummary, UrlSummaryOptions } from "./types";
 
+/** 执行结构化特征分析并返回报告。 */
 export function summarizeUrl(input: string, options: UrlSummaryOptions = {}): UrlSummary {
   const nextUrl = tryCreateUrl(input, { baseUrl: options.baseUrl });
 
@@ -77,6 +78,7 @@ export function summarizeUrl(input: string, options: UrlSummaryOptions = {}): Ur
   };
 }
 
+/** 执行结构化特征分析并返回报告。 */
 export function summarizeUrls(inputs: readonly string[], options: UrlSummaryOptions = {}): UrlListSummary {
   const summaries = inputs.map((input) => summarizeUrl(input, options));
   const validSummaries = summaries.filter((summary) => summary.valid);

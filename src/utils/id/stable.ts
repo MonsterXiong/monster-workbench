@@ -1,5 +1,6 @@
 import { joinIdParts } from "./normalize";
 
+/** 基于参数构建一个复杂的数据实例报告。 */
 export function createStableHashId(value: string, prefix = "id"): string {
   let hash = 2166136261;
 

@@ -40,6 +40,7 @@ export function getRejectedResultEntries<T>(results: readonly PromiseSettledResu
   return mapSettledResultEntries(results).filter((entry) => entry.rejected);
 }
 
+/** 汇总 Promise.allSettled 的执行结果（成功/失败统计）。 */
 export function summarizeSettledResults<T>(results: readonly PromiseSettledResult<T>[]): SettledResultsSummary {
   const fulfilledCount = results.filter(isFulfilledResult).length;
   const rejectedCount = results.length - fulfilledCount;

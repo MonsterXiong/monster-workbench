@@ -3,6 +3,7 @@ import { summarizeAsyncBatchPlan } from "./batch-plan";
 import { createSettledResultsReport } from "./settled";
 import type { AsyncBatchPlanSummary, AsyncBatchReport, SettledResultsReport } from "./types";
 
+/** 对一批已执行完成的任务进行合并汇总报告。 */
 export function createAsyncBatchReport<T>(
   results: readonly PromiseSettledResult<T>[],
   plan: AsyncBatchPlanSummary,

@@ -52,6 +52,7 @@ export function parseLogLine(value: string): ParsedLogLine {
   };
 }
 
+/** 对聚合的日志片段生成严重度与分布概要。 */
 export function summarizeLogLines(lines: readonly string[]): LogLinesSummary {
   const parsedLines = lines.map(parseLogLine);
   const levelCounts = LOG_LEVELS.reduce<Record<LogLevel, number>>((result, level) => {

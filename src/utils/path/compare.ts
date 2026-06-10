@@ -20,6 +20,7 @@ export function isPathInsideOrSame(basePath: string, targetPath: string, options
   return isSamePath(basePath, targetPath, options) || isPathInsideBasePath(basePath, targetPath, options);
 }
 
+/** 内部核心工具方法。 */
 export function getRelativePath(basePath: string, targetPath: string, options: PathCompareOptions = {}): string {
   const normalizedBaseRaw = normalizePathForCompare(basePath);
   const normalizedTargetRaw = normalizePathForCompare(targetPath);
@@ -113,6 +114,7 @@ export function getCommonPathAncestor(paths: readonly string[], options: PathCom
   return firstRoot ? `${firstRoot.replace(/\/$/, "")}/${commonSegments.join("/")}` : commonSegments.join("/");
 }
 
+/** 执行结构化特征分析并返回报告。 */
 export function summarizePathRelation(
   basePath: string,
   targetPath: string,

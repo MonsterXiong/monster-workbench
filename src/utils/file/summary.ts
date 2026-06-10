@@ -29,6 +29,7 @@ export function summarizeFiles<T extends FileLike = File>(files: FileListInput<T
   };
 }
 
+/** 对多个文件的大小编制并统计分布比例。 */
 export function summarizeFileSizes<T extends FileLike = File>(files: FileListInput<T>): FileSizeSummary<T> {
   const fileArray = toFileArray(files);
 
@@ -101,6 +102,7 @@ export function formatFileDisplaySummary(summary: FileListSummary, options: Form
   return [countText, sizeText].filter(Boolean).join(options.separator ?? " | ");
 }
 
+/** 针对某个展示卡片生成体积、格式与尺寸的信息。 */
 export function createFileDisplaySummary<T extends FileLike = File>(
   files: FileListInput<T>,
   options: FormatFileDisplaySummaryOptions = {}

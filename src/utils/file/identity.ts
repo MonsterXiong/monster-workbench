@@ -131,6 +131,7 @@ export function deduplicateFiles<T extends FileLike = File>(
   return getDeduplicatedFileIndexes(fileArray, options).map((index) => fileArray[index]);
 }
 
+/** 自动针对给定的文件集合依据哈希或尺寸排重并报告结果。 */
 export function createFileDeduplicationReport<T extends FileLike = File>(
   files: FileListInput<T>,
   options: FileDeduplicateOptions = {}

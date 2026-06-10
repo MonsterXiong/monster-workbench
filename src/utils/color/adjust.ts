@@ -46,6 +46,7 @@ export function mixRgbColors(left: RgbColor, right: RgbColor, weight = 0.5): Rgb
   };
 }
 
+/** 在两种十六进制颜色间按照一定比例进行混合。 */
 export function mixHexColors(left: string, right: string, weight = 0.5, fallback = "#000000"): string {
   const leftRgb = colorToRgb(left);
   const rightRgb = colorToRgb(right);

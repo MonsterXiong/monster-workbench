@@ -7,6 +7,7 @@ import type {
   FormatClipboardResultSummaryOptions,
 } from "./types";
 
+/** 包装原生的剪贴板操作结果。 */
 export function createClipboardCopyResult(
   success: boolean,
   method: ClipboardCopyMethod,
@@ -33,6 +34,7 @@ export function hasClipboardText(result: ClipboardReadResult): boolean {
   return result.success && result.text.length > 0;
 }
 
+/** 生成剪贴板操作状态及字符特征摘要。 */
 export function summarizeClipboardCopyResult(result: ClipboardCopyResult): ClipboardResultSummary {
   return {
     success: result.success,
@@ -72,6 +74,7 @@ export function formatClipboardResultSummary(
   return options.includeLength ? `${text} (${summary.textLength})` : text;
 }
 
+/** 快速格式化剪贴板交互信息以供 UI 提示。 */
 export function formatClipboardCopyResult(result: ClipboardCopyResult, options: FormatClipboardResultSummaryOptions = {}): string {
   return formatClipboardResultSummary(summarizeClipboardCopyResult(result), options);
 }
@@ -80,6 +83,7 @@ export function formatClipboardReadResult(result: ClipboardReadResult, options: 
   return formatClipboardResultSummary(summarizeClipboardReadResult(result), options);
 }
 
+/** 创建包含失败重试等上下文的完整剪贴板报告。 */
 export function createClipboardCopyReport(
   result: ClipboardCopyResult,
   options: FormatClipboardResultSummaryOptions = {}

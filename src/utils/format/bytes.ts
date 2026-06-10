@@ -8,6 +8,7 @@ import type {
   FormatOptionalBytesOptions,
 } from "./types";
 
+/** 执行格式化逻辑并返回可展示字符串。 */
 export function formatBytes(bytes: number, options: FormatBytesOptions = {}): string {
   const base = options.base ?? 1024;
   const decimals = options.decimals ?? 2;

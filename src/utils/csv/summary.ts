@@ -16,6 +16,7 @@ export function summarizeCsvRows(rows: readonly (readonly string[])[], hasHeader
   };
 }
 
+/** 对一系列单元格的值类型分布进行直观摘要。 */
 export function summarizeCsvCells(rows: readonly (readonly CsvValue[])[], delimiter = ","): CsvCellSummary {
   const cells = rows.flatMap((row) => Array.from(row));
   const texts = cells.map(toCsvCellText);
@@ -57,6 +58,7 @@ export function summarizeCsvColumn(
   };
 }
 
+/** 快速分析已解析表格的行列与数据有效性。 */
 export function summarizeCsvTable(rows: readonly (readonly string[])[], hasHeader = true): CsvTableSummary {
   const summary = summarizeCsvRows(rows, hasHeader);
 
@@ -158,6 +160,7 @@ export function parseCsvAuto(text: string, options: CsvAutoParseOptions = {}): s
   });
 }
 
+/** 带有分隔符自动探测与行列预警机制的 CSV 解析。 */
 export function parseCsvAutoWithSummary(text: string, options: CsvAutoParseOptions = {}): CsvParseResult {
   const delimiter = detectCsvDelimiter(text, options.delimiters);
   const rows = parseCsv(text, {
@@ -180,6 +183,7 @@ export function parseCsvObjectsAuto(text: string, options: CsvAutoParseObjectsOp
   });
 }
 
+/** 将首行视为表头，将 CSV 解析为包含对象的对象数组摘要。 */
 export function parseCsvObjectsAutoWithSummary(
   text: string,
   options: CsvAutoParseObjectsOptions = {}

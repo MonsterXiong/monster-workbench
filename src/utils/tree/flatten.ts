@@ -109,6 +109,7 @@ export function treeToListByDepth<T>(items: readonly T[], getChildren: TreeChild
     .map((item) => item.node);
 }
 
+/** 内部核心工具方法。 */
 export function treeToListWithoutChildren<T extends object, C extends string = "children">(
   items: readonly T[],
   getChildren: (item: T) => readonly T[] | undefined,
@@ -158,6 +159,7 @@ export function treeToFlatList<T, K extends PropertyKey>(
   });
 }
 
+/** 内部核心工具方法。 */
 export function treeToParentIdList<T extends object, K extends PropertyKey, C extends string = "children">(
   items: readonly T[],
   options: TreeParentIdListOptions<T, K, C>

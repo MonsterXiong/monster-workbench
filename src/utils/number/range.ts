@@ -57,6 +57,7 @@ export function doNumberRangesOverlap(left: NumberBounds, right: NumberBounds, i
   return inclusive ? !summary.empty : summary.overlaps;
 }
 
+/** 执行结构化特征分析并返回报告。 */
 export function summarizeNumberRange(value: unknown, min: unknown, max: unknown, precision = 0): NumberRangeSummary {
   const bounds = normalizeNumberBounds(min, max);
   const safeValue = toFiniteNumber(value, bounds.min);
@@ -84,6 +85,7 @@ export function summarizePercent(value: unknown, fallback = 0, precision = 0): P
   };
 }
 
+/** 执行结构化特征分析并返回报告。 */
 export function summarizeProgressRatio(current: unknown, total: unknown, precision = 0): ProgressRatioSummary {
   const currentValue = toFiniteNumber(current);
   const totalValue = Math.max(0, toFiniteNumber(total));

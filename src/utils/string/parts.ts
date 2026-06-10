@@ -119,6 +119,7 @@ export function truncateText(value: string, maxLength: number, suffix = "..."): 
   return `${value.slice(0, safeLength)}${suffix}`;
 }
 
+/** 内部核心工具方法。 */
 export function truncateMiddleText(value: string, maxLength: number, separator = "..."): string {
   if (value.length <= maxLength) {
     return value;
@@ -212,6 +213,7 @@ export function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+/** 内部核心工具方法。 */
 export function splitBySeparators(value: string, separators: ReadonlyArray<string> = [",", "\uFF0C", "\n"], normalize = true): string[] {
   if (separators.length === 0) {
     return [normalize ? value.trim() : value].filter(isNonEmptyValue);

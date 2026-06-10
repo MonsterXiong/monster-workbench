@@ -38,6 +38,7 @@ export function isSafeRelativePathText(path: string): boolean {
   return isRelativePath(normalizedPath) && !hasPathControlCharacters(normalizedPath) && !hasPathTraversal(normalizedPath);
 }
 
+/** 执行结构化特征分析并返回报告。 */
 export function summarizePathSafety(path: string): PathSafetySummary {
   const normalizedPath = normalizePathInput(path);
 
@@ -63,6 +64,7 @@ export function isSafeFileName(value: string): boolean {
   return isSafeFileNameInternal(value);
 }
 
+/** 内部核心工具方法。 */
 export function sanitizeFileNameWithFallback(value: string, fallback = "untitled", replacement = "_"): string {
   return sanitizeFileNameWithFallbackInternal(value, fallback, replacement);
 }

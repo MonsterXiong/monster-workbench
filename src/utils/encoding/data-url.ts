@@ -3,6 +3,7 @@ import { bytesToBase64, encodeBase64Utf8 } from "./base64";
 import { textToUtf8Bytes } from "./bytes";
 import type { DataUrlInfo, DataUrlListSummary, DataUrlSummary } from "./types";
 
+/** 基于数据内容快速拼接标准的 Data URI 字符串。 */
 export function createDataUrl(data: string, mimeType = "text/plain", encoding: "base64" | "text" = "base64"): string {
   const normalizedMimeType = mimeType.trim() || "text/plain";
   return encoding === "base64"
@@ -92,6 +93,7 @@ export function safeDataUrlToBytes(value: string, fallback = new Uint8Array()): 
   return tryDataUrlToBytes(value) ?? fallback;
 }
 
+/** 解析并验证给定 Data URI 的 mime-type 和大小。 */
 export function summarizeDataUrl(value: string): DataUrlSummary {
   const parsed = parseDataUrl(value);
 

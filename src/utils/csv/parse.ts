@@ -51,6 +51,7 @@ export function parseCsvLine(line: string, delimiter = ","): string[] {
   return cells;
 }
 
+/** 基础的 CSV 字符串转二维数组实现。 */
 export function parseCsv(text: string, options: string | CsvParseOptions = ","): string[][] {
   const parseOptions = normalizeCsvParseOptions(options);
   const normalizedText = parseOptions.trimBom ? stripCsvBom(text) : text;

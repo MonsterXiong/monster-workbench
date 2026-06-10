@@ -38,6 +38,7 @@ export function normalizeWhitespace(value: string): string {
   return value.replace(/\s+/g, " ").trim();
 }
 
+/** 内部核心工具方法。 */
 export function cleanDisplayText(value: unknown, options: CleanDisplayTextOptions = {}): string {
   const normalizeLineBreaksEnabled = options.normalizeLineBreaks ?? true;
   const removeBom = options.removeBom ?? true;

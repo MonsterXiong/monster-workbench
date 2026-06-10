@@ -100,6 +100,7 @@ export function getNullCompareResult(
   return (leftIsNull ? 1 : -1) * getSortDirectionFactor(direction);
 }
 
+/** 对多种数据类型执行标准比较逻辑（相等、大小等）。 */
 export function compareValues(
   left: ComparableValue,
   right: ComparableValue,

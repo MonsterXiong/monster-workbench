@@ -142,6 +142,7 @@ export function formatSummaryItems<TMeta = unknown>(
   return formatKeyValueList(entries, options);
 }
 
+/** 基于参数构建一个复杂的数据实例报告。 */
 export function createSummaryItemsReport<TMeta = unknown>(
   inputs: readonly SummaryItemInput<TMeta>[],
   options: CreateSummaryItemsReportOptions<TMeta> = {}
@@ -225,6 +226,7 @@ export function summarizeStatusSummaryItems<TMeta = unknown>(
   };
 }
 
+/** 基于参数构建一个复杂的数据实例报告。 */
 export function createStatusSummaryItemsReport<TMeta = unknown>(
   inputs: readonly StatusSummaryItemInput<TMeta>[],
   options: CreateSummaryItemsReportOptions<TMeta> = {}

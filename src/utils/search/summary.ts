@@ -94,6 +94,7 @@ export function formatSearchResultSummary(summary: SearchResultSummary, options:
   return options.matchText?.(summary) ?? `${summary.matchedCount} / ${summary.totalCount}`;
 }
 
+/** 基于参数构建一个复杂的数据实例报告。 */
 export function createSearchResultDisplaySummary(
   summary: SearchResultSummary,
   options: FormatSearchResultSummaryOptions = {}

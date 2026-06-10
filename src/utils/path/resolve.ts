@@ -15,6 +15,7 @@ export function resolvePath(basePath: string, ...parts: string[]): string {
   }, normalizePathDots(basePath));
 }
 
+/** 内部核心工具方法。 */
 export function resolveSafeChildPath(
   basePath: string,
   relativePath: string,

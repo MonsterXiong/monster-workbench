@@ -132,6 +132,7 @@ export function createNormalizeRecordEmptyValuesReport<T extends AnyRecord>(
   };
 }
 
+/** 基于参数构建一个复杂的数据实例报告。 */
 export function createObjectCleanupReport<T extends AnyRecord>(
   value: T,
   options: ObjectCleanupOptions = {}

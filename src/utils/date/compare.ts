@@ -91,6 +91,7 @@ export function isDateInRange(value: DateInput, start?: DateInput | null, end?: 
   return true;
 }
 
+/** 根据传入基准时间判断当前属于什么时态阶段。 */
 export function summarizeDateStatus(value: DateInput, baseDate: DateInput = getCurrentDate()): DateStatusSummary {
   const date = parseDateValue(value);
   const base = parseDateValue(baseDate) ?? getCurrentDate();

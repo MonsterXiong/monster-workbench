@@ -178,6 +178,7 @@ export function createArrayIndexDiffGroups<T>(entries: readonly ArrayIndexDiffEn
   };
 }
 
+/** 基于索引对两个数组进行对比，常用于列表纯变动检测。 */
 export function diffArraysByIndex<T>(
   before: readonly T[],
   after: readonly T[],
@@ -283,6 +284,7 @@ export function summarizeArrayIndexDiff<T>(diff: ArrayIndexDiffResult<T>): Array
   };
 }
 
+/** 基于键值进行集合变动的 diff（提取新增、删除和保持不变的项）。 */
 export function diffArraysByKeyChanges<T, K extends PropertyKey>(
   before: readonly T[],
   after: readonly T[],

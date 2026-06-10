@@ -46,6 +46,7 @@ export function summarizeKeyboardEvent(
   };
 }
 
+/** 执行结构化特征分析并返回报告。 */
 export function summarizeKeyboardShortcuts(
   shortcuts: readonly (string | KeyboardShortcut)[],
   options: FormatKeyboardShortcutsOptions = {}

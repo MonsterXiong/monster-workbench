@@ -30,6 +30,7 @@ export function summarizeNumberListBounds(values: readonly unknown[]): NumberLis
   };
 }
 
+/** 执行结构化特征分析并返回报告。 */
 export function summarizeNumberList(values: readonly unknown[]): NumberListSummary {
   const numbers = values.map((value) => toFiniteNumber(value, Number.NaN)).filter(isFiniteNumber);
   const bounds = summarizeNumberListBounds(values);
@@ -158,6 +159,7 @@ export function isNumberInBucket(value: number, bucket: NumberBucketDefinition):
   return true;
 }
 
+/** 执行结构化特征分析并返回报告。 */
 export function summarizeNumberDistribution(
   values: readonly unknown[],
   buckets: readonly NumberBucketDefinition[],

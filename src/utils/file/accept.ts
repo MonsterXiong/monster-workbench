@@ -57,6 +57,7 @@ export function getNativeAcceptValue(accept: FileAcceptInput): string | undefine
   return isAcceptAll(accept) ? undefined : buildAcceptString(accept);
 }
 
+/** 解析 MIME 和后缀，总结可接收的文件范畴。 */
 export function summarizeFileAccept(accept: FileAcceptInput): FileAcceptSummary {
   const rules = normalizeAccept(accept);
   const extensionRules = rules.filter((rule) => rule.startsWith("."));
@@ -109,6 +110,7 @@ export function matchesAccept(path: string, accept: FileAcceptInput, mimeType = 
   });
 }
 
+/** 校验一个给定的文件是否符合特定的 accept 规则。 */
 export function matchesFileAccept(file: FileLike, accept: FileAcceptInput): boolean {
   return matchesAccept(file.name, accept, getFileLikeMimeType(file));
 }

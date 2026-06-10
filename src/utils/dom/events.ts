@@ -211,6 +211,7 @@ export function addDomEventListener(
   listener: EventListenerOrEventListenerObject,
   options?: DomEventOptions
 ): DomEventCleanup;
+/** 注册 DOM 事件并返回一键销毁闭包，支持弱引用。 */
 export function addDomEventListener(
   target: EventTarget | null | undefined,
   type: string,
@@ -242,6 +243,7 @@ export function cleanupDomEventListeners(cleanups: readonly DomEventCleanup[]): 
   cleanups.forEach((cleanup) => cleanup());
 }
 
+/** 合并多个事件销毁闭包为一个。 */
 export function mergeDomEventCleanups(cleanups: readonly DomEventCleanup[]): DomEventCleanup {
   let pendingCleanups = [...cleanups];
 

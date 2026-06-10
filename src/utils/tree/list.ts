@@ -1,6 +1,7 @@
 import { ListToTreeOptions, ListToTreeResult, ListTreeDiagnostic, ListTreeIssue, ListTreeIssueGroups, ListTreeIssueStats, TreeWithChildren, TreeWithoutEmptyChildren } from "./types";
 import { pruneTreeEmptyChildren } from "./visible";
 
+/** 内部核心工具方法。 */
 export function listToTree<T extends object, K extends PropertyKey, C extends string = "children">(
   items: readonly T[],
   options: ListToTreeOptions<T, K, C>
@@ -162,6 +163,7 @@ export function getListTreeIssueStats<T, K extends PropertyKey>(issues: readonly
   };
 }
 
+/** 内部核心工具方法。 */
 export function diagnoseListTreeItems<T, K extends PropertyKey>(
   items: readonly T[],
   options: Pick<ListToTreeOptions<T, K>, "getId" | "getParentId" | "rootParentIds">

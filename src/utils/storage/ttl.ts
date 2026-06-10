@@ -14,6 +14,7 @@ import type {
   StorageTtlSummary,
 } from "./types";
 
+/** 基于参数构建一个复杂的数据实例报告。 */
 export function createStorageTtlEnvelope<T>(
   value: T,
   ttlMs?: number,
@@ -152,6 +153,7 @@ export function getStorageTtlEntries<T = unknown>(
   });
 }
 
+/** 执行结构化特征分析并返回报告。 */
 export function summarizeStorageTtlEntries(entries: readonly StorageTtlEntry[]): StorageTtlSummary {
   const ttlEntries = entries.filter((entry) => entry.envelope !== null);
   const expiredEntries = ttlEntries.filter((entry) => entry.expired);

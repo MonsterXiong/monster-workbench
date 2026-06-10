@@ -36,6 +36,7 @@ export function getViewportBreakpoint(
   return matched[matched.length - 1]?.key ?? fallback;
 }
 
+/** 将视口尺寸折叠至当前的响应式断点类型。 */
 export function summarizeViewportBreakpoints(
   breakpoints: readonly ViewportBreakpoint[],
   win: Window | null = typeof window === "undefined" ? null : window,
@@ -73,6 +74,7 @@ export function summarizeMediaQuery(query: string, fallback = false, win: Window
   };
 }
 
+/** 汇总并分析常见的 CSS 媒体查询生效状态。 */
 export function summarizeMediaQueries(
   queries: readonly string[],
   fallback = false,

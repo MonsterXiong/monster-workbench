@@ -59,6 +59,7 @@ export function summarizeTreeDiffByKey<T, K extends PropertyKey>(diff: TreeDiffB
   };
 }
 
+/** 基于参数构建一个复杂的数据实例报告。 */
 export function createTreeDiffByKeyReport<T, K extends PropertyKey>(
   before: readonly T[],
   after: readonly T[],

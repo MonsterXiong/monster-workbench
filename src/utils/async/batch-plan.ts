@@ -12,6 +12,7 @@ export function normalizeConcurrency(concurrency: number, itemCount?: number): n
   return safeItemCount === 0 ? 1 : Math.min(safeConcurrency, safeItemCount);
 }
 
+/** 根据总数和并发度规划并输出批处理计划。 */
 export function summarizeAsyncBatchPlan(itemCount: unknown, concurrency = 4): AsyncBatchPlanSummary {
   const safeItemCount = toNonNegativeInteger(itemCount);
   const requestedConcurrency = toIntegerAtLeast(concurrency, 1);

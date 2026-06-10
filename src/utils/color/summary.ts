@@ -5,7 +5,8 @@ import type { ColorPaletteSummary, ColorValueSummary, HslColor, RgbColor, RgbaCo
 
 export { summarizeColorContrast };
 
-export function summarizeColorValue(value: string | RgbColor | RgbaColor | HslColor, fallback = "#000000"): ColorValueSummary {
+/** 对颜色值提取亮度、色相等特征并生成摘要。 */
+    export function summarizeColorValue(value: string | RgbColor | RgbaColor | HslColor, fallback = "#000000"): ColorValueSummary {
   const input = typeof value === "string" ? value : colorToCss(value);
   const rgba = colorToRgba(value as string | RgbColor | RgbaColor);
   const rgb = typeof value !== "string" && "h" in value ? hslToRgb(value) : rgba ? normalizeRgbColor(rgba) : null;
@@ -24,6 +25,7 @@ export function summarizeColorValue(value: string | RgbColor | RgbaColor | HslCo
   };
 }
 
+/** 生成色板组合的关键统计信息。 */
 export function summarizeColorPalette(values: readonly (string | RgbColor | RgbaColor)[]): ColorPaletteSummary {
   const colors = values.map(colorToRgb).filter((color): color is RgbColor => Boolean(color));
   const total = colors.reduce(

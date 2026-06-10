@@ -1,3 +1,4 @@
+/** 内部核心工具方法。 */
 export function maskText(value: string, visibleStart = 3, visibleEnd = 3, mask = "*"): string {
   if (!value) {
     return "";

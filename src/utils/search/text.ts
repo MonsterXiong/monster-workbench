@@ -44,6 +44,7 @@ function normalizeSearchKeyword(value: string | readonly string[]): string {
   return typeof value === "string" ? normalizeSearchText(value) : normalizeSearchTokens(value).join(" ");
 }
 
+/** 内部核心工具方法。 */
 export function normalizeSearchKeywordText(value: string | readonly string[]): string {
   return normalizeSearchKeyword(value);
 }

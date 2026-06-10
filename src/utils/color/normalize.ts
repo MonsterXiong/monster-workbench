@@ -14,6 +14,7 @@ export function normalizeColorAlpha(value: unknown, fallback = 1): number {
   return clampNumber(value, 0, 1, fallback, 3);
 }
 
+/** 标准化十六进制颜色，去除非法字符并补全缩写。 */
 export function normalizeHexColor(value: string, fallback = "#000000"): string {
   const trimmedValue = value.trim();
   const match = trimmedValue.match(HEX_COLOR_REGEXP);

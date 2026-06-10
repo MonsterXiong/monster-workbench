@@ -193,6 +193,7 @@ export function normalizeSteppedNumber(value: unknown, options: NormalizeStepped
   return clampNumber(steppedValue, normalizedMin, normalizedMax, clampedValue, getNumberPrecision(normalizedStep));
 }
 
+/** 执行结构化特征分析并返回报告。 */
 export function summarizeSteppedNumber(value: unknown, options: NormalizeSteppedNumberOptions = {}): SteppedNumberSummary {
   const min = toFiniteNumber(options.min);
   const max = toFiniteNumber(options.max, Number.MAX_SAFE_INTEGER);

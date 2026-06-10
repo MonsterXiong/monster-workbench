@@ -144,6 +144,7 @@ export function getDateRangeDurationDays(range: DateRangeLike, options: DateRang
   return value + (options.inclusive ? 1 : 0);
 }
 
+/** 对包含起止的日期对象生成持续天数等概要。 */
 export function summarizeDateRange(
   range: DateRangeLike,
   separator = " - ",
@@ -162,6 +163,7 @@ export function summarizeDateRange(
   };
 }
 
+/** 针对日期区间快速进行可读性字符串格式化输出。 */
 export function formatDateRangeSummary(summary: DateRangeSummary, options: FormatDateRangeSummaryOptions = {}): string {
   if (summary.empty) {
     return options.emptyText ?? "";
@@ -221,6 +223,7 @@ export function enumerateDateRange(range: DateRangeLike, options: EnumerateDateR
   return result;
 }
 
+/** 枚举并返回区间内包含的所有离散日期。 */
 export function enumerateDateRangeValues(range: DateRangeLike, options: EnumerateDateRangeOptions = {}): string[] {
   return enumerateDateRange(range, options).map((date) => formatDateOnly(date, ""));
 }

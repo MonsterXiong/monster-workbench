@@ -7,6 +7,7 @@ import { diffSearchParams, formatUrlQuerySummary, summarizeSearchParams } from "
 import { tryCreateUrl } from "./core";
 import type { BuildUrlOptions, FilterUrlQueryParamsOptions, FormatUrlQuerySummaryOptions, MergeQueryParamsOptions, NormalizeUrlQueryOptions, QueryParamArrayOptions, QueryParamValueOptions, QueryRecordOptions, QueryValue, UrlParseOptions, UrlQueryDiffSummary, UrlQueryMutationPreview, UrlQuerySummary } from "./types";
 
+/** 内部核心工具方法。 */
 export function appendQuery(url: string, params: Record<string, QueryValue>): string {
   const nextUrl = createUrl(url);
   setSearchParamsFromRecord(nextUrl.searchParams, params);
@@ -241,6 +242,7 @@ export function cleanQuery(url: string): string {
   return formatUrlForInput(nextUrl, url);
 }
 
+/** 内部核心工具方法。 */
 export function normalizeUrlQuery(url: string, options: NormalizeUrlQueryOptions = {}): string {
   const nextUrl = createUrl(url, { baseUrl: options.baseUrl });
   nextUrl.search = stringifySearchParams(normalizeSearchParams(nextUrl.searchParams, options), false);
@@ -251,6 +253,7 @@ export function createUrlQueryKey(url: string, options: NormalizeUrlQueryOptions
   return createQueryKey(tryCreateUrl(url, { baseUrl: options.baseUrl })?.searchParams ?? new URLSearchParams(), options);
 }
 
+/** 内部核心工具方法。 */
 export function filterUrlQueryParams(url: string, options: FilterUrlQueryParamsOptions = {}): string {
   const nextUrl = createUrl(url, { baseUrl: options.baseUrl });
   nextUrl.search = stringifySearchParams(filterSearchParams(nextUrl.searchParams, options), false);

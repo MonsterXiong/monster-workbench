@@ -57,6 +57,7 @@ export async function copyTextToClipboardResult(text: string, options: CopyTextO
   }
 }
 
+/** 触发剪贴板复制逻辑，支持自动降级。 */
 export async function copyTextToClipboard(text: string, options: CopyTextOptions = {}): Promise<boolean> {
   const result = await copyTextToClipboardResult(text, options);
 

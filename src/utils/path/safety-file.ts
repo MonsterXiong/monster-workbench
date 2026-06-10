@@ -12,6 +12,7 @@ export function isSafeFileName(value: string): boolean {
   return trimmedValue.length > 0 && !FILE_NAME_UNSAFE_CHAR_REGEXP.test(trimmedValue);
 }
 
+/** 内部核心工具方法。 */
 export function sanitizeFileNameWithFallback(value: string, fallback = "untitled", replacement = "_"): string {
   return sanitizeFileName(value, replacement) || fallback;
 }

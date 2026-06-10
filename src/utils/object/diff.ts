@@ -329,6 +329,7 @@ export function formatObjectDiffEntry(entry: ObjectDiffEntry, options: FormatObj
   return `${typeLabel}: ${pathText} ${stringifyValue(entry.before)} -> ${stringifyValue(entry.after)}`;
 }
 
+/** 执行格式化逻辑并返回可展示字符串。 */
 export function formatObjectDiff(entries: readonly ObjectDiffEntry[], options: FormatObjectDiffOptions = {}): string {
   const text = entries.map((entry) => formatObjectDiffEntry(entry, options)).join(options.separator ?? "\n");
   return text || options.fallback || "";
@@ -786,6 +787,7 @@ export function createDeepObjectDiffSummary(
   return summarizeObjectDiff(diffObjectsDeep(before, after, options, basePath));
 }
 
+/** 基于参数构建一个复杂的数据实例报告。 */
 export function createDeepObjectDiffReport(
   before: unknown,
   after: unknown,

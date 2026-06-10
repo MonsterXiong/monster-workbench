@@ -1,6 +1,7 @@
 import type { ComparableValue, CompareValueOptions, SortDirection, SortRule } from "./types";
 import { createComparator, createMultiComparator } from "./compare";
 
+/** 增强的属性安全排序实现，支持正逆向排序。 */
 export function sortByValue<T>(
   items: readonly T[],
   getValue: (item: T) => ComparableValue,

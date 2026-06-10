@@ -15,6 +15,7 @@ import type {
   TextTransformResult,
 } from "./types";
 
+/** 执行结构化特征分析并返回报告。 */
 export function summarizeText(value: unknown, options: TextSummaryOptions = {}): TextSummary {
   const text = String(value ?? "");
   const normalizedText = normalizeLineBreaks(text);
@@ -102,6 +103,7 @@ export function formatTextListSummary(
   return parts.join(separator);
 }
 
+/** 基于参数构建一个复杂的数据实例报告。 */
 export function createTextPreview(value: unknown, options: TextPreviewOptions = {}): TextPreviewSummary {
   const sourceText = String(value ?? "");
   const normalizedText = options.collapseWhitespace ?? true
@@ -126,6 +128,7 @@ export function createTextPreview(value: unknown, options: TextPreviewOptions = 
   };
 }
 
+/** 执行格式化逻辑并返回可展示字符串。 */
 export function formatTextPreview(value: unknown, options: TextPreviewOptions = {}): string {
   return createTextPreview(value, options).preview;
 }

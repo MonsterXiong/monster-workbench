@@ -341,6 +341,7 @@ export function deepEqual(left: unknown, right: unknown): boolean {
   return leftKeys.every((key) => Object.prototype.hasOwnProperty.call(right, key) && deepEqual(left[key], right[key]));
 }
 
+/** 内部核心工具方法。 */
 export function getByPath<T = unknown>(value: unknown, path: ObjectPathInput, fallback?: T): T | undefined {
   let current = value;
 
@@ -420,6 +421,7 @@ export function hasEveryByPath(value: unknown, paths: readonly ObjectPathInput[]
   return paths.every((path) => hasByPath(value, path));
 }
 
+/** 内部核心工具方法。 */
 export function setByPath<T extends AnyRecord>(value: T, path: ObjectPathInput, nextValue: unknown): T {
   const normalizedPath = parseObjectPath(path);
 
@@ -528,6 +530,7 @@ export function getObjectPathValues(value: unknown, paths: readonly ObjectPathIn
   });
 }
 
+/** 内部核心工具方法。 */
 export function pickByPaths(value: unknown, paths: readonly ObjectPathInput[]): AnyRecord {
   const entries = getObjectPathValues(value, paths)
     .filter((entry) => entry.exists)

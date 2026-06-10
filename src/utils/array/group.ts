@@ -11,6 +11,7 @@ export function groupBy<T, K extends PropertyKey>(items: readonly T[], getKey: (
   }, {} as Record<K, T[]>);
 }
 
+/** 将数组元素分组，并返回对象数组结构而不是单个大对象。 */
 export function groupByEntries<T, K extends PropertyKey>(items: readonly T[], getKey: (item: T) => K): Array<GroupByEntry<K, T>> {
   const groups = new Map<K, T[]>();
 

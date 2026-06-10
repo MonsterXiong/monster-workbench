@@ -184,6 +184,7 @@ export function createFileValidationReport<T extends FileLike = File>(
   };
 }
 
+/** 接收到选中文件后，生成总览报告和警告拦截清单。 */
 export function createFileSelectionIntakeReport<T extends FileLike = File>(
   files: FileListInput<T>,
   options: FileValidationOptions = {}
