@@ -1153,6 +1153,7 @@ mod queue_tests {
             image_model: "image-test".to_string(),
             image_prompt: "blue robot".to_string(),
             image_size: "1024x1024".to_string(),
+            image_count: 1,
             timeout_ms,
             queue_mode: "serial".to_string(),
             max_concurrency: 3,
@@ -2069,6 +2070,12 @@ fn validate_provider_config(config: &AiProviderConfig, action: &str) -> AppResul
         )));
     }
 
+    if action == "image" && (config.image_count == 0 || config.image_count > 4) {
+        return Err(AppError::Config(
+            "生图测试一次仅支持 1 到 4 张图片".to_string(),
+        ));
+    }
+
     validate_text_len(
         "提供商显示名称",
         &config.display_name,
@@ -2256,6 +2263,10 @@ fn default_max_concurrency() -> usize {
     3
 }
 
+fn default_image_count() -> usize {
+    1
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AiProviderConfig {
@@ -2269,6 +2280,8 @@ pub struct AiProviderConfig {
     pub image_model: String,
     pub image_prompt: String,
     pub image_size: String,
+    #[serde(default = "default_image_count")]
+    pub image_count: usize,
     pub timeout_ms: u64,
     #[serde(default = "default_queue_mode")]
     pub queue_mode: String,
@@ -2348,6 +2361,7 @@ mod tests {
             image_model: "image-test".to_string(),
             image_prompt: "blue robot".to_string(),
             image_size: "1024x1024".to_string(),
+            image_count: 1,
             timeout_ms: 5_000,
             queue_mode: "serial".to_string(),
             max_concurrency: 3,

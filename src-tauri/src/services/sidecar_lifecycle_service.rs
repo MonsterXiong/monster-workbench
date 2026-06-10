@@ -1,0 +1,396 @@
+use crate::infra::{AppError, AppResult};
+use serde_json::{json, Value};
+use std::io::{Read, Write};
+use std::net::{TcpListener, TcpStream};
+use std::path::{Path, PathBuf};
+use std::process::{Child, Command, Stdio};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use tauri::{AppHandle, Manager};
+
+const PYTHON_SIDECAR_ENV_ALLOWLIST: &[&str] = &[
+    "PATH",
+    "Path",
+    "PATHEXT",
+    "SystemRoot",
+    "WINDIR",
+    "COMSPEC",
+    "TEMP",
+    "TMP",
+    "USERPROFILE",
+    "APPDATA",
+    "LOCALAPPDATA",
+    "HOME",
+];
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SidecarStatusSnapshot {
+    pub status: String,
+    pub port: Option<u16>,
+    pub pid: Option<u32>,
+    pub last_error: Option<String>,
+    pub started_at: Option<String>,
+    pub checked_at: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GenerateImagePromptSidecarRequest {
+    pub project_id: Option<String>,
+    pub brief: String,
+    pub style: Option<String>,
+    pub mood: Option<String>,
+    pub aspect_ratio: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GenerateImagePromptSidecarAsset {
+    pub asset_type: String,
+    pub title: String,
+    pub content: String,
+    pub metadata_json: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GenerateImagePromptSidecarResponse {
+    pub ok: bool,
+    pub status: String,
+    pub message: Option<String>,
+    pub asset: GenerateImagePromptSidecarAsset,
+}
+
+pub struct SidecarLifecycleService {
+    app_handle: AppHandle,
+    child: Option<Child>,
+    runtime_token: Option<String>,
+    snapshot: SidecarStatusSnapshot,
+}
+
+impl SidecarLifecycleService {
+    pub fn new(app_handle: AppHandle) -> Self {
+        Self {
+            app_handle,
+            child: None,
+            runtime_token: None,
+            snapshot: SidecarStatusSnapshot {
+                status: "stopped".to_string(),
+                port: None,
+                pid: None,
+                last_error: None,
+                started_at: None,
+                checked_at: None,
+            },
+        }
+    }
+
+    pub fn get_status(&mut self) -> SidecarStatusSnapshot {
+        self.refresh_exit_status();
+        self.snapshot.clone()
+    }
+
+    pub fn start_dev_health_server(&mut self) -> AppResult<SidecarStatusSnapshot> {
+        self.refresh_exit_status();
+        if matches!(
+            self.snapshot.status.as_str(),
+            "starting" | "running" | "unhealthy"
+        ) {
+            return self.check_health();
+        }
+
+        let port = reserve_port()?;
+        let token = format!("monster-sidecar-{}", now_millis());
+        let script_path = self.resolve_sidecar_script()?;
+        let child = spawn_python_sidecar(&script_path, port, &token)?;
+
+        self.snapshot.status = "starting".to_string();
+        self.snapshot.port = Some(port);
+        self.snapshot.pid = Some(child.id());
+        self.snapshot.last_error = None;
+        self.snapshot.started_at = Some(now_text());
+        self.snapshot.checked_at = None;
+        self.runtime_token = Some(token);
+        self.child = Some(child);
+
+        std::thread::sleep(Duration::from_millis(250));
+        self.check_health()
+    }
+
+    pub fn check_health(&mut self) -> AppResult<SidecarStatusSnapshot> {
+        self.refresh_exit_status();
+        let Some(port) = self.snapshot.port else {
+            return Ok(self.snapshot.clone());
+        };
+        let Some(token) = self.runtime_token.clone() else {
+            return Ok(self.snapshot.clone());
+        };
+
+        match health_check(port, &token) {
+            Ok(()) => {
+                self.snapshot.status = "running".to_string();
+                self.snapshot.last_error = None;
+                self.snapshot.checked_at = Some(now_text());
+                Ok(self.snapshot.clone())
+            }
+            Err(error) => {
+                if self.child.is_some() {
+                    self.snapshot.status = "unhealthy".to_string();
+                }
+                self.snapshot.last_error = Some(error.to_string());
+                self.snapshot.checked_at = Some(now_text());
+                Ok(self.snapshot.clone())
+            }
+        }
+    }
+
+    pub fn stop_dev_health_server(&mut self) -> AppResult<SidecarStatusSnapshot> {
+        self.snapshot.status = "stopping".to_string();
+        if let Some(mut child) = self.child.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        self.snapshot.status = "stopped".to_string();
+        self.snapshot.port = None;
+        self.snapshot.pid = None;
+        self.snapshot.checked_at = Some(now_text());
+        self.runtime_token = None;
+        Ok(self.snapshot.clone())
+    }
+
+    pub fn shutdown_reserved(&mut self) {
+        let _ = self.stop_dev_health_server();
+    }
+
+    pub fn ensure_dev_server(&mut self) -> AppResult<SidecarStatusSnapshot> {
+        let status = self.start_dev_health_server()?;
+        if status.status != "running" {
+            return Err(AppError::Process(format!(
+                "sidecar did not reach running state: {}",
+                status.status
+            )));
+        }
+        Ok(status)
+    }
+
+    pub fn submit_generate_image_prompt(
+        &mut self,
+        request: GenerateImagePromptSidecarRequest,
+    ) -> AppResult<GenerateImagePromptSidecarResponse> {
+        self.ensure_dev_server()?;
+        let port = self
+            .snapshot
+            .port
+            .ok_or_else(|| AppError::Process("sidecar port is missing".to_string()))?;
+        let token = self
+            .runtime_token
+            .clone()
+            .ok_or_else(|| AppError::Process("sidecar runtime token is missing".to_string()))?;
+
+        let payload = json!({
+            "taskType": "generate_image_prompt",
+            "projectId": request.project_id,
+            "payload": request,
+        });
+        let response = post_json(port, &token, "/tasks", &payload)?;
+        serde_json::from_str::<GenerateImagePromptSidecarResponse>(&response).map_err(|error| {
+            AppError::Process(format!("failed to parse sidecar response: {error}"))
+        })
+    }
+
+    fn refresh_exit_status(&mut self) {
+        let Some(child) = self.child.as_mut() else {
+            return;
+        };
+        let outcome = match child.try_wait() {
+            Ok(Some(status)) => Some(format!("sidecar exited with status {status}")),
+            Ok(None) => None,
+            Err(error) => Some(format!("sidecar status check failed: {error}")),
+        };
+
+        if let Some(message) = outcome {
+            self.snapshot.status = "failed".to_string();
+            self.snapshot.last_error = Some(message);
+            self.snapshot.pid = None;
+            self.runtime_token = None;
+            self.child = None;
+        }
+    }
+
+    fn resolve_sidecar_script(&self) -> AppResult<PathBuf> {
+        let dev_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("sidecars")
+            .join("python")
+            .join("creative_health_server.py");
+        if dev_path.exists() {
+            return Ok(dev_path);
+        }
+
+        let resource_path = self
+            .app_handle
+            .path()
+            .resource_dir()
+            .map_err(|error| AppError::Io(format!("failed to locate resource dir: {error}")))?
+            .join("sidecars")
+            .join("python")
+            .join("creative_health_server.py");
+        if resource_path.exists() {
+            return Ok(resource_path);
+        }
+
+        Err(AppError::Io(
+            "creative_health_server.py was not found".to_string(),
+        ))
+    }
+}
+
+fn reserve_port() -> AppResult<u16> {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .map_err(|error| AppError::Process(format!("failed to reserve port: {error}")))?;
+    listener
+        .local_addr()
+        .map(|addr| addr.port())
+        .map_err(|error| AppError::Process(format!("failed to read reserved port: {error}")))
+}
+
+fn health_check(port: u16, token: &str) -> AppResult<()> {
+    let mut stream = TcpStream::connect_timeout(
+        &format!("127.0.0.1:{port}")
+            .parse()
+            .map_err(|error| AppError::Process(format!("invalid health endpoint: {error}")))?,
+        Duration::from_secs(1),
+    )
+    .map_err(|error| AppError::Process(format!("health connect failed: {error}")))?;
+    stream
+        .set_read_timeout(Some(Duration::from_secs(1)))
+        .map_err(|error| AppError::Process(format!("failed to set read timeout: {error}")))?;
+    stream
+        .set_write_timeout(Some(Duration::from_secs(1)))
+        .map_err(|error| AppError::Process(format!("failed to set write timeout: {error}")))?;
+    let request = format!(
+        "GET /health HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\nX-Monster-Token: {token}\r\n\r\n"
+    );
+    stream
+        .write_all(request.as_bytes())
+        .map_err(|error| AppError::Process(format!("health request failed: {error}")))?;
+
+    let mut response = String::new();
+    stream
+        .read_to_string(&mut response)
+        .map_err(|error| AppError::Process(format!("health response failed: {error}")))?;
+    if response.contains("200 OK") && response.contains("\"ok\"") {
+        return Ok(());
+    }
+
+    Err(AppError::Process(format!(
+        "unexpected health response: {}",
+        response.lines().next().unwrap_or("empty response")
+    )))
+}
+
+fn post_json(port: u16, token: &str, path: &str, payload: &Value) -> AppResult<String> {
+    let mut stream = TcpStream::connect_timeout(
+        &format!("127.0.0.1:{port}")
+            .parse()
+            .map_err(|error| AppError::Process(format!("invalid sidecar endpoint: {error}")))?,
+        Duration::from_secs(2),
+    )
+    .map_err(|error| AppError::Process(format!("sidecar connect failed: {error}")))?;
+    stream
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .map_err(|error| AppError::Process(format!("failed to set read timeout: {error}")))?;
+    stream
+        .set_write_timeout(Some(Duration::from_secs(2)))
+        .map_err(|error| AppError::Process(format!("failed to set write timeout: {error}")))?;
+
+    let body = serde_json::to_string(payload)
+        .map_err(|error| AppError::Process(format!("failed to encode sidecar payload: {error}")))?;
+    let request = format!(
+        "POST {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: {}\r\nX-Monster-Token: {token}\r\n\r\n{}",
+        body.len(),
+        body
+    );
+    stream
+        .write_all(request.as_bytes())
+        .map_err(|error| AppError::Process(format!("sidecar request failed: {error}")))?;
+
+    let mut response = String::new();
+    stream
+        .read_to_string(&mut response)
+        .map_err(|error| AppError::Process(format!("sidecar response failed: {error}")))?;
+    if !response.contains("200 OK") && !response.contains("202 Accepted") {
+        return Err(AppError::Process(format!(
+            "unexpected sidecar response: {}",
+            response.lines().next().unwrap_or("empty response")
+        )));
+    }
+
+    response
+        .split("\r\n\r\n")
+        .nth(1)
+        .map(|body| body.to_string())
+        .ok_or_else(|| AppError::Process("sidecar response body is missing".to_string()))
+}
+
+fn spawn_python_sidecar(script_path: &Path, port: u16, token: &str) -> AppResult<Child> {
+    let args = [
+        script_path.to_string_lossy().to_string(),
+        "--port".to_string(),
+        port.to_string(),
+        "--token".to_string(),
+        token.to_string(),
+    ];
+
+    let mut errors = Vec::new();
+    for (program, prefix) in [
+        ("python", Vec::<String>::new()),
+        ("py", vec!["-3".to_string()]),
+    ] {
+        let mut command = Command::new(program);
+        let mut full_args = prefix;
+        full_args.extend(args.iter().cloned());
+        configure_python_sidecar_command(&mut command, &full_args, script_path);
+        match command.spawn() {
+            Ok(child) => return Ok(child),
+            Err(error) => errors.push(format!("{program}: {error}")),
+        }
+    }
+
+    Err(AppError::Process(format!(
+        "failed to start sidecar python process: {}",
+        errors.join("; ")
+    )))
+}
+
+fn configure_python_sidecar_command(command: &mut Command, args: &[String], script_path: &Path) {
+    command.env_clear();
+    for name in PYTHON_SIDECAR_ENV_ALLOWLIST {
+        if let Some(value) = std::env::var_os(name) {
+            command.env(name, value);
+        }
+    }
+
+    command
+        .args(args)
+        .env("PYTHONIOENCODING", "utf-8")
+        .env("PYTHONUTF8", "1")
+        .env("PYTHONDONTWRITEBYTECODE", "1")
+        .env("PYTHONNOUSERSITE", "1")
+        .env_remove("PYTHONHOME")
+        .env_remove("PYTHONPATH")
+        .current_dir(script_path.parent().unwrap_or_else(|| Path::new(".")))
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+}
+
+fn now_text() -> String {
+    now_millis().to_string()
+}
+
+fn now_millis() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+}

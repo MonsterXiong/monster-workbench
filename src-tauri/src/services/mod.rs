@@ -1,10 +1,14 @@
 pub mod ai_service;
 pub mod app_service;
 pub mod auth_service;
+pub mod batch_job_service;
 pub mod config_service;
 pub mod database_service;
 pub mod file_service;
+pub mod goal_service;
 pub mod log_service;
 pub mod navigation_service;
+pub mod sidecar_lifecycle_service;
 pub mod system_service;
 pub mod task_service;
+pub mod worker_queue_service;

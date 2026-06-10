@@ -13,13 +13,17 @@ use infra::path::PathProvider;
 use services::ai_service::AiProviderService;
 use services::app_service::AppService;
 use services::auth_service::AuthService;
+use services::batch_job_service::BatchJobService;
 use services::config_service::ConfigService;
 use services::database_service::DatabaseService;
 use services::file_service::FileService;
+use services::goal_service::GoalService;
 use services::log_service::LogService;
 use services::navigation_service::NavigationService;
+use services::sidecar_lifecycle_service::SidecarLifecycleService;
 use services::system_service::SystemService;
 use services::task_service::TaskService;
+use services::worker_queue_service::WorkerQueueService;
 
 fn create_main_window(app: &AppHandle) -> tauri::Result<()> {
     WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
@@ -54,13 +58,17 @@ fn main() {
             let app_service = AppService::new(handle.clone(), path_provider.clone());
             let config_service = ConfigService::new(path_provider.clone());
             let file_service = FileService::new(handle.clone(), path_provider.clone());
-            let task_service = TaskService::new(handle.clone());
+            let task_service = TaskService::new(handle.clone(), path_provider.clone());
             let auth_service = AuthService::new(path_provider.clone());
+            let batch_job_service = BatchJobService::new(handle.clone(), path_provider.clone());
             let database_service = DatabaseService::new(handle.clone(), path_provider.clone());
+            let goal_service = GoalService::new(path_provider.clone());
             let log_service = LogService::new(path_provider.clone());
             let system_service = SystemService::new(handle.clone(), path_provider.clone());
             let navigation_service = NavigationService::new(path_provider.clone());
             let ai_provider_service = AiProviderService::new(handle.clone());
+            let sidecar_lifecycle_service = SidecarLifecycleService::new(handle.clone());
+            let worker_queue_service = WorkerQueueService::new(path_provider.clone());
 
             // 初始化运行时数据库表，具体 DB/Repo 细节保持在 Service 层内。
             let _ = database_service.init_runtime_schema();
@@ -71,11 +79,15 @@ fn main() {
             app.manage(std::sync::Mutex::new(file_service));
             app.manage(std::sync::Mutex::new(task_service));
             app.manage(std::sync::Mutex::new(auth_service));
+            app.manage(std::sync::Mutex::new(batch_job_service));
             app.manage(std::sync::Mutex::new(database_service));
+            app.manage(std::sync::Mutex::new(goal_service));
             app.manage(std::sync::Mutex::new(log_service));
             app.manage(std::sync::Mutex::new(system_service));
             app.manage(std::sync::Mutex::new(navigation_service));
             app.manage(std::sync::Mutex::new(ai_provider_service));
+            app.manage(std::sync::Mutex::new(sidecar_lifecycle_service));
+            app.manage(std::sync::Mutex::new(worker_queue_service));
 
             // 3. 创建托盘菜单
             let quit_i = MenuItem::with_id(app.handle(), "quit", "退出应用", true, None::<&str>)?;
@@ -91,6 +103,13 @@ fn main() {
                 .menu(&tray_menu)
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "quit" => {
+                        let sidecar_state: tauri::State<
+                            '_,
+                            std::sync::Mutex<SidecarLifecycleService>,
+                        > = app.state();
+                        let mut sidecar_service =
+                            sidecar_state.lock().unwrap_or_else(|e| e.into_inner());
+                        sidecar_service.shutdown_reserved();
                         app.exit(0);
                     }
                     "show" => {
@@ -144,6 +163,38 @@ fn main() {
             commands::database::import_database,
             commands::database::reset_database,
             commands::database::check_db_status,
+            commands::database::create_creative_goal,
+            commands::database::list_creative_goals,
+            commands::database::create_batch_image_job,
+            commands::database::list_batch_jobs,
+            commands::database::get_batch_job,
+            commands::database::start_batch_job,
+            commands::database::pause_batch_job,
+            commands::database::resume_batch_job,
+            commands::database::cancel_batch_job,
+            commands::database::list_batch_job_tasks,
+            commands::database::create_goal_multi_agent_stub,
+            commands::database::get_goal_status,
+            commands::database::stop_creative_goal,
+            commands::database::create_creative_task,
+            commands::database::get_creative_task,
+            commands::database::list_creative_tasks,
+            commands::database::update_creative_task_status,
+            commands::database::append_task_event,
+            commands::database::create_creative_asset,
+            commands::database::list_creative_assets,
+            commands::database::create_asset_link,
+            commands::database::list_asset_links,
+            commands::database::get_sidecar_status,
+            commands::database::start_sidecar_dev_health_server,
+            commands::database::check_sidecar_health,
+            commands::database::stop_sidecar_dev_health_server,
+            commands::database::run_generate_image_prompt_workflow,
+            commands::database::run_review_asset_quality_stub,
+            commands::database::claim_next_creative_task,
+            commands::database::request_creative_task_cancel,
+            commands::database::check_task_cancel_checkpoint,
+            commands::database::recover_interrupted_creative_tasks,
             commands::auth::verify_admin_password,
             commands::updater::trigger_update_download,
             commands::system::open_system_path,
