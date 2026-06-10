@@ -196,8 +196,8 @@ const componentGroups: ComponentGroup[] = [
   },
 ];
 
-const activeGroupKey = ref<ComponentGroupKey>("data");
-const activeComponentKey = ref("filter-bar");
+const activeGroupKey = ref<ComponentGroupKey>("workflow");
+const activeComponentKey = ref("creative-workflow");
 
 const coveredComponentKeys = [
   "buttons-badges",

@@ -1,5 +1,7 @@
-<script setup lang="ts">
-import { ref } from "vue";
+﻿<script setup lang="ts">
+import { computed, onMounted, ref } from "vue";
+import { storeToRefs } from "pinia";
+import { useTaskStore } from "../../../stores/task";
 import PlaygroundDemoSection from "./PlaygroundDemoSection.vue";
 
 defineProps<{
@@ -8,122 +10,196 @@ defineProps<{
 
 const workflowStep = ref(1);
 const selectedTimelineKey = ref("review");
+const taskStore = useTaskStore();
+const {
+  promptWorkflowTask,
+  promptWorkflowAsset,
+  promptWorkflowEvents,
+  promptWorkflowActivity,
+  promptWorkflowError,
+  promptWorkflowRunning,
+  reviewTaskResult,
+  reviewAssetResult,
+  reviewRevisionTask,
+  reviewResultEvents,
+  reviewResultPayload,
+  reviewResultActivity,
+  reviewResultError,
+  reviewResultRunning,
+  domainAssets,
+  domainAssetLinks,
+  domainAssetError,
+  domainAssetRunning,
+  goalResult,
+  goalRoleResults,
+  goalTaskResults,
+  goalStatusSnapshot,
+  goalError,
+  goalRunning,
+  batchJobSnapshot,
+  batchJobTasks,
+  batchJobActivity,
+  batchJobError,
+  batchJobRunning,
+} = storeToRefs(taskStore);
+
+const promptWorkflowForm = ref({
+  projectId: "demo-image-workflow",
+  brief: "A clean product poster with a clear focal subject and crisp lighting.",
+  style: "editorial product illustration",
+  mood: "focused, modern, high contrast",
+  aspectRatio: "16:9",
+});
+
+const reviewWorkflowForm = ref({
+  projectId: "demo-image-workflow",
+  contentHint: "A clean product poster with a clear focal subject and crisp lighting.",
+  reviewKind: "review_asset_quality",
+});
+
+const domainAssetForm = ref({
+  projectId: "demo-domain-assets",
+  characterTitle: "Lead Character",
+  sceneTitle: "Opening Scene",
+  propTitle: "Signature Prop",
+  storyboardTitle: "Opening Storyboard",
+  novelChapterTitle: "Chapter 1",
+  scriptSceneTitle: "Scene 1",
+  bibleTitle: "Project Bible",
+});
+
+const goalForm = ref({
+  projectId: "demo-goal-mode",
+  title: "Demo Goal",
+  description: "Split one goal into agent role tasks and a merge stub.",
+  characterCount: 1,
+  sceneCount: 1,
+  propCount: 1,
+  reviewCount: 1,
+});
+
+const batchJobForm = ref({
+  projectId: "demo-batch-image",
+  name: "Batch Mock Demo",
+  totalCount: 100,
+  concurrency: 5,
+  maxRetries: 0,
+});
+const batchTaskPage = ref(1);
+const batchTaskPageSize = 20;
+
+const promptWorkflowTimelineItems = computed(() =>
+  promptWorkflowActivity.value.map((item, index) => ({
+    key: `${item.taskId}-${item.createdAt}-${index}`,
+    title: `${item.status} · ${item.message || item.taskId}`,
+    time: item.createdAt,
+    description: `project: ${item.projectId || "-"} / task: ${item.taskId}`,
+    type:
+      item.status === "failed"
+        ? ("danger" as const)
+        : item.status === "succeeded"
+          ? ("success" as const)
+          : ("primary" as const),
+    tag: item.status,
+  }))
+);
+
+const reviewWorkflowTimelineItems = computed(() =>
+  reviewResultActivity.value.map((item, index) => ({
+    key: `${item.taskId}-${item.createdAt}-${index}`,
+    title: `${item.status} · ${item.message || item.taskId}`,
+    time: item.createdAt,
+    description: `project: ${item.projectId || "-"} / task: ${item.taskId}`,
+    type:
+      item.status === "failed"
+        ? ("danger" as const)
+        : item.status === "succeeded"
+          ? ("success" as const)
+          : item.status === "manual_approval"
+            ? ("warning" as const)
+            : ("primary" as const),
+    tag: item.status,
+  }))
+);
+
+const domainAssetTypes = computed(() =>
+  domainAssets.value.map((asset, index) => ({
+    key: `${asset.id}-${index}`,
+    title: `${asset.assetType} · ${asset.title || asset.id}`,
+    time: asset.createdAt,
+    description: asset.metadataJson || asset.content || "-",
+    type: "primary" as const,
+    tag: asset.status,
+  }))
+);
+
+const batchJobTimelineItems = computed(() =>
+  batchJobActivity.value.map((item, index) => ({
+    key: `${item.batchJobId}-${item.createdAt}-${index}`,
+    title: `${item.status} · ${item.message || item.batchType}`,
+    time: item.createdAt,
+    description: `queued ${item.queuedTasks} / running ${item.runningTasks} / done ${item.succeededTasks}`,
+    type:
+      item.status === "cancelled"
+        ? ("warning" as const)
+        : item.status === "completed"
+          ? ("success" as const)
+          : item.status === "failed"
+            ? ("danger" as const)
+            : ("primary" as const),
+    tag: item.status,
+  }))
+);
 
 const workflowSteps = [
-  { key: "prepare", title: "准备配置", description: "收集字段与依赖。" },
-  { key: "scan", title: "扫描组件", description: "发现未展示组件。" },
-  { key: "build", title: "生成演示", description: "补充完整状态。", error: true },
-  { key: "verify", title: "验证", description: "类型与视觉复核。", disabled: true },
-];
-
-const releaseSteps = [
-  { key: "draft", title: "草稿", description: "填写信息。", state: "done" as const, icon: "FileText" },
-  { key: "review", title: "审核", description: "等待确认。", state: "current" as const, icon: "ShieldCheck" },
-  { key: "publish", title: "发布", description: "生成版本。", state: "pending" as const, icon: "Rocket" },
-  { key: "notify", title: "通知", description: "同步结果。", state: "disabled" as const, icon: "Bell" },
-];
-
-const longStepperSteps = [
-  {
-    key: "collect",
-    title: "收集需要迁移的公共组件和对应页面入口",
-    description: "长标题和长描述在窄容器中需要自然换行，避免步骤卡片把页面撑出横向滚动。",
-    state: "done" as const,
-    icon: "ListChecks",
-  },
-  {
-    key: "review",
-    title: "逐个补齐状态、交互、键盘和视觉反馈",
-    description: "适合流程配置页、导入向导、发布检查和组件沙箱的长任务说明。",
-    state: "current" as const,
-    icon: "ScanSearch",
-  },
+  { key: "prepare", title: "Prepare", description: "Collect inputs and dependencies." },
+  { key: "scan", title: "Scan", description: "Find missing coverage." },
+  { key: "build", title: "Build", description: "Fill the demo state.", error: true },
+  { key: "verify", title: "Verify", description: "Type and visual checks.", disabled: true },
 ];
 
 const timelineItems = [
   {
     key: "create",
-    title: "新增组件入口",
+    title: "Add component entry",
     time: "09:30",
-    description: "完成 BaseFilterBar 独立展示，并补齐筛选摘要、动作区和紧凑态。",
+    description: "Keep the layout stable while adding the new workflow demo.",
     type: "success" as const,
     icon: "Plus",
-    meta: "组件平台",
-    tag: "已完成",
+    meta: "component platform",
+    tag: "done",
   },
   {
     key: "review",
-    title: "视觉复核",
+    title: "Visual review",
     time: "10:10",
-    description: "调整拖拽手柄 hover 高亮，统一页面留白与分割线背景。",
+    description: "Tune hover highlight and spacing.",
     type: "primary" as const,
     icon: "Eye",
-    meta: "设计复核",
-    tag: "进行中",
+    meta: "design review",
+    tag: "in progress",
   },
   {
     key: "pending",
-    title: "待处理",
-    time: "待处理",
-    description: "继续逐个审查 Playground 组件能力，优先补高频展示、容器和表单组件。",
+    title: "Pending",
+    time: "later",
+    description: "Continue reviewing Playground coverage.",
     type: "warning" as const,
     icon: "Monitor",
-    meta: "组件沙箱",
-    tag: "排队",
-  },
-  {
-    key: "blocked",
-    title: "外部依赖",
-    time: "稍后",
-    description: "等待真实业务页面复核后再迁移到更多页面，避免和页面开发冲突。",
-    type: "neutral" as const,
-    icon: "Clock",
-    meta: "待确认",
-    tag: "只读",
-    disabled: true,
-  },
-];
-
-const releaseTimelineItems = [
-  {
-    key: "draft",
-    title: "草稿编排",
-    time: "D1",
-    description: "整理变更说明、组件截图和验证记录。",
-    type: "success" as const,
-    meta: "Owner: UI",
-    tag: "Done",
-  },
-  {
-    key: "check",
-    title: "质量门禁",
-    time: "D2",
-    description: "执行类型检查、架构检查和浏览器验收。",
-    type: "primary" as const,
-    meta: "CI Gate",
-    tag: "Active",
-  },
-  {
-    key: "publish",
-    title: "发布同步",
-    time: "D3",
-    description: "同步组件说明，通知使用方按公共组件方式接入。",
-    type: "warning" as const,
-    meta: "Docs",
-    tag: "Next",
+    meta: "sandbox",
+    tag: "queued",
   },
 ];
 
 const longTimelineItems = [
   {
     key: "long-review",
-    title: "超长任务标题会在 wrapTitle 开启后自然换行，避免窄容器里被截断",
+    title: "A very long title that should wrap naturally in narrow containers.",
     time: "11:40",
-    description:
-      "时间线经常出现在抽屉、审计详情和发布记录中，描述文本可能包含较长的业务背景。开启 wrapDescription 后应该完整展示，并且不会让内容区产生横向溢出。",
+    description: "Long labels should wrap without creating horizontal overflow.",
     type: "primary" as const,
     icon: "ScrollText",
-    meta: "长文案",
+    meta: "long form note",
     tag: "Wrap",
   },
   {
@@ -139,9 +215,9 @@ const longTimelineItems = [
   },
   {
     key: "disabled-action",
-    title: "权限不足的事件仍展示上下文，但不允许触发选择",
-    time: "只读",
-    description: "禁用项应保留可读信息，同时 actions 插槽按 interactiveDisabled 自动禁用。",
+    title: "Readonly item still shows context but does not allow selection.",
+    time: "later",
+    description: "Disabled actions should stay readable while blocking selection.",
     type: "neutral" as const,
     icon: "Lock",
     meta: "Readonly",
@@ -149,136 +225,653 @@ const longTimelineItems = [
     disabled: true,
   },
 ];
+
+const runPromptWorkflow = async () => {
+  try {
+    await taskStore.runGenerateImagePromptWorkflow({
+      ...promptWorkflowForm.value,
+    });
+  } catch {
+    // store records the error state.
+  }
+};
+
+const runReviewWorkflow = async () => {
+  try {
+    if (!promptWorkflowAsset.value?.id) {
+      reviewWorkflowForm.value.contentHint = promptWorkflowForm.value.brief;
+      const promptResult = await taskStore.runGenerateImagePromptWorkflow({
+        ...promptWorkflowForm.value,
+      });
+      await taskStore.runReviewAssetQualityStub({
+        projectId: reviewWorkflowForm.value.projectId,
+        sourceAssetId: promptResult.asset.id,
+        sourceTaskId: promptResult.task.id,
+        reviewKind: reviewWorkflowForm.value.reviewKind,
+        contentHint: reviewWorkflowForm.value.contentHint,
+      });
+      return;
+    }
+
+    await taskStore.runReviewAssetQualityStub({
+      projectId: reviewWorkflowForm.value.projectId,
+      sourceAssetId: promptWorkflowAsset.value.id,
+      sourceTaskId: promptWorkflowTask.value?.id ?? null,
+      reviewKind: reviewWorkflowForm.value.reviewKind,
+      contentHint: reviewWorkflowForm.value.contentHint,
+    });
+  } catch {
+    // store records the error state.
+  }
+};
+
+const runDomainAssetDraft = async () => {
+  try {
+    await taskStore.runDomainAssetDraft({
+      ...domainAssetForm.value,
+      sourceAssetId: reviewAssetResult.value?.id ?? promptWorkflowAsset.value?.id ?? null,
+      sourceTaskId: reviewTaskResult.value?.id ?? promptWorkflowTask.value?.id ?? null,
+    });
+  } catch {
+    // store records the error state.
+  }
+};
+
+const runGoalMultiAgentStub = async () => {
+  try {
+    await taskStore.runGoalMultiAgentStub({
+      projectId: goalForm.value.projectId,
+      title: goalForm.value.title,
+      description: goalForm.value.description,
+      budgetJson: JSON.stringify({
+        maxTasks: 12,
+        maxRunningTasks: 3,
+        maxRetries: 1,
+        maxConsecutiveFailures: 3,
+      }),
+      roleSpecs: [
+        {
+          roleKey: "character",
+          taskType: "goal.character.stub",
+          description: "Character drafting stub",
+          taskCount: goalForm.value.characterCount,
+        },
+        {
+          roleKey: "scene",
+          taskType: "goal.scene.stub",
+          description: "Scene drafting stub",
+          taskCount: goalForm.value.sceneCount,
+        },
+        {
+          roleKey: "prop",
+          taskType: "goal.prop.stub",
+          description: "Prop drafting stub",
+          taskCount: goalForm.value.propCount,
+        },
+        {
+          roleKey: "review",
+          taskType: "goal.review.stub",
+          description: "Merge and review stub",
+          taskCount: goalForm.value.reviewCount,
+        },
+      ],
+      mergeTaskType: "goal.merge_review_stub",
+    });
+  } catch {
+    // store records the error state.
+  }
+};
+
+const stopGoal = async () => {
+  if (!goalResult.value?.id) return;
+  await taskStore.stopCreativeGoal(goalResult.value.id);
+};
+
+const refreshBatchJobPage = async (page = batchTaskPage.value) => {
+  if (!batchJobSnapshot.value?.job.id) return;
+  batchTaskPage.value = Math.max(1, page);
+  await taskStore.refreshBatchJob(
+    batchJobSnapshot.value.job.id,
+    batchTaskPageSize,
+    (batchTaskPage.value - 1) * batchTaskPageSize
+  );
+};
+
+const createBatchJob = async () => {
+  try {
+    batchTaskPage.value = 1;
+    await taskStore.createBatchImageJob({
+      projectId: batchJobForm.value.projectId,
+      name: batchJobForm.value.name,
+      batchType: "demo.image.mock",
+      totalCount: batchJobForm.value.totalCount,
+      concurrency: batchJobForm.value.concurrency,
+      maxRetries: batchJobForm.value.maxRetries,
+      budgetJson: JSON.stringify({
+        stage: "mock",
+        maxConsecutiveFailures: 20,
+      }),
+    });
+  } catch {
+    // store records the error state.
+  }
+};
+
+const startBatchJob = async () => {
+  if (!batchJobSnapshot.value?.job.id) return;
+  await taskStore.startBatchJob(
+    batchJobSnapshot.value.job.id,
+    batchTaskPageSize,
+    (batchTaskPage.value - 1) * batchTaskPageSize
+  );
+};
+
+const pauseBatchJob = async () => {
+  if (!batchJobSnapshot.value?.job.id) return;
+  await taskStore.pauseBatchJob(
+    batchJobSnapshot.value.job.id,
+    batchTaskPageSize,
+    (batchTaskPage.value - 1) * batchTaskPageSize
+  );
+};
+
+const resumeBatchJob = async () => {
+  if (!batchJobSnapshot.value?.job.id) return;
+  await taskStore.resumeBatchJob(
+    batchJobSnapshot.value.job.id,
+    batchTaskPageSize,
+    (batchTaskPage.value - 1) * batchTaskPageSize
+  );
+};
+
+const cancelBatchJob = async () => {
+  if (!batchJobSnapshot.value?.job.id) return;
+  await taskStore.cancelBatchJob(
+    batchJobSnapshot.value.job.id,
+    batchTaskPageSize,
+    (batchTaskPage.value - 1) * batchTaskPageSize
+  );
+};
+
+onMounted(async () => {
+  await taskStore.initCreativeTaskListeners();
+  await taskStore.initBatchJobListeners();
+});
 </script>
 
 <template>
-  <section v-if="activeComponentKey === 'stepper'" class="detail-stack">
-    <PlaygroundDemoSection title="步骤条" subtitle="向导、导入、发布检查和多阶段任务都可以复用。" icon="Footprints">
-      <BasePanel title="横向流程" subtitle="支持完成态、当前态、禁用态和点击切换。" divided>
-        <BaseStepper :steps="workflowSteps" :current="workflowStep" clickable linear surface="muted" @select="workflowStep = $event.index" />
-        <template #footer>
-          <div class="step-actions">
-            <BaseButton type="neutral" size="sm" :disabled="workflowStep <= 0" @click="workflowStep -= 1">上一步</BaseButton>
-            <BaseButton type="primary" size="sm" :disabled="workflowStep >= workflowSteps.length - 1" @click="workflowStep += 1">下一步</BaseButton>
+  <section v-if="activeComponentKey === 'creative-workflow'" class="detail-stack">
+    <PlaygroundDemoSection
+      title="generate_image_prompt"
+      subtitle="Create the task, start sidecar, persist the asset, and emit events."
+      icon="Wand2"
+    >
+      <div class="demo-grid demo-grid--wide">
+        <BasePanel title="Task Input" subtitle="Store -> service -> Tauri command.">
+          <div class="workflow-form">
+            <BaseInput v-model="promptWorkflowForm.projectId" label="Project ID" />
+            <BaseTextarea v-model="promptWorkflowForm.brief" label="Brief" :rows="3" />
+            <BaseInput v-model="promptWorkflowForm.style" label="Style" />
+            <BaseInput v-model="promptWorkflowForm.mood" label="Mood" />
+            <BaseInput v-model="promptWorkflowForm.aspectRatio" label="Aspect Ratio" />
           </div>
-        </template>
-      </BasePanel>
+          <template #footer>
+            <div class="step-actions">
+              <BaseButton
+                type="primary"
+                size="sm"
+                :disabled="promptWorkflowRunning"
+                :loading="promptWorkflowRunning"
+                @click="runPromptWorkflow"
+              >
+                Run workflow
+              </BaseButton>
+            </div>
+          </template>
+        </BasePanel>
 
-      <BasePanel title="纵向错误态" subtitle="适合抽屉、侧栏和校验流程。">
-        <BaseStepper :steps="workflowSteps" :current="2" vertical size="sm" surface="plain" :bordered="false" />
-      </BasePanel>
-
-      <BasePanel title="发布流程" subtitle="自定义图标、状态和大尺寸适合发布检查。">
-        <BaseStepper :steps="releaseSteps" :current="1" size="lg" :columns="4" aria-label="发布流程步骤" />
-      </BasePanel>
+        <BasePanel title="Run State" subtitle="Live task, events, and errors.">
+          <div class="workflow-status">
+            <BaseBadge
+              :type="promptWorkflowTask?.status === 'failed' ? 'danger' : 'primary'"
+              size="sm"
+            >
+              {{ promptWorkflowTask?.status || (promptWorkflowRunning ? "running" : "idle") }}
+            </BaseBadge>
+            <BaseBadge v-if="promptWorkflowTask?.assetId" type="success" size="sm">
+              asset {{ promptWorkflowTask.assetId }}
+            </BaseBadge>
+          </div>
+          <BaseTimeline
+            :items="promptWorkflowTimelineItems"
+            size="sm"
+            dense
+            marker="dot"
+            surface="muted"
+            empty-text="No workflow events yet"
+            aria-label="generate_image_prompt task events"
+          />
+          <p v-if="promptWorkflowError" class="workflow-error">{{ promptWorkflowError }}</p>
+        </BasePanel>
+      </div>
 
       <div class="demo-grid">
-        <BasePanel title="状态展示" subtitle="空态和加载态保持流程区域结构稳定。">
-          <div class="stepper-demo-stack">
-            <BaseStepper :steps="[]" :current="0" empty-text="暂无流程步骤" surface="muted" />
-            <BaseStepper :steps="workflowSteps" :current="1" loading loading-text="加载步骤配置" size="sm" />
-          </div>
+        <BasePanel title="Prompt Asset" subtitle="The generated prompt asset.">
+          <BaseCodeBlock
+            :code="promptWorkflowAsset?.content || 'No prompt asset yet'"
+            language="text"
+            copyable
+            copy-label="Copy prompt"
+            empty-text="No prompt asset yet"
+          />
         </BasePanel>
-        <BasePanel title="长文案步骤" subtitle="标题与描述支持换行，不撑出内容区域。">
-          <BaseStepper
-            :steps="longStepperSteps"
-            :current="1"
-            wrap-title
-            wrap-description
-            :max-description-lines="4"
+        <BasePanel title="Workflow Result" subtitle="Task and event snapshot.">
+          <BaseDescriptionList
+            :items="[
+              { key: 'taskId', label: 'Task ID', value: String(promptWorkflowTask?.id || '-') },
+              { key: 'status', label: 'Status', value: promptWorkflowTask?.status || '-' },
+              { key: 'asset', label: 'Asset ID', value: String(promptWorkflowTask?.assetId || '-') },
+              { key: 'events', label: 'Events', value: String(promptWorkflowEvents.length) },
+            ]"
+          />
+        </BasePanel>
+      </div>
+
+      <div class="demo-grid demo-grid--wide">
+        <BasePanel
+          title="Review Stub"
+          subtitle="Persist a review_result asset and optional revise task stub."
+        >
+          <div class="workflow-form">
+            <BaseInput v-model="reviewWorkflowForm.projectId" label="Project ID" />
+            <BaseInput v-model="reviewWorkflowForm.reviewKind" label="Review Kind" />
+            <BaseTextarea
+              v-model="reviewWorkflowForm.contentHint"
+              label="Content Hint"
+              :rows="3"
+            />
+          </div>
+          <template #footer>
+            <div class="step-actions">
+              <BaseButton
+                type="primary"
+                size="sm"
+                :disabled="reviewResultRunning"
+                :loading="reviewResultRunning"
+                @click="runReviewWorkflow"
+              >
+                Run review stub
+              </BaseButton>
+            </div>
+          </template>
+        </BasePanel>
+
+        <BasePanel title="Review State" subtitle="Review result, approval state, and revise stub.">
+          <div class="workflow-status">
+            <BaseBadge
+              :type="reviewTaskResult?.status === 'manual_approval' ? 'warning' : reviewTaskResult?.status === 'failed' ? 'danger' : 'primary'"
+              size="sm"
+            >
+              {{ reviewTaskResult?.status || (reviewResultRunning ? "running" : "idle") }}
+            </BaseBadge>
+            <BaseBadge v-if="reviewAssetResult?.id" type="success" size="sm">
+              review asset {{ reviewAssetResult.id }}
+            </BaseBadge>
+            <BaseBadge v-if="reviewRevisionTask?.id" type="warning" size="sm">
+              revise task {{ reviewRevisionTask.id }}
+            </BaseBadge>
+          </div>
+          <BaseTimeline
+            :items="reviewWorkflowTimelineItems"
+            size="sm"
+            dense
+            marker="dot"
+            surface="muted"
+            empty-text="No review events yet"
+            aria-label="review task events"
+          />
+          <p v-if="reviewResultError" class="workflow-error">{{ reviewResultError }}</p>
+        </BasePanel>
+      </div>
+
+      <div class="demo-grid">
+        <BasePanel title="Review Result" subtitle="Parsed review payload and approval state.">
+          <BaseDescriptionList
+            :items="[
+              { key: 'reviewTaskId', label: 'Review Task', value: String(reviewTaskResult?.id || '-') },
+              { key: 'pass', label: 'Pass', value: String(reviewResultPayload?.pass ?? '-') },
+              { key: 'score', label: 'Quality Score', value: String(reviewResultPayload?.qualityScore ?? '-') },
+              { key: 'approval', label: 'Approval', value: reviewResultPayload?.manualApprovalStatus || '-' },
+              { key: 'events', label: 'Events', value: String(reviewResultEvents.length) },
+            ]"
+          />
+          <p v-if="reviewResultPayload?.problems?.length" class="workflow-note">
+            {{ reviewResultPayload.problems.join("; ") }}
+          </p>
+        </BasePanel>
+        <BasePanel title="Revision Instruction" subtitle="Revision stub appears only when review fails.">
+          <BaseCodeBlock
+            :code="reviewResultPayload?.revisionInstruction || 'No revision instruction yet'"
+            language="text"
+            copyable
+            copy-label="Copy revision"
+            empty-text="No revision instruction yet"
+          />
+        </BasePanel>
+      </div>
+
+      <div class="demo-grid demo-grid--wide">
+        <BasePanel title="Domain Assets" subtitle="Create character / scene / prop / bible assets as a compact draft set.">
+          <div class="workflow-form">
+            <BaseInput v-model="domainAssetForm.projectId" label="Project ID" />
+            <BaseInput v-model="domainAssetForm.characterTitle" label="Character" />
+            <BaseInput v-model="domainAssetForm.sceneTitle" label="Scene" />
+            <BaseInput v-model="domainAssetForm.propTitle" label="Prop" />
+            <BaseInput v-model="domainAssetForm.storyboardTitle" label="Storyboard" />
+            <BaseInput v-model="domainAssetForm.novelChapterTitle" label="Novel Chapter" />
+            <BaseInput v-model="domainAssetForm.scriptSceneTitle" label="Script Scene" />
+            <BaseInput v-model="domainAssetForm.bibleTitle" label="Bible" />
+          </div>
+          <template #footer>
+            <div class="step-actions">
+              <BaseButton
+                type="primary"
+                size="sm"
+                :disabled="domainAssetRunning"
+                :loading="domainAssetRunning"
+                @click="runDomainAssetDraft"
+              >
+                Create domain assets
+              </BaseButton>
+            </div>
+          </template>
+        </BasePanel>
+
+        <BasePanel title="Domain State" subtitle="Asset types and relation links.">
+          <div class="workflow-status">
+            <BaseBadge v-if="domainAssets.length" type="primary" size="sm">
+              assets {{ domainAssets.length }}
+            </BaseBadge>
+            <BaseBadge v-if="domainAssetLinks.length" type="success" size="sm">
+              links {{ domainAssetLinks.length }}
+            </BaseBadge>
+          </div>
+          <BaseTimeline
+            :items="domainAssetTypes"
+            size="sm"
+            dense
+            marker="dot"
+            surface="muted"
+            empty-text="No domain assets yet"
+            aria-label="domain asset list"
+          />
+          <p v-if="domainAssetError" class="workflow-error">{{ domainAssetError }}</p>
+        </BasePanel>
+      </div>
+
+      <div class="demo-grid">
+        <BasePanel title="Link Snapshot" subtitle="Show link types created by the domain draft.">
+          <BaseDescriptionList
+            :items="[
+              { key: 'links', label: 'Links', value: String(domainAssetLinks.length) },
+              { key: 'characters', label: 'Character', value: domainAssetForm.characterTitle },
+              { key: 'scene', label: 'Scene', value: domainAssetForm.sceneTitle },
+              { key: 'prop', label: 'Prop', value: domainAssetForm.propTitle },
+              { key: 'bible', label: 'Bible', value: domainAssetForm.bibleTitle },
+            ]"
+          />
+        </BasePanel>
+        <BasePanel title="Link Types" subtitle="uses_* / part_of / derived_from are kept on the generic asset_links table.">
+          <BaseCodeBlock
+            :code="domainAssetLinks.map((link) => `${link.linkType}: ${link.sourceAssetId} -> ${link.targetAssetId}`).join('\n') || 'No links yet'"
+            language="text"
+            copyable
+            copy-label="Copy links"
+            empty-text="No links yet"
+          />
+        </BasePanel>
+      </div>
+
+      <div class="demo-grid demo-grid--wide">
+        <BasePanel title="Goal Stub" subtitle="Create a goal, fan out tasks, and keep the stop control visible.">
+          <div class="workflow-form">
+            <BaseInput v-model="goalForm.projectId" label="Project ID" />
+            <BaseInput v-model="goalForm.title" label="Goal Title" />
+            <BaseTextarea v-model="goalForm.description" label="Goal Description" :rows="3" />
+            <BaseNumberInput v-model="goalForm.characterCount" label="Character Tasks" :min="1" :max="4" />
+            <BaseNumberInput v-model="goalForm.sceneCount" label="Scene Tasks" :min="1" :max="4" />
+            <BaseNumberInput v-model="goalForm.propCount" label="Prop Tasks" :min="1" :max="4" />
+            <BaseNumberInput v-model="goalForm.reviewCount" label="Review Tasks" :min="1" :max="4" />
+          </div>
+          <template #footer>
+            <div class="step-actions">
+              <BaseButton
+                type="primary"
+                size="sm"
+                :disabled="goalRunning"
+                :loading="goalRunning"
+                @click="runGoalMultiAgentStub"
+              >
+                Create goal
+              </BaseButton>
+              <BaseButton
+                type="neutral"
+                size="sm"
+                :disabled="!goalResult?.id"
+                @click="stopGoal"
+              >
+                Stop goal
+              </BaseButton>
+            </div>
+          </template>
+        </BasePanel>
+
+        <BasePanel title="Goal State" subtitle="Goal snapshot, role mapping, and fan-out tasks.">
+          <div class="workflow-status">
+            <BaseBadge v-if="goalStatusSnapshot?.goal.status" type="primary" size="sm">
+              {{ goalStatusSnapshot.goal.status }}
+            </BaseBadge>
+            <BaseBadge v-if="goalStatusSnapshot?.goal.id" type="success" size="sm">
+              goal {{ goalStatusSnapshot.goal.id }}
+            </BaseBadge>
+          </div>
+          <BaseDescriptionList
+            :items="[
+              { key: 'tasks', label: 'Tasks', value: String(goalStatusSnapshot?.totalTasks ?? 0) },
+              { key: 'queued', label: 'Queued', value: String(goalStatusSnapshot?.queuedTasks ?? 0) },
+              { key: 'running', label: 'Running', value: String(goalStatusSnapshot?.runningTasks ?? 0) },
+              { key: 'done', label: 'Succeeded', value: String(goalStatusSnapshot?.succeededTasks ?? 0) },
+            ]"
+          />
+          <p v-if="goalError" class="workflow-error">{{ goalError }}</p>
+        </BasePanel>
+      </div>
+
+      <div class="demo-grid">
+        <BasePanel title="Goal Roles" subtitle="Role keys are bound to task types.">
+          <BaseTimeline
+            :items="goalRoleResults.map((role) => ({
+              key: String(role.id),
+              title: `${role.roleKey} · ${role.taskType}`,
+              time: role.createdAt,
+              description: role.description || 'No description',
+              type: 'primary' as const,
+              tag: `x${role.taskCount}`,
+            }))"
+            size="sm"
+            dense
+            marker="dot"
+            surface="muted"
+            empty-text="No goal roles yet"
+          />
+        </BasePanel>
+        <BasePanel title="Fan-out Tasks" subtitle="Multiple stub tasks plus merge/review task.">
+          <BaseTimeline
+            :items="goalTaskResults.map((task) => ({
+              key: String(task.id),
+              title: `${task.taskType} · ${task.status}`,
+              time: task.createdAt,
+              description: task.payloadJson || 'No payload',
+              type: task.status === 'failed' ? 'danger' : task.status === 'queued' ? 'warning' : 'primary',
+              tag: task.status,
+            }))"
+            size="sm"
+            dense
+            marker="number"
             surface="plain"
             :bordered="false"
-            vertical
+            empty-text="No goal tasks yet"
           />
+          <p class="workflow-note">
+            Merge stub follows the same task system and stays manual-approval friendly.
+          </p>
+        </BasePanel>
+      </div>
+
+      <div class="demo-grid demo-grid--wide">
+        <BasePanel title="Batch Image Demo Mock" subtitle="Create 100 to 1000 mock tasks with bounded concurrency.">
+          <div class="workflow-form">
+            <BaseInput v-model="batchJobForm.projectId" label="Project ID" />
+            <BaseInput v-model="batchJobForm.name" label="Batch Name" />
+            <BaseNumberInput v-model="batchJobForm.totalCount" label="Total Count" :min="1" :max="1000" />
+            <BaseNumberInput v-model="batchJobForm.concurrency" label="Concurrency" :min="1" :max="10" />
+            <BaseNumberInput v-model="batchJobForm.maxRetries" label="Max Retries" :min="0" :max="3" />
+          </div>
+          <template #footer>
+            <div class="step-actions step-actions--wrap">
+              <BaseButton type="primary" size="sm" @click="createBatchJob">
+                Create batch
+              </BaseButton>
+              <BaseButton type="neutral" size="sm" :disabled="!batchJobSnapshot?.job.id" @click="startBatchJob">
+                Start
+              </BaseButton>
+              <BaseButton type="neutral" size="sm" :disabled="!batchJobSnapshot?.job.id || !batchJobRunning" @click="pauseBatchJob">
+                Pause
+              </BaseButton>
+              <BaseButton type="neutral" size="sm" :disabled="!batchJobSnapshot?.job.id || batchJobRunning" @click="resumeBatchJob">
+                Resume
+              </BaseButton>
+              <BaseButton type="danger" size="sm" :disabled="!batchJobSnapshot?.job.id" @click="cancelBatchJob">
+                Cancel
+              </BaseButton>
+              <BaseButton type="neutral" size="sm" :disabled="!batchJobSnapshot?.job.id" @click="refreshBatchJobPage()">
+                Refresh
+              </BaseButton>
+            </div>
+          </template>
+        </BasePanel>
+
+        <BasePanel title="Batch State" subtitle="Stats update through batch job events and paged task reads.">
+          <div class="workflow-status">
+            <BaseBadge v-if="batchJobSnapshot?.job.status" type="primary" size="sm">
+              {{ batchJobSnapshot.job.status }}
+            </BaseBadge>
+            <BaseBadge v-if="batchJobSnapshot?.job.id" type="success" size="sm">
+              batch {{ batchJobSnapshot.job.id }}
+            </BaseBadge>
+            <BaseBadge v-if="batchJobSnapshot?.stats.runningTasks" type="warning" size="sm">
+              running {{ batchJobSnapshot.stats.runningTasks }}
+            </BaseBadge>
+          </div>
+          <BaseDescriptionList
+            :items="[
+              { key: 'total', label: 'Total', value: String(batchJobSnapshot?.stats.totalTasks ?? 0) },
+              { key: 'queued', label: 'Queued', value: String(batchJobSnapshot?.stats.queuedTasks ?? 0) },
+              { key: 'running', label: 'Running', value: String(batchJobSnapshot?.stats.runningTasks ?? 0) },
+              { key: 'succeeded', label: 'Succeeded', value: String(batchJobSnapshot?.stats.succeededTasks ?? 0) },
+              { key: 'failed', label: 'Failed', value: String(batchJobSnapshot?.stats.failedTasks ?? 0) },
+              { key: 'cancelled', label: 'Cancelled', value: String(batchJobSnapshot?.stats.cancelledTasks ?? 0) },
+            ]"
+          />
+          <p v-if="batchJobError" class="workflow-error">{{ batchJobError }}</p>
+        </BasePanel>
+      </div>
+
+      <div class="demo-grid">
+        <BasePanel title="Batch Activity" subtitle="Supervisor progress and status changes.">
+          <BaseTimeline
+            :items="batchJobTimelineItems"
+            size="sm"
+            dense
+            marker="dot"
+            surface="muted"
+            empty-text="No batch activity yet"
+          />
+        </BasePanel>
+        <BasePanel title="Paged Tasks" subtitle="Only render one page of tasks to avoid a heavy 1000-row surface.">
+          <BaseTimeline
+            :items="batchJobTasks.map((task) => ({
+              key: String(task.id),
+              title: `#${task.sequenceNo || task.id} · ${task.status}`,
+              time: task.updatedAt,
+              description: task.errorMessage || task.payloadJson || 'No payload',
+              type: task.status === 'failed' ? 'danger' : task.status === 'cancelled' ? 'warning' : task.status === 'succeeded' ? 'success' : 'primary',
+              tag: task.taskType,
+            }))"
+            size="sm"
+            dense
+            marker="number"
+            surface="plain"
+            :bordered="false"
+            empty-text="No batch tasks yet"
+          />
+          <template #footer>
+            <div class="step-actions">
+              <BaseButton
+                type="neutral"
+                size="sm"
+                :disabled="batchTaskPage <= 1 || !batchJobSnapshot?.job.id"
+                @click="refreshBatchJobPage(batchTaskPage - 1)"
+              >
+                Previous
+              </BaseButton>
+              <BaseBadge type="neutral" size="sm">Page {{ batchTaskPage }}</BaseBadge>
+              <BaseButton
+                type="neutral"
+                size="sm"
+                :disabled="!batchJobSnapshot?.job.id || batchJobTasks.length < batchTaskPageSize"
+                @click="refreshBatchJobPage(batchTaskPage + 1)"
+              >
+                Next
+              </BaseButton>
+            </div>
+          </template>
         </BasePanel>
       </div>
     </PlaygroundDemoSection>
   </section>
 
-  <section v-else-if="activeComponentKey === 'timeline'" class="detail-stack">
-    <PlaygroundDemoSection title="时间线" subtitle="记录任务、发布、审计和同步事件。" icon="History">
-      <div class="demo-grid demo-grid--wide">
-        <BasePanel title="审计时间线" subtitle="支持图标、状态色、标签、meta、禁用项和点击选择。">
-          <BaseTimeline
-            :items="timelineItems"
-            clickable
-            :selected-key="selectedTimelineKey"
-            aria-label="组件审计时间线"
-            actions-label="审计时间线动作"
-            @select="selectedTimelineKey = $event.item.key"
-          >
-            <template #actions="{ selected, interactiveDisabled }">
-              <BaseBadge v-if="selected" type="primary" size="sm">已选中</BaseBadge>
-              <BaseButton v-else type="neutral" size="sm" :disabled="interactiveDisabled">定位</BaseButton>
-            </template>
-          </BaseTimeline>
-          <template #footer>
-            <span class="timeline-result">当前选择：{{ selectedTimelineKey }}</span>
-          </template>
-        </BasePanel>
-        <BasePanel title="紧凑日志" subtitle="plain 表面和圆点标记适合侧栏、详情卡片和抽屉嵌入。" muted>
-          <BaseTimeline :items="timelineItems" dense size="sm" surface="plain" :bordered="false" marker="dot" reverse />
-        </BasePanel>
-      </div>
+  <section v-else-if="activeComponentKey === 'stepper'" class="detail-stack">
+    <PlaygroundDemoSection title="Stepper" subtitle="A compact demo for progress and review states." icon="Footprints">
+      <BasePanel title="Horizontal" subtitle="Completed, current, and disabled steps.">
+        <BaseStepper :steps="workflowSteps" :current="workflowStep" clickable linear surface="muted" @select="workflowStep = $event.index" />
+      </BasePanel>
+      <BasePanel title="Vertical" subtitle="A narrow layout for side panels.">
+        <BaseStepper :steps="workflowSteps" :current="2" vertical size="sm" surface="plain" :bordered="false" />
+      </BasePanel>
+    </PlaygroundDemoSection>
+  </section>
 
-      <BasePanel title="发布记录" subtitle="数字节点、大尺寸和 muted 表面适合阶段性发布说明。">
-        <BaseTimeline :items="releaseTimelineItems" size="lg" surface="muted" marker="number" aria-label="发布记录时间线" actions-label="发布记录动作">
-          <template #actions="{ item, interactiveDisabled }">
-            <BaseButton v-if="item.key === 'check'" type="primary" size="sm" :disabled="interactiveDisabled">查看检查</BaseButton>
-            <BaseButton v-else type="neutral" size="sm" :disabled="interactiveDisabled">查看详情</BaseButton>
+  <section v-else-if="activeComponentKey === 'timeline'" class="detail-stack">
+    <PlaygroundDemoSection title="Timeline" subtitle="Record task and release events." icon="History">
+      <BasePanel title="Timeline" subtitle="Clickable records with selection and actions.">
+        <BaseTimeline
+          :items="timelineItems"
+          clickable
+          :selected-key="selectedTimelineKey"
+          aria-label="component timeline"
+          actions-label="timeline actions"
+          @select="selectedTimelineKey = $event.item.key"
+        >
+          <template #actions="{ selected, interactiveDisabled }">
+            <BaseBadge v-if="selected" type="primary" size="sm">selected</BaseBadge>
+            <BaseButton v-else type="neutral" size="sm" :disabled="interactiveDisabled">View</BaseButton>
           </template>
         </BaseTimeline>
-        <template #footer>
-          <span class="timeline-result">覆盖 dot / icon / number 三种标记和 card / muted / plain 三种表面。</span>
-        </template>
       </BasePanel>
-      <div class="demo-grid">
-        <BasePanel title="只读记录" subtitle="保留旧 API：只传 items 就能展示标准时间线。">
-          <BaseTimeline :items="timelineItems" />
-        </BasePanel>
-        <BasePanel title="状态与长文案" subtitle="空态、加载态、选中态和长文案换行保持稳定。">
-          <div class="timeline-demo-stack">
-            <BaseTimeline :items="[]" empty-text="暂无审计记录" surface="muted" />
-            <BaseTimeline :items="timelineItems" loading loading-text="加载审计记录" dense size="sm" />
-            <BaseTimeline
-              :items="longTimelineItems"
-              wrap-title
-              wrap-description
-              :max-description-lines="4"
-              marker="number"
-              surface="plain"
-              :bordered="false"
-              actions-label="长文案时间线动作"
-            >
-              <template #actions="{ item, interactiveDisabled }">
-                <BaseButton type="neutral" size="sm" :disabled="interactiveDisabled">{{ item.key === "trace" ? "复制路径" : "查看" }}</BaseButton>
-              </template>
-            </BaseTimeline>
-          </div>
-        </BasePanel>
-        <BasePanel title="窄容器压力" subtitle="侧栏宽度下长时间、长 URI、动作区和禁用态都不产生横向溢出。">
-          <div class="timeline-narrow-demo">
-            <BaseTimeline
-              :items="longTimelineItems"
-              clickable
-              :selected-key="selectedTimelineKey"
-              dense
-              size="sm"
-              wrap-title
-              wrap-description
-              :max-description-lines="6"
-              actions-label="窄容器时间线动作"
-              aria-label="窄容器时间线压力示例"
-              @select="selectedTimelineKey = $event.item.key"
-            >
-              <template #actions="{ item, selected, interactiveDisabled }">
-                <BaseBadge v-if="selected" type="primary" size="sm">当前</BaseBadge>
-                <BaseButton v-else type="neutral" size="sm" :disabled="interactiveDisabled">{{ item.disabled ? "只读" : "处理" }}</BaseButton>
-              </template>
-            </BaseTimeline>
-          </div>
-        </BasePanel>
-      </div>
+      <BasePanel title="Long items" subtitle="Wrap long labels safely in narrow containers.">
+        <BaseTimeline :items="longTimelineItems" wrap-title wrap-description :max-description-lines="4" marker="number" surface="plain" :bordered="false" />
+      </BasePanel>
     </PlaygroundDemoSection>
   </section>
 </template>
@@ -298,6 +891,26 @@ const longTimelineItems = [
 
 .step-actions {
   @apply flex justify-end gap-2;
+}
+
+.step-actions--wrap {
+  @apply flex-wrap justify-start;
+}
+
+.workflow-form {
+  @apply grid gap-3;
+}
+
+.workflow-status {
+  @apply mb-3 flex flex-wrap gap-2;
+}
+
+.workflow-error {
+  @apply mt-3 text-xs font-bold text-red-600 dark:text-red-400;
+}
+
+.workflow-note {
+  @apply mt-3 text-xs text-slate-600 dark:text-slate-300;
 }
 
 .timeline-result {
