@@ -1,3 +1,7 @@
+use crate::infra::creative_db_support::{
+    connect, ensure_column, map_asset_link, map_creative_asset, map_creative_batch_job,
+    map_creative_goal, map_creative_goal_role, map_creative_task, map_model_run, map_task_event,
+};
 use crate::infra::{AppError, AppResult};
 use rusqlite::{params, params_from_iter, types::Value, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
@@ -519,9 +523,6 @@ impl CreativeDbInfra {
             CREATE INDEX IF NOT EXISTS idx_creative_tasks_status ON creative_tasks(status);
             CREATE INDEX IF NOT EXISTS idx_creative_tasks_task_type ON creative_tasks(task_type);
             CREATE INDEX IF NOT EXISTS idx_creative_tasks_asset_id ON creative_tasks(asset_id);
-            CREATE INDEX IF NOT EXISTS idx_creative_tasks_goal_id ON creative_tasks(goal_id);
-            CREATE INDEX IF NOT EXISTS idx_creative_tasks_batch_job_id ON creative_tasks(batch_job_id);
-            CREATE INDEX IF NOT EXISTS idx_creative_tasks_sequence_no ON creative_tasks(sequence_no);
             CREATE INDEX IF NOT EXISTS idx_creative_tasks_created_at ON creative_tasks(created_at);
             CREATE INDEX IF NOT EXISTS idx_batch_jobs_project_id ON batch_jobs(project_id);
             CREATE INDEX IF NOT EXISTS idx_batch_jobs_status ON batch_jobs(status);
@@ -551,6 +552,11 @@ impl CreativeDbInfra {
         ensure_column(&conn, "creative_tasks", "goal_id", "INTEGER")?;
         ensure_column(&conn, "creative_tasks", "batch_job_id", "INTEGER")?;
         ensure_column(&conn, "creative_tasks", "sequence_no", "INTEGER")?;
+        conn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_creative_tasks_goal_id ON creative_tasks(goal_id);
+            CREATE INDEX IF NOT EXISTS idx_creative_tasks_batch_job_id ON creative_tasks(batch_job_id);
+            CREATE INDEX IF NOT EXISTS idx_creative_tasks_sequence_no ON creative_tasks(sequence_no);",
+        )?;
         Ok(())
     }
 
@@ -1553,19 +1559,6 @@ impl CreativeDbInfra {
     }
 }
 
-fn connect(db_path: &Path) -> AppResult<Connection> {
-    if let Some(parent) = db_path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let conn = Connection::open(db_path)?;
-    conn.execute_batch(
-        "PRAGMA journal_mode = WAL;
-         PRAGMA busy_timeout = 5000;
-         PRAGMA foreign_keys = ON;",
-    )?;
-    Ok(conn)
-}
-
 fn non_empty_filter(value: Option<String>) -> Option<String> {
     value.and_then(|item| {
         let trimmed = item.trim();
@@ -1574,159 +1567,6 @@ fn non_empty_filter(value: Option<String>) -> Option<String> {
         } else {
             Some(trimmed.to_string())
         }
-    })
-}
-
-fn ensure_column(conn: &Connection, table: &str, column: &str, column_def: &str) -> AppResult<()> {
-    let exists: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?",
-        params![table, column],
-        |row| row.get(0),
-    )?;
-    if exists == 0 {
-        conn.execute(
-            &format!("ALTER TABLE {table} ADD COLUMN {column} {column_def}"),
-            [],
-        )?;
-    }
-    Ok(())
-}
-
-fn map_creative_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<CreativeTask> {
-    Ok(CreativeTask {
-        id: row.get(0)?,
-        project_id: row.get(1)?,
-        goal_id: row.get(2)?,
-        batch_job_id: row.get(3)?,
-        task_type: row.get(4)?,
-        status: row.get(5)?,
-        priority: row.get(6)?,
-        payload_json: row.get(7)?,
-        result_json: row.get(8)?,
-        error_message: row.get(9)?,
-        retry_count: row.get(10)?,
-        max_retries: row.get(11)?,
-        parent_task_id: row.get(12)?,
-        asset_id: row.get(13)?,
-        sequence_no: row.get(14)?,
-        created_at: row.get(15)?,
-        updated_at: row.get(16)?,
-        started_at: row.get(17)?,
-        finished_at: row.get(18)?,
-    })
-}
-
-fn map_task_event(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskEvent> {
-    Ok(TaskEvent {
-        id: row.get(0)?,
-        task_id: row.get(1)?,
-        event_type: row.get(2)?,
-        message: row.get(3)?,
-        payload_json: row.get(4)?,
-        created_at: row.get(5)?,
-    })
-}
-
-fn map_creative_asset(row: &rusqlite::Row<'_>) -> rusqlite::Result<CreativeAsset> {
-    Ok(CreativeAsset {
-        id: row.get(0)?,
-        project_id: row.get(1)?,
-        asset_type: row.get(2)?,
-        title: row.get(3)?,
-        content: row.get(4)?,
-        file_path: row.get(5)?,
-        thumbnail_path: row.get(6)?,
-        metadata_json: row.get(7)?,
-        status: row.get(8)?,
-        created_at: row.get(9)?,
-        updated_at: row.get(10)?,
-    })
-}
-
-fn map_creative_goal(row: &rusqlite::Row<'_>) -> rusqlite::Result<CreativeGoal> {
-    Ok(CreativeGoal {
-        id: row.get(0)?,
-        project_id: row.get(1)?,
-        title: row.get(2)?,
-        description: row.get(3)?,
-        status: row.get(4)?,
-        budget_json: row.get(5)?,
-        created_at: row.get(6)?,
-        updated_at: row.get(7)?,
-        started_at: row.get(8)?,
-        finished_at: row.get(9)?,
-        stopped_at: row.get(10)?,
-    })
-}
-
-fn map_creative_batch_job(row: &rusqlite::Row<'_>) -> rusqlite::Result<CreativeBatchJob> {
-    Ok(CreativeBatchJob {
-        id: row.get(0)?,
-        project_id: row.get(1)?,
-        name: row.get(2)?,
-        batch_type: row.get(3)?,
-        status: row.get(4)?,
-        total_count: row.get(5)?,
-        concurrency: row.get(6)?,
-        max_retries: row.get(7)?,
-        prompt_template: row.get(8)?,
-        provider_id: row.get(9)?,
-        model: row.get(10)?,
-        image_size: row.get(11)?,
-        budget_json: row.get(12)?,
-        created_at: row.get(13)?,
-        updated_at: row.get(14)?,
-        started_at: row.get(15)?,
-        finished_at: row.get(16)?,
-    })
-}
-
-fn map_creative_goal_role(row: &rusqlite::Row<'_>) -> rusqlite::Result<CreativeGoalRole> {
-    Ok(CreativeGoalRole {
-        id: row.get(0)?,
-        goal_id: row.get(1)?,
-        role_key: row.get(2)?,
-        task_type: row.get(3)?,
-        description: row.get(4)?,
-        task_count: row.get(5)?,
-        budget_json: row.get(6)?,
-        created_at: row.get(7)?,
-        updated_at: row.get(8)?,
-    })
-}
-
-fn map_asset_link(row: &rusqlite::Row<'_>) -> rusqlite::Result<AssetLink> {
-    Ok(AssetLink {
-        id: row.get(0)?,
-        source_asset_id: row.get(1)?,
-        target_asset_id: row.get(2)?,
-        link_type: row.get(3)?,
-        created_at: row.get(4)?,
-    })
-}
-
-fn map_model_run(row: &rusqlite::Row<'_>) -> rusqlite::Result<ModelRun> {
-    Ok(ModelRun {
-        id: row.get(0)?,
-        project_id: row.get(1)?,
-        task_id: row.get(2)?,
-        asset_id: row.get(3)?,
-        provider_id: row.get(4)?,
-        provider_type: row.get(5)?,
-        model: row.get(6)?,
-        request_type: row.get(7)?,
-        status: row.get(8)?,
-        duration_ms: row.get(9)?,
-        prompt_hash: row.get(10)?,
-        prompt_version_id: row.get(11)?,
-        input_token_count: row.get(12)?,
-        output_token_count: row.get(13)?,
-        cost_estimate: row.get(14)?,
-        error_code: row.get(15)?,
-        error_message: row.get(16)?,
-        metadata_json: row.get(17)?,
-        created_at: row.get(18)?,
-        finished_at: row.get(19)?,
     })
 }
 
@@ -1767,6 +1607,49 @@ mod tests {
             )
             .expect("table count should be queryable");
         assert_eq!(table_count, 6);
+
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn init_schema_migrates_legacy_creative_tasks_without_goal_columns() {
+        let db_path = temp_db_path("creative_schema_legacy");
+        let conn = connect(&db_path).expect("db should connect");
+        conn.execute_batch(
+            "CREATE TABLE creative_tasks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id TEXT,
+                task_type TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'draft',
+                priority INTEGER NOT NULL DEFAULT 0,
+                payload_json TEXT,
+                result_json TEXT,
+                error_message TEXT,
+                retry_count INTEGER NOT NULL DEFAULT 0,
+                max_retries INTEGER NOT NULL DEFAULT 0,
+                parent_task_id INTEGER,
+                asset_id INTEGER,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                started_at TEXT,
+                finished_at TEXT
+            );",
+        )
+        .expect("legacy schema should be created");
+
+        CreativeDbInfra::init_schema(&db_path).expect("legacy schema should migrate");
+
+        let conn = connect(&db_path).expect("db should reconnect");
+        let column_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*)
+                 FROM pragma_table_info('creative_tasks')
+                 WHERE name IN ('goal_id', 'batch_job_id', 'sequence_no')",
+                [],
+                |row| row.get(0),
+            )
+            .expect("column count should be queryable");
+        assert_eq!(column_count, 3);
 
         let _ = std::fs::remove_file(db_path);
     }
