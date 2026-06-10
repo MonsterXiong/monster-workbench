@@ -279,6 +279,67 @@ function emitMockBatchEvent(
   });
 }
 
+function resolveMockMaxConsecutiveFailures(job: any) {
+  if (!job?.budgetJson) {
+    return 0;
+  }
+  const parsed = tryJsonParseObject(job.budgetJson);
+  if (!parsed.ok || !parsed.data || typeof parsed.data !== "object") {
+    return 0;
+  }
+  const budget = parsed.data as Record<string, unknown>;
+  const threshold = Number(budget.maxConsecutiveFailures || 0);
+  return Number.isFinite(threshold) && threshold > 0 ? Math.floor(threshold) : 0;
+}
+
+function shouldMockAutoPauseAfterFailure(batchJobId: number, threshold: number) {
+  if (!threshold || threshold <= 0) {
+    return false;
+  }
+  const recentTasks = mockCreativeTasks
+    .filter((task) => task.batchJobId === batchJobId)
+    .sort((a, b) => (b.sequenceNo || b.id) - (a.sequenceNo || a.id));
+  let failures = 0;
+  for (const task of recentTasks) {
+    if (!["succeeded", "failed", "cancelled"].includes(task.status)) {
+      continue;
+    }
+    if (task.status !== "failed") {
+      break;
+    }
+    failures += 1;
+    if (failures >= threshold) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function maybeAutoPauseMockBatchAfterFailure(batchJobId: number) {
+  const job = findByValue(mockBatchJobs, (item) => item.id, batchJobId);
+  if (!job || job.status !== "running") {
+    return;
+  }
+  const threshold = resolveMockMaxConsecutiveFailures(job);
+  if (!shouldMockAutoPauseAfterFailure(batchJobId, threshold)) {
+    return;
+  }
+  job.status = "paused";
+  job.updatedAt = formatCurrentIsoDateTime(" ");
+  const snapshot = createMockBatchSnapshot(job);
+  emitMockBatchEvent(
+    "batch-job-status-changed",
+    snapshot,
+    `batch auto-paused after ${threshold} consecutive failures`
+  );
+  emitMockBatchEvent(
+    "batch-job-progress",
+    snapshot,
+    `batch auto-paused after ${threshold} consecutive failures`
+  );
+  stopMockBatchTimer(batchJobId);
+}
+
 function emitMockTaskStatus(task: any, eventName: string, message: string | null) {
   dispatchMockTaskEvent(eventName, toTaskEventPayload(task, message, task.updatedAt));
 }
@@ -491,6 +552,7 @@ function completeMockPromptBatchTask(task: any, batchJob: any, durationMs: numbe
     mockTaskEvents.set(task.id, events);
     emitMockTaskStatus(task, "creative-task-status-changed", "status changed to failed");
     emitMockTaskStatus(task, "creative-task-event", "prompt worker finished with failure");
+    maybeAutoPauseMockBatchAfterFailure(batchJob.id);
     return;
   }
 
@@ -589,6 +651,7 @@ function completeMockGenerateBatchTask(task: any, batchJob: any, durationMs: num
     task.finishedAt = task.updatedAt;
     emitMockTaskStatus(task, "creative-task-status-changed", "status changed to failed");
     emitMockTaskStatus(task, "creative-task-event", "image worker finished with failure");
+    maybeAutoPauseMockBatchAfterFailure(batchJob.id);
     return;
   }
 

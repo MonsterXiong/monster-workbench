@@ -92,6 +92,7 @@ const batchJobForm = ref({
   queueMode: "serial",
   maxConcurrency: 1,
   queueKey: "batch-demo",
+  budgetJson: "",
 });
 const batchTaskPage = ref(1);
 const batchTaskPageSize = 20;
@@ -381,10 +382,12 @@ const createBatchJob = async () => {
             queueKey: batchJobForm.value.queueKey,
           }
         : null,
-      budgetJson: JSON.stringify({
-        stage: isRealBatch ? "real" : isPromptBatch ? "prompt" : "mock",
-        maxConsecutiveFailures: isRealBatch ? 20 : isPromptBatch ? 5 : 20,
-      }),
+      budgetJson:
+        batchJobForm.value.budgetJson ||
+        JSON.stringify({
+          stage: isRealBatch ? "real" : isPromptBatch ? "prompt" : "mock",
+          maxConsecutiveFailures: isRealBatch ? 20 : isPromptBatch ? 5 : 20,
+        }),
     });
   } catch {
     // store records the error state.
@@ -427,9 +430,55 @@ const cancelBatchJob = async () => {
   );
 };
 
+const installPlaygroundDebugBridge = () => {
+  if (!import.meta.env.DEV || typeof window === "undefined") return;
+  (window as typeof window & { __monsterPlaygroundDebug?: Record<string, unknown> }).__monsterPlaygroundDebug = {
+    getState: () => ({
+      promptWorkflowTask: promptWorkflowTask.value,
+      promptWorkflowAsset: promptWorkflowAsset.value,
+      reviewTaskResult: reviewTaskResult.value,
+      reviewAssetResult: reviewAssetResult.value,
+      reviewRevisionTask: reviewRevisionTask.value,
+      domainAssets: domainAssets.value,
+      domainAssetLinks: domainAssetLinks.value,
+      goalResult: goalResult.value,
+      goalRoleResults: goalRoleResults.value,
+      goalTaskResults: goalTaskResults.value,
+      goalStatusSnapshot: goalStatusSnapshot.value,
+      batchJobSnapshot: batchJobSnapshot.value,
+      batchJobTasks: batchJobTasks.value,
+      batchJobActivity: batchJobActivity.value,
+      batchJobImageItems: batchJobImageItems.value,
+      batchJobRunning: batchJobRunning.value,
+    }),
+    setBatchMode: (mode: "mock" | "prompt" | "real") => {
+      batchJobForm.value.mode = mode;
+      return batchJobForm.value.mode;
+    },
+    patchBatchForm: (patch: Partial<typeof batchJobForm.value>) => {
+      batchJobForm.value = {
+        ...batchJobForm.value,
+        ...patch,
+      };
+      return batchJobForm.value;
+    },
+    runPromptWorkflow,
+    runReviewWorkflow,
+    runDomainAssetDraft,
+    runGoalMultiAgentStub,
+    createBatchJob,
+    startBatchJob,
+    pauseBatchJob,
+    resumeBatchJob,
+    cancelBatchJob,
+    refreshBatchJobPage,
+  };
+};
+
 onMounted(async () => {
   await taskStore.initCreativeTaskListeners();
   await taskStore.initBatchJobListeners();
+  installPlaygroundDebugBridge();
 });
 
 // Avoid vue-tsc unused variable false positive for variables used in template
