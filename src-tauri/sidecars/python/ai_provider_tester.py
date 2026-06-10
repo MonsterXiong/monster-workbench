@@ -3,6 +3,7 @@ import base64
 import binascii
 import ipaddress
 import os
+import re
 import socket
 import sys
 import time
@@ -35,10 +36,43 @@ MAX_TEXT_CHARS = 8192
 MAX_IMAGE_ITEMS = 4
 MAX_IMAGE_URL_CHARS = 2048
 MAX_RAW_STRING_CHARS = 512
+ANYROUTER_CLAUDE_MODEL_RE = re.compile(r"^claude-(opus|sonnet|haiku)-(\d+)(?:-(\d+))?(?:-\d{8})?$", re.IGNORECASE)
 
 
 def normalize_base_url(base_url):
     return base_url.rstrip("/")
+
+
+def is_anyrouter_target(base_url, provider):
+    clean_provider = str(provider or "").strip().lower()
+    if clean_provider == "anyrouter":
+        return True
+
+    parsed = urllib.parse.urlparse(str(base_url or ""))
+    hostname = (parsed.hostname or "").lower()
+    return hostname in ("anyrouter.dev", "anyrouter.top")
+
+
+def normalize_anyrouter_model(model):
+    text = str(model or "").strip()
+    if not text:
+        return ""
+
+    clean = text[len("anthropic/"):] if text.lower().startswith("anthropic/") else text
+    match = ANYROUTER_CLAUDE_MODEL_RE.match(clean)
+    if not match:
+        return text
+
+    tier, major, minor = match.groups()
+    version = "{0}.{1}".format(major, minor) if minor else major
+    return "anthropic/claude-{0}-{1}".format(tier.lower(), version)
+
+
+def resolve_request_model(base_url, provider, model):
+    text = str(model or "").strip()
+    if is_anyrouter_target(base_url, provider):
+        return normalize_anyrouter_model(text)
+    return text
 
 
 def build_chat_url(base_url):
@@ -538,9 +572,9 @@ def main():
     provider = config.get("provider") or "custom"
     base_url = normalize_base_url(config.get("baseUrl") or "")
     api_key = config.get("apiKey") or ""
-    model = config.get("model") or ""
+    model = resolve_request_model(base_url, provider, config.get("model") or "")
     prompt = config.get("testPrompt") or "ping"
-    image_model = config.get("imageModel") or model
+    image_model = resolve_request_model(base_url, provider, config.get("imageModel") or model)
     image_prompt = config.get("imagePrompt") or prompt
     image_size = config.get("imageSize") or "1024x1024"
     timeout_ms = int(config.get("timeoutMs") or 20000)
@@ -577,10 +611,11 @@ def main():
             }
         elif action == "image":
             api_image_size = resolve_api_image_size(image_size)
+            image_count = max(1, min(MAX_IMAGE_ITEMS, int(config.get("imageCount") or 1)))
             body = {
                 "model": image_model,
                 "prompt": image_prompt,
-                "n": 1,
+                "n": image_count,
                 "size": api_image_size
             }
             status, parsed = request_image_generation(
