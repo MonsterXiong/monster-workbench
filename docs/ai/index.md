@@ -106,6 +106,13 @@ AGENTS.md                    ← 首读入口，全局红线（最高优先级�
 必读: AGENTS.md → maintenance.md → 本文件
 ```
 
+### 持续型 AI 创作系统
+
+```
+必读: codex-goal-ops-manual.md → codex-goal-mode.md → creative-architecture-guardrails.md
+按需: creative-system-roadmap.md → creative-regression-checklist.md → multi-agent-operating-model.md → v2-addon-index.md
+```
+
 ---
 
 ## 3. 规则晋升机制
