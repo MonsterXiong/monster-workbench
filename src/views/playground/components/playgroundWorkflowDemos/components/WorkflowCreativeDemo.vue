@@ -1,15 +1,9 @@
-﻿<script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+<script setup lang="ts">
+import { computed, onMounted, ref, watch } from "vue";
 import { storeToRefs } from "pinia";
-import { useTaskStore } from "../../../stores/task";
-import PlaygroundDemoSection from "./PlaygroundDemoSection.vue";
+import { useTaskStore } from "../../../../../stores/task";
+import PlaygroundDemoSection from "../../PlaygroundDemoSection.vue";
 
-defineProps<{
-  activeComponentKey: string;
-}>();
-
-const workflowStep = ref(1);
-const selectedTimelineKey = ref("review");
 const taskStore = useTaskStore();
 const {
   promptWorkflowTask,
@@ -41,6 +35,7 @@ const {
   batchJobActivity,
   batchJobError,
   batchJobRunning,
+  batchJobImageItems,
 } = storeToRefs(taskStore);
 
 const promptWorkflowForm = ref({
@@ -114,7 +109,38 @@ const batchModeOptions = [
     meta: "Goal 12",
     description: "Generate demo_image_prompt assets through the provider path.",
   },
+  {
+    label: "Real Image",
+    value: "real",
+    meta: "Goal 13",
+    description: "Generate bounded real images, files, thumbnails, and demo_image assets.",
+  },
 ];
+
+watch(
+  () => batchJobForm.value.mode,
+  (mode) => {
+    if (mode === "mock") {
+      batchJobForm.value.name = "Batch Mock Demo";
+      batchJobForm.value.concurrency = 5;
+      batchJobForm.value.maxRetries = 0;
+      batchJobForm.value.model = "mock-image-model";
+      return;
+    }
+    if (mode === "prompt") {
+      batchJobForm.value.name = "Batch Prompt Demo";
+      batchJobForm.value.concurrency = 3;
+      batchJobForm.value.maxRetries = 1;
+      batchJobForm.value.model = "gpt-4.1-mini";
+      return;
+    }
+    batchJobForm.value.name = "Batch Real Image Demo";
+    batchJobForm.value.concurrency = 2;
+    batchJobForm.value.maxRetries = 2;
+    batchJobForm.value.model = "gpt-image-1";
+  },
+  { immediate: true }
+);
 
 const promptWorkflowTimelineItems = computed(() =>
   promptWorkflowActivity.value.map((item, index) => ({
@@ -179,6 +205,16 @@ const batchJobTimelineItems = computed(() =>
   }))
 );
 
+const batchLatestActivity = computed(() => batchJobActivity.value[0] || null);
+
+const safeParseJson = (raw: string) => {
+  try {
+    return JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+};
+
 const batchTaskResultSummary = computed(() =>
   batchJobTasks.value.map((task) => {
     const result = task.resultJson ? safeParseJson(task.resultJson) : null;
@@ -190,85 +226,16 @@ const batchTaskResultSummary = computed(() =>
       promptExcerpt: typeof result?.promptExcerpt === "string" ? result.promptExcerpt : "-",
       assetId: typeof result?.assetId === "number" ? result.assetId : task.assetId,
       modelRunId: typeof result?.modelRunId === "number" ? result.modelRunId : null,
+      filePath: typeof result?.filePath === "string" ? result.filePath : null,
+      thumbnailPath: typeof result?.thumbnailPath === "string" ? result.thumbnailPath : null,
       errorMessage: task.errorMessage || "-",
     };
   })
 );
 
-const workflowSteps = [
-  { key: "prepare", title: "Prepare", description: "Collect inputs and dependencies." },
-  { key: "scan", title: "Scan", description: "Find missing coverage." },
-  { key: "build", title: "Build", description: "Fill the demo state.", error: true },
-  { key: "verify", title: "Verify", description: "Type and visual checks.", disabled: true },
-];
-
-const timelineItems = [
-  {
-    key: "create",
-    title: "Add component entry",
-    time: "09:30",
-    description: "Keep the layout stable while adding the new workflow demo.",
-    type: "success" as const,
-    icon: "Plus",
-    meta: "component platform",
-    tag: "done",
-  },
-  {
-    key: "review",
-    title: "Visual review",
-    time: "10:10",
-    description: "Tune hover highlight and spacing.",
-    type: "primary" as const,
-    icon: "Eye",
-    meta: "design review",
-    tag: "in progress",
-  },
-  {
-    key: "pending",
-    title: "Pending",
-    time: "later",
-    description: "Continue reviewing Playground coverage.",
-    type: "warning" as const,
-    icon: "Monitor",
-    meta: "sandbox",
-    tag: "queued",
-  },
-];
-
-const longTimelineItems = [
-  {
-    key: "long-review",
-    title: "A very long title that should wrap naturally in narrow containers.",
-    time: "11:40",
-    description: "Long labels should wrap without creating horizontal overflow.",
-    type: "primary" as const,
-    icon: "ScrollText",
-    meta: "long form note",
-    tag: "Wrap",
-  },
-  {
-    key: "trace",
-    title: "trace-20260609-component-playground-timeline-verification-with-very-long-unbroken-token",
-    time: "2026-06-09 18:42:16.238 UTC+08:00",
-    description:
-      "https://monster.local/audit/component/BaseTimeline/events/very-long-path-segment-that-should-wrap-anywhere?trace_id=trace_01HZYX_LONG_LONG_LONG_LONG_LONG&request_id=req_component_sandbox_timeline_visual_check",
-    type: "warning" as const,
-    icon: "Link",
-    meta: "workspace/components/workflow/timeline/very-long-meta-value",
-    tag: "TraceId",
-  },
-  {
-    key: "disabled-action",
-    title: "Readonly item still shows context but does not allow selection.",
-    time: "later",
-    description: "Disabled actions should stay readable while blocking selection.",
-    type: "neutral" as const,
-    icon: "Lock",
-    meta: "Readonly",
-    tag: "Disabled",
-    disabled: true,
-  },
-];
+const batchShowsImageWall = computed(
+  () => batchJobForm.value.mode === "real" || batchJobSnapshot.value?.job.batchType === "demo.image.generate"
+);
 
 const runPromptWorkflow = async () => {
   try {
@@ -277,14 +244,6 @@ const runPromptWorkflow = async () => {
     });
   } catch {
     // store records the error state.
-  }
-};
-
-const safeParseJson = (raw: string) => {
-  try {
-    return JSON.parse(raw) as Record<string, unknown>;
-  } catch {
-    return null;
   }
 };
 
@@ -393,15 +352,23 @@ const createBatchJob = async () => {
   try {
     batchTaskPage.value = 1;
     const isPromptBatch = batchJobForm.value.mode === "prompt";
+    const isRealBatch = batchJobForm.value.mode === "real";
     await taskStore.createBatchImageJob({
       projectId: batchJobForm.value.projectId,
       name: batchJobForm.value.name,
-      batchType: isPromptBatch ? "demo.image.prompt" : "demo.image.mock",
+      batchType: isRealBatch
+        ? "demo.image.generate"
+        : isPromptBatch
+          ? "demo.image.prompt"
+          : "demo.image.mock",
       totalCount: batchJobForm.value.totalCount,
       concurrency: batchJobForm.value.concurrency,
       maxRetries: batchJobForm.value.maxRetries,
-      promptTemplate: isPromptBatch ? batchJobForm.value.promptTemplate : null,
-      providerConfig: isPromptBatch
+      promptTemplate: isPromptBatch || isRealBatch ? batchJobForm.value.promptTemplate : null,
+      imageSize: isPromptBatch || isRealBatch ? batchJobForm.value.imageSize : null,
+      providerId: isPromptBatch || isRealBatch ? batchJobForm.value.displayName : null,
+      model: isPromptBatch || isRealBatch ? batchJobForm.value.model : null,
+      providerConfig: isPromptBatch || isRealBatch
         ? {
             provider: batchJobForm.value.provider,
             displayName: batchJobForm.value.displayName,
@@ -415,8 +382,8 @@ const createBatchJob = async () => {
           }
         : null,
       budgetJson: JSON.stringify({
-        stage: isPromptBatch ? "prompt" : "mock",
-        maxConsecutiveFailures: isPromptBatch ? 5 : 20,
+        stage: isRealBatch ? "real" : isPromptBatch ? "prompt" : "mock",
+        maxConsecutiveFailures: isRealBatch ? 20 : isPromptBatch ? 5 : 20,
       }),
     });
   } catch {
@@ -464,10 +431,15 @@ onMounted(async () => {
   await taskStore.initCreativeTaskListeners();
   await taskStore.initBatchJobListeners();
 });
+
+// Avoid vue-tsc unused variable false positive for variables used in template
+void batchJobImageItems;
+void batchShowsImageWall;
+void batchLatestActivity;
 </script>
 
 <template>
-  <section v-if="activeComponentKey === 'creative-workflow'" class="detail-stack">
+  <section class="detail-stack">
     <PlaygroundDemoSection
       title="generate_image_prompt"
       subtitle="Create the task, start sidecar, persist the asset, and emit events."
@@ -796,7 +768,7 @@ onMounted(async () => {
       </div>
 
       <div class="demo-grid demo-grid--wide">
-        <BasePanel title="Batch Image Demo" subtitle="Create mock or prompt batches with bounded concurrency.">
+        <BasePanel title="Batch Image Demo" subtitle="Create mock, prompt, or real-image batches with bounded concurrency.">
           <div class="workflow-form">
             <BaseSegmented
               v-model="batchJobForm.mode"
@@ -811,12 +783,12 @@ onMounted(async () => {
             <BaseNumberInput v-model="batchJobForm.concurrency" label="Concurrency" :min="1" :max="10" />
             <BaseNumberInput v-model="batchJobForm.maxRetries" label="Max Retries" :min="0" :max="3" />
             <BaseTextarea
-              v-if="batchJobForm.mode === 'prompt'"
+              v-if="batchJobForm.mode !== 'mock'"
               v-model="batchJobForm.promptTemplate"
               label="Prompt Template"
               :rows="4"
             />
-            <div v-if="batchJobForm.mode === 'prompt'" class="workflow-form workflow-form--tight">
+            <div v-if="batchJobForm.mode !== 'mock'" class="workflow-form workflow-form--tight">
               <BaseInput v-model="batchJobForm.provider" label="Provider" />
               <BaseInput v-model="batchJobForm.displayName" label="Display Name" />
               <BaseInput v-model="batchJobForm.baseUrl" label="Base URL" />
@@ -828,7 +800,13 @@ onMounted(async () => {
           <template #footer>
             <div class="step-actions step-actions--wrap">
               <BaseButton type="primary" size="sm" @click="createBatchJob">
-                Create {{ batchJobForm.mode === 'prompt' ? 'prompt' : 'mock' }} batch
+                Create {{
+                  batchJobForm.mode === 'real'
+                    ? 'real image'
+                    : batchJobForm.mode === 'prompt'
+                      ? 'prompt'
+                      : 'mock'
+                }} batch
               </BaseButton>
               <BaseButton type="neutral" size="sm" :disabled="!batchJobSnapshot?.job.id" @click="startBatchJob">
                 Start
@@ -863,6 +841,7 @@ onMounted(async () => {
           </div>
           <BaseDescriptionList
             :items="[
+              { key: 'type', label: 'Batch Type', value: batchJobSnapshot?.job.batchType || '-' },
               { key: 'total', label: 'Total', value: String(batchJobSnapshot?.stats.totalTasks ?? 0) },
               { key: 'queued', label: 'Queued', value: String(batchJobSnapshot?.stats.queuedTasks ?? 0) },
               { key: 'running', label: 'Running', value: String(batchJobSnapshot?.stats.runningTasks ?? 0) },
@@ -871,6 +850,9 @@ onMounted(async () => {
               { key: 'cancelled', label: 'Cancelled', value: String(batchJobSnapshot?.stats.cancelledTasks ?? 0) },
             ]"
           />
+          <p v-if="batchLatestActivity?.message" class="workflow-note">
+            Latest: {{ batchLatestActivity.message }}
+          </p>
           <p v-if="batchJobError" class="workflow-error">{{ batchJobError }}</p>
         </BasePanel>
       </div>
@@ -928,7 +910,7 @@ onMounted(async () => {
       </div>
 
       <div class="demo-grid">
-        <BasePanel title="Task Results" subtitle="Prompt batches surface asset and model run summaries here.">
+        <BasePanel title="Task Results" subtitle="Prompt and real-image batches surface asset and model run summaries here.">
           <BaseTimeline
             :items="batchTaskResultSummary.map((task) => ({
               key: String(task.id),
@@ -946,7 +928,7 @@ onMounted(async () => {
             empty-text="No task results yet"
           />
         </BasePanel>
-        <BasePanel title="Prompt Notes" subtitle="Prompt batches create demo_image_prompt assets, not images.">
+        <BasePanel title="Prompt Notes" subtitle="Prompt batches create demo_image_prompt assets; real mode additionally writes image files and thumbnails.">
           <BaseDescriptionList
             :items="[
               { key: 'mode', label: 'Mode', value: batchJobForm.mode },
@@ -957,40 +939,47 @@ onMounted(async () => {
           />
         </BasePanel>
       </div>
-    </PlaygroundDemoSection>
-  </section>
 
-  <section v-else-if="activeComponentKey === 'stepper'" class="detail-stack">
-    <PlaygroundDemoSection title="Stepper" subtitle="A compact demo for progress and review states." icon="Footprints">
-      <BasePanel title="Horizontal" subtitle="Completed, current, and disabled steps.">
-        <BaseStepper :steps="workflowSteps" :current="workflowStep" clickable linear surface="muted" @select="workflowStep = $event.index" />
-      </BasePanel>
-      <BasePanel title="Vertical" subtitle="A narrow layout for side panels.">
-        <BaseStepper :steps="workflowSteps" :current="2" vertical size="sm" surface="plain" :bordered="false" />
-      </BasePanel>
-    </PlaygroundDemoSection>
-  </section>
-
-  <section v-else-if="activeComponentKey === 'timeline'" class="detail-stack">
-    <PlaygroundDemoSection title="Timeline" subtitle="Record task and release events." icon="History">
-      <BasePanel title="Timeline" subtitle="Clickable records with selection and actions.">
-        <BaseTimeline
-          :items="timelineItems"
-          clickable
-          :selected-key="selectedTimelineKey"
-          aria-label="component timeline"
-          actions-label="timeline actions"
-          @select="selectedTimelineKey = $event.item.key"
+      <div class="demo-grid">
+        <BasePanel
+          title="Image Wall"
+          subtitle="Only the current page of generated thumbnails is rendered here."
         >
-          <template #actions="{ selected, interactiveDisabled }">
-            <BaseBadge v-if="selected" type="primary" size="sm">selected</BaseBadge>
-            <BaseButton v-else type="neutral" size="sm" :disabled="interactiveDisabled">View</BaseButton>
-          </template>
-        </BaseTimeline>
-      </BasePanel>
-      <BasePanel title="Long items" subtitle="Wrap long labels safely in narrow containers.">
-        <BaseTimeline :items="longTimelineItems" wrap-title wrap-description :max-description-lines="4" marker="number" surface="plain" :bordered="false" />
-      </BasePanel>
+          <div v-if="batchShowsImageWall && batchJobImageItems.length" class="image-wall">
+            <article
+              v-for="item in batchJobImageItems"
+              :key="item.id"
+              class="image-tile"
+            >
+              <img :src="item.imageSrc" :alt="item.title" class="image-tile__media" />
+              <div class="image-tile__meta">
+                <p class="image-tile__title">{{ item.title }}</p>
+                <p class="image-tile__caption">
+                  asset {{ item.assetId || "-" }} / model {{ item.modelRunId || "-" }}
+                </p>
+                <p class="image-tile__path">{{ item.thumbnailPath || item.filePath || "-" }}</p>
+              </div>
+            </article>
+          </div>
+          <BaseDataState
+            v-else
+            state="empty"
+            title="No thumbnails yet"
+            description="Real image mode will populate this wall after file paths and thumbnails are persisted."
+            compact
+          />
+        </BasePanel>
+
+        <BasePanel title="File Snapshot" subtitle="Real image batches persist file and thumbnail paths into task results.">
+          <BaseCodeBlock
+            :code="batchTaskResultSummary.map((task) => `#${task.id} file=${task.filePath || '-'} thumb=${task.thumbnailPath || '-'}`).join('\n') || 'No file paths yet'"
+            language="text"
+            copyable
+            copy-label="Copy file paths"
+            empty-text="No file paths yet"
+          />
+        </BasePanel>
+      </div>
     </PlaygroundDemoSection>
   </section>
 </template>
@@ -1020,6 +1009,10 @@ onMounted(async () => {
   @apply grid gap-3;
 }
 
+.workflow-form--tight {
+  @apply gap-2;
+}
+
 .workflow-status {
   @apply mb-3 flex flex-wrap gap-2;
 }
@@ -1032,19 +1025,31 @@ onMounted(async () => {
   @apply mt-3 text-xs text-slate-600 dark:text-slate-300;
 }
 
-.timeline-result {
-  @apply text-xs font-black text-slate-500 dark:text-slate-400;
+.image-wall {
+  @apply grid gap-3 sm:grid-cols-2;
 }
 
-.timeline-demo-stack {
-  @apply grid gap-3;
+.image-tile {
+  @apply overflow-hidden rounded-lg border border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-950;
 }
 
-.timeline-narrow-demo {
-  @apply w-full max-w-[320px];
+.image-tile__media {
+  @apply aspect-square w-full bg-slate-200 object-cover dark:bg-slate-800;
 }
 
-.stepper-demo-stack {
-  @apply grid gap-3;
+.image-tile__meta {
+  @apply grid gap-1 p-3;
+}
+
+.image-tile__title {
+  @apply text-xs font-bold text-slate-900 dark:text-slate-100;
+}
+
+.image-tile__caption {
+  @apply text-[11px] text-slate-500 dark:text-slate-400;
+}
+
+.image-tile__path {
+  @apply break-all text-[10px] text-slate-400 dark:text-slate-500;
 }
 </style>

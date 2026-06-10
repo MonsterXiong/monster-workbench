@@ -319,6 +319,26 @@ function runMockBatchSupervisor(batchJobId: number) {
       task.updatedAt = formatCurrentIsoDateTime(" ");
       task.startedAt = task.startedAt || task.updatedAt;
       emitMockTaskStatus(task, "creative-task-status-changed", "status changed to running");
+      const [startedEventType, startedMessage] = getMockBatchWorkerStartedLabels(job.batchType);
+      emitMockTaskStatus(task, "creative-task-event", startedMessage);
+      mockTaskEvents.set(task.id, [
+        ...(mockTaskEvents.get(task.id) || []),
+        {
+          id: ++mockTaskEventId,
+          taskId: task.id,
+          eventType: startedEventType,
+          message: startedMessage,
+          payloadJson: safeJsonStringify(
+            {
+              batchJobId: batchJobId,
+              sequenceNo: task.sequenceNo,
+              batchType: job.batchType,
+            },
+            "{}"
+          ),
+          createdAt: formatCurrentIsoDateTime(" "),
+        },
+      ]);
       const taskDuration = 1000 + ((task.sequenceNo || task.id) * 137) % 2001;
       const taskTimer = window.setTimeout(() => {
         mockBatchTaskTimers.delete(task.id);
@@ -344,6 +364,8 @@ function runMockBatchSupervisor(batchJobId: number) {
         }
         if (currentJob.batchType === "demo.image.prompt") {
           completeMockPromptBatchTask(current, currentJob, taskDuration);
+        } else if (currentJob.batchType === "demo.image.generate") {
+          completeMockGenerateBatchTask(current, currentJob, taskDuration);
         } else {
           completeMockBatchTask(current, currentJob, taskDuration);
         }
@@ -530,6 +552,95 @@ function completeMockPromptBatchTask(task: any, batchJob: any, durationMs: numbe
   mockTaskEvents.set(task.id, events);
   emitMockTaskStatus(task, "creative-task-status-changed", "status changed to succeeded");
   emitMockTaskStatus(task, "creative-task-event", "prompt worker finished successfully");
+}
+
+function completeMockGenerateBatchTask(task: any, batchJob: any, durationMs: number) {
+  const promptRequest = renderMockBatchPromptTemplate(task);
+  const providerConfig = resolveMockPromptProviderConfig(task);
+  const shouldFail = (task.sequenceNo || task.id) % 9 === 0;
+  const modelRun = createMockModelRunRecord({
+    projectId: task.projectId,
+    taskId: task.id,
+    providerId: providerConfig.displayName,
+    providerType: providerConfig.provider,
+    model: providerConfig.model,
+    status:
+      shouldFail && task.retryCount >= task.maxRetries ? "failed" : shouldFail ? "retrying" : "succeeded",
+    durationMs,
+    promptRequest,
+  });
+
+  if (shouldFail && task.retryCount < task.maxRetries) {
+    task.retryCount += 1;
+    task.status = "queued";
+    task.errorMessage = "mock image provider deterministic failure";
+    task.resultJson = null;
+    task.updatedAt = formatCurrentIsoDateTime(" ");
+    emitMockTaskStatus(task, "creative-task-status-changed", "status changed to queued");
+    emitMockTaskStatus(task, "creative-task-event", "image worker scheduled retry");
+    return;
+  }
+
+  if (shouldFail) {
+    task.status = "failed";
+    task.errorMessage = "mock image provider deterministic failure";
+    task.resultJson = null;
+    task.updatedAt = formatCurrentIsoDateTime(" ");
+    task.finishedAt = task.updatedAt;
+    emitMockTaskStatus(task, "creative-task-status-changed", "status changed to failed");
+    emitMockTaskStatus(task, "creative-task-event", "image worker finished with failure");
+    return;
+  }
+
+  const savedFile = createMockSavedFile(Number(task.sequenceNo || task.id) - 1, batchJob.imageSize || "1024x1024");
+  const asset = createMockAssetRecord({
+    projectId: task.projectId,
+    assetType: "demo_image",
+    title: `Batch image #${task.sequenceNo || task.id}`,
+    content: "Mock generated image asset.",
+    filePath: savedFile.path,
+    thumbnailPath: MOCK_IMAGE_DATA_URL,
+    metadataJson: safeJsonStringify(
+      {
+        batchJobId: batchJob.id,
+        sourceTaskId: task.id,
+        sequenceNo: task.sequenceNo,
+        promptTemplate: promptRequest,
+        modelRunId: modelRun.id,
+      },
+      "{}"
+    ),
+    status: "ready",
+  });
+  modelRun.assetId = asset.id;
+  task.assetId = asset.id;
+  task.status = "succeeded";
+  task.errorMessage = null;
+  task.resultJson = safeJsonStringify(
+    {
+      assetId: asset.id,
+      modelRunId: modelRun.id,
+      filePath: savedFile.path,
+      thumbnailPath: MOCK_IMAGE_DATA_URL,
+      promptExcerpt: summarizeMockPrompt(promptRequest),
+      durationMs,
+    },
+    "{}"
+  );
+  task.updatedAt = formatCurrentIsoDateTime(" ");
+  task.finishedAt = task.updatedAt;
+  emitMockTaskStatus(task, "creative-task-status-changed", "status changed to succeeded");
+  emitMockTaskStatus(task, "creative-task-event", "image worker finished successfully");
+}
+
+function getMockBatchWorkerStartedLabels(batchType: string): [string, string] {
+  if (batchType === "demo.image.prompt") {
+    return ["prompt_started", "prompt worker started"];
+  }
+  if (batchType === "demo.image.generate") {
+    return ["image_started", "image worker started"];
+  }
+  return ["mock_started", "mock worker started"];
 }
 
 function renderMockBatchPromptTemplate(task: any) {

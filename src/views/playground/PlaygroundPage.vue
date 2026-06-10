@@ -4,7 +4,6 @@ import {
   BellRing,
   Database,
   FileText,
-  FunctionSquare,
   ListTree,
   LoaderCircle,
   MousePointer,
@@ -13,17 +12,16 @@ import {
 } from "lucide-vue-next";
 import PlaygroundCatalog from "./components/PlaygroundCatalog.vue";
 import PlaygroundDetailHeader from "./components/PlaygroundDetailHeader.vue";
-import PlaygroundActionDemos from "./components/PlaygroundActionDemos.vue";
-import PlaygroundDataDemos from "./components/PlaygroundDataDemos.vue";
-import PlaygroundDisplayDemos from "./components/PlaygroundDisplayDemos.vue";
-import PlaygroundFeedbackDemos from "./components/PlaygroundFeedbackDemos.vue";
-import PlaygroundFormDemos from "./components/PlaygroundFormDemos.vue";
-import PlaygroundFoundationDemos from "./components/PlaygroundFoundationDemos.vue";
-import PlaygroundLayoutDemos from "./components/PlaygroundLayoutDemos.vue";
-import PlaygroundLoadingDemos from "./components/PlaygroundLoadingDemos.vue";
-import PlaygroundNavigationDemos from "./components/PlaygroundNavigationDemos.vue";
-import PlaygroundUtilsDemos from "./components/PlaygroundUtilsDemos.vue";
-import PlaygroundWorkflowDemos from "./components/PlaygroundWorkflowDemos.vue";
+import PlaygroundActionDemos from "./components/playgroundActionDemos/PlaygroundActionDemos.vue";
+import PlaygroundDataDemos from "./components/playgroundDataDemos/PlaygroundDataDemos.vue";
+import PlaygroundDisplayDemos from "./components/playgroundDisplayDemos/PlaygroundDisplayDemos.vue";
+import PlaygroundFeedbackDemos from "./components/playgroundFeedbackDemos/PlaygroundFeedbackDemos.vue";
+import PlaygroundFormDemos from "./components/playgroundFormDemos/PlaygroundFormDemos.vue";
+import PlaygroundFoundationDemos from "./components/playgroundFoundationDemos/PlaygroundFoundationDemos.vue";
+import PlaygroundLayoutDemos from "./components/playgroundLayoutDemos/PlaygroundLayoutDemos.vue";
+import PlaygroundLoadingDemos from "./components/playgroundLoadingDemos/PlaygroundLoadingDemos.vue";
+import PlaygroundNavigationDemos from "./components/playgroundNavigationDemos/PlaygroundNavigationDemos.vue";
+import PlaygroundWorkflowDemos from "./components/playgroundWorkflowDemos/PlaygroundWorkflowDemos.vue";
 import { findByValue, firstItem, hasItem } from "../../utils";
 
 type ComponentGroupKey =
@@ -36,8 +34,7 @@ type ComponentGroupKey =
   | "layout"
   | "workflow"
   | "feedback"
-  | "loading"
-  | "utils";
+  | "loading";
 
 interface ComponentEntry {
   key: string;
@@ -164,24 +161,6 @@ const componentGroups: ComponentGroup[] = [
       { key: "toast-message", name: "BaseToast / BaseMessage", title: "轻提示", description: "底部 Toast、顶部 Message、队列和语义状态。" },
       { key: "dialog", name: "BaseDialog", title: "对话框", description: "标题、正文、底部动作和关闭回调。" },
       { key: "drawer", name: "BaseDrawer", title: "抽屉", description: "左右侧滑出、表单内容和底部动作。" },
-    ],
-  },
-  {
-    key: "utils",
-    title: "工具函数",
-    icon: FunctionSquare,
-    components: [
-      { key: "utils-number", name: "number", title: "数值工具", description: "数值解析、范围归一化、分桶统计、分页边界和典型异常输入。" },
-      { key: "utils-csv", name: "csv", title: "CSV 工具", description: "CSV/TSV 解析、自动分隔符、多行引号、列摘要和安全导出。" },
-      { key: "utils-array", name: "array", title: "数组工具", description: "去重、分组、分页、筛选、排序、索引 diff 和 keyed diff。" },
-      { key: "utils-object", name: "object", title: "对象工具", description: "record 处理、路径读写、cleanup、patch、对象 diff 和 deep diff。" },
-      { key: "utils-tree", name: "tree", title: "树形工具", description: "tree to list、list to tree、lookup、诊断、可见节点和 diff by key。" },
-      { key: "utils-json-path", name: "json / path", title: "JSON 与路径", description: "循环 JSON、中文路径、Windows 路径、安全子路径和文件名清理。" },
-      { key: "utils-runtime", name: "async / color / date", title: "运行时工具", description: "异步任务、批处理摘要、颜色转换/对比与日期范围/日历工具。" },
-      { key: "utils-text", name: "string / encoding / id / keyboard", title: "文本与输入工具", description: "文本清理、编码摘要、稳定 ID、DOM ID 和键盘快捷键。" },
-      { key: "utils-data", name: "file / storage / url", title: "文件存储 URL", description: "文件选择摘要、Storage key/TTL、URL 与 query 参数处理。" },
-      { key: "utils-browser", name: "browser / clipboard / dom", title: "浏览器能力工具", description: "视口、媒体查询、剪贴板结果、DOM 可见区域摘要。" },
-      { key: "utils-business", name: "compare / error / format / search / selection / validation / value", title: "业务通用工具", description: "排序、错误展示、格式化、搜索、选择、校验和值解析。" },
     ],
   },
   {
@@ -331,7 +310,6 @@ const selectComponent = (key: string) => {
             <PlaygroundWorkflowDemos :active-component-key="activeComponentKey" />
             <PlaygroundLoadingDemos :active-component-key="activeComponentKey" />
             <PlaygroundFeedbackDemos :active-component-key="activeComponentKey" />
-            <PlaygroundUtilsDemos :active-component-key="activeComponentKey" />
 
             <section
               v-if="!hasActiveDemo"

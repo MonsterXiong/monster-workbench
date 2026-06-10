@@ -1,5 +1,6 @@
 import { defineStore } from "pinia";
-import { ref } from "vue";
+import { computed, ref } from "vue";
+import { resolveDisplayImageSrc } from "../services/image-source.service";
 import {
   taskService,
   type CreateBatchImageJobInput,
@@ -72,6 +73,47 @@ export const useTaskStore = defineStore("task", () => {
   const batchJobActivity = ref<CreativeBatchJobEventPayload[]>([]);
   const batchJobError = ref<string | null>(null);
   const batchJobRunning = ref(false);
+  const batchJobTaskLimit = ref(20);
+  const batchJobTaskOffset = ref(0);
+  let batchJobTaskRefreshInFlight = false;
+  let batchJobTaskRefreshPending = false;
+  const batchJobImageItems = computed(() =>
+    batchJobTasks.value
+      .map((task) => {
+        const parsed = parseBatchTaskResult(task.resultJson);
+        const filePath =
+          typeof parsed?.filePath === "string" ? parsed.filePath : null;
+        const thumbnailPath =
+          typeof parsed?.thumbnailPath === "string" ? parsed.thumbnailPath : null;
+        const assetId =
+          typeof parsed?.assetId === "number" ? parsed.assetId : task.assetId;
+        const modelRunId =
+          typeof parsed?.modelRunId === "number" ? parsed.modelRunId : null;
+        if (!filePath && !thumbnailPath) {
+          return null;
+        }
+        return {
+          id: task.id,
+          title: `#${task.sequenceNo || task.id} · ${task.status}`,
+          status: task.status,
+          assetId,
+          modelRunId,
+          filePath,
+          thumbnailPath,
+          imageSrc: resolveDisplayImageSrc(thumbnailPath || filePath),
+        };
+      })
+      .filter((item): item is NonNullable<typeof item> => Boolean(item))
+  );
+
+  const parseBatchTaskResult = (raw: string | null) => {
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw) as Record<string, unknown>;
+    } catch {
+      return null;
+    }
+  };
 
   const addTask = (id: string, name: string) => {
     if (hasByValue(tasks.value, (task) => task.id, id)) return;
@@ -161,6 +203,34 @@ export const useTaskStore = defineStore("task", () => {
     }
   };
 
+  const rememberBatchTaskWindow = (limit = 20, offset = 0) => {
+    batchJobTaskLimit.value = limit;
+    batchJobTaskOffset.value = offset;
+  };
+
+  const refreshCurrentBatchTasks = async () => {
+    if (!batchJobSnapshot.value?.job.id) return;
+    if (batchJobTaskRefreshInFlight) {
+      batchJobTaskRefreshPending = true;
+      return;
+    }
+
+    batchJobTaskRefreshInFlight = true;
+    try {
+      batchJobTasks.value = await taskService.listBatchJobTasks(
+        batchJobSnapshot.value.job.id,
+        batchJobTaskLimit.value,
+        batchJobTaskOffset.value
+      );
+    } finally {
+      batchJobTaskRefreshInFlight = false;
+      if (batchJobTaskRefreshPending) {
+        batchJobTaskRefreshPending = false;
+        void refreshCurrentBatchTasks();
+      }
+    }
+  };
+
   const recordBatchJobActivity = (payload: CreativeBatchJobEventPayload) => {
     batchJobActivity.value = [payload, ...batchJobActivity.value].slice(0, 80);
     if (batchJobSnapshot.value?.job.id === payload.batchJobId) {
@@ -188,6 +258,7 @@ export const useTaskStore = defineStore("task", () => {
               : 0,
         },
       };
+      void refreshCurrentBatchTasks();
     }
     batchJobRunning.value = payload.status === "running";
   };
@@ -438,6 +509,7 @@ export const useTaskStore = defineStore("task", () => {
     try {
       const snapshot = await taskService.createBatchImageJob(input);
       batchJobSnapshot.value = snapshot;
+      rememberBatchTaskWindow(20, 0);
       batchJobTasks.value = await taskService.listBatchJobTasks(snapshot.job.id, 20, 0);
       return snapshot;
     } catch (error) {
@@ -448,6 +520,7 @@ export const useTaskStore = defineStore("task", () => {
   };
 
   const refreshBatchJob = async (batchJobId: number, limit = 20, offset = 0) => {
+    rememberBatchTaskWindow(limit, offset);
     batchJobSnapshot.value = await taskService.getBatchJob(batchJobId);
     batchJobTasks.value = await taskService.listBatchJobTasks(batchJobId, limit, offset);
     batchJobRunning.value = batchJobSnapshot.value.job.status === "running";
@@ -455,6 +528,7 @@ export const useTaskStore = defineStore("task", () => {
   };
 
   const startBatchJob = async (batchJobId: number, limit = 20, offset = 0) => {
+    rememberBatchTaskWindow(limit, offset);
     batchJobSnapshot.value = await taskService.startBatchJob(batchJobId);
     batchJobTasks.value = await taskService.listBatchJobTasks(batchJobId, limit, offset);
     batchJobRunning.value = true;
@@ -462,6 +536,7 @@ export const useTaskStore = defineStore("task", () => {
   };
 
   const pauseBatchJob = async (batchJobId: number, limit = 20, offset = 0) => {
+    rememberBatchTaskWindow(limit, offset);
     batchJobSnapshot.value = await taskService.pauseBatchJob(batchJobId);
     batchJobTasks.value = await taskService.listBatchJobTasks(batchJobId, limit, offset);
     batchJobRunning.value = false;
@@ -469,6 +544,7 @@ export const useTaskStore = defineStore("task", () => {
   };
 
   const resumeBatchJob = async (batchJobId: number, limit = 20, offset = 0) => {
+    rememberBatchTaskWindow(limit, offset);
     batchJobSnapshot.value = await taskService.resumeBatchJob(batchJobId);
     batchJobTasks.value = await taskService.listBatchJobTasks(batchJobId, limit, offset);
     batchJobRunning.value = true;
@@ -476,6 +552,7 @@ export const useTaskStore = defineStore("task", () => {
   };
 
   const cancelBatchJob = async (batchJobId: number, limit = 20, offset = 0) => {
+    rememberBatchTaskWindow(limit, offset);
     batchJobSnapshot.value = await taskService.cancelBatchJob(batchJobId);
     batchJobTasks.value = await taskService.listBatchJobTasks(batchJobId, limit, offset);
     batchJobRunning.value = false;
@@ -542,6 +619,7 @@ export const useTaskStore = defineStore("task", () => {
     batchJobActivity,
     batchJobError,
     batchJobRunning,
+    batchJobImageItems,
     initCreativeTaskListeners,
     stopCreativeTaskListeners,
     initBatchJobListeners,

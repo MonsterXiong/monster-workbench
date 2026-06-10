@@ -1,0 +1,174 @@
+<script setup lang="ts">
+import { ref } from "vue";
+import { useToast } from "../../../../../composables/useToast";
+import PlaygroundDemoSection from "../../PlaygroundDemoSection.vue";
+
+const { triggerToast } = useToast();
+
+const textValue = ref("Monster Workbench");
+const selectValue = ref("design-system");
+const numberValue = ref(36);
+const tagValues = ref(["组件", "沙箱", "高频"]);
+const textareaValue = ref("用于承载高频表单字段的标签、说明、校验反馈和辅助信息。");
+const segmentedValue = ref("balanced");
+const switchValue = ref(true);
+const codeValue = ref("base-form-item");
+
+const selectOptions = [
+  { value: "vue", label: "Vue 3", description: "前端交互框架。", icon: "PanelsTopLeft", meta: "前端" },
+  { value: "tauri", label: "Tauri v2", description: "桌面端运行底座。", icon: "MonitorCog", meta: "桌面" },
+  {
+    value: "design-system",
+    label: "Design System",
+    selectedLabel: "设计系统",
+    description: "Base 组件与主题规范。",
+    icon: "Component",
+    meta: "组件",
+  },
+  { value: "legacy", label: "暂不可用", description: "禁用项保持可读但不可选。", icon: "Lock", meta: "停用", disabled: true },
+];
+
+const segmentedOptions = [
+  { label: "紧凑", value: "compact", icon: "Rows3", description: "适合侧栏与抽屉。", meta: "S" },
+  { label: "均衡", value: "balanced", icon: "PanelTop", description: "默认桌面密度。", meta: "M" },
+  { label: "宽松", value: "comfortable", icon: "Maximize2", description: "适合复杂表单。", meta: "L" },
+  { label: "停用", value: "disabled", icon: "Lock", description: "权限不足不可选。", meta: "禁用", disabled: true },
+];
+
+const handleSubmit = () => {
+  triggerToast("表单已提交", "success");
+};
+
+const handleReset = () => {
+  codeValue.value = "base-form-item";
+  triggerToast("表单已重置", "info");
+};
+</script>
+
+<template>
+  <section class="detail-stack">
+    <PlaygroundDemoSection title="表单容器" subtitle="把表单标题、字段布局和尾部动作区收在一个基础组件里。" icon="FileText">
+      <div class="form-demo-stack">
+        <BaseForm
+          title="组件配置"
+          description="适合设置页、编辑页和抽屉内表单。"
+          :columns="2"
+          body-gap="lg"
+          divided
+          autocomplete="off"
+          no-validate
+          wrap-description
+          footer-label="组件配置动作"
+          @submit="handleSubmit"
+          @reset="handleReset"
+        >
+          <template #actions>
+            <BaseBadge type="primary">双列</BaseBadge>
+          </template>
+          <BaseFormItem label="组件名称" required>
+            <BaseInput v-model="textValue" clearable />
+          </BaseFormItem>
+          <BaseFormItem label="分类">
+            <BaseSelect v-model="selectValue" :options="selectOptions" />
+          </BaseFormItem>
+          <BaseFormItem label="阈值">
+            <BaseNumberInput v-model="numberValue" block :min="1" :max="100" />
+          </BaseFormItem>
+          <BaseFormItem label="标签">
+            <BaseTagInput
+              v-model="tagValues"
+              :max="6"
+              placeholder="输入标签，逗号或回车添加"
+              @add="triggerToast(`已添加标签：${$event}`, 'success')"
+              @remove="triggerToast(`已移除标签：${$event}`, 'info')"
+            />
+          </BaseFormItem>
+          <BaseFormItem label="备注" :span="2">
+            <BaseTextarea v-model="textareaValue" :rows="3" />
+          </BaseFormItem>
+          <template #footer>
+            <BaseFormActions title="提交前检查" description="建议先确认字段完整性。">
+              <template #meta>
+                <BaseStatusDot type="success" label="校验通过" description="可直接提交" />
+              </template>
+              <BaseButton type="neutral" size="sm" native-type="reset">重置</BaseButton>
+              <BaseButton type="primary" size="sm" native-type="submit">提交</BaseButton>
+            </BaseFormActions>
+          </template>
+        </BaseForm>
+
+        <BaseForm
+          title="加载表单"
+          description="提交、保存或远程读取期间显示轻量加载状态，并锁定内部字段与底部动作。"
+          :columns="2"
+          surface="muted"
+          body-gap="sm"
+          loading
+          loading-text="保存中"
+          wrap-description
+        >
+          <template #actions>
+            <BaseBadge type="warning" variant="outline">处理中</BaseBadge>
+          </template>
+          <BaseFormItem label="配置名称" loading loading-text="正在同步名称">
+            <BaseInput model-value="远程配置" loading />
+          </BaseFormItem>
+          <BaseFormItem label="启用状态">
+            <BaseSwitch model-value label="自动启用" />
+          </BaseFormItem>
+          <template #footer>
+            <BaseFormActions compact justify="end">
+              <BaseButton type="neutral" size="sm" native-type="reset">重置</BaseButton>
+              <BaseButton type="primary" size="sm" native-type="submit">保存</BaseButton>
+            </BaseFormActions>
+          </template>
+        </BaseForm>
+
+        <BaseForm title="三列快速配置" description="适合密度更高的参数面板。" :columns="3" compact size="sm">
+          <template #actions>
+            <BaseBadge type="neutral" variant="outline">三列</BaseBadge>
+          </template>
+          <BaseFormItem label="密度" compact>
+            <BaseSegmented v-model="segmentedValue" :options="segmentedOptions" size="sm" />
+          </BaseFormItem>
+          <BaseFormItem label="并发" compact>
+            <BaseNumberInput v-model="numberValue" block size="sm" :min="1" :max="100" />
+          </BaseFormItem>
+          <BaseFormItem label="开关" compact>
+            <BaseSwitch v-model="switchValue" size="sm" compact label="自动保存" />
+          </BaseFormItem>
+        </BaseForm>
+
+        <BaseForm compact title="紧凑单列表单" description="适合抽屉、侧栏和空间受限区域。">
+          <BaseFormItem label="字段编码" help="紧凑模式会降低标签和间距密度。" compact>
+            <BaseInput v-model="codeValue" size="sm" />
+          </BaseFormItem>
+          <template #footer>
+            <BaseFormActions compact justify="end">
+              <BaseButton type="primary" size="sm">应用</BaseButton>
+            </BaseFormActions>
+          </template>
+        </BaseForm>
+
+        <BaseForm title="整表禁用" description="加载、权限不足或提交中可锁定整组字段。" disabled surface="muted">
+          <BaseFormItem label="配置名称">
+            <BaseInput model-value="系统继承配置" />
+          </BaseFormItem>
+          <BaseFormItem label="继承状态" success="来自默认策略">
+            <BaseSwitch model-value label="启用继承" />
+          </BaseFormItem>
+        </BaseForm>
+      </div>
+    </PlaygroundDemoSection>
+  </section>
+</template>
+
+<style scoped>
+.detail-stack {
+  @apply space-y-4;
+}
+
+.form-demo-stack {
+  @apply grid gap-4;
+}
+</style>
