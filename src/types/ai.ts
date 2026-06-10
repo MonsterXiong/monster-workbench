@@ -1,4 +1,4 @@
-export type AiProviderType = "openai" | "deepseek" | "siliconflow" | "custom";
+export type AiProviderType = "openai" | "deepseek" | "siliconflow" | "anyrouter" | "custom";
 export type AiProviderTestAction = "models" | "chat" | "image";
 export type AiProviderQueueMode = "serial" | "concurrent";
 export type AiProviderTestQueueStatus = "queued" | "running" | "success" | "failed";
@@ -6,6 +6,7 @@ export type AiPromptType = "chat" | "image";
 export type AiSessionType = AiPromptType;
 export type AiSessionMessageRole = "user" | "assistant" | "error";
 export type AiSessionMessageStatus = "success" | "failed" | "pending";
+export type AiChatExportFormat = "markdown" | "txt" | "json";
 export type AiImageFailureKind =
   | "unsupported_size"
   | "timeout"
@@ -26,6 +27,7 @@ export interface AiProviderConfig {
   imageModel: string;
   imagePrompt: string;
   imageSize: string;
+  imageCount: number;
   timeoutMs: number;
   queueMode: AiProviderQueueMode;
   maxConcurrency: number;
@@ -174,6 +176,7 @@ export interface AiSessionMessage {
   actualImageSize?: string;
   fallbackImageSize?: string;
   imageAttempts?: number;
+  imageCount?: number;
   failureKind?: AiImageFailureKind;
   imageUrls?: string[];
   imagePaths?: string[];

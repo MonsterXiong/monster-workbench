@@ -145,6 +145,7 @@ const IMAGE_SIZE_TIER_LABELS = new Map<string, string>([
 const aiStore = useAiStore();
 const { t } = useI18n();
 const input = ref("");
+const imageDraftCount = ref(1);
 const imageInputRef = ref<{ focus?: () => void } | null>(null);
 const messageListRef = ref<HTMLElement | null>(null);
 const isHistoryAwayFromBottom = ref(false);
@@ -255,6 +256,15 @@ const activeSizeNotice = computed(() => {
   }
   return formatTemplate(t("aiPage.image.experimentalSizeNotice"), { size: activeSizeLabel.value });
 });
+const imageCountOptions = computed(() =>
+  [1, 2, 3, 4].map((count) => ({
+    label: `x${count}`,
+    selectedLabel: `x${count}`,
+    description: `${count}`,
+    filterText: `${count} x${count}`,
+    value: count,
+  }))
+);
 const activeImageModelName = computed(() => aiStore.activeImageConfig?.imageModel || aiStore.activeImageConfig?.model || "-");
 const stylePromptPresets = computed(() => aiStore.getPrompts("image", STYLE_PROMPT_CATEGORY_ID));
 const filteredStylePromptPresets = computed(() => {
@@ -636,7 +646,8 @@ async function handleGenerate() {
     await aiStore.generateImageMessage(
       content,
       aiStore.activeModelConfigIds.image,
-      aiStore.imageDraftSize
+      aiStore.imageDraftSize,
+      imageDraftCount.value
     );
   } catch (err) {
     emit("failed", getErrorMessage(err, t("settings.aiProvider.testFailed")));
@@ -678,6 +689,7 @@ function usePromptFromMessage(message: ImageMessage) {
   }
   input.value = prompt;
   aiStore.imageDraftSize = getMessageRegenerateSize(message);
+  imageDraftCount.value = getMessageImageCount(message);
   selectedStylePromptId.value = "";
   promptStartersExpanded.value = false;
   stylePresetsExpanded.value = false;
@@ -694,7 +706,8 @@ async function retryImageMessage(message: AiConversationSession["messages"][numb
     await aiStore.generateImageMessage(
       prompt,
       message.modelConfigId || aiStore.activeModelConfigIds.image,
-      getMessageRegenerateSize(message)
+      getMessageRegenerateSize(message),
+      getMessageImageCount(message)
     );
   } catch (err) {
     emit("failed", getErrorMessage(err, t("settings.aiProvider.testFailed")));
@@ -710,7 +723,8 @@ async function regenerateImageMessage(message: ImageMessage) {
     await aiStore.generateImageMessage(
       prompt,
       message.modelConfigId || aiStore.activeModelConfigIds.image,
-      getMessageRegenerateSize(message)
+      getMessageRegenerateSize(message),
+      getMessageImageCount(message)
     );
   } catch (err) {
     emit("failed", getErrorMessage(err, t("settings.aiProvider.testFailed")));
@@ -910,7 +924,6 @@ const previewInfoText = computed(() => {
     `${t("aiPage.image.actualSize")}: ${getMessageActualSize(message) || "-"}`,
     `${t("aiPage.image.requestedSize")}: ${getMessageRequestedSize(message) || "-"}`,
     message.requestId ? `${t("aiPage.image.requestId")}: ${message.requestId}` : "",
-    previewSavedFile.value?.path ? `${t("aiPage.image.previewSavedFile")}: ${previewSavedFile.value.path}` : "",
     previewImageUrl.value ? `${t("aiPage.image.previewImageUrl")}: ${previewImageUrl.value}` : "",
     previewPrompt.value ? `${t("aiPage.image.previewPrompt")}:\n${previewPrompt.value}` : "",
   ];
@@ -1084,6 +1097,10 @@ function getPendingImageElapsedLabel(message: ImageMessage) {
 
 function getMessageRequestedSize(message: ImageMessage) {
   return message.requestedImageSize || message.imageSize || "";
+}
+
+function getMessageImageCount(message: ImageMessage) {
+  return clampNumber(Number(message.imageCount || getPreviewItems(message).length || 1), 1, 4, 1, 0);
 }
 
 function getMessageActualSize(message: ImageMessage) {
@@ -1677,6 +1694,14 @@ function getSessionSizeLabel(target: AiConversationSession) {
                 class="size-select"
                 :fit-input-width="false"
                 @update:model-value="aiStore.imageDraftSize = String($event)"
+              />
+              <BaseSelect
+                :model-value="imageDraftCount"
+                :options="imageCountOptions"
+                size="sm"
+                class="count-select"
+                :fit-input-width="false"
+                @update:model-value="imageDraftCount = clampNumber(Number($event), 1, 4, 1, 0)"
               />
             </div>
             <div
@@ -2403,14 +2428,17 @@ function getSessionSizeLabel(target: AiConversationSession) {
   @apply pointer-events-none absolute left-1/2 top-2 z-10 inline-flex -translate-x-1/2 items-center rounded-full border border-white/20 bg-slate-950/85 px-2.5 py-1 text-[10px] font-black text-white shadow-lg backdrop-blur;
 }
 .generated-frame__footer {
-  @apply flex min-w-0 flex-wrap items-center justify-between gap-2 border-t border-slate-200 bg-white/95 px-2.5 py-2.5 dark:border-slate-800 dark:bg-slate-950/95;
+  @apply flex min-w-0 flex-wrap items-center justify-between gap-2.5 border-t border-slate-200 bg-slate-50/90 px-2.5 py-2.5 dark:border-slate-800 dark:bg-slate-900/90;
 }
 .generated-frame__primary-actions,
 .generated-frame__secondary-actions {
   @apply flex min-w-0 max-w-full flex-wrap items-center gap-1.5;
 }
+.generated-frame__primary-actions {
+  @apply flex-1;
+}
 .generated-frame__secondary-actions {
-  @apply ml-auto justify-end;
+  @apply ml-auto justify-end rounded-full border border-slate-200 bg-white/90 px-1.5 py-1 dark:border-slate-700 dark:bg-slate-950/90;
 }
 .generated-frame__primary-actions :deep(.el-button) {
   @apply border-slate-200 bg-slate-50 text-slate-700 hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:border-emerald-800 dark:hover:bg-emerald-950/40 dark:hover:text-emerald-200;
@@ -2454,7 +2482,14 @@ function getSessionSizeLabel(target: AiConversationSession) {
 .size-select {
   @apply w-20 shrink-0;
 }
+.count-select {
+  @apply shrink-0;
+  width: 76px;
+}
 .size-select :deep(.base-select__selected-label) {
+  @apply w-full text-center font-black;
+}
+.count-select :deep(.base-select__selected-label) {
   @apply w-full text-center font-black;
 }
 .composer-size-detail {

@@ -346,6 +346,26 @@ export const systemService = {
     return readSelectedBrowserTextFile(accept, failedMessage);
   },
 
+  async exportTextFile(defaultPath: string, contents: string, mimeType = "text/plain"): Promise<"desktop" | "browser" | "cancelled"> {
+    if (!isTauriRuntime()) {
+      downloadTextFile(defaultPath, contents, mimeType);
+      return "browser";
+    }
+
+    const extension = getFileExtensionWithDot(defaultPath).replace(/^\./, "") || "txt";
+    const filePath = await systemService.saveFileDialog({
+      defaultPath,
+      filters: [{ name: extension.toUpperCase(), extensions: [extension] }],
+    });
+
+    if (!filePath) {
+      return "cancelled";
+    }
+
+    await systemService.writeTextFile(filePath, contents);
+    return "desktop";
+  },
+
   async writeTextFile(path: string, contents: string): Promise<void> {
     if (!isTauriRuntime()) return;
     return callTauri<void>("write_text_file", { path, contents });

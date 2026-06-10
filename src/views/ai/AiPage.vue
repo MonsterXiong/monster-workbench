@@ -96,6 +96,7 @@ const handleUsePrompt = (type: "chat" | "image") => {
         />
         <AiChatPanel
           v-else-if="activeTab === 'chat'"
+          @tested="handleTested"
           @failed="handleFailed"
         />
         <AiImagePanel

@@ -31,7 +31,17 @@ export default {
       error: "Error",
       inputPlaceholder: "Enter a message for the model",
       send: "Send",
-      sending: "Sending"
+      sending: "Sending",
+      modelLabel: "Model",
+      enterHint: "Enter to send, Ctrl+Enter for newline",
+      copyMessage: "Copy",
+      export: "Export",
+      exportMarkdown: "Export Markdown",
+      exportText: "Export TXT",
+      exportJson: "Export JSON",
+      exportSuccessDesktop: "Chat exported to a local file",
+      exportSuccessBrowser: "Chat file generated and downloaded",
+      exportFailed: "Failed to export chat"
     },
     image: {
       title: "Image Generation",

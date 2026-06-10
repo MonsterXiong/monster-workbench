@@ -31,7 +31,17 @@ export default {
       error: "错误",
       inputPlaceholder: "输入要发送给模型的内容",
       send: "发送",
-      sending: "发送中"
+      sending: "发送中",
+      modelLabel: "模型",
+      enterHint: "Enter 发送，Ctrl+Enter 换行",
+      copyMessage: "复制",
+      export: "导出",
+      exportMarkdown: "导出 Markdown",
+      exportText: "导出 TXT",
+      exportJson: "导出 JSON",
+      exportSuccessDesktop: "对话已导出到本地文件",
+      exportSuccessBrowser: "对话文件已生成并开始下载",
+      exportFailed: "导出对话失败"
     },
     image: {
       title: "模型生图",

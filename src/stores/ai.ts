@@ -6,6 +6,7 @@ import { systemService } from "../services/system.service";
 import {
   applyObjectPatch,
   arrayIfArray,
+  buildDatedFileName,
   clampNumber,
   clearTimeoutHandle,
   countWhere,
@@ -15,9 +16,10 @@ import {
   filterByValue,
   filterByValues,
   findByValue,
-  formatReducedAspectRatio,
   firstItem,
   findLastItem,
+  formatDateTime,
+  formatReducedAspectRatio,
   getCurrentTimestampMs,
   getDirectoryName,
   hasTimeElapsed,
@@ -36,6 +38,8 @@ import {
   runAllSettled,
   safeJsonParseObject,
   safeJsonStringify,
+  safeJsonStringifyPretty,
+  sanitizeFileNameWithFallback,
   sleep,
   sortByMany,
   stringifyErrorMessage,
@@ -48,6 +52,7 @@ import {
 } from "../utils";
 import type {
   AiActiveConfigIds,
+  AiChatExportFormat,
   AiConversationSession,
   AiModelConfig,
   AiProviderBackendQueueStatus,
@@ -87,6 +92,7 @@ const IMAGE_TASK_LOST_MESSAGE = "生成任务状态已丢失，可能是服务�
 const IMAGE_TASK_NO_RESULT_MESSAGE = "生成任务已结束但没有返回图片结果，请重试。";
 const DEFAULT_MAX_CONCURRENCY = 3;
 const MAX_MODEL_CONCURRENCY = 6;
+const ANYROUTER_CLAUDE_MODEL_PATTERN = /^claude-(opus|sonnet|haiku)-(\d+)(?:-(\d+))?(?:-\d{8})?$/i;
 const AI_IMAGE_FAILURE_KINDS: AiImageFailureKind[] = [
   "unsupported_size",
   "timeout",
@@ -132,6 +138,12 @@ const SUPPORTED_IMAGE_SIZES = new Set([
   "1280x3840",
 ]);
 
+const AI_CHAT_EXPORT_META: Record<AiChatExportFormat, { extension: string; mimeType: string }> = {
+  markdown: { extension: "md", mimeType: "text/markdown" },
+  txt: { extension: "txt", mimeType: "text/plain" },
+  json: { extension: "json", mimeType: "application/json" },
+};
+
 const providerDefaults: Record<AiProviderType, Pick<AiProviderConfig, "displayName" | "baseUrl" | "model">> = {
   openai: {
     displayName: "OpenAI",
@@ -147,6 +159,11 @@ const providerDefaults: Record<AiProviderType, Pick<AiProviderConfig, "displayNa
     displayName: "SiliconFlow",
     baseUrl: "https://api.siliconflow.cn/v1",
     model: "Qwen/Qwen2.5-7B-Instruct",
+  },
+  anyrouter: {
+    displayName: "AnyRouter",
+    baseUrl: "https://anyrouter.dev/api/v1",
+    model: "anthropic/claude-sonnet-4.6",
   },
   custom: {
     displayName: "Codex Local Gateway",
@@ -166,6 +183,7 @@ const defaultConfig: AiProviderConfig = {
   imageModel: "gpt-image-2",
   imagePrompt: "生成一张简洁的蓝色机器人图标，白色背景。",
   imageSize: "1008x1792",
+  imageCount: 1,
   timeoutMs: IMAGE_REQUEST_TIMEOUT_MS,
   queueMode: "serial",
   maxConcurrency: DEFAULT_MAX_CONCURRENCY,
@@ -346,6 +364,45 @@ function normalizeImageFailureKind(value: unknown): AiImageFailureKind | undefin
   return parseOptionalEnum(value, AI_IMAGE_FAILURE_KINDS);
 }
 
+function isAnyRouterBaseUrl(value: unknown) {
+  const baseUrl = toTrimmedString(value);
+  if (!baseUrl) {
+    return false;
+  }
+
+  try {
+    const url = new URL(baseUrl);
+    return url.hostname === "anyrouter.dev" || url.hostname === "anyrouter.top";
+  } catch {
+    const normalized = baseUrl.toLowerCase();
+    return normalized.includes("anyrouter.dev") || normalized.includes("anyrouter.top");
+  }
+}
+
+function normalizeAnyRouterClaudeModel(value: unknown) {
+  const model = toTrimmedString(value);
+  if (!model) {
+    return "";
+  }
+
+  const normalizedModel = model.toLowerCase().startsWith("anthropic/") ? model.slice("anthropic/".length) : model;
+  const match = normalizedModel.match(ANYROUTER_CLAUDE_MODEL_PATTERN);
+  if (!match) {
+    return model;
+  }
+
+  const [, tier, major, minor] = match;
+  const version = minor ? `${major}.${minor}` : major;
+  return `anthropic/claude-${tier.toLowerCase()}-${version}`;
+}
+
+function normalizeProviderModel(provider: AiProviderType, baseUrl: string, model: unknown) {
+  if (provider === "anyrouter" || isAnyRouterBaseUrl(baseUrl)) {
+    return normalizeAnyRouterClaudeModel(model);
+  }
+  return toTrimmedString(model);
+}
+
 function buildImagePromptWithSize(prompt: string, imageSize: string) {
   const cleanPrompt = toTrimmedString(prompt);
   const dimensions = parseDimensionsText(imageSize);
@@ -408,8 +465,10 @@ function normalizeConfig(raw: Partial<AiProviderConfig> | null | undefined): AiP
     provider,
     displayName: raw?.displayName || preset.displayName,
     baseUrl: raw?.baseUrl || preset.baseUrl,
-    model: raw?.model || preset.model,
+    model: normalizeProviderModel(provider, raw?.baseUrl || preset.baseUrl, raw?.model || preset.model) || preset.model,
+    imageModel: normalizeProviderModel(provider, raw?.baseUrl || preset.baseUrl, raw?.imageModel || defaultConfig.imageModel) || defaultConfig.imageModel,
     timeoutMs: clampNumber(timeoutMs, 3000, IMAGE_REQUEST_TIMEOUT_MAX_MS, defaultConfig.timeoutMs, 0),
+    imageCount: clampNumber(Number(raw?.imageCount || defaultConfig.imageCount), 1, 4, defaultConfig.imageCount, 0),
     queueMode: normalizeQueueMode(raw?.queueMode),
     maxConcurrency: normalizeMaxConcurrency(raw?.maxConcurrency),
   };
@@ -872,6 +931,88 @@ export const useAiStore = defineStore("ai", () => {
     await systemService.openPath(targetPath);
   }
 
+  function getChatMessageRoleLabel(message: AiSessionMessage) {
+    if (message.role === "user") return "用户";
+    if (message.role === "error") return "错误";
+    return "模型";
+  }
+
+  function getChatExportTitle(session: AiConversationSession) {
+    return toTrimmedString(session.title, "模型对话");
+  }
+
+  function getChatExportFileName(session: AiConversationSession, format: AiChatExportFormat) {
+    const meta = AI_CHAT_EXPORT_META[format] ?? AI_CHAT_EXPORT_META.txt;
+    const title = sanitizeFileNameWithFallback(getChatExportTitle(session), "ai-chat");
+    return buildDatedFileName(`ai-chat_${title}`, meta.extension, new Date(), "YYYY-MM-DD_HH-mm-ss");
+  }
+
+  function formatChatMessageText(message: AiSessionMessage) {
+    const role = getChatMessageRoleLabel(message);
+    const createdAt = formatDateTime(message.createdAt);
+    const modelText = message.model ? ` · ${message.model}` : "";
+    const statusText = message.status === "success" ? "" : ` · ${message.status}`;
+    const content = toTrimmedString(message.content || message.error, "");
+    return `### ${role} · ${createdAt}${modelText}${statusText}\n\n${content}`;
+  }
+
+  function formatChatSessionAsMarkdown(session: AiConversationSession) {
+    const header = [
+      `# ${getChatExportTitle(session)}`,
+      "",
+      `- 会话类型：${session.type === "chat" ? "模型对话" : "模型生图"}`,
+      `- 创建时间：${formatDateTime(session.createdAt)}`,
+      `- 更新时间：${formatDateTime(session.updatedAt)}`,
+      `- 消息数量：${session.messages.length}`,
+    ];
+    return [...header, "", ...session.messages.map(formatChatMessageText)].join("\n");
+  }
+
+  function formatChatSessionAsText(session: AiConversationSession) {
+    const lines = [
+      getChatExportTitle(session),
+      `创建时间：${formatDateTime(session.createdAt)}`,
+      `更新时间：${formatDateTime(session.updatedAt)}`,
+      `消息数量：${session.messages.length}`,
+      "",
+      ...session.messages.map((message) => {
+        const content = toTrimmedString(message.content || message.error, "");
+        return `[${getChatMessageRoleLabel(message)}] ${formatDateTime(message.createdAt)} ${message.model || ""}\n${content}`;
+      }),
+    ];
+    return lines.join("\n\n");
+  }
+
+  function formatChatSessionAsJson(session: AiConversationSession) {
+    return safeJsonStringifyPretty(
+      {
+        exportedAt: formatDateTime(currentTime()),
+        session,
+      },
+      "{}"
+    );
+  }
+
+  function formatChatSessionExport(session: AiConversationSession, format: AiChatExportFormat) {
+    if (format === "json") return formatChatSessionAsJson(session);
+    if (format === "markdown") return formatChatSessionAsMarkdown(session);
+    return formatChatSessionAsText(session);
+  }
+
+  async function exportChatSession(sessionId: string, format: AiChatExportFormat) {
+    const session = findByValue(sessions.value, (item) => item.id, sessionId);
+    if (!session) {
+      throw new Error("会话不存在或已被删除");
+    }
+
+    const meta = AI_CHAT_EXPORT_META[format] ?? AI_CHAT_EXPORT_META.txt;
+    return systemService.exportTextFile(
+      getChatExportFileName(session, format),
+      formatChatSessionExport(session, format),
+      meta.mimeType
+    );
+  }
+
   function appendSessionMessage(
     session: AiConversationSession,
     message: AiConversationSession["messages"][number]
@@ -923,6 +1064,11 @@ export const useAiStore = defineStore("ai", () => {
       actualImageSize: result.actualImageSize ? normalizeImageSize(result.actualImageSize) : undefined,
       fallbackImageSize: result.fallbackImageSize ? normalizeImageSize(result.fallbackImageSize) : undefined,
       imageAttempts: result.imageAttempts ? clampNumber(result.imageAttempts, 1, 10, 1, 0) : undefined,
+      imageCount: Math.max(
+        result.imageUrls?.length || 0,
+        result.imagePaths?.length || 0,
+        result.savedFiles?.length || 0
+      ) || undefined,
       failureKind: result.failureKind || undefined,
       imageUrls: result.imageUrls,
       imagePaths: result.imagePaths,
@@ -1643,19 +1789,21 @@ export const useAiStore = defineStore("ai", () => {
 
   function buildRuntimeConfig(
     action: AiProviderTestAction,
-    options: { configId?: string; prompt?: string; imageSize?: string } = {}
+    options: { configId?: string; prompt?: string; imageSize?: string; imageCount?: number } = {}
   ) {
     const fallbackConfigId = action === "image" ? activeModelConfigIds.value.image : selectedConfigId.value;
     const source = options.configId ? getModelConfig(options.configId) : getModelConfig(fallbackConfigId);
     const base = toProviderConfig(source);
     if (action === "image") {
       const imageSize = normalizeImageSize(options.imageSize || base.imageSize || imageDraftSize.value);
+      const imageCount = clampNumber(Number(options.imageCount || base.imageCount || 1), 1, 4, base.imageCount || 1, 0);
       return {
         ...base,
         queueKey: source.id,
         imageModel: base.imageModel || base.model,
         imagePrompt: buildImagePromptWithSize(options.prompt || base.imagePrompt || base.testPrompt, imageSize),
         imageSize,
+        imageCount,
         queueMode: normalizeQueueMode(base.queueMode),
         maxConcurrency: normalizeMaxConcurrency(base.maxConcurrency),
       };
@@ -1675,6 +1823,7 @@ export const useAiStore = defineStore("ai", () => {
       configId?: string;
       prompt?: string;
       imageSize?: string;
+      imageCount?: number;
       onTask?: (task: AiProviderTestTask, item: AiProviderTestQueueItem) => void | Promise<void>;
     } = {}
   ) {
@@ -1820,7 +1969,8 @@ export const useAiStore = defineStore("ai", () => {
   async function generateImageMessage(
     content: string,
     configId = activeModelConfigIds.value.image,
-    imageSize = imageDraftSize.value
+    imageSize = imageDraftSize.value,
+    imageCount = 1
   ) {
     const prompt = toTrimmedString(content);
     if (!prompt) {
@@ -1841,6 +1991,7 @@ export const useAiStore = defineStore("ai", () => {
       modelConfigId: modelConfig.id,
       model: modelConfig.model,
       imageSize: normalizedImageSize,
+      imageCount,
       requestedImageSize: normalizedImageSize,
       createdAt: currentTime(),
     });
@@ -1856,6 +2007,7 @@ export const useAiStore = defineStore("ai", () => {
         modelConfigId: modelConfig.id,
         model: modelConfig.imageModel || modelConfig.model,
         imageSize: normalizedImageSize,
+        imageCount,
         requestedImageSize: normalizedImageSize,
         createdAt: currentTime(),
       };
@@ -1866,6 +2018,7 @@ export const useAiStore = defineStore("ai", () => {
         configId: modelConfig.id,
         prompt,
         imageSize: normalizedImageSize,
+        imageCount,
         onTask: (task) => {
           pendingRequestId = task.requestId;
           patchSessionMessage(pendingMessage.id, {
@@ -1918,6 +2071,7 @@ export const useAiStore = defineStore("ai", () => {
           model: modelConfig.imageModel || modelConfig.model,
           error: message,
           imageSize: normalizedImageSize,
+          imageCount,
           requestedImageSize: normalizedImageSize,
           createdAt: currentTime(),
         });
@@ -1993,6 +2147,7 @@ export const useAiStore = defineStore("ai", () => {
     deleteSession,
     renameSession,
     duplicateSession,
+    exportChatSession,
     openImageSavedFileLocation,
     saveConfig,
     testProvider,

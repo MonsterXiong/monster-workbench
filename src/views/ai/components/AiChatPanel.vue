@@ -5,7 +5,7 @@ import { useAiStore } from "../../../stores/ai";
 import { useI18n } from "../../../composables/useI18n";
 import { getErrorMessage, isBlank, joinBy, scrollElementToBottom, toTrimmedString } from "../../../utils";
 import type { ActionMenuItem } from "../../../components/common/BaseActionMenu.vue";
-import type { AiConversationSession } from "../../../types/ai";
+import type { AiChatExportFormat, AiConversationSession } from "../../../types/ai";
 
 const aiStore = useAiStore();
 const { t } = useI18n();
@@ -23,11 +23,18 @@ const emit = defineEmits<{
 const session = computed(() => aiStore.activeChatSession);
 const messages = computed(() => session.value?.messages || []);
 const isBusy = computed(() => aiStore.isActionBusy("chat", aiStore.activeModelConfigIds.chat));
+const canExportSession = computed(() => Boolean(session.value && messages.value.length));
+const composerHint = computed(() => [t("aiPage.chat.enterHint"), aiStore.activeChatConfig?.model].filter(Boolean).join(" · "));
 const scrollAnchor = computed(() => joinBy(messages.value, (message) => `${message.id}:${message.status}`, "|"));
 const sessionActions = computed<ActionMenuItem[]>(() => [
   { key: "rename", label: t("aiPage.sessions.rename"), icon: "Pencil" },
   { key: "duplicate", label: t("aiPage.sessions.duplicate"), icon: "Copy" },
   { key: "delete", label: t("common.delete"), icon: "Trash2", type: "danger", divided: true },
+]);
+const exportActions = computed<ActionMenuItem[]>(() => [
+  { key: "markdown", label: t("aiPage.chat.exportMarkdown"), icon: "FileText" },
+  { key: "txt", label: t("aiPage.chat.exportText"), icon: "FileType" },
+  { key: "json", label: t("aiPage.chat.exportJson"), icon: "Braces" },
 ]);
 
 onMounted(async () => {
@@ -116,6 +123,22 @@ async function handleSessionAction(action: ActionMenuItem, target: AiConversatio
     emit("failed", getErrorMessage(err, t("settings.aiProvider.saveFailed")));
   }
 }
+
+async function handleExportAction(action: ActionMenuItem) {
+  if (!session.value || !canExportSession.value) {
+    return;
+  }
+
+  try {
+    const result = await aiStore.exportChatSession(session.value.id, action.key as AiChatExportFormat);
+    if (result === "cancelled") {
+      return;
+    }
+    emit("tested", true, t(result === "desktop" ? "aiPage.chat.exportSuccessDesktop" : "aiPage.chat.exportSuccessBrowser"));
+  } catch (err) {
+    emit("failed", getErrorMessage(err, t("aiPage.chat.exportFailed")));
+  }
+}
 </script>
 
 <template>
@@ -160,6 +183,13 @@ async function handleSessionAction(action: ActionMenuItem, target: AiConversatio
           <h3>{{ t("aiPage.chat.title") }}</h3>
           <p>{{ aiStore.activeChatConfig?.name || aiStore.activeChatConfig?.displayName }}</p>
         </div>
+        <BaseActionMenu
+          :actions="exportActions"
+          :label="t('aiPage.chat.export')"
+          icon="Download"
+          :disabled="!canExportSession"
+          @select="handleExportAction"
+        />
       </header>
 
       <div ref="messageListRef" class="message-list">
@@ -194,6 +224,14 @@ async function handleSessionAction(action: ActionMenuItem, target: AiConversatio
               </div>
               <pre v-else>{{ message.content }}<span v-if="message.status === 'pending'" class="typing-tail">...</span></pre>
             </div>
+            <div class="message-actions">
+              <BaseCopyButton
+                :text="message.content || message.error || ''"
+                :label="t('aiPage.chat.copyMessage')"
+                size="xs"
+                :disabled="!(message.content || message.error)"
+              />
+            </div>
           </div>
         </div>
       </div>
@@ -201,6 +239,7 @@ async function handleSessionAction(action: ActionMenuItem, target: AiConversatio
       <footer class="composer">
         <div class="composer-card">
           <div class="composer-tools">
+            <span class="composer-tools__label">{{ t("aiPage.chat.modelLabel") }}</span>
             <BaseSelect
               :model-value="aiStore.activeModelConfigIds.chat"
               :options="aiStore.modelConfigOptions"
@@ -219,7 +258,7 @@ async function handleSessionAction(action: ActionMenuItem, target: AiConversatio
             @keydown.enter.exact.prevent="handleSend"
           />
           <div class="composer-actions">
-            <span class="composer-hint">{{ aiStore.activeChatConfig?.model }}</span>
+            <span class="composer-hint">{{ composerHint }}</span>
             <BaseButton
               type="primary"
               size="sm"
@@ -291,7 +330,10 @@ async function handleSessionAction(action: ActionMenuItem, target: AiConversatio
   @apply flex min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950;
 }
 .chat-header {
-  @apply flex shrink-0 items-center gap-3 border-b border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950;
+  @apply flex shrink-0 flex-wrap items-center gap-3 border-b border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950;
+}
+.chat-header :deep(.base-action-menu__trigger) {
+  @apply h-8 rounded-xl border-slate-200 bg-slate-50 px-3 text-[11px] text-slate-600 shadow-none hover:border-primary hover:bg-primary/5 hover:text-primary dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300;
 }
 .chat-header__icon {
   @apply flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary;
@@ -410,6 +452,19 @@ async function handleSessionAction(action: ActionMenuItem, target: AiConversatio
 .message-row--user .message-bubble pre {
   @apply text-white;
 }
+.message-actions {
+  @apply flex max-w-full items-center gap-1 px-1 opacity-0 transition-opacity;
+}
+.message-body:hover .message-actions,
+.message-body:focus-within .message-actions {
+  @apply opacity-100;
+}
+.message-row--user .message-actions {
+  @apply justify-end;
+}
+.message-actions :deep(.base-copy-button) {
+  @apply border-slate-200 bg-white/80 text-slate-500 shadow-none hover:text-primary dark:border-slate-800 dark:bg-slate-950/80 dark:text-slate-400;
+}
 .composer {
   @apply shrink-0 border-t border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950;
 }
@@ -417,10 +472,13 @@ async function handleSessionAction(action: ActionMenuItem, target: AiConversatio
   @apply flex flex-col gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-2 shadow-sm transition-colors focus-within:border-primary focus-within:bg-white focus-within:shadow-md dark:border-slate-800 dark:bg-slate-900 dark:focus-within:bg-slate-950;
 }
 .composer-tools {
-  @apply flex flex-wrap items-center justify-between gap-2;
+  @apply flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white px-2 py-1.5 dark:border-slate-800 dark:bg-slate-950;
+}
+.composer-tools__label {
+  @apply shrink-0 text-[10px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500;
 }
 .composer-model {
-  @apply w-full sm:w-64;
+  @apply min-w-44 flex-1 sm:max-w-72;
 }
 .composer-textarea {
   @apply overflow-hidden rounded-xl;
