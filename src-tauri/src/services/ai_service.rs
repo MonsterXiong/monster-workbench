@@ -459,7 +459,6 @@ const AI_PROVIDER_TEST_MAX_CONFIG_CONCURRENCY: usize = 6;
 const AI_PROVIDER_TEST_QUEUE_WAIT_TIMEOUT: Duration = Duration::from_secs(90);
 const AI_PROVIDER_FINISHED_TASK_LIMIT: usize = 40;
 const AI_PROVIDER_IMAGE_REQUEST_TIMEOUT_MS_MIN: u64 = 60_000;
-const AI_PROVIDER_IMAGE_REQUEST_TIMEOUT_MS_DEFAULT: u64 = 720_000;
 const AI_PROVIDER_IMAGE_REQUEST_TIMEOUT_MS_MAX: u64 = 900_000;
 const AI_PROVIDER_IMAGE_SIDECAR_TIMEOUT_SLACK_MS: u64 = 30_000;
 
@@ -1410,7 +1409,7 @@ mod queue_tests {
 
     #[test]
     fn image_queue_wait_timeout_does_not_auto_cancel_queueing() {
-        let config = test_config(AI_PROVIDER_IMAGE_REQUEST_TIMEOUT_MS_DEFAULT);
+        let config = test_config(720_000);
         let wait_timeout = provider_test_queue_wait_timeout("image", &config);
 
         assert_eq!(wait_timeout, Duration::ZERO);

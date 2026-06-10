@@ -42,7 +42,6 @@ import {
   joinBy,
   joinLines,
   joinMappedNonEmptyLines,
-  joinNonEmptyLines,
   parseDimensionsText,
   preventAndStopDomEvent,
   replaceAllText,
@@ -260,8 +259,8 @@ const imageCountOptions = computed(() =>
   [1, 2, 3, 4].map((count) => ({
     label: `x${count}`,
     selectedLabel: `x${count}`,
-    description: `${count}`,
-    filterText: `${count} x${count}`,
+    description: formatTemplate(t("aiPage.image.resultImageCount"), { count }),
+    filterText: `${count} ${formatTemplate(t("aiPage.image.resultImageCount"), { count })} x${count}`,
     value: count,
   }))
 );
@@ -911,25 +910,6 @@ const previewInspectorItems = computed<PreviewInspectorItem[]>(() => {
 
   return items;
 });
-const previewInfoText = computed(() => {
-  const message = previewMessage.value;
-  if (!message) {
-    return "";
-  }
-  const lines = [
-    `${t("aiPage.image.previewTitle")}: ${previewImageTitle.value || "-"}`,
-    `${t("aiPage.image.previewModel")}: ${message.model || "-"}`,
-    getMessageLatencyLabel(message) ? `${t("aiPage.image.latency")}: ${getMessageLatencyLabel(message)}` : "",
-    getMessageQueueWaitLabel(message) ? `${t("aiPage.image.queueWait")}: ${getMessageQueueWaitLabel(message)}` : "",
-    `${t("aiPage.image.actualSize")}: ${getMessageActualSize(message) || "-"}`,
-    `${t("aiPage.image.requestedSize")}: ${getMessageRequestedSize(message) || "-"}`,
-    message.requestId ? `${t("aiPage.image.requestId")}: ${message.requestId}` : "",
-    previewImageUrl.value ? `${t("aiPage.image.previewImageUrl")}: ${previewImageUrl.value}` : "",
-    previewPrompt.value ? `${t("aiPage.image.previewPrompt")}:\n${previewPrompt.value}` : "",
-  ];
-  return joinNonEmptyLines(lines);
-});
-
 function openImagePreview(url: string, message: ImageMessage, index = 0) {
   previewImageUrl.value = url;
   previewImageTitle.value = getImagePreviewTitle(message);
@@ -1987,17 +1967,6 @@ function getSessionSizeLabel(target: AiConversationSession) {
                 :aria-label="t('aiPage.image.copyImageUrl')"
                 size="xs"
               />
-              <BaseButton
-                v-if="previewSavedFile"
-                type="neutral"
-                outline
-                size="xs"
-                :title="t('aiPage.image.openFileLocation')"
-                @click="openPreviewSavedFileLocation"
-              >
-                <template #icon><FolderOpen class="h-3 w-3" /></template>
-                {{ t("aiPage.image.openFileLocationShort") }}
-              </BaseButton>
             </div>
           </div>
 
@@ -2039,12 +2008,16 @@ function getSessionSizeLabel(target: AiConversationSession) {
               :aria-label="t('aiPage.image.copyPath')"
               size="xs"
             />
-            <BaseCopyButton
-              :text="previewInfoText"
-              :label="t('aiPage.image.copyImageInfoShort')"
-              :aria-label="t('aiPage.image.copyImageInfo')"
+            <BaseButton
+              type="neutral"
+              outline
               size="xs"
-            />
+              :title="t('aiPage.image.openFileLocation')"
+              @click="openPreviewSavedFileLocation"
+            >
+              <template #icon><FolderOpen class="h-3 w-3" /></template>
+              {{ t("aiPage.image.openFileLocationShort") }}
+            </BaseButton>
           </div>
         </aside>
       </div>
