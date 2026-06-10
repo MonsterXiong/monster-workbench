@@ -81,12 +81,40 @@ const goalForm = ref({
 const batchJobForm = ref({
   projectId: "demo-batch-image",
   name: "Batch Mock Demo",
+  mode: "mock",
   totalCount: 100,
   concurrency: 5,
   maxRetries: 0,
+  promptTemplate:
+    "Create a production-ready image prompt for batch item {{sequenceNo}}. Keep the subject clear and the composition concise.",
+  provider: "custom",
+  displayName: "Browser Mock Provider",
+  baseUrl: "https://mock.local/v1",
+  apiKey: "mock-key",
+  model: "mock-image-model",
+  imageSize: "1024x1024",
+  timeoutMs: 60000,
+  queueMode: "serial",
+  maxConcurrency: 1,
+  queueKey: "batch-demo",
 });
 const batchTaskPage = ref(1);
 const batchTaskPageSize = 20;
+
+const batchModeOptions = [
+  {
+    label: "Mock",
+    value: "mock",
+    meta: "Goal 11",
+    description: "Create a deterministic batch without provider calls.",
+  },
+  {
+    label: "Prompt",
+    value: "prompt",
+    meta: "Goal 12",
+    description: "Generate demo_image_prompt assets through the provider path.",
+  },
+];
 
 const promptWorkflowTimelineItems = computed(() =>
   promptWorkflowActivity.value.map((item, index) => ({
@@ -149,6 +177,22 @@ const batchJobTimelineItems = computed(() =>
             : ("primary" as const),
     tag: item.status,
   }))
+);
+
+const batchTaskResultSummary = computed(() =>
+  batchJobTasks.value.map((task) => {
+    const result = task.resultJson ? safeParseJson(task.resultJson) : null;
+    return {
+      id: task.id,
+      title: `#${task.sequenceNo || task.id} · ${task.status}`,
+      status: task.status,
+      taskType: task.taskType,
+      promptExcerpt: typeof result?.promptExcerpt === "string" ? result.promptExcerpt : "-",
+      assetId: typeof result?.assetId === "number" ? result.assetId : task.assetId,
+      modelRunId: typeof result?.modelRunId === "number" ? result.modelRunId : null,
+      errorMessage: task.errorMessage || "-",
+    };
+  })
 );
 
 const workflowSteps = [
@@ -233,6 +277,14 @@ const runPromptWorkflow = async () => {
     });
   } catch {
     // store records the error state.
+  }
+};
+
+const safeParseJson = (raw: string) => {
+  try {
+    return JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    return null;
   }
 };
 
@@ -340,16 +392,31 @@ const refreshBatchJobPage = async (page = batchTaskPage.value) => {
 const createBatchJob = async () => {
   try {
     batchTaskPage.value = 1;
+    const isPromptBatch = batchJobForm.value.mode === "prompt";
     await taskStore.createBatchImageJob({
       projectId: batchJobForm.value.projectId,
       name: batchJobForm.value.name,
-      batchType: "demo.image.mock",
+      batchType: isPromptBatch ? "demo.image.prompt" : "demo.image.mock",
       totalCount: batchJobForm.value.totalCount,
       concurrency: batchJobForm.value.concurrency,
       maxRetries: batchJobForm.value.maxRetries,
+      promptTemplate: isPromptBatch ? batchJobForm.value.promptTemplate : null,
+      providerConfig: isPromptBatch
+        ? {
+            provider: batchJobForm.value.provider,
+            displayName: batchJobForm.value.displayName,
+            baseUrl: batchJobForm.value.baseUrl,
+            apiKey: batchJobForm.value.apiKey,
+            model: batchJobForm.value.model,
+            timeoutMs: batchJobForm.value.timeoutMs,
+            queueMode: batchJobForm.value.queueMode,
+            maxConcurrency: batchJobForm.value.maxConcurrency,
+            queueKey: batchJobForm.value.queueKey,
+          }
+        : null,
       budgetJson: JSON.stringify({
-        stage: "mock",
-        maxConsecutiveFailures: 20,
+        stage: isPromptBatch ? "prompt" : "mock",
+        maxConsecutiveFailures: isPromptBatch ? 5 : 20,
       }),
     });
   } catch {
@@ -729,18 +796,39 @@ onMounted(async () => {
       </div>
 
       <div class="demo-grid demo-grid--wide">
-        <BasePanel title="Batch Image Demo Mock" subtitle="Create 100 to 1000 mock tasks with bounded concurrency.">
+        <BasePanel title="Batch Image Demo" subtitle="Create mock or prompt batches with bounded concurrency.">
           <div class="workflow-form">
+            <BaseSegmented
+              v-model="batchJobForm.mode"
+              :options="batchModeOptions"
+              block
+              detailed
+              size="sm"
+            />
             <BaseInput v-model="batchJobForm.projectId" label="Project ID" />
             <BaseInput v-model="batchJobForm.name" label="Batch Name" />
             <BaseNumberInput v-model="batchJobForm.totalCount" label="Total Count" :min="1" :max="1000" />
             <BaseNumberInput v-model="batchJobForm.concurrency" label="Concurrency" :min="1" :max="10" />
             <BaseNumberInput v-model="batchJobForm.maxRetries" label="Max Retries" :min="0" :max="3" />
+            <BaseTextarea
+              v-if="batchJobForm.mode === 'prompt'"
+              v-model="batchJobForm.promptTemplate"
+              label="Prompt Template"
+              :rows="4"
+            />
+            <div v-if="batchJobForm.mode === 'prompt'" class="workflow-form workflow-form--tight">
+              <BaseInput v-model="batchJobForm.provider" label="Provider" />
+              <BaseInput v-model="batchJobForm.displayName" label="Display Name" />
+              <BaseInput v-model="batchJobForm.baseUrl" label="Base URL" />
+              <BaseInput v-model="batchJobForm.apiKey" label="API Key" />
+              <BaseInput v-model="batchJobForm.model" label="Model" />
+              <BaseInput v-model="batchJobForm.imageSize" label="Image Size" />
+            </div>
           </div>
           <template #footer>
             <div class="step-actions step-actions--wrap">
               <BaseButton type="primary" size="sm" @click="createBatchJob">
-                Create batch
+                Create {{ batchJobForm.mode === 'prompt' ? 'prompt' : 'mock' }} batch
               </BaseButton>
               <BaseButton type="neutral" size="sm" :disabled="!batchJobSnapshot?.job.id" @click="startBatchJob">
                 Start
@@ -836,6 +924,37 @@ onMounted(async () => {
               </BaseButton>
             </div>
           </template>
+        </BasePanel>
+      </div>
+
+      <div class="demo-grid">
+        <BasePanel title="Task Results" subtitle="Prompt batches surface asset and model run summaries here.">
+          <BaseTimeline
+            :items="batchTaskResultSummary.map((task) => ({
+              key: String(task.id),
+              title: task.title,
+              time: task.status,
+              description: `asset ${task.assetId ?? '-'} / model run ${task.modelRunId ?? '-'} / ${task.promptExcerpt}`,
+              type: task.status === 'failed' ? 'danger' : task.status === 'cancelled' ? 'warning' : 'primary',
+              tag: task.taskType,
+            }))"
+            size="sm"
+            dense
+            marker="number"
+            surface="plain"
+            :bordered="false"
+            empty-text="No task results yet"
+          />
+        </BasePanel>
+        <BasePanel title="Prompt Notes" subtitle="Prompt batches create demo_image_prompt assets, not images.">
+          <BaseDescriptionList
+            :items="[
+              { key: 'mode', label: 'Mode', value: batchJobForm.mode },
+              { key: 'template', label: 'Template', value: batchJobForm.promptTemplate },
+              { key: 'provider', label: 'Provider', value: batchJobForm.provider },
+              { key: 'model', label: 'Model', value: batchJobForm.model },
+            ]"
+          />
         </BasePanel>
       </div>
     </PlaygroundDemoSection>

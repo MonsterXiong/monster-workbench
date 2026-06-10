@@ -135,6 +135,8 @@ let mockTaskEventId = 0;
 let mockCreativeTasks: any[] = [];
 const mockTaskEvents = new Map<number, any[]>();
 let mockCreativeAssets: any[] = [];
+let mockModelRunId = 0;
+let mockModelRuns: any[] = [];
 let mockAssetLinkId = 0;
 let mockCreativeAssetLinks: any[] = [];
 let mockGoalId = 0;
@@ -331,35 +333,20 @@ function runMockBatchSupervisor(batchJobId: number) {
           current.updatedAt = formatCurrentIsoDateTime(" ");
           current.finishedAt = current.updatedAt;
           emitMockTaskStatus(current, "creative-task-status-changed", "status changed to cancelled");
-          emitMockTaskStatus(current, "creative-task-event", "mock worker observed cancellation");
+          emitMockTaskStatus(
+            current,
+            "creative-task-event",
+            currentJob.batchType === "demo.image.prompt"
+              ? "prompt worker observed cancellation"
+              : "mock worker observed cancellation"
+          );
           return;
         }
-        const shouldFail = (current.sequenceNo || current.id) % 9 === 0;
-        current.status = shouldFail ? "failed" : "succeeded";
-        current.resultJson = shouldFail
-          ? null
-          : safeJsonStringify(
-              {
-                mock: true,
-                batchJobId,
-                sequenceNo: current.sequenceNo,
-                durationMs: taskDuration,
-              },
-              "{}"
-            );
-        current.errorMessage = shouldFail ? "mock worker deterministic failure" : null;
-        current.updatedAt = formatCurrentIsoDateTime(" ");
-        current.finishedAt = current.updatedAt;
-        emitMockTaskStatus(
-          current,
-          "creative-task-status-changed",
-          `status changed to ${current.status}`
-        );
-        emitMockTaskStatus(
-          current,
-          "creative-task-event",
-          shouldFail ? "mock worker finished with failure" : "mock worker finished successfully"
-        );
+        if (currentJob.batchType === "demo.image.prompt") {
+          completeMockPromptBatchTask(current, currentJob, taskDuration);
+        } else {
+          completeMockBatchTask(current, currentJob, taskDuration);
+        }
         const snapshot = createMockBatchSnapshot(currentJob);
         emitMockBatchEvent("batch-job-progress", snapshot, "batch progress updated");
         if (
@@ -380,6 +367,221 @@ function runMockBatchSupervisor(batchJobId: number) {
     }
   }, 200);
   mockBatchJobTimers.set(batchJobId, timer);
+}
+
+function completeMockBatchTask(task: any, batchJob: any, durationMs: number) {
+  const shouldFail = (task.sequenceNo || task.id) % 9 === 0;
+  if (shouldFail && task.retryCount < task.maxRetries) {
+    task.retryCount += 1;
+    task.status = "queued";
+    task.errorMessage = "mock worker deterministic failure";
+    task.resultJson = null;
+    task.updatedAt = formatCurrentIsoDateTime(" ");
+    emitMockTaskStatus(task, "creative-task-status-changed", "status changed to queued");
+    emitMockTaskStatus(task, "creative-task-event", "mock worker scheduled retry");
+    return;
+  }
+
+  task.status = shouldFail ? "failed" : "succeeded";
+  task.resultJson = shouldFail
+    ? null
+    : safeJsonStringify(
+        {
+          mock: true,
+          batchJobId: batchJob.id,
+          sequenceNo: task.sequenceNo,
+          durationMs,
+        },
+        "{}"
+      );
+  task.errorMessage = shouldFail ? "mock worker deterministic failure" : null;
+  task.updatedAt = formatCurrentIsoDateTime(" ");
+  task.finishedAt = task.updatedAt;
+  emitMockTaskStatus(task, "creative-task-status-changed", `status changed to ${task.status}`);
+  emitMockTaskStatus(
+    task,
+    "creative-task-event",
+    shouldFail ? "mock worker finished with failure" : "mock worker finished successfully"
+  );
+}
+
+function completeMockPromptBatchTask(task: any, batchJob: any, durationMs: number) {
+  const promptRequest = renderMockBatchPromptTemplate(task);
+  const providerConfig = resolveMockPromptProviderConfig(task);
+  const shouldFail = (task.sequenceNo || task.id) % 9 === 0;
+  const modelRun = createMockModelRunRecord({
+    projectId: task.projectId,
+    taskId: task.id,
+    providerId: providerConfig.displayName,
+    providerType: providerConfig.provider,
+    model: providerConfig.model,
+    status:
+      shouldFail && task.retryCount >= task.maxRetries ? "failed" : shouldFail ? "retrying" : "succeeded",
+    durationMs,
+    promptRequest,
+  });
+
+  if (shouldFail && task.retryCount < task.maxRetries) {
+    task.retryCount += 1;
+    task.status = "queued";
+    task.errorMessage = "mock prompt provider deterministic failure";
+    task.resultJson = null;
+    task.updatedAt = formatCurrentIsoDateTime(" ");
+    const retryEvent = {
+      id: ++mockTaskEventId,
+      taskId: task.id,
+      eventType: "prompt_retry_scheduled",
+      message: "prompt worker scheduled retry",
+      payloadJson: safeJsonStringify(
+        {
+          batchJobId: batchJob.id,
+          retryCount: task.retryCount,
+          maxRetries: task.maxRetries,
+        },
+        "{}"
+      ),
+      createdAt: task.updatedAt,
+    };
+    const events = mockTaskEvents.get(task.id) || [];
+    events.push(retryEvent);
+    mockTaskEvents.set(task.id, events);
+    emitMockTaskStatus(task, "creative-task-status-changed", "status changed to queued");
+    emitMockTaskStatus(task, "creative-task-event", "prompt worker scheduled retry");
+    return;
+  }
+
+  if (shouldFail) {
+    task.status = "failed";
+    task.errorMessage = "mock prompt provider deterministic failure";
+    task.resultJson = null;
+    task.updatedAt = formatCurrentIsoDateTime(" ");
+    task.finishedAt = task.updatedAt;
+    const failedEvent = {
+      id: ++mockTaskEventId,
+      taskId: task.id,
+      eventType: "prompt_failed",
+      message: "prompt worker finished with failure",
+      payloadJson: safeJsonStringify({ error: task.errorMessage }, "{}"),
+      createdAt: task.updatedAt,
+    };
+    const events = mockTaskEvents.get(task.id) || [];
+    events.push(failedEvent);
+    mockTaskEvents.set(task.id, events);
+    emitMockTaskStatus(task, "creative-task-status-changed", "status changed to failed");
+    emitMockTaskStatus(task, "creative-task-event", "prompt worker finished with failure");
+    return;
+  }
+
+  const promptText = [
+    `Prompt ${task.sequenceNo || task.id}: ${promptRequest}`,
+    `Provider: ${providerConfig.displayName}`,
+    `Model: ${providerConfig.model}`,
+    "Output: clean subject, readable silhouette, controlled lighting, production-ready framing.",
+  ].join("\n");
+  const asset = createMockAssetRecord({
+    projectId: task.projectId,
+    assetType: "demo_image_prompt",
+    title: `Batch prompt #${task.sequenceNo || task.id}`,
+    content: promptText,
+    metadataJson: safeJsonStringify(
+      {
+        batchJobId: batchJob.id,
+        sourceTaskId: task.id,
+        sequenceNo: task.sequenceNo,
+        promptTemplate: promptRequest,
+        modelRunId: modelRun.id,
+      },
+      "{}"
+    ),
+    status: "ready",
+  });
+  modelRun.assetId = asset.id;
+  task.assetId = asset.id;
+  task.status = "succeeded";
+  task.errorMessage = null;
+  task.resultJson = safeJsonStringify(
+    {
+      assetId: asset.id,
+      modelRunId: modelRun.id,
+      promptExcerpt: summarizeMockPrompt(promptText),
+      durationMs,
+    },
+    "{}"
+  );
+  task.updatedAt = formatCurrentIsoDateTime(" ");
+  task.finishedAt = task.updatedAt;
+  const savedEvent = {
+    id: ++mockTaskEventId,
+    taskId: task.id,
+    eventType: "prompt_asset_saved",
+    message: `prompt asset created: ${asset.id}`,
+    payloadJson: safeJsonStringify(
+      {
+        assetId: asset.id,
+        modelRunId: modelRun.id,
+        durationMs,
+      },
+      "{}"
+    ),
+    createdAt: task.updatedAt,
+  };
+  const events = mockTaskEvents.get(task.id) || [];
+  events.push(savedEvent);
+  mockTaskEvents.set(task.id, events);
+  emitMockTaskStatus(task, "creative-task-status-changed", "status changed to succeeded");
+  emitMockTaskStatus(task, "creative-task-event", "prompt worker finished successfully");
+}
+
+function renderMockBatchPromptTemplate(task: any) {
+  const payload = task.payloadJson ? tryJsonParseObject(task.payloadJson) : null;
+  const promptTemplate =
+    payload?.ok && payload.data && typeof payload.data.promptTemplate === "string"
+      ? payload.data.promptTemplate
+      : "Create a production-ready image prompt for batch item {{sequenceNo}}.";
+  const sequenceNo = String(task.sequenceNo || task.id);
+  return promptTemplate
+    .replaceAll("{{sequenceNo}}", sequenceNo)
+    .replaceAll("{{index}}", sequenceNo);
+}
+
+function resolveMockPromptProviderConfig(task: any) {
+  const payload = task.payloadJson ? tryJsonParseObject(task.payloadJson) : null;
+  const providerConfig =
+    payload?.ok && payload.data && typeof payload.data.providerConfig === "object"
+      ? (payload.data.providerConfig as Record<string, unknown>)
+      : {};
+  return {
+    provider: String(providerConfig.provider || "custom"),
+    displayName: String(providerConfig.displayName || "Browser Mock Provider"),
+    model: String(providerConfig.model || "mock-image-model"),
+  };
+}
+
+function createMockModelRunRecord(input: Record<string, unknown>) {
+  const now = formatCurrentIsoDateTime(" ");
+  mockModelRunId += 1;
+  const record = {
+    id: mockModelRunId,
+    projectId: (input.projectId as string | null | undefined) ?? null,
+    taskId: (input.taskId as number | null | undefined) ?? null,
+    assetId: (input.assetId as number | null | undefined) ?? null,
+    providerId: String(input.providerId || "Browser Mock Provider"),
+    providerType: String(input.providerType || "custom"),
+    model: String(input.model || "mock-image-model"),
+    requestType: "chat",
+    status: String(input.status || "succeeded"),
+    durationMs: Number(input.durationMs || 0),
+    promptRequest: String(input.promptRequest || ""),
+    createdAt: now,
+    updatedAt: now,
+  };
+  mockModelRuns = [record, ...mockModelRuns];
+  return record;
+}
+
+function summarizeMockPrompt(value: string) {
+  const trimmed = value.trim();
+  return trimmed.length <= 120 ? trimmed : `${trimmed.slice(0, 120)}...`;
 }
 
 function toTaskEventPayload(task: any, message: string | null, createdAt: string) {
@@ -956,7 +1158,9 @@ export async function mockCallTauri<T = unknown>(
             {
               batchJobId: batchJob.id,
               sequenceNo,
-              mockMode: batchJob.batchType,
+              batchType: batchJob.batchType,
+              promptTemplate: batchJob.promptTemplate,
+              providerConfig: (input.providerConfig as Record<string, unknown> | null | undefined) ?? null,
             },
             "{}"
           ),
@@ -1507,6 +1711,7 @@ export async function mockCallTauri<T = unknown>(
       navigationsStore = [...mockNavigations];
       mockCreativeTasks = [];
       mockCreativeAssets = [];
+      mockModelRuns = [];
       mockCreativeAssetLinks = [];
       mockCreativeGoals = [];
       mockCreativeGoalRoles = [];
@@ -1522,6 +1727,7 @@ export async function mockCallTauri<T = unknown>(
       mockGoalId = 0;
       mockGoalRoleId = 0;
       mockBatchJobId = 0;
+      mockModelRunId = 0;
       return null as T;
 
     case "export_database":
