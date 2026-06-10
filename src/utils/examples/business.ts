@@ -109,6 +109,24 @@ function createErrorWithCodeLike(message: string, code: string): Error & { code:
 
 export const businessUtilityBoundaryCases = [
   {
+    key: "compare-sort-state",
+    title: "compare sort state",
+    input: "createSortControlsReport({ key: 'size', direction: 'desc' }, ['title', 'size', 'status'])",
+    expected: businessUtilityExamples.sortControls.summary.activeDirection ?? "",
+  },
+  {
+    key: "search-filtered-match",
+    title: "search query filtered match",
+    input: "partitionSearchQuery(items, { keyword: 'report', filters: [{ value: 'ready' }] })",
+    expected: String(businessUtilityExamples.searchPartition.summary.matchedCount),
+  },
+  {
+    key: "error-display-code",
+    title: "error display code",
+    input: "createErrorDisplayReport(createErrorWithCodeLike('Upload failed', 'UPLOAD_FAILED'))",
+    expected: businessUtilityExamples.errorReport.code,
+  },
+  {
     key: "missing-template",
     title: "template missing key",
     input: "formatTemplateWithReport('Hello {name}, {missing}')",
@@ -131,5 +149,11 @@ export const businessUtilityBoundaryCases = [
     title: "enum list fallback",
     input: "parseEnumListWithReport(['ready', 'unknown'], ['ready', 'draft'])",
     expected: String(businessUtilityExamples.parsedEnumList.summary.fallbackUsedCount),
+  },
+  {
+    key: "value-empty-list",
+    title: "value empty list summary",
+    input: "summarizeValueTypes([null, '', 0, false])",
+    expected: String(businessUtilityExamples.valueTypes.emptyValueCount),
   },
 ];

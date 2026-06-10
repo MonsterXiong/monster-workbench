@@ -76,10 +76,22 @@ export const textUtilityBoundaryCases = [
     expected: textUtilityExamples.stableId,
   },
   {
+    key: "duplicate-dom-id",
+    title: "duplicate dom id",
+    input: "ensureUniqueDomId('panel', ['panel', 'panel-1'])",
+    expected: textUtilityExamples.uniqueDomId,
+  },
+  {
     key: "invalid-base64",
     title: "safe base64 decode",
     input: "safeDecodeBase64Utf8('@@@', { fallback: 'invalid' })",
     expected: safeDecodeBase64Utf8("@@@", { fallback: "invalid" }),
+  },
+  {
+    key: "invalid-data-url",
+    title: "invalid data url",
+    input: "summarizeDataUrl('not-a-data-url')",
+    expected: String(summarizeDataUrl("not-a-data-url").valid),
   },
   {
     key: "duplicate-shortcut",

@@ -365,11 +365,19 @@ export function getValueIdentity(value: unknown, options: ValueIdentityOptions |
     return normalizeStringKey(rawValue);
   }
 
-  if (typeof rawValue === "number" || typeof rawValue === "boolean" || rawValue === null || rawValue === undefined) {
+  if (typeof rawValue === "number" || typeof rawValue === "boolean") {
     return rawValue;
   }
 
-  return normalizeStringKey(rawValue);
+  if (rawValue === null) {
+    return null;
+  }
+
+  if (rawValue === undefined) {
+    return undefined;
+  }
+
+  return normalizeStringKey(String(rawValue));
 }
 
 export function isSameValueIdentity(

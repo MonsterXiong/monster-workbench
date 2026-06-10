@@ -25,7 +25,7 @@ function normalizeSelectionKeyReplacements<K extends PropertyKey>(
   replacements: ReadonlyMap<K, K> | ReadonlyArray<readonly [K, K]>
 ): Array<[K, K]> {
   const entries = replacements instanceof Map ? Array.from(replacements.entries()) : [...replacements];
-  return entries.map(([currentKey, nextKey]) => [currentKey, nextKey]);
+  return entries.map(([currentKey, nextKey]) => [currentKey, nextKey] as [K, K]);
 }
 
 export function replaceManySelectionKeys<K extends PropertyKey>(

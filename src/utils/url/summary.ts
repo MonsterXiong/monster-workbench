@@ -44,7 +44,10 @@ export function summarizeUrl(input: string, options: UrlSummaryOptions = {}): Ur
   const fileName = getFileName(nextUrl.pathname);
   const queryArrayRecord = options.includeQueryArrayRecord === false ? {} : searchParamsToArrayRecord(nextUrl.searchParams);
   const queryRecord = searchParamsToRecord(nextUrl.searchParams, options);
-  const queryCount = Array.from(nextUrl.searchParams.keys()).length;
+  let queryCount = 0;
+  nextUrl.searchParams.forEach(() => {
+    queryCount += 1;
+  });
   const hashValue = normalizeHash(nextUrl.hash, false);
 
   return {

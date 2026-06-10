@@ -83,6 +83,12 @@ export const browserUtilityBoundaryCases = [
     expected: browserUtilityExamples.clipboardReport.text,
   },
   {
+    key: "clipboard-empty",
+    title: "clipboard empty result",
+    input: "createClipboardCopyResult(false, 'none', '')",
+    expected: String(createClipboardCopyResult(false, "none", "").textLength),
+  },
+  {
     key: "viewport-breakpoint",
     title: "viewport breakpoint",
     input: "summarizeViewportBreakpoints([{ lg: 1024 }])",

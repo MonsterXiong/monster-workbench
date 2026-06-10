@@ -75,7 +75,10 @@ export function hasSearchParam(searchParams: URLSearchParams, key: string): bool
 }
 
 export function removeEmptySearchParams(searchParams: URLSearchParams): URLSearchParams {
-  Array.from(searchParams.entries()).forEach(([key, value]) => {
+  const entries: Array<[string, string]> = [];
+  searchParams.forEach((value, key) => entries.push([key, value]));
+
+  entries.forEach(([key, value]) => {
     if (value === "") {
       searchParams.delete(key);
     }
