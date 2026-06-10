@@ -266,6 +266,19 @@ export interface CreateBatchImageJobInput {
   model?: string | null;
   imageSize?: string | null;
   budgetJson?: string | null;
+  providerConfig?: BatchPromptProviderConfigInput | null;
+}
+
+export interface BatchPromptProviderConfigInput {
+  provider: string;
+  displayName: string;
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  timeoutMs?: number | null;
+  queueMode?: string | null;
+  maxConcurrency?: number | null;
+  queueKey?: string | null;
 }
 
 export interface ListCreativeBatchJobsFilter {
