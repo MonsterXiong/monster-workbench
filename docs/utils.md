@@ -1,10 +1,10 @@
 # 工具函数手册
 
-`src/utils` 是前端纯工具函数层。工具函数必须保持无 Vue、无 Tauri、无 Store、无 Service 依赖；页面和业务层优先通过 `src/utils/index.ts` 或模块 barrel 导入。
+`src/utils` 是前端纯工具函数层。工具函数必须保持无 Vue、无 Tauri、无 Store、无 Service 依赖；页面和业务层统一通过 `src/utils/index.ts` 导入。
 
 ## 目录规则
 
-- 大文件按 `src/utils/<module>/` 拆分，并保留同名兼容入口，例如 `src/utils/array.ts` 只做 `export * from "./array/index"`。
+- 大文件按 `src/utils/<module>/` 拆分，模块入口统一由 `src/utils/index.ts` 聚合导出，不再保留同名 `src/utils/<module>.ts` 目录入口。
 - 子文件按功能划分，常见结构为 `types.ts`、`core.ts`、`diff.ts`、`summary.ts`、`pagination.ts`、`path.ts` 等。
 - 拆分不得改变公开函数名、参数语义、返回结构和边界行为。
 - 独立用例放在 `src/utils/examples/*`，用于 Playground 展示，也可后续迁移为单元测试。
@@ -13,7 +13,7 @@
 
 位置：
 
-- `src/utils/number.ts`：兼容入口。
+- `src/utils/number/`：目录入口。
 - `src/utils/number/types.ts`：数值、范围、分页、分布统计类型。
 - `src/utils/number/core.ts`：数值解析、整数归一、clamp、step、随机数、排序。
 - `src/utils/number/range.ts`：范围映射、百分比、区间交集、进度和 delta 摘要。
@@ -38,13 +38,13 @@ const page = summarizePagination(99, 20, 45);
 
 用例：`src/utils/examples/number.ts`
 
-Playground：`/playground` -> `工具函数` -> `number`
+文档站点：`/utils-docs` -> `工具函数文档站点` -> `number`
 
 ## CSV
 
 位置：
 
-- `src/utils/csv.ts`：兼容入口。
+- `src/utils/csv/`：目录入口。
 - `src/utils/csv/types.ts`：CSV 行、列、解析、摘要类型。
 - `src/utils/csv/core.ts`：delimiter、BOM、cell 转义、公式样式 cell 判断。
 - `src/utils/csv/stringify.ts`：CSV/TSV 序列化、电子表格安全 CSV。
@@ -71,13 +71,13 @@ const safeCsv = stringifySpreadsheetCsvRows([["name", "=SUM(A1:A2)"]]);
 
 用例：`src/utils/examples/csv.ts`
 
-Playground：`/playground` -> `工具函数` -> `csv`
+文档站点：`/utils-docs` -> `工具函数文档站点` -> `csv`
 
 ## Array
 
 位置：
 
-- `src/utils/array.ts`：兼容入口。
+- `src/utils/array/`：目录入口。
 - `src/utils/array/types.ts`：分页、分组、集合、diff、筛选、排序类型。
 - `src/utils/array/core.ts`：数组归一、compact、首尾项、下标、查找、相邻项。
 - `src/utils/array/set-map.ts`：去重、Set、Map、按 key 映射、集合合并。
@@ -111,13 +111,13 @@ const view = createArrayListViewReport(tasks, { filters, sortRules, page: 1, pag
 
 用例：`src/utils/examples/array.ts`
 
-Playground：`/playground` -> `工具函数` -> `array`
+文档站点：`/utils-docs` -> `工具函数文档站点` -> `array`
 
 ## Object
 
 位置：
 
-- `src/utils/object.ts`：兼容入口。
+- `src/utils/object/`：目录入口。
 - `src/utils/object/types.ts`：record、path、cleanup、patch、diff、deep diff 类型。
 - `src/utils/object/core.ts`：record/plain object 判断。
 - `src/utils/object/record.ts`：pick/omit、map/filter/partition、entries、patch、dirty、reset。
@@ -148,13 +148,13 @@ const report = createDeepObjectDiffReport(before, after, { compareArraysByIndex:
 
 用例：`src/utils/examples/object.ts`
 
-Playground：`/playground` -> `工具函数` -> `object`
+文档站点：`/utils-docs` -> `工具函数文档站点` -> `object`
 
 ## Tree
 
 位置：
 
-- `src/utils/tree.ts`：兼容入口。
+- `src/utils/tree/`：目录入口。
 - `src/utils/tree/types.ts`：tree、flat list、lookup、checked、diff、list diagnostic 类型。
 - `src/utils/tree/core.ts`：children 访问、基础遍历、搜索、按 value 查询。
 - `src/utils/tree/flatten.ts`：flatten、tree to list、parent id list、node/parent/children map。
@@ -188,13 +188,13 @@ const diff = createTreeDiffByKeyReport(before, after, (item) => item.children, (
 
 用例：`src/utils/examples/tree.ts`
 
-Playground：`/playground` -> `工具函数` -> `tree`
+文档站点：`/utils-docs` -> `工具函数文档站点` -> `tree`
 
 ## JSON / Path
 
-JSON 仍保留单文件 `src/utils/json.ts`，覆盖 parse/stringify、guard、summary、format/minify、clone。循环对象会让 `tryJsonStringify` 返回失败结果，`safeJsonStringify` 返回 fallback。
+JSON 已拆分为 `src/utils/json/`，覆盖 parse/stringify、guard、summary、format/minify、clone。循环对象会让 `tryJsonStringify` 返回失败结果，`safeJsonStringify` 返回 fallback。
 
-Path 仍保留单文件 `src/utils/path.ts`，覆盖 slash 归一、Windows/UNC 判断、join/resolve、相对路径、共同祖先、安全子路径、文件名清理。
+Path 已拆分为 `src/utils/path/`，覆盖 slash 归一、Windows/UNC 判断、join/resolve、相对路径、共同祖先、安全子路径、文件名清理。
 
 典型用例：
 
@@ -215,15 +215,15 @@ const safePath = resolveSafeChildPath("C:\\work\\项目", "报告\\明细.csv");
 
 用例：`src/utils/examples/json.ts`、`src/utils/examples/path.ts`
 
-Playground：`/playground` -> `工具函数` -> `json / path`
+文档站点：`/utils-docs` -> `工具函数文档站点` -> `json / path`
 
 ## Async / Color / Date
 
 位置：
 
-- `src/utils/async.ts`：sleep、timeout、debounce/throttle、retry、poll、batch、settled result 和异步任务 report。
-- `src/utils/color.ts`：hex/rgb/rgba/hsl 互转、alpha、混色、明暗调整、可读文本色、对比度与 palette summary。
-- `src/utils/date.ts`：日期解析/格式化、日期范围、预设范围、枚举、同日/月/年判断、时间戳和日历标签。
+- `src/utils/async/`：sleep、timeout、debounce/throttle、retry、poll、batch、settled result 和异步任务 report。
+- `src/utils/color/`：hex/rgb/rgba/hsl 互转、alpha、混色、明暗调整、可读文本色、对比度与 palette summary。
+- `src/utils/date/`：日期解析/格式化、日期范围、预设范围、枚举、同日/月/年判断、时间戳和日历标签。
 
 典型用例：
 
@@ -245,16 +245,16 @@ const range = summarizeDateRange({ start: "2026-06-01", end: "2026-06-05" });
 
 用例：`src/utils/examples/runtime.ts`
 
-Playground：`/playground` -> `工具函数` -> `async / color / date`
+文档站点：`/utils-docs` -> `工具函数文档站点` -> `async / color / date`
 
 ## String / Encoding / ID / Keyboard
 
 位置：
 
-- `src/utils/string.ts`：空白判断、清理、行处理、截断、大小写转换、关键词匹配、mask、DOM id segment 清理。
-- `src/utils/encoding.ts`：UTF-8 bytes、base64/base64url/hex、Data URL、编码摘要和安全 decode。
-- `src/utils/id.ts`：随机/时间/顺序 ID、DOM ID、稳定 hash ID、唯一 ID 摘要。
-- `src/utils/keyboard.ts`：按键归一、导航键、快捷键解析/格式化、ARIA shortcut、事件匹配和 handler。
+- `src/utils/string/`：空白判断、清理、行处理、截断、大小写转换、关键词匹配、mask、DOM id segment 清理。
+- `src/utils/encoding/`：UTF-8 bytes、base64/base64url/hex、Data URL、编码摘要和安全 decode。
+- `src/utils/id/`：随机/时间/顺序 ID、DOM ID、稳定 hash ID、唯一 ID 摘要。
+- `src/utils/keyboard/`：按键归一、导航键、快捷键解析/格式化、ARIA shortcut、事件匹配和 handler。
 
 典型用例：
 
@@ -276,15 +276,15 @@ const shortcut = formatKeyboardShortcut("Ctrl+Shift+P");
 
 用例：`src/utils/examples/text.ts`
 
-Playground：`/playground` -> `工具函数` -> `string / encoding / id / keyboard`
+文档站点：`/utils-docs` -> `工具函数文档站点` -> `string / encoding / id / keyboard`
 
 ## File / Storage / URL
 
 位置：
 
-- `src/utils/file.ts`：文件扩展名/MIME/kind、accept 规则、选择校验、去重、大小摘要、浏览器下载/读取结果。
-- `src/utils/storage.ts`：Storage key、读写安全包装、entry/prefix summary、mutation preview、TTL envelope、过期清理。
-- `src/utils/url.ts`：URL parse/build、query record、SearchParams 归一、query diff、URL list summary 和外链打开。
+- `src/utils/file/`：文件扩展名/MIME/kind、accept 规则、选择校验、去重、大小摘要、浏览器下载/读取结果。
+- `src/utils/storage/`：Storage key、读写安全包装、entry/prefix summary、mutation preview、TTL envelope、过期清理。
+- `src/utils/url/`：URL parse/build、query record、SearchParams 归一、query diff、URL list summary 和外链打开。
 
 典型用例：
 
@@ -306,15 +306,15 @@ const queryDiff = diffSearchParams(new URLSearchParams("page=1"), new URLSearchP
 
 用例：`src/utils/examples/data.ts`
 
-Playground：`/playground` -> `工具函数` -> `file / storage / url`
+文档站点：`/utils-docs` -> `工具函数文档站点` -> `file / storage / url`
 
 ## Browser / Clipboard / DOM
 
 位置：
 
-- `src/utils/browser.ts`：浏览器/SSR 判断、Window/Navigator/Location 快照、视口、断点、媒体查询和能力摘要。
-- `src/utils/clipboard.ts`：剪贴板读写能力、copy/read result、summary/report/format，以及 CSV/JSON/lines 复制包装。
-- `src/utils/dom.ts`：焦点、滚动、class/style、元素尺寸、rect viewport summary、事件监听和自定义事件。
+- `src/utils/browser/`：浏览器/SSR 判断、Window/Navigator/Location 快照、视口、断点、媒体查询和能力摘要。
+- `src/utils/clipboard/`：剪贴板读写能力、copy/read result、summary/report/format，以及 CSV/JSON/lines 复制包装。
+- `src/utils/dom/`：焦点、滚动、class/style、元素尺寸、rect viewport summary、事件监听和自定义事件。
 
 典型用例：
 
@@ -336,19 +336,19 @@ const rect = summarizeRectInViewport(element.getBoundingClientRect());
 
 用例：`src/utils/examples/browser.ts`
 
-Playground：`/playground` -> `工具函数` -> `browser / clipboard / dom`
+文档站点：`/utils-docs` -> `工具函数文档站点` -> `browser / clipboard / dom`
 
 ## Compare / Error / Format / Search / Selection / Validation / Value
 
 位置：
 
-- `src/utils/compare.ts`：排序方向、sort state、aria sort、sort controls、comparator 和多规则排序。
-- `src/utils/error.ts`：错误归一、错误展示 report、错误分组、日志级别解析、log lines summary。
-- `src/utils/format.ts`：bytes、percent、duration、number/currency、list/key-value、summary item、template 和 dimensions。
-- `src/utils/search.ts`：关键词 token、字段匹配、filter matcher、rank、partition、highlight 和结果摘要。
-- `src/utils/selection.ts`：key selection、全选/反选、页选择、可选/禁用/不可用摘要、range 和 replacement report。
-- `src/utils/validation.ts`：validator、record schema、字段摘要、required/email/url/json/file/path 等常用校验器。
-- `src/utils/value.ts`：类型判断、默认值合并、boolean/number/integer/enum 解析、list report 和空值转换。
+- `src/utils/compare/`：排序方向、sort state、aria sort、sort controls、comparator 和多规则排序。
+- `src/utils/error/`：错误归一、错误展示 report、错误分组、日志级别解析、log lines summary。
+- `src/utils/format/`：bytes、percent、duration、number/currency、list/key-value、summary item、template 和 dimensions。
+- `src/utils/search/`：关键词 token、字段匹配、filter matcher、rank、partition、highlight 和结果摘要。
+- `src/utils/selection/`：key selection、全选/反选、页选择、可选/禁用/不可用摘要、range 和 replacement report。
+- `src/utils/validation/`：validator、record schema、字段摘要、required/email/url/json/file/path 等常用校验器。
+- `src/utils/value/`：类型判断、默认值合并、boolean/number/integer/enum 解析、list report 和空值转换。
 
 典型用例：
 
@@ -372,11 +372,11 @@ const statuses = parseEnumListWithReport(input, ["ready", "draft"] as const, "dr
 
 用例：`src/utils/examples/business.ts`
 
-Playground：`/playground` -> `工具函数` -> `compare / error / format / search / selection / validation / value`
+文档站点：`/utils-docs` -> `工具函数文档站点` -> `compare / error / format / search / selection / validation / value`
 
 ## 覆盖索引
 
-当前 `src/utils` 公共模块均已纳入手册、典型用例和 Playground：
+当前 `src/utils` 公共模块均已纳入手册、典型用例和文档站点：
 
 - 数值/结构类：`number`、`array`、`object`、`tree`、`json`、`path`、`csv`。
 - 文本/输入类：`string`、`encoding`、`id`、`keyboard`。
@@ -393,5 +393,4 @@ npm run typecheck
 npm run check:architecture
 git diff --check -- <touched files>
 ```
-
 涉及 Playground UI 时补浏览器验证；涉及复杂边界时补 `src/utils/examples/*` 或后续测试脚本。
