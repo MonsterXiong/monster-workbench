@@ -5,7 +5,7 @@ use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, Runtime, Wry};
 
 const PYTHON_SIDECAR_ENV_ALLOWLIST: &[&str] = &[
     "PATH",
@@ -61,15 +61,15 @@ pub struct GenerateImagePromptSidecarResponse {
     pub asset: GenerateImagePromptSidecarAsset,
 }
 
-pub struct SidecarLifecycleService {
-    app_handle: AppHandle,
+pub struct SidecarLifecycleService<R: Runtime = Wry> {
+    app_handle: AppHandle<R>,
     child: Option<Child>,
     runtime_token: Option<String>,
     snapshot: SidecarStatusSnapshot,
 }
 
-impl SidecarLifecycleService {
-    pub fn new(app_handle: AppHandle) -> Self {
+impl<R: Runtime> SidecarLifecycleService<R> {
+    pub fn new(app_handle: AppHandle<R>) -> Self {
         Self {
             app_handle,
             child: None,

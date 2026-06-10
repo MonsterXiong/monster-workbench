@@ -1,21 +1,35 @@
 use crate::infra::{AppError, AppResult};
 use std::path::PathBuf;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, Runtime, Wry};
 
-#[derive(Clone)]
-pub struct PathProvider {
+pub struct PathProvider<R: Runtime = Wry> {
     #[cfg(not(test))]
-    app_handle: AppHandle,
+    app_handle: AppHandle<R>,
     #[cfg(test)]
-    app_handle: Option<AppHandle>,
+    app_handle: Option<AppHandle<R>>,
     #[cfg(test)]
     app_local_data_dir: Option<PathBuf>,
     #[cfg(test)]
     db_file_path: Option<PathBuf>,
 }
 
-impl PathProvider {
-    pub fn new(app_handle: AppHandle) -> Self {
+impl<R: Runtime> Clone for PathProvider<R> {
+    fn clone(&self) -> Self {
+        Self {
+            #[cfg(not(test))]
+            app_handle: self.app_handle.clone(),
+            #[cfg(test)]
+            app_handle: self.app_handle.clone(),
+            #[cfg(test)]
+            app_local_data_dir: self.app_local_data_dir.clone(),
+            #[cfg(test)]
+            db_file_path: self.db_file_path.clone(),
+        }
+    }
+}
+
+impl<R: Runtime> PathProvider<R> {
+    pub fn new(app_handle: AppHandle<R>) -> Self {
         #[cfg(not(test))]
         {
             Self { app_handle }

@@ -14,7 +14,7 @@ use std::sync::{
 };
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, Runtime, Wry};
 
 const GENERATED_IMAGE_MAX_FILES: usize = 40;
 const GENERATED_IMAGE_MAX_AGE: Duration = Duration::from_secs(7 * 24 * 60 * 60);
@@ -84,8 +84,8 @@ const PYTHON_SIDECAR_ENV_ALLOWLIST: &[&str] = &[
     "no_proxy",
 ];
 
-pub struct AiProviderService {
-    app_handle: AppHandle,
+pub struct AiProviderService<R: Runtime = Wry> {
+    app_handle: AppHandle<R>,
 }
 
 #[derive(Clone, Default)]
@@ -107,8 +107,8 @@ impl AiProviderCancelToken {
     }
 }
 
-impl AiProviderService {
-    pub fn new(app_handle: AppHandle) -> Self {
+impl<R: Runtime> AiProviderService<R> {
+    pub fn new(app_handle: AppHandle<R>) -> Self {
         Self { app_handle }
     }
 
@@ -369,6 +369,18 @@ impl AiProviderService {
     }
 
     fn resolve_generated_output_dir(&self) -> AppResult<PathBuf> {
+        #[cfg(test)]
+        if let Some(test_path) = std::env::var_os("MONSTER_TOOLS_TEST_OUTPUT_DIR") {
+            let output_dir = PathBuf::from(test_path);
+            if !output_dir.exists() {
+                fs::create_dir_all(&output_dir).map_err(|error| {
+                    AppError::Io(format!("鍒涘缓 AI 鐢熷浘杈撳嚭鐩綍澶辫触: {}", error))
+                })?;
+            }
+            cleanup_generated_output_dir(&output_dir)?;
+            return Ok(output_dir);
+        }
+
         let path_provider = PathProvider::new(self.app_handle.clone());
         let output_dir = path_provider
             .get_app_local_data_dir()?

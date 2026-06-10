@@ -9,7 +9,7 @@ use crate::services::sidecar_lifecycle_service::{
     GenerateImagePromptSidecarRequest, SidecarLifecycleService,
 };
 use serde_json::json;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Runtime, Wry};
 
 #[derive(serde::Serialize, Clone)]
 pub struct TaskProgressPayload {
@@ -20,8 +20,8 @@ pub struct TaskProgressPayload {
     pub message: String,
 }
 
-pub struct TaskService {
-    app_handle: AppHandle,
+pub struct TaskService<R: Runtime = Wry> {
+    app_handle: AppHandle<R>,
     path_provider: PathProvider,
 }
 
@@ -98,8 +98,8 @@ pub struct CreateCreativeAssetServiceInput {
     pub status: Option<String>,
 }
 
-impl TaskService {
-    pub fn new(app_handle: AppHandle, path_provider: PathProvider) -> Self {
+impl<R: Runtime> TaskService<R> {
+    pub fn new(app_handle: AppHandle<R>, path_provider: PathProvider) -> Self {
         Self {
             app_handle,
             path_provider,
@@ -250,7 +250,7 @@ impl TaskService {
     pub fn run_generate_image_prompt_workflow(
         &self,
         input: GenerateImagePromptWorkflowInput,
-        sidecar_service: &mut SidecarLifecycleService,
+        sidecar_service: &mut SidecarLifecycleService<R>,
     ) -> AppResult<GenerateImagePromptWorkflowResult> {
         validate_generate_image_prompt_input(&input)?;
         let db_path = self.db_path()?;
@@ -338,7 +338,7 @@ impl TaskService {
         db_path: &std::path::Path,
         task: &CreativeTask,
         input: GenerateImagePromptWorkflowInput,
-        sidecar_service: &mut SidecarLifecycleService,
+        sidecar_service: &mut SidecarLifecycleService<R>,
     ) -> AppResult<GenerateImagePromptWorkflowResult> {
         let mut events = Vec::new();
 
@@ -733,5 +733,107 @@ fn build_review_result(
             .unwrap_or_else(|| "review_asset_quality".to_string()),
         source_asset_id: source_asset.id,
         source_task_id: source_task.map(|task| task.id),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::infra::creative_db::CreativeDbInfra;
+    use crate::infra::path::PathProvider;
+    use crate::services::sidecar_lifecycle_service::SidecarLifecycleService;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_root(name: &str) -> PathBuf {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be after unix epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "monster-workbench-task-service-{name}-{}-{stamp}",
+            std::process::id()
+        ))
+    }
+
+    #[test]
+    fn generate_image_prompt_workflow_persists_task_asset_and_events() {
+        let app = tauri::test::mock_app();
+        let root = temp_root("generate_prompt");
+        let db_path = root.join("monster_workbench.db");
+        let path_provider = PathProvider::new_for_test(root.clone(), db_path.clone());
+        let task_service = TaskService::new(app.handle().clone(), path_provider.clone());
+        let mut sidecar_service = SidecarLifecycleService::new(app.handle().clone());
+
+        CreativeDbInfra::init_schema(&db_path).expect("schema should init");
+
+        let result = task_service
+            .run_generate_image_prompt_workflow(
+                GenerateImagePromptWorkflowInput {
+                    project_id: Some("project-test".to_string()),
+                    brief: "A clean cinematic product poster".to_string(),
+                    style: Some("editorial illustration".to_string()),
+                    mood: Some("focused".to_string()),
+                    aspect_ratio: Some("16:9".to_string()),
+                },
+                &mut sidecar_service,
+            )
+            .expect("workflow should complete");
+
+        assert_eq!(result.task.task_type, "generate_image_prompt");
+        assert_eq!(result.task.status, "succeeded");
+        assert_eq!(result.asset.asset_type, "image_prompt");
+        assert!(
+            result
+                .asset
+                .content
+                .as_deref()
+                .unwrap_or_default()
+                .contains("product poster"),
+            "prompt asset should contain the brief"
+        );
+        assert!(
+            result
+                .events
+                .iter()
+                .any(|event| event.event_type == "workflow_started"),
+            "workflow should emit a start event"
+        );
+        assert!(
+            result
+                .events
+                .iter()
+                .any(|event| event.event_type == "asset_created"),
+            "workflow should emit an asset creation event"
+        );
+        assert!(
+            result
+                .events
+                .iter()
+                .any(|event| event.event_type == "workflow_succeeded"),
+            "workflow should emit a completion event"
+        );
+
+        let persisted_task = CreativeDbInfra::get_task(&db_path, result.task.id)
+            .expect("task query should succeed")
+            .expect("task should exist");
+        assert_eq!(persisted_task.status, "succeeded");
+        assert_eq!(persisted_task.asset_id, Some(result.asset.id));
+
+        let persisted_events = CreativeDbInfra::list_task_events(&db_path, result.task.id)
+            .expect("event query should succeed");
+        assert!(
+            persisted_events
+                .iter()
+                .any(|event| event.event_type == "workflow_succeeded"),
+            "persisted events should include completion"
+        );
+
+        let persisted_asset = CreativeDbInfra::get_asset(&db_path, result.asset.id)
+            .expect("asset query should succeed")
+            .expect("asset should exist");
+        assert_eq!(persisted_asset.asset_type, "image_prompt");
+
+        let _ = std::fs::remove_dir_all(root);
     }
 }

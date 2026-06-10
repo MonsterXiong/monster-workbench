@@ -10,11 +10,12 @@ use crate::services::ai_service::{AiProviderConfig, AiProviderService};
 use crate::services::task_service::CreativeTaskEventPayload;
 use serde_json::{json, Value};
 use std::collections::HashSet;
+use std::fs;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 use std::time::Instant;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Runtime, Wry};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -64,14 +65,20 @@ pub struct CreativeBatchJobEventPayload {
     pub message: Option<String>,
 }
 
-pub struct BatchJobService {
-    app_handle: AppHandle,
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BatchExecutionBudget {
+    max_consecutive_failures: Option<i64>,
+}
+
+pub struct BatchJobService<R: Runtime = Wry> {
+    app_handle: AppHandle<R>,
     path_provider: PathProvider,
     active_supervisors: Arc<Mutex<HashSet<i64>>>,
 }
 
-impl BatchJobService {
-    pub fn new(app_handle: AppHandle, path_provider: PathProvider) -> Self {
+impl<R: Runtime> BatchJobService<R> {
+    pub fn new(app_handle: AppHandle<R>, path_provider: PathProvider) -> Self {
         Self {
             app_handle,
             path_provider,
@@ -415,8 +422,8 @@ impl BatchJobService {
     }
 }
 
-fn run_batch_supervisor(
-    app_handle: AppHandle,
+fn run_batch_supervisor<R: Runtime>(
+    app_handle: AppHandle<R>,
     db_path: std::path::PathBuf,
     active_supervisors: Arc<Mutex<HashSet<i64>>>,
     batch_job_id: i64,
@@ -448,8 +455,8 @@ fn run_batch_supervisor(
     active.remove(&batch_job_id);
 }
 
-fn run_batch_supervisor_inner(
-    app_handle: &AppHandle,
+fn run_batch_supervisor_inner<R: Runtime>(
+    app_handle: &AppHandle<R>,
     db_path: &std::path::Path,
     batch_job_id: i64,
 ) -> AppResult<()> {
@@ -491,20 +498,14 @@ fn run_batch_supervisor_inner(
                         "creative-task-status-changed",
                         "status changed to running",
                     )?;
+                    let (started_event_type, started_message) =
+                        batch_worker_started_labels(&snapshot.job.batch_type);
                     let _ = CreativeDbInfra::append_task_event(
                         db_path,
                         CreateTaskEventInput {
                             task_id: task.id,
-                            event_type: if snapshot.job.batch_type == "demo.image.prompt" {
-                                "prompt_started".to_string()
-                            } else {
-                                "mock_started".to_string()
-                            },
-                            message: Some(if snapshot.job.batch_type == "demo.image.prompt" {
-                                "prompt worker started".to_string()
-                            } else {
-                                "mock worker started".to_string()
-                            }),
+                            event_type: started_event_type.to_string(),
+                            message: Some(started_message.to_string()),
                             payload_json: Some(
                                 json!({
                                     "batchJobId": batch_job_id,
@@ -515,22 +516,20 @@ fn run_batch_supervisor_inner(
                             ),
                         },
                     );
-                    emit_task_status(
-                        app_handle,
-                        &task,
-                        "creative-task-event",
-                        if snapshot.job.batch_type == "demo.image.prompt" {
-                            "prompt worker started"
-                        } else {
-                            "mock worker started"
-                        },
-                    )?;
+                    emit_task_status(app_handle, &task, "creative-task-event", started_message)?;
                     let task_db_path = db_path.to_path_buf();
                     let task_app_handle = app_handle.clone();
                     let batch_type = snapshot.job.batch_type.clone();
                     thread::spawn(move || {
                         let _ = if batch_type == "demo.image.prompt" {
                             run_prompt_task_worker(
+                                &task_app_handle,
+                                &task_db_path,
+                                batch_job_id,
+                                task,
+                            )
+                        } else if batch_type == "demo.image.generate" {
+                            run_generate_task_worker(
                                 &task_app_handle,
                                 &task_db_path,
                                 batch_job_id,
@@ -590,8 +589,112 @@ fn run_batch_supervisor_inner(
     Ok(())
 }
 
-fn run_mock_task_worker(
-    app_handle: &AppHandle,
+fn resolve_max_consecutive_failures(batch: &CreativeBatchJob) -> i64 {
+    batch
+        .budget_json
+        .as_deref()
+        .and_then(|raw| serde_json::from_str::<BatchExecutionBudget>(raw).ok())
+        .and_then(|budget| budget.max_consecutive_failures)
+        .unwrap_or(20)
+        .clamp(1, 1000)
+}
+
+fn batch_worker_started_labels(batch_type: &str) -> (&'static str, &'static str) {
+    match batch_type {
+        "demo.image.prompt" => ("prompt_started", "prompt worker started"),
+        "demo.image.generate" => ("image_started", "image worker started"),
+        _ => ("mock_started", "mock worker started"),
+    }
+}
+
+fn should_auto_pause_after_failure(
+    db_path: &std::path::Path,
+    batch_job_id: i64,
+    threshold: i64,
+) -> AppResult<bool> {
+    if threshold <= 0 {
+        return Ok(false);
+    }
+
+    let tasks = CreativeDbInfra::list_tasks(
+        db_path,
+        ListCreativeTasksFilter {
+            batch_job_id: Some(batch_job_id),
+            limit: Some(1000),
+            offset: Some(0),
+            ..Default::default()
+        },
+    )?;
+
+    let mut terminal_tasks = tasks
+        .into_iter()
+        .filter(|task| matches!(task.status.as_str(), "succeeded" | "failed" | "cancelled"))
+        .collect::<Vec<_>>();
+    terminal_tasks.sort_by(|left, right| {
+        right
+            .updated_at
+            .cmp(&left.updated_at)
+            .then_with(|| right.id.cmp(&left.id))
+    });
+
+    let consecutive_failures = terminal_tasks
+        .iter()
+        .take_while(|task| task.status == "failed")
+        .count() as i64;
+    Ok(consecutive_failures >= threshold)
+}
+
+fn maybe_auto_pause_batch_after_failure<R: Runtime>(
+    app_handle: &AppHandle<R>,
+    db_path: &std::path::Path,
+    batch_job_id: i64,
+    failure_message: &str,
+) -> AppResult<bool> {
+    let Some(batch) = CreativeDbInfra::get_batch_job(db_path, batch_job_id)? else {
+        return Ok(false);
+    };
+    if batch.status != "running" {
+        return Ok(false);
+    }
+
+    let threshold = resolve_max_consecutive_failures(&batch);
+    if !should_auto_pause_after_failure(db_path, batch_job_id, threshold)? {
+        return Ok(false);
+    }
+
+    CreativeDbInfra::update_batch_job(
+        db_path,
+        UpdateCreativeBatchJobInput {
+            id: batch_job_id,
+            status: Some("paused".to_string()),
+            concurrency: None,
+            max_retries: None,
+            prompt_template: None,
+            provider_id: None,
+            model: None,
+            image_size: None,
+            budget_json: None,
+            started_at: None,
+            finished_at: None,
+        },
+    )?;
+
+    let snapshot =
+        CreativeDbInfra::get_batch_job_snapshot(db_path, batch_job_id)?.ok_or_else(|| {
+            AppError::Database("batch job snapshot missing after auto pause".to_string())
+        })?;
+    let message = format!(
+        "batch auto-paused after {} consecutive failures: {}",
+        threshold,
+        summarize_prompt_text(failure_message)
+    );
+    emit_batch_status(app_handle, &snapshot, &message)?;
+    emit_batch_progress(app_handle, &snapshot, &message)?;
+    Ok(true)
+}
+
+fn run_mock_task_worker<R: Runtime>(
+    app_handle: &AppHandle<R>,
     db_path: &std::path::Path,
     batch_job_id: i64,
     task: CreativeTask,
@@ -727,8 +830,8 @@ fn run_mock_task_worker(
     Ok(())
 }
 
-fn run_prompt_task_worker(
-    app_handle: &AppHandle,
+fn run_prompt_task_worker<R: Runtime>(
+    app_handle: &AppHandle<R>,
     db_path: &std::path::Path,
     batch_job_id: i64,
     task: CreativeTask,
@@ -1032,6 +1135,12 @@ fn run_prompt_task_worker(
                     "creative-task-event",
                     "prompt worker finished with failure",
                 )?;
+                let _ = maybe_auto_pause_batch_after_failure(
+                    app_handle,
+                    db_path,
+                    batch_job_id,
+                    &error.to_string(),
+                );
             }
         }
     }
@@ -1039,8 +1148,221 @@ fn run_prompt_task_worker(
     Ok(())
 }
 
-fn emit_batch_progress(
-    app_handle: &AppHandle,
+fn run_generate_task_worker<R: Runtime>(
+    app_handle: &AppHandle<R>,
+    db_path: &std::path::Path,
+    batch_job_id: i64,
+    task: CreativeTask,
+) -> AppResult<()> {
+    let batch = CreativeDbInfra::get_batch_job(db_path, batch_job_id)?.ok_or_else(|| {
+        AppError::Database("batch job not found while running generate task".to_string())
+    })?;
+    let current_task = CreativeDbInfra::get_task(db_path, task.id)?.ok_or_else(|| {
+        AppError::Database("task not found while running generate worker".to_string())
+    })?;
+    if batch.status == "cancelled"
+        || matches!(current_task.status.as_str(), "cancelling" | "cancelled")
+    {
+        let cancelled_task = CreativeDbInfra::update_task_status(
+            db_path,
+            UpdateCreativeTaskStatusInput {
+                id: task.id,
+                status: "cancelled".to_string(),
+                result_json: None,
+                error_message: Some("image task cancelled".to_string()),
+                asset_id: current_task.asset_id,
+                retry_count_increment: None,
+            },
+        )?;
+        let _ = CreativeDbInfra::append_task_event(
+            db_path,
+            CreateTaskEventInput {
+                task_id: task.id,
+                event_type: "image_cancelled".to_string(),
+                message: Some("image worker observed cancellation".to_string()),
+                payload_json: Some(json!({ "batchJobId": batch_job_id }).to_string()),
+            },
+        );
+        emit_task_status(
+            app_handle,
+            &cancelled_task,
+            "creative-task-status-changed",
+            "status changed to cancelled",
+        )?;
+        emit_task_status(
+            app_handle,
+            &cancelled_task,
+            "creative-task-event",
+            "image worker observed cancellation",
+        )?;
+        return Ok(());
+    }
+
+    let prompt_request = build_prompt_request(&task)?;
+    let provider_config =
+        build_image_provider_config(&task, &prompt_request, batch.image_size.as_deref())?;
+    let model_started = Instant::now();
+    let ai_service = AiProviderService::new(app_handle.clone());
+    let provider_result = ai_service.test_provider(
+        provider_config.clone(),
+        "image".to_string(),
+        Some(format!("batch-image-task-{}", task.id)),
+        None,
+    );
+    let duration_ms = model_started.elapsed().as_millis() as i64;
+
+    match provider_result {
+        Ok(result) if result.ok => {
+            let (file_path, thumbnail_path, saved_files) =
+                resolve_generate_image_paths(db_path, batch_job_id, task.id, &result)?;
+            let image_asset = CreativeDbInfra::create_asset(
+                db_path,
+                CreateCreativeAssetInput {
+                    project_id: task.project_id.clone(),
+                    asset_type: "demo_image".to_string(),
+                    title: Some(format!(
+                        "Batch image #{}",
+                        task.sequence_no.unwrap_or(task.id)
+                    )),
+                    content: Some(result.message.clone()),
+                    file_path: Some(file_path.clone()),
+                    thumbnail_path: Some(thumbnail_path.clone()),
+                    metadata_json: Some(
+                        json!({
+                            "batchJobId": batch_job_id,
+                            "sourceTaskId": task.id,
+                            "sequenceNo": task.sequence_no,
+                            "promptTemplate": prompt_request,
+                            "providerResult": result,
+                            "savedFiles": saved_files,
+                            "filePath": file_path,
+                            "thumbnailPath": thumbnail_path,
+                        })
+                        .to_string(),
+                    ),
+                    status: Some("ready".to_string()),
+                },
+            )?;
+
+            let model_run = CreativeDbInfra::create_model_run(
+                db_path,
+                CreateModelRunInput {
+                    project_id: task.project_id.clone(),
+                    task_id: Some(task.id),
+                    asset_id: Some(image_asset.id),
+                    provider_id: Some(provider_config.display_name.clone()),
+                    provider_type: Some(provider_config.provider.clone()),
+                    model: Some(provider_config.image_model.clone()),
+                    request_type: "image".to_string(),
+                    status: "succeeded".to_string(),
+                    duration_ms: Some(duration_ms),
+                    prompt_hash: Some(simple_prompt_hash(&prompt_request)),
+                    prompt_version_id: Some(format!("batch:{}:{}", batch_job_id, task.id)),
+                    input_token_count: None,
+                    output_token_count: None,
+                    cost_estimate: None,
+                    error_code: None,
+                    error_message: None,
+                    metadata_json: Some(
+                        json!({
+                            "requestId": result.request_id,
+                            "baseUrl": result.base_url,
+                            "queueWaitMs": result.queue_wait_ms,
+                            "message": result.message,
+                            "apiImageSize": result.api_image_size,
+                            "requestedImageSize": result.requested_image_size,
+                            "actualImageSize": result.actual_image_size,
+                            "fallbackImageSize": result.fallback_image_size,
+                            "imageAttempts": result.image_attempts,
+                        })
+                        .to_string(),
+                    ),
+                    finished_at: None,
+                },
+            )?;
+
+            let updated_task = CreativeDbInfra::update_task_status(
+                db_path,
+                UpdateCreativeTaskStatusInput {
+                    id: task.id,
+                    status: "succeeded".to_string(),
+                    result_json: Some(
+                        json!({
+                            "assetId": image_asset.id,
+                            "modelRunId": model_run.id,
+                            "filePath": file_path,
+                            "thumbnailPath": thumbnail_path,
+                            "promptExcerpt": summarize_prompt_text(&prompt_request),
+                            "durationMs": duration_ms,
+                        })
+                        .to_string(),
+                    ),
+                    error_message: None,
+                    asset_id: Some(image_asset.id),
+                    retry_count_increment: None,
+                },
+            )?;
+            let _ = CreativeDbInfra::append_task_event(
+                db_path,
+                CreateTaskEventInput {
+                    task_id: task.id,
+                    event_type: "image_asset_saved".to_string(),
+                    message: Some(format!("image asset created: {}", image_asset.id)),
+                    payload_json: Some(
+                        json!({
+                            "assetId": image_asset.id,
+                            "modelRunId": model_run.id,
+                            "filePath": file_path,
+                            "thumbnailPath": thumbnail_path,
+                        })
+                        .to_string(),
+                    ),
+                },
+            );
+            emit_task_status(
+                app_handle,
+                &updated_task,
+                "creative-task-status-changed",
+                "status changed to succeeded",
+            )?;
+            emit_task_status(
+                app_handle,
+                &updated_task,
+                "creative-task-event",
+                "image worker finished successfully",
+            )?;
+        }
+        Ok(result) => {
+            handle_generate_failure(
+                app_handle,
+                db_path,
+                batch_job_id,
+                task,
+                &provider_config,
+                prompt_request,
+                duration_ms,
+                result.message.clone(),
+            )?;
+        }
+        Err(error) => {
+            handle_generate_failure(
+                app_handle,
+                db_path,
+                batch_job_id,
+                task,
+                &provider_config,
+                prompt_request,
+                duration_ms,
+                error.to_string(),
+            )?;
+        }
+    }
+
+    Ok(())
+}
+
+fn emit_batch_progress<R: Runtime>(
+    app_handle: &AppHandle<R>,
     snapshot: &CreativeBatchJobSnapshot,
     message: &str,
 ) -> AppResult<()> {
@@ -1063,8 +1385,8 @@ fn emit_batch_progress(
         .map_err(|error| AppError::Process(format!("failed to emit batch-job-progress: {error}")))
 }
 
-fn emit_batch_status(
-    app_handle: &AppHandle,
+fn emit_batch_status<R: Runtime>(
+    app_handle: &AppHandle<R>,
     snapshot: &CreativeBatchJobSnapshot,
     message: &str,
 ) -> AppResult<()> {
@@ -1089,8 +1411,8 @@ fn emit_batch_status(
         })
 }
 
-fn emit_task_status(
-    app_handle: &AppHandle,
+fn emit_task_status<R: Runtime>(
+    app_handle: &AppHandle<R>,
     task: &CreativeTask,
     event_name: &str,
     message: &str,
@@ -1175,6 +1497,231 @@ fn build_provider_config(task: &CreativeTask, prompt_request: &str) -> AppResult
     })
 }
 
+fn build_image_provider_config(
+    task: &CreativeTask,
+    prompt_request: &str,
+    image_size: Option<&str>,
+) -> AppResult<AiProviderConfig> {
+    let payload = task
+        .payload_json
+        .as_deref()
+        .map(|raw| serde_json::from_str::<Value>(raw))
+        .transpose()
+        .map_err(|error| AppError::Config(format!("invalid batch prompt payload: {error}")))?;
+    let config_value = payload
+        .as_ref()
+        .and_then(|value| value.get("providerConfig"))
+        .cloned()
+        .ok_or_else(|| {
+            AppError::Config("providerConfig is required for generate batch".to_string())
+        })?;
+    let provider_config: BatchPromptProviderConfigInput = serde_json::from_value(config_value)
+        .map_err(|error| AppError::Config(format!("invalid providerConfig: {error}")))?;
+
+    Ok(AiProviderConfig {
+        provider: provider_config.provider,
+        display_name: provider_config.display_name,
+        base_url: provider_config.base_url,
+        api_key: provider_config.api_key,
+        remember_api_key: false,
+        model: provider_config.model.clone(),
+        test_prompt: prompt_request.to_string(),
+        image_model: provider_config.model,
+        image_prompt: prompt_request.to_string(),
+        image_count: 1,
+        image_size: image_size.unwrap_or("1024x1024").to_string(),
+        timeout_ms: provider_config.timeout_ms.unwrap_or(60_000),
+        queue_mode: provider_config
+            .queue_mode
+            .unwrap_or_else(|| "serial".to_string()),
+        max_concurrency: provider_config.max_concurrency.unwrap_or(1),
+        queue_key: provider_config.queue_key.unwrap_or_default(),
+    })
+}
+
+fn resolve_generate_image_paths(
+    db_path: &std::path::Path,
+    batch_job_id: i64,
+    task_id: i64,
+    result: &crate::services::ai_service::AiProviderTestResult,
+) -> AppResult<(String, String, String)> {
+    let source_path = result
+        .image_paths
+        .as_ref()
+        .and_then(|paths| paths.first().cloned())
+        .or_else(|| {
+            result
+                .saved_files
+                .as_ref()
+                .and_then(|files| files.first().map(|file| file.path.clone()))
+        })
+        .ok_or_else(|| AppError::Process("image provider returned no saved file".to_string()))?;
+
+    let source_path = std::path::PathBuf::from(&source_path);
+    let thumbnail_path = source_path.with_file_name(format!(
+        "{}-thumb{}",
+        source_path
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .unwrap_or("image"),
+        source_path
+            .extension()
+            .and_then(|value| value.to_str())
+            .map(|ext| format!(".{ext}"))
+            .unwrap_or_else(|| ".png".to_string())
+    ));
+
+    if source_path.exists() {
+        let _ = fs::copy(&source_path, &thumbnail_path);
+    }
+
+    let _ = db_path;
+    let _ = batch_job_id;
+    let _ = task_id;
+
+    Ok((
+        source_path.to_string_lossy().to_string(),
+        thumbnail_path.to_string_lossy().to_string(),
+        serde_json::to_string(&result.saved_files).unwrap_or_else(|_| "[]".to_string()),
+    ))
+}
+
+fn handle_generate_failure<R: Runtime>(
+    app_handle: &AppHandle<R>,
+    db_path: &std::path::Path,
+    batch_job_id: i64,
+    task: CreativeTask,
+    provider_config: &AiProviderConfig,
+    prompt_request: String,
+    duration_ms: i64,
+    error_message: String,
+) -> AppResult<()> {
+    if current_retry_count(&task) < task.max_retries {
+        let retry_task = CreativeDbInfra::update_task_status(
+            db_path,
+            UpdateCreativeTaskStatusInput {
+                id: task.id,
+                status: "queued".to_string(),
+                result_json: None,
+                error_message: Some(error_message.clone()),
+                asset_id: task.asset_id,
+                retry_count_increment: Some(1),
+            },
+        )?;
+        let _ = CreativeDbInfra::create_model_run(
+            db_path,
+            CreateModelRunInput {
+                project_id: task.project_id.clone(),
+                task_id: Some(task.id),
+                asset_id: None,
+                provider_id: Some(provider_config.display_name.clone()),
+                provider_type: Some(provider_config.provider.clone()),
+                model: Some(provider_config.image_model.clone()),
+                request_type: "image".to_string(),
+                status: "failed".to_string(),
+                duration_ms: Some(duration_ms),
+                prompt_hash: Some(simple_prompt_hash(&prompt_request)),
+                prompt_version_id: Some(format!("batch:{}:{}", batch_job_id, task.id)),
+                input_token_count: None,
+                output_token_count: None,
+                cost_estimate: None,
+                error_code: Some("provider_error".to_string()),
+                error_message: Some(error_message.clone()),
+                metadata_json: Some(json!({ "retryScheduled": true }).to_string()),
+                finished_at: None,
+            },
+        );
+        let _ = CreativeDbInfra::append_task_event(
+            db_path,
+            CreateTaskEventInput {
+                task_id: task.id,
+                event_type: "image_retry_scheduled".to_string(),
+                message: Some("image worker scheduled retry".to_string()),
+                payload_json: Some(
+                    json!({
+                        "retryCount": retry_task.retry_count,
+                        "maxRetries": retry_task.max_retries,
+                        "error": error_message,
+                    })
+                    .to_string(),
+                ),
+            },
+        );
+        emit_task_status(
+            app_handle,
+            &retry_task,
+            "creative-task-status-changed",
+            "status changed to queued",
+        )?;
+        emit_task_status(
+            app_handle,
+            &retry_task,
+            "creative-task-event",
+            "image worker scheduled retry",
+        )?;
+    } else {
+        let failed_task = CreativeDbInfra::update_task_status(
+            db_path,
+            UpdateCreativeTaskStatusInput {
+                id: task.id,
+                status: "failed".to_string(),
+                result_json: None,
+                error_message: Some(error_message.clone()),
+                asset_id: task.asset_id,
+                retry_count_increment: None,
+            },
+        )?;
+        let _ = CreativeDbInfra::create_model_run(
+            db_path,
+            CreateModelRunInput {
+                project_id: task.project_id.clone(),
+                task_id: Some(task.id),
+                asset_id: None,
+                provider_id: Some(provider_config.display_name.clone()),
+                provider_type: Some(provider_config.provider.clone()),
+                model: Some(provider_config.image_model.clone()),
+                request_type: "image".to_string(),
+                status: "failed".to_string(),
+                duration_ms: Some(duration_ms),
+                prompt_hash: Some(simple_prompt_hash(&prompt_request)),
+                prompt_version_id: Some(format!("batch:{}:{}", batch_job_id, task.id)),
+                input_token_count: None,
+                output_token_count: None,
+                cost_estimate: None,
+                error_code: Some("provider_error".to_string()),
+                error_message: Some(error_message.clone()),
+                metadata_json: Some(json!({ "retryScheduled": false }).to_string()),
+                finished_at: None,
+            },
+        );
+        let _ = CreativeDbInfra::append_task_event(
+            db_path,
+            CreateTaskEventInput {
+                task_id: task.id,
+                event_type: "image_failed".to_string(),
+                message: Some("image worker finished with failure".to_string()),
+                payload_json: Some(json!({ "error": error_message }).to_string()),
+            },
+        );
+        emit_task_status(
+            app_handle,
+            &failed_task,
+            "creative-task-status-changed",
+            "status changed to failed",
+        )?;
+        emit_task_status(
+            app_handle,
+            &failed_task,
+            "creative-task-event",
+            "image worker finished with failure",
+        )?;
+        let _ =
+            maybe_auto_pause_batch_after_failure(app_handle, db_path, batch_job_id, &error_message);
+    }
+
+    Ok(())
+}
+
 fn summarize_prompt_text(value: &str) -> String {
     let trimmed = value.trim();
     const MAX_CHARS: usize = 120;
@@ -1220,10 +1767,664 @@ fn validate_create_batch_job_input(input: &CreateBatchImageJobInput) -> AppResul
             ));
         }
     }
-    if batch_type == "demo.image.prompt" && input.provider_config.is_none() {
+    if matches!(batch_type, "demo.image.prompt" | "demo.image.generate")
+        && input.provider_config.is_none()
+    {
         return Err(AppError::Config(
-            "provider_config is required for prompt batch".to_string(),
+            "provider_config is required for prompt/generate batch".to_string(),
         ));
     }
     Ok(())
+}
+
+fn current_retry_count(task: &CreativeTask) -> i64 {
+    task.retry_count
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::infra::creative_db::{
+        CreativeAsset, ListCreativeAssetsFilter, ListModelRunsFilter, UpdateCreativeBatchJobInput,
+    };
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::path::PathBuf;
+    use std::process::Command;
+    use std::thread::JoinHandle;
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+    const TINY_PNG_BASE64: &str =
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO2p8Z0AAAAASUVORK5CYII=";
+
+    fn python_available() -> bool {
+        Command::new("python")
+            .arg("--version")
+            .output()
+            .map(|output| output.status.success())
+            .unwrap_or(false)
+            || Command::new("py")
+                .args(["-3", "--version"])
+                .output()
+                .map(|output| output.status.success())
+                .unwrap_or(false)
+    }
+
+    fn temp_root(name: &str) -> PathBuf {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be after unix epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "monster-workbench-batch-job-{name}-{}-{stamp}",
+            std::process::id()
+        ))
+    }
+
+    fn provider_config(base_url: String, model: &str) -> BatchPromptProviderConfigInput {
+        BatchPromptProviderConfigInput {
+            provider: "custom".to_string(),
+            display_name: "Local Test Provider".to_string(),
+            base_url,
+            api_key: "local-test-key".to_string(),
+            model: model.to_string(),
+            timeout_ms: Some(15_000),
+            queue_mode: Some("serial".to_string()),
+            max_concurrency: Some(1),
+            queue_key: Some("batch-test".to_string()),
+        }
+    }
+
+    fn start_prompt_provider_server(prompt_text: &'static str) -> (String, JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
+        listener
+            .set_nonblocking(true)
+            .expect("listener should allow non-blocking");
+        let base_url = format!(
+            "http://127.0.0.1:{}",
+            listener.local_addr().expect("addr should exist").port()
+        );
+        let handle = std::thread::spawn(move || {
+            let deadline = std::time::Instant::now() + Duration::from_secs(10);
+            let mut handled = 0;
+            while handled < 1 && std::time::Instant::now() < deadline {
+                match listener.accept() {
+                    Ok((mut stream, _)) => {
+                        let request = read_http_request(&mut stream);
+                        let body = if request.starts_with("POST /chat/completions ") {
+                            serde_json::json!({
+                                "choices": [
+                                    {
+                                        "message": {
+                                            "content": prompt_text
+                                        }
+                                    }
+                                ]
+                            })
+                            .to_string()
+                        } else {
+                            "{\"error\":\"unexpected route\"}".to_string()
+                        };
+                        write_json_response(&mut stream, 200, &body);
+                        handled += 1;
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                    Err(error) => panic!("prompt test server accept failed: {error}"),
+                }
+            }
+        });
+        (base_url, handle)
+    }
+
+    fn start_image_provider_server(model: &'static str) -> (String, JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
+        listener
+            .set_nonblocking(true)
+            .expect("listener should allow non-blocking");
+        let base_url = format!(
+            "http://127.0.0.1:{}",
+            listener.local_addr().expect("addr should exist").port()
+        );
+        let handle = std::thread::spawn(move || {
+            let deadline = std::time::Instant::now() + Duration::from_secs(10);
+            let mut handled = 0;
+            while handled < 2 && std::time::Instant::now() < deadline {
+                match listener.accept() {
+                    Ok((mut stream, _)) => {
+                        let request = read_http_request(&mut stream);
+                        let body = if request.starts_with("GET /models ") {
+                            serde_json::json!({
+                                "data": [
+                                    {
+                                        "id": model
+                                    }
+                                ]
+                            })
+                            .to_string()
+                        } else if request.starts_with("POST /images/generations ") {
+                            serde_json::json!({
+                                "data": [
+                                    {
+                                        "b64_json": TINY_PNG_BASE64
+                                    }
+                                ]
+                            })
+                            .to_string()
+                        } else {
+                            "{\"error\":\"unexpected route\"}".to_string()
+                        };
+                        write_json_response(&mut stream, 200, &body);
+                        handled += 1;
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                    Err(error) => panic!("image test server accept failed: {error}"),
+                }
+            }
+        });
+        (base_url, handle)
+    }
+
+    fn start_failing_image_provider_server(model: &'static str) -> (String, JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
+        listener
+            .set_nonblocking(true)
+            .expect("listener should allow non-blocking");
+        let base_url = format!(
+            "http://127.0.0.1:{}",
+            listener.local_addr().expect("addr should exist").port()
+        );
+        let handle = std::thread::spawn(move || {
+            let deadline = std::time::Instant::now() + Duration::from_secs(10);
+            let mut handled = 0;
+            while handled < 4 && std::time::Instant::now() < deadline {
+                match listener.accept() {
+                    Ok((mut stream, _)) => {
+                        let request = read_http_request(&mut stream);
+                        if request.starts_with("GET /models ") {
+                            let body = serde_json::json!({
+                                "data": [
+                                    {
+                                        "id": model
+                                    }
+                                ]
+                            })
+                            .to_string();
+                            write_json_response(&mut stream, 200, &body);
+                        } else if request.starts_with("POST /images/generations ") {
+                            let body = serde_json::json!({
+                                "error": {
+                                    "message": "rate limit for test auto pause"
+                                }
+                            })
+                            .to_string();
+                            write_json_response(&mut stream, 500, &body);
+                        } else {
+                            write_json_response(
+                                &mut stream,
+                                404,
+                                "{\"error\":\"unexpected route\"}",
+                            );
+                        }
+                        handled += 1;
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                    Err(error) => panic!("failing image test server accept failed: {error}"),
+                }
+            }
+        });
+        (base_url, handle)
+    }
+
+    fn read_http_request(stream: &mut std::net::TcpStream) -> String {
+        stream
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .expect("read timeout should set");
+        let mut buffer = [0_u8; 8192];
+        let mut data = Vec::new();
+        let mut header_end = None;
+        let mut content_length = 0usize;
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            match stream.read(&mut buffer) {
+                Ok(0) => break,
+                Ok(size) => {
+                    data.extend_from_slice(&buffer[..size]);
+                    if header_end.is_none() {
+                        if let Some(position) =
+                            data.windows(4).position(|window| window == b"\r\n\r\n")
+                        {
+                            let end = position + 4;
+                            header_end = Some(end);
+                            let headers = String::from_utf8_lossy(&data[..end]).into_owned();
+                            content_length = headers
+                                .lines()
+                                .find_map(|line| {
+                                    let (name, value) = line.split_once(':')?;
+                                    if name.trim().eq_ignore_ascii_case("content-length") {
+                                        value.trim().parse::<usize>().ok()
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .unwrap_or(0);
+                            if data.len() >= end + content_length {
+                                break;
+                            }
+                        }
+                    } else if let Some(end) = header_end {
+                        if data.len() >= end + content_length {
+                            break;
+                        }
+                    }
+                }
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                    ) =>
+                {
+                    if let Some(end) = header_end {
+                        if data.len() >= end + content_length {
+                            break;
+                        }
+                    }
+                    if std::time::Instant::now() >= deadline {
+                        break;
+                    }
+                }
+                Err(error) => panic!("request read failed: {error}"),
+            }
+        }
+        String::from_utf8_lossy(&data).into_owned()
+    }
+
+    fn write_json_response(stream: &mut std::net::TcpStream, status: u16, body: &str) {
+        let response = format!(
+            "HTTP/1.1 {status} OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        stream
+            .write_all(response.as_bytes())
+            .expect("response should write");
+        stream.flush().expect("response should flush");
+    }
+
+    fn cleanup_asset_files(asset: &CreativeAsset) {
+        if let Some(path) = &asset.file_path {
+            let _ = std::fs::remove_file(path);
+        }
+        if let Some(path) = &asset.thumbnail_path {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+
+    #[test]
+    fn batch_worker_started_labels_match_batch_type() {
+        assert_eq!(
+            batch_worker_started_labels("demo.image.mock"),
+            ("mock_started", "mock worker started")
+        );
+        assert_eq!(
+            batch_worker_started_labels("demo.image.prompt"),
+            ("prompt_started", "prompt worker started")
+        );
+        assert_eq!(
+            batch_worker_started_labels("demo.image.generate"),
+            ("image_started", "image worker started")
+        );
+    }
+
+    #[test]
+    fn auto_pause_batch_when_generate_failures_hit_budget_threshold() {
+        if !python_available() {
+            eprintln!("python runtime is unavailable; skipping generate auto-pause test");
+            return;
+        }
+
+        let app = tauri::test::mock_app();
+        let root = temp_root("generate-auto-pause");
+        let db_path = root.join("monster_workbench.db");
+        let generated_root = root.join("generated");
+        let path_provider = PathProvider::new_for_test(root.clone(), db_path.clone());
+        let service = BatchJobService::new(app.handle().clone(), path_provider.clone());
+        CreativeDbInfra::init_schema(&db_path).expect("schema should init");
+        std::env::set_var("MONSTER_TOOLS_TEST_OUTPUT_DIR", &generated_root);
+
+        let (base_url, server) = start_failing_image_provider_server("gpt-image-1");
+        let snapshot = service
+            .create_batch_image_job(CreateBatchImageJobInput {
+                project_id: Some("project-batch-image".to_string()),
+                name: "Image Batch Auto Pause".to_string(),
+                batch_type: Some("demo.image.generate".to_string()),
+                total_count: Some(2),
+                concurrency: Some(1),
+                max_retries: Some(0),
+                prompt_template: Some("Render batch image {{sequenceNo}}".to_string()),
+                provider_id: Some("local-test".to_string()),
+                model: Some("gpt-image-1".to_string()),
+                image_size: Some("1024x1024".to_string()),
+                budget_json: Some(json!({ "maxConsecutiveFailures": 2 }).to_string()),
+                provider_config: Some(provider_config(base_url, "gpt-image-1")),
+            })
+            .expect("batch job should create");
+
+        CreativeDbInfra::update_batch_job(
+            &db_path,
+            UpdateCreativeBatchJobInput {
+                id: snapshot.job.id,
+                status: Some("running".to_string()),
+                concurrency: None,
+                max_retries: None,
+                prompt_template: None,
+                provider_id: None,
+                model: None,
+                image_size: None,
+                budget_json: None,
+                started_at: None,
+                finished_at: None,
+            },
+        )
+        .expect("batch should transition to running");
+
+        let tasks = service
+            .list_batch_job_tasks(snapshot.job.id, Some(10), Some(0))
+            .expect("task list should load");
+        assert_eq!(tasks.len(), 2);
+
+        for task in tasks {
+            let running_task = CreativeDbInfra::update_task_status(
+                &db_path,
+                UpdateCreativeTaskStatusInput {
+                    id: task.id,
+                    status: "running".to_string(),
+                    result_json: None,
+                    error_message: None,
+                    asset_id: None,
+                    retry_count_increment: None,
+                },
+            )
+            .expect("task should move to running");
+
+            run_generate_task_worker(app.handle(), &db_path, snapshot.job.id, running_task)
+                .expect("generate worker should complete even on failure");
+        }
+
+        server
+            .join()
+            .expect("failing image test server should join");
+
+        let refreshed = CreativeDbInfra::get_batch_job_snapshot(&db_path, snapshot.job.id)
+            .expect("snapshot should load")
+            .expect("batch job should exist");
+        assert_eq!(refreshed.job.status, "paused");
+        assert_eq!(refreshed.stats.failed_tasks, 2);
+
+        let failed_tasks = service
+            .list_batch_job_tasks(snapshot.job.id, Some(10), Some(0))
+            .expect("task list should load");
+        assert!(failed_tasks.iter().all(|task| task.status == "failed"));
+
+        std::env::remove_var("MONSTER_TOOLS_TEST_OUTPUT_DIR");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn prompt_batch_worker_persists_prompt_asset_and_model_run() {
+        if !python_available() {
+            eprintln!("python runtime is unavailable; skipping prompt batch worker test");
+            return;
+        }
+
+        let app = tauri::test::mock_app();
+        let root = temp_root("prompt");
+        let db_path = root.join("monster_workbench.db");
+        let path_provider = PathProvider::new_for_test(root.clone(), db_path.clone());
+        let service = BatchJobService::new(app.handle().clone(), path_provider.clone());
+        CreativeDbInfra::init_schema(&db_path).expect("schema should init");
+
+        let (base_url, server) = start_prompt_provider_server(
+            "A polished cinematic prompt about a quiet neon street scene.",
+        );
+        let snapshot = service
+            .create_batch_image_job(CreateBatchImageJobInput {
+                project_id: Some("project-batch-prompt".to_string()),
+                name: "Prompt Batch".to_string(),
+                batch_type: Some("demo.image.prompt".to_string()),
+                total_count: Some(1),
+                concurrency: Some(1),
+                max_retries: Some(0),
+                prompt_template: Some("Prompt {{sequenceNo}}".to_string()),
+                provider_id: Some("local-test".to_string()),
+                model: Some("gpt-4.1-mini".to_string()),
+                image_size: Some("1024x1024".to_string()),
+                budget_json: None,
+                provider_config: Some(provider_config(base_url, "gpt-4.1-mini")),
+            })
+            .expect("batch job should create");
+
+        CreativeDbInfra::update_batch_job(
+            &db_path,
+            UpdateCreativeBatchJobInput {
+                id: snapshot.job.id,
+                status: Some("running".to_string()),
+                concurrency: None,
+                max_retries: None,
+                prompt_template: None,
+                provider_id: None,
+                model: None,
+                image_size: None,
+                budget_json: None,
+                started_at: None,
+                finished_at: None,
+            },
+        )
+        .expect("batch should transition to running");
+
+        let task = service
+            .list_batch_job_tasks(snapshot.job.id, Some(10), Some(0))
+            .expect("task list should load")
+            .into_iter()
+            .next()
+            .expect("task should exist");
+        let running_task = CreativeDbInfra::update_task_status(
+            &db_path,
+            UpdateCreativeTaskStatusInput {
+                id: task.id,
+                status: "running".to_string(),
+                result_json: None,
+                error_message: None,
+                asset_id: None,
+                retry_count_increment: None,
+            },
+        )
+        .expect("task should move to running");
+
+        run_prompt_task_worker(app.handle(), &db_path, snapshot.job.id, running_task)
+            .expect("prompt worker should succeed");
+        server.join().expect("prompt test server should join");
+
+        let persisted_task = CreativeDbInfra::get_task(&db_path, task.id)
+            .expect("task lookup should succeed")
+            .expect("task should exist");
+        assert_eq!(persisted_task.status, "succeeded");
+        let asset_id = persisted_task
+            .asset_id
+            .expect("task should reference an asset");
+
+        let assets = CreativeDbInfra::list_assets(
+            &db_path,
+            ListCreativeAssetsFilter {
+                asset_type: Some("demo_image_prompt".to_string()),
+                ..Default::default()
+            },
+        )
+        .expect("asset list should succeed");
+        assert_eq!(assets.len(), 1);
+        assert_eq!(assets[0].id, asset_id);
+        assert!(assets[0]
+            .content
+            .as_deref()
+            .unwrap_or_default()
+            .contains("quiet neon street scene"));
+
+        let model_runs = CreativeDbInfra::list_model_runs(
+            &db_path,
+            ListModelRunsFilter {
+                task_id: Some(task.id),
+                ..Default::default()
+            },
+        )
+        .expect("model runs should list");
+        assert_eq!(model_runs.len(), 1);
+        assert_eq!(model_runs[0].request_type, "chat");
+        assert_eq!(model_runs[0].status, "succeeded");
+
+        let events =
+            CreativeDbInfra::list_task_events(&db_path, task.id).expect("events should list");
+        assert!(
+            events
+                .iter()
+                .any(|event| event.event_type == "prompt_asset_saved"),
+            "prompt worker should persist prompt_asset_saved event"
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn generate_batch_worker_persists_image_asset_files_and_model_run() {
+        if !python_available() {
+            eprintln!("python runtime is unavailable; skipping generate batch worker test");
+            return;
+        }
+
+        let app = tauri::test::mock_app();
+        let root = temp_root("generate");
+        let db_path = root.join("monster_workbench.db");
+        let generated_root = root.join("generated");
+        let path_provider = PathProvider::new_for_test(root.clone(), db_path.clone());
+        let service = BatchJobService::new(app.handle().clone(), path_provider.clone());
+        CreativeDbInfra::init_schema(&db_path).expect("schema should init");
+        std::env::set_var("MONSTER_TOOLS_TEST_OUTPUT_DIR", &generated_root);
+
+        let (base_url, server) = start_image_provider_server("gpt-image-1");
+        let snapshot = service
+            .create_batch_image_job(CreateBatchImageJobInput {
+                project_id: Some("project-batch-image".to_string()),
+                name: "Image Batch".to_string(),
+                batch_type: Some("demo.image.generate".to_string()),
+                total_count: Some(1),
+                concurrency: Some(1),
+                max_retries: Some(0),
+                prompt_template: Some("Render batch image {{sequenceNo}}".to_string()),
+                provider_id: Some("local-test".to_string()),
+                model: Some("gpt-image-1".to_string()),
+                image_size: Some("1024x1024".to_string()),
+                budget_json: None,
+                provider_config: Some(provider_config(base_url, "gpt-image-1")),
+            })
+            .expect("batch job should create");
+
+        CreativeDbInfra::update_batch_job(
+            &db_path,
+            UpdateCreativeBatchJobInput {
+                id: snapshot.job.id,
+                status: Some("running".to_string()),
+                concurrency: None,
+                max_retries: None,
+                prompt_template: None,
+                provider_id: None,
+                model: None,
+                image_size: None,
+                budget_json: None,
+                started_at: None,
+                finished_at: None,
+            },
+        )
+        .expect("batch should transition to running");
+
+        let task = service
+            .list_batch_job_tasks(snapshot.job.id, Some(10), Some(0))
+            .expect("task list should load")
+            .into_iter()
+            .next()
+            .expect("task should exist");
+        let running_task = CreativeDbInfra::update_task_status(
+            &db_path,
+            UpdateCreativeTaskStatusInput {
+                id: task.id,
+                status: "running".to_string(),
+                result_json: None,
+                error_message: None,
+                asset_id: None,
+                retry_count_increment: None,
+            },
+        )
+        .expect("task should move to running");
+
+        run_generate_task_worker(app.handle(), &db_path, snapshot.job.id, running_task)
+            .expect("image worker should succeed");
+        server.join().expect("image test server should join");
+
+        let persisted_task = CreativeDbInfra::get_task(&db_path, task.id)
+            .expect("task lookup should succeed")
+            .expect("task should exist");
+        assert_eq!(persisted_task.status, "succeeded");
+        let asset_id = persisted_task
+            .asset_id
+            .expect("task should reference an asset");
+
+        let assets = CreativeDbInfra::list_assets(
+            &db_path,
+            ListCreativeAssetsFilter {
+                asset_type: Some("demo_image".to_string()),
+                ..Default::default()
+            },
+        )
+        .expect("asset list should succeed");
+        assert_eq!(assets.len(), 1);
+        assert_eq!(assets[0].id, asset_id);
+        assert!(assets[0]
+            .file_path
+            .as_deref()
+            .map(std::path::Path::new)
+            .is_some_and(|path| path.exists()));
+        assert!(assets[0]
+            .thumbnail_path
+            .as_deref()
+            .map(std::path::Path::new)
+            .is_some_and(|path| path.exists()));
+
+        let model_runs = CreativeDbInfra::list_model_runs(
+            &db_path,
+            ListModelRunsFilter {
+                task_id: Some(task.id),
+                ..Default::default()
+            },
+        )
+        .expect("model runs should list");
+        assert_eq!(model_runs.len(), 1);
+        assert_eq!(model_runs[0].request_type, "image");
+        assert_eq!(model_runs[0].status, "succeeded");
+
+        let events =
+            CreativeDbInfra::list_task_events(&db_path, task.id).expect("events should list");
+        assert!(
+            events
+                .iter()
+                .any(|event| event.event_type == "image_asset_saved"),
+            "image worker should persist image_asset_saved event"
+        );
+
+        cleanup_asset_files(&assets[0]);
+        std::env::remove_var("MONSTER_TOOLS_TEST_OUTPUT_DIR");
+        let _ = std::fs::remove_dir_all(root);
+    }
 }
