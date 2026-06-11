@@ -63,11 +63,11 @@ Provider Gateway -> 管业务状态
 截至 2026-06-11，当前实现仍是过渡态：
 
 - `src-tauri/src/services/sidecar_lifecycle_service.rs` 负责启动 `creative_health_server.py`、分配 localhost 端口、注入 runtime token、执行 `/health` 检查，并通过 `/tasks` 提交 `generate_image_prompt` stub。
-- `src-tauri/sidecars/python/creative_health_server.py` 当前只有最小 HTTP stub：`GET /health`、`GET /events`、`POST /tasks`。其中 `generate_image_prompt` 会同步返回一个 prompt asset payload，其他任务只返回 accepted stub。
+- `src-tauri/sidecars/python/creative_health_server.py` 当前只有最小 HTTP stub：`GET /health`、`GET /events`、`POST /tasks`。其中 `generate_image_prompt` 已按本协议返回 `outputs / modelRuns / events / retry` 标准结果，其他任务仍只返回 accepted stub。
 - `src-tauri/src/services/worker_queue_service.rs` 已经有 SQLite-backed queue 的基础控制面：claim queued task、request cancel、cancel checkpoint、startup recovery。
 - `src-tauri/src/services/batch_job_service.rs` 当前仍在 Rust 内运行 `demo.image.mock / demo.image.prompt / demo.image.generate` worker，并且 prompt/image worker 仍直接调用 `AiProviderService::test_provider`。
 
-因此下一阶段不是直接让 Python 任意读写主库，而是先把 Python execution protocol 固化，再迁移 worker 执行业务。
+因此下一阶段不是直接让 Python 任意读写主库，而是在已落地的 `generate_image_prompt` 最小协议基础上，继续补 cancel checkpoint、失败恢复和 batch worker 迁移。
 
 ## 7. 推荐迁移模式：Rust 主动提交，Python 执行业务
 

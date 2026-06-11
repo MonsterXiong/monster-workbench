@@ -62,10 +62,11 @@ class CreativeHealthHandler(BaseHTTPRequestHandler):
             return
 
         if payload.get("taskType") == "generate_image_prompt":
-            task_payload = payload.get("payload") or {}
+            task_payload = payload.get("input") or payload.get("payload") or {}
             prompt = build_image_prompt(task_payload)
             metadata = {
-                "source": "creative_health_server_stub",
+                "source": "python-workflow-stub",
+                "workflowType": payload.get("workflowType") or "image_prompt",
                 "brief": task_payload.get("brief"),
                 "style": task_payload.get("style"),
                 "mood": task_payload.get("mood"),
@@ -75,14 +76,45 @@ class CreativeHealthHandler(BaseHTTPRequestHandler):
             self._write_json(
                 HTTPStatus.OK,
                 {
-                    "ok": True,
-                    "status": "completed",
+                    "protocolVersion": payload.get("protocolVersion") or 1,
+                    "taskId": payload.get("taskId"),
+                    "status": "succeeded",
                     "message": "generate_image_prompt workflow completed",
-                    "asset": {
+                    "outputs": [{
                         "assetType": "image_prompt",
                         "title": "Generated image prompt",
                         "content": prompt,
-                        "metadataJson": json.dumps(metadata, ensure_ascii=False),
+                        "filePath": None,
+                        "thumbnailPath": None,
+                        "metadata": metadata,
+                    }],
+                    "modelRuns": [{
+                        "providerId": "creative-sidecar-stub",
+                        "providerType": "python-sidecar",
+                        "model": "creative_health_server_stub",
+                        "requestType": "workflow",
+                        "status": "succeeded",
+                        "durationMs": 200,
+                        "promptHash": None,
+                        "promptVersionId": f"workflow:{payload.get('taskId')}:1",
+                        "inputTokenCount": None,
+                        "outputTokenCount": None,
+                        "costEstimate": None,
+                        "errorCode": None,
+                        "errorMessage": None,
+                        "metadata": {
+                            "workflowType": payload.get("workflowType") or "image_prompt",
+                            "stub": True,
+                        },
+                    }],
+                    "events": [{
+                        "eventType": "workflow_step_completed",
+                        "message": "prompt built",
+                        "payload": {"workflowType": payload.get("workflowType") or "image_prompt"},
+                    }],
+                    "retry": {
+                        "shouldRetry": False,
+                        "reason": None,
                     },
                 },
             )

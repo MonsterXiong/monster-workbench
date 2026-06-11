@@ -11,7 +11,7 @@
 - [ ] 继续收口 Creative service / backend：前端 `task.service.ts` 已只剩后台任务兼容入口，下一步重点评估 Rust `TaskService` 是否继续按领域缩窄。
 - [ ] 评估前后端分域对齐：前端已拆出 `creative-task / creative-asset / creative-goal / creative-batch / creative-project` service/store，但 Rust 侧 asset CRUD 与 workflow 仍主要挂在 `TaskService + commands/creative_task.rs` 下。
 - [ ] 完成 `creative_db` 后续治理：补正式 migration、旧库兼容回归，以及 `creative_projects`、资产版本、来源建模。
-- [ ] 按 `docs/ai/workflow-runtime-boundary.md` 的协议草案，把 Python sidecar 从同步 stub 推进到最小 workflow runtime：task request/result、cancel checkpoint、model_runs 审计和失败恢复。
+- [ ] 继续推进 Python workflow runtime：`generate_image_prompt` 已落地 task request/result 与 model_runs 审计，下一步补 cancel checkpoint、失败/重试结果映射，并迁移 batch prompt worker 的 provider 调用。
 
 ## 回归与验收待办
 
@@ -23,7 +23,7 @@
 
 - [ ] 以代码事实为准继续同步 `docs/architecture-current-state.md`，重点继续修正剩余的 AI façade 最新职责、`creative_db_tests.rs` 下沉后的 repo/test 结构，以及 `/creative` 三栏壳层的后续产品化边界。
 - [ ] 基于当前 `/creative` 三栏工作台的实际代码边界，继续评审“正式业务核心”和“原型/展示壳层”的分界，决定后续是否拆出正式工作台页面。
-- [ ] 后续继续同步 `docs/architecture-current-state.md`：当 Python workflow runtime 协议开始落地后，更新 Rust / Python 执行面职责和 batch worker 迁移状态。
+- [ ] 后续继续同步 `docs/architecture-current-state.md`：当 cancel checkpoint、失败恢复或 batch worker 迁移落地后，更新 Rust / Python 执行面职责和 batch worker 迁移状态。
 - [ ] 评估 `src-tauri/src/infra/creative_db_tests.rs` 与各 creative repo 的下一轮边界：当前 `CreativeDbInfra` 已移除，shared types 已迁出到 `creative_types.rs`，测试入口也已直接化；下一步需要决定是继续把测试按领域拆散，还是保留当前集中回归入口。
   - 2026-06-11：已完成 creative_task_repo、creative_asset_repo、creative_batch_repo 的 repo 级测试下沉；creative_db_tests.rs 当前仅保留 schema / migration 回归。
 - [ ] 如后续继续扩写架构材料，优先更新 `docs/architecture-current-state.md` 和对应专题文档，不再新增平行路线图、阶段提示词或一次性执行包。

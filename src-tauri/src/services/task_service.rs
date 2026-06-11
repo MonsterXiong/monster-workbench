@@ -1,11 +1,12 @@
-﻿use crate::infra::creative_types::{
-    CreateAssetLinkInput, CreateCreativeAssetInput, CreateCreativeTaskInput, CreateTaskEventInput,
-    CreativeAsset, CreativeTask, ListAssetLinksFilter, ListCreativeAssetsFilter,
-    ListCreativeTasksFilter, TaskEvent, UpdateCreativeTaskStatusInput,
-};
 use crate::infra::creative_asset_repo;
-use crate::infra::path::PathProvider;
+use crate::infra::creative_model_run_repo;
 use crate::infra::creative_task_repo;
+use crate::infra::creative_types::{
+    CreateAssetLinkInput, CreateCreativeAssetInput, CreateCreativeTaskInput, CreateModelRunInput,
+    CreateTaskEventInput, CreativeAsset, CreativeTask, ListAssetLinksFilter,
+    ListCreativeAssetsFilter, ListCreativeTasksFilter, TaskEvent, UpdateCreativeTaskStatusInput,
+};
+use crate::infra::path::PathProvider;
 use crate::infra::{AppError, AppResult};
 use crate::services::sidecar_lifecycle_service::{
     GenerateImagePromptSidecarRequest, SidecarLifecycleService,
@@ -379,29 +380,82 @@ impl<R: Runtime> TaskService<R> {
 
         let sidecar_response =
             sidecar_service.submit_generate_image_prompt(GenerateImagePromptSidecarRequest {
+                task_id: task.id,
                 project_id: input.project_id.clone(),
                 brief: input.brief.clone(),
                 style: input.style.clone(),
                 mood: input.mood.clone(),
                 aspect_ratio: input.aspect_ratio.clone(),
+                attempt: task.retry_count + 1,
+                max_retries: task.max_retries,
             })?;
+        if sidecar_response.protocol_version != 1 {
+            return Err(AppError::Process(format!(
+                "unsupported sidecar protocol version: {}",
+                sidecar_response.protocol_version
+            )));
+        }
+        if sidecar_response.task_id != task.id {
+            return Err(AppError::Process(format!(
+                "sidecar task id mismatch: expected {}, got {}",
+                task.id, sidecar_response.task_id
+            )));
+        }
+        if sidecar_response.status != "succeeded" {
+            return Err(AppError::Process(format!(
+                "sidecar workflow returned status {}",
+                sidecar_response.status
+            )));
+        }
         events.push(self.append_task_event(CreateTaskEventInput {
             task_id: task.id,
             event_type: "sidecar_completed".to_string(),
             message: sidecar_response.message.clone(),
             payload_json: None,
         })?);
+        for event in &sidecar_response.events {
+            events.push(
+                self.append_task_event(CreateTaskEventInput {
+                    task_id: task.id,
+                    event_type: event.event_type.clone(),
+                    message: event.message.clone(),
+                    payload_json: event
+                        .payload
+                        .as_ref()
+                        .map(serde_json::to_string)
+                        .transpose()
+                        .map_err(|error| {
+                            AppError::Config(format!(
+                                "failed to encode sidecar event payload: {error}"
+                            ))
+                        })?,
+                })?,
+            );
+        }
 
+        let output =
+            sidecar_response.outputs.first().cloned().ok_or_else(|| {
+                AppError::Process("sidecar workflow returned no outputs".to_string())
+            })?;
         let asset = creative_asset_repo::create_asset(
             db_path,
             CreateCreativeAssetInput {
                 project_id: input.project_id.clone(),
-                asset_type: sidecar_response.asset.asset_type,
-                title: Some(sidecar_response.asset.title),
-                content: Some(sidecar_response.asset.content),
-                file_path: None,
-                thumbnail_path: None,
-                metadata_json: sidecar_response.asset.metadata_json,
+                asset_type: output.asset_type,
+                title: output.title,
+                content: output.content,
+                file_path: output.file_path,
+                thumbnail_path: output.thumbnail_path,
+                metadata_json: output
+                    .metadata
+                    .as_ref()
+                    .map(serde_json::to_string)
+                    .transpose()
+                    .map_err(|error| {
+                        AppError::Config(format!(
+                            "failed to encode sidecar output metadata: {error}"
+                        ))
+                    })?,
                 status: Some("ready".to_string()),
             },
         )?;
@@ -412,11 +466,49 @@ impl<R: Runtime> TaskService<R> {
             payload_json: Some(json!({ "assetId": asset.id }).to_string()),
         })?);
 
+        let mut model_run_ids = Vec::new();
+        for model_run in sidecar_response.model_runs {
+            let model_run = creative_model_run_repo::create_model_run(
+                db_path,
+                CreateModelRunInput {
+                    project_id: input.project_id.clone(),
+                    task_id: Some(task.id),
+                    asset_id: Some(asset.id),
+                    provider_id: model_run.provider_id,
+                    provider_type: model_run.provider_type,
+                    model: model_run.model,
+                    request_type: model_run.request_type,
+                    status: model_run.status,
+                    duration_ms: model_run.duration_ms,
+                    prompt_hash: model_run.prompt_hash,
+                    prompt_version_id: model_run.prompt_version_id,
+                    input_token_count: model_run.input_token_count,
+                    output_token_count: model_run.output_token_count,
+                    cost_estimate: model_run.cost_estimate,
+                    error_code: model_run.error_code,
+                    error_message: model_run.error_message,
+                    metadata_json: model_run
+                        .metadata
+                        .as_ref()
+                        .map(serde_json::to_string)
+                        .transpose()
+                        .map_err(|error| {
+                            AppError::Config(format!(
+                                "failed to encode sidecar model run metadata: {error}"
+                            ))
+                        })?,
+                    finished_at: None,
+                },
+            )?;
+            model_run_ids.push(model_run.id);
+        }
+
         let result_json = json!({
             "assetId": asset.id,
             "assetType": asset.asset_type,
             "title": asset.title,
             "status": sidecar_response.status,
+            "modelRunIds": model_run_ids,
         })
         .to_string();
         let task = self.update_creative_task_status(UpdateCreativeTaskStatusInput {
@@ -743,8 +835,10 @@ mod tests {
     use super::*;
     use crate::infra::creative_asset_repo;
     use crate::infra::creative_db_schema::init_schema;
-    use crate::infra::path::PathProvider;
+    use crate::infra::creative_model_run_repo;
     use crate::infra::creative_task_repo;
+    use crate::infra::creative_types::ListModelRunsFilter;
+    use crate::infra::path::PathProvider;
     use crate::services::sidecar_lifecycle_service::SidecarLifecycleService;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -838,7 +932,21 @@ mod tests {
             .expect("asset should exist");
         assert_eq!(persisted_asset.asset_type, "image_prompt");
 
+        let model_runs = creative_model_run_repo::list_model_runs(
+            &db_path,
+            ListModelRunsFilter {
+                task_id: Some(result.task.id),
+                ..Default::default()
+            },
+        )
+        .expect("model runs should list");
+        assert_eq!(model_runs.len(), 1);
+        assert_eq!(model_runs[0].asset_id, Some(result.asset.id));
+        assert_eq!(
+            model_runs[0].provider_type.as_deref(),
+            Some("python-sidecar")
+        );
+
         let _ = std::fs::remove_dir_all(root);
     }
 }
-

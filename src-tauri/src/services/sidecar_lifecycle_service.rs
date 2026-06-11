@@ -36,29 +36,72 @@ pub struct SidecarStatusSnapshot {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GenerateImagePromptSidecarRequest {
+    pub task_id: i64,
     pub project_id: Option<String>,
     pub brief: String,
     pub style: Option<String>,
     pub mood: Option<String>,
     pub aspect_ratio: Option<String>,
+    pub attempt: i64,
+    pub max_retries: i64,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct GenerateImagePromptSidecarAsset {
+pub struct SidecarWorkflowOutput {
     pub asset_type: String,
-    pub title: String,
-    pub content: String,
-    pub metadata_json: Option<String>,
+    pub title: Option<String>,
+    pub content: Option<String>,
+    pub file_path: Option<String>,
+    pub thumbnail_path: Option<String>,
+    pub metadata: Option<Value>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct GenerateImagePromptSidecarResponse {
-    pub ok: bool,
+pub struct SidecarWorkflowModelRun {
+    pub provider_id: Option<String>,
+    pub provider_type: Option<String>,
+    pub model: Option<String>,
+    pub request_type: String,
+    pub status: String,
+    pub duration_ms: Option<i64>,
+    pub prompt_hash: Option<String>,
+    pub prompt_version_id: Option<String>,
+    pub input_token_count: Option<i64>,
+    pub output_token_count: Option<i64>,
+    pub cost_estimate: Option<f64>,
+    pub error_code: Option<String>,
+    pub error_message: Option<String>,
+    pub metadata: Option<Value>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SidecarWorkflowEvent {
+    pub event_type: String,
+    pub message: Option<String>,
+    pub payload: Option<Value>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SidecarWorkflowRetry {
+    pub should_retry: bool,
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SidecarWorkflowTaskResult {
+    pub protocol_version: i64,
+    pub task_id: i64,
     pub status: String,
     pub message: Option<String>,
-    pub asset: GenerateImagePromptSidecarAsset,
+    pub outputs: Vec<SidecarWorkflowOutput>,
+    pub model_runs: Vec<SidecarWorkflowModelRun>,
+    pub events: Vec<SidecarWorkflowEvent>,
+    pub retry: Option<SidecarWorkflowRetry>,
 }
 
 pub struct SidecarLifecycleService<R: Runtime = Wry> {
@@ -176,7 +219,7 @@ impl<R: Runtime> SidecarLifecycleService<R> {
     pub fn submit_generate_image_prompt(
         &mut self,
         request: GenerateImagePromptSidecarRequest,
-    ) -> AppResult<GenerateImagePromptSidecarResponse> {
+    ) -> AppResult<SidecarWorkflowTaskResult> {
         self.ensure_dev_server()?;
         let port = self
             .snapshot
@@ -188,12 +231,31 @@ impl<R: Runtime> SidecarLifecycleService<R> {
             .ok_or_else(|| AppError::Process("sidecar runtime token is missing".to_string()))?;
 
         let payload = json!({
-            "taskType": "generate_image_prompt",
+            "protocolVersion": 1,
+            "taskId": request.task_id,
             "projectId": request.project_id,
-            "payload": request,
+            "taskType": "generate_image_prompt",
+            "workflowType": "image_prompt",
+            "attempt": request.attempt,
+            "maxRetries": request.max_retries,
+            "cancelToken": format!("task-{}", request.task_id),
+            "budget": Value::Null,
+            "provider": Value::Null,
+            "input": {
+                "brief": request.brief,
+                "style": request.style,
+                "mood": request.mood,
+                "aspectRatio": request.aspect_ratio,
+            },
+            "context": {
+                "sourceAssetIds": [],
+                "parentTaskId": Value::Null,
+                "batchJobId": Value::Null,
+                "goalId": Value::Null,
+            },
         });
         let response = post_json(port, &token, "/tasks", &payload)?;
-        serde_json::from_str::<GenerateImagePromptSidecarResponse>(&response).map_err(|error| {
+        serde_json::from_str::<SidecarWorkflowTaskResult>(&response).map_err(|error| {
             AppError::Process(format!("failed to parse sidecar response: {error}"))
         })
     }
