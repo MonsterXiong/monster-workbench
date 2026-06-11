@@ -24,6 +24,7 @@ import {
 } from "../services/creative-batch.service";
 
 export const useCreativeProjectStore = defineStore("creative-project", () => {
+  const activeCreativeProjectId = ref("creative-main-project");
   const creativeProjects = ref<CreativeProject[]>([]);
   const creativeProjectIndexTasks = ref<CreativeTask[]>([]);
   const creativeProjectIndexAssets = ref<CreativeAsset[]>([]);
@@ -46,6 +47,10 @@ export const useCreativeProjectStore = defineStore("creative-project", () => {
 
   const upsertCreativeProject = async (input: UpsertCreativeProjectInput) => {
     return creativeProjectService.upsertProject(input);
+  };
+
+  const setActiveCreativeProjectId = (projectId: string) => {
+    activeCreativeProjectId.value = projectId.trim() || "creative-main-project";
   };
 
   const ensureCreativeProjectSeeds = async (
@@ -136,6 +141,7 @@ export const useCreativeProjectStore = defineStore("creative-project", () => {
   };
 
   return {
+    activeCreativeProjectId,
     creativeProjects,
     creativeProjectIndexTasks,
     creativeProjectIndexAssets,
@@ -149,6 +155,7 @@ export const useCreativeProjectStore = defineStore("creative-project", () => {
     creativeProjectHistoryError,
     loadCreativeProjects,
     upsertCreativeProject,
+    setActiveCreativeProjectId,
     ensureCreativeProjectSeeds,
     loadCreativeProjectIndex,
     loadCreativeProjectHistory,

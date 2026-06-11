@@ -18,13 +18,14 @@ const creativeTaskStore = useCreativeTaskStore();
 const { t } = useI18n();
 
 const {
+  activeCreativeProjectId,
   creativeProjectIndexTasks,
   creativeProjectIndexAssets,
   creativeProjectIndexGoals,
   creativeProjectIndexBatchJobs,
 } = storeToRefs(creativeProjectStore);
 
-const activeProjectId = ref("creative-main-project");
+const activeProjectId = activeCreativeProjectId;
 const activeWorkspaceTab = ref("prompt");
 
 const creativeWorkspaceTabs = computed(() => [
@@ -185,7 +186,7 @@ const refreshCreativeProjectCenter = async () => {
 };
 
 const selectCreativeProject = (projectId: string) => {
-  activeProjectId.value = projectId;
+  creativeProjectStore.setActiveCreativeProjectId(projectId);
 };
 
 onMounted(async () => {

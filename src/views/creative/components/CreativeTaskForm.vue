@@ -3,6 +3,7 @@ import { ref, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useCreativeGoalStore } from '../../../stores/creative-goal';
 import { useCreativeBatchStore } from '../../../stores/creative-batch';
+import { useCreativeProjectStore } from '../../../stores/creative-project';
 import BaseInput from '../../../components/common/BaseInput.vue';
 import BaseTextarea from '../../../components/common/BaseTextarea.vue';
 import BaseNumberInput from '../../../components/common/BaseNumberInput.vue';
@@ -13,6 +14,8 @@ import { Play } from 'lucide-vue-next';
 // 注入 Store
 const creativeGoalStore = useCreativeGoalStore();
 const creativeBatchStore = useCreativeBatchStore();
+const creativeProjectStore = useCreativeProjectStore();
+const { activeCreativeProjectId } = storeToRefs(creativeProjectStore);
 
 // UI 状态
 const formTab = ref('goal');
@@ -36,7 +39,7 @@ const { goalRunning, goalResult } = storeToRefs(creativeGoalStore);
 const runGoal = async () => {
   try {
     await creativeGoalStore.runGoalMultiAgentStub({
-      projectId: "creative-main-project",
+      projectId: activeCreativeProjectId.value,
       title: goalForm.value.title,
       description: goalForm.value.description,
       budgetJson: JSON.stringify({
@@ -98,7 +101,7 @@ const createBatchJob = async () => {
     const isPromptBatch = batchJobForm.value.mode === "prompt";
     const isRealBatch = batchJobForm.value.mode === "real";
     await creativeBatchStore.createBatchImageJob({
-      projectId: "creative-main-project",
+      projectId: activeCreativeProjectId.value,
       name: batchJobForm.value.name,
       batchType: isRealBatch ? "demo.image.generate" : isPromptBatch ? "demo.image.prompt" : "demo.image.mock",
       totalCount: batchJobForm.value.totalCount,

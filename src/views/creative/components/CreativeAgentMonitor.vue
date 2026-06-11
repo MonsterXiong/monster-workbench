@@ -1,8 +1,13 @@
 <script setup lang="ts">
 import { Terminal, Clock, PlayCircle, Loader2 } from 'lucide-vue-next';
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
+import { storeToRefs } from 'pinia';
 import CreativeTaskForm from './CreativeTaskForm.vue';
 import BaseSegmented from '../../../components/common/BaseSegmented.vue';
+import { useCreativeFormatters } from '../../../composables/useCreativeFormatters';
+import { useCreativeBatchStore } from '../../../stores/creative-batch';
+import { useCreativeProjectStore } from '../../../stores/creative-project';
+import { useCreativeTaskStore } from '../../../stores/creative-task';
 
 const activeTab = ref('properties');
 const tabs = [
@@ -10,17 +15,78 @@ const tabs = [
   { label: 'Agent 监控', value: 'monitor' }
 ];
 
-const queueItems = ref([
-  { id: 't1', title: '角色草稿生成', status: 'running', type: 'character' },
-  { id: 't2', title: '场景草稿生成', status: 'queued', type: 'scene' },
-  { id: 't3', title: '资产审查', status: 'queued', type: 'review' },
-]);
+const creativeProjectStore = useCreativeProjectStore();
+const creativeTaskStore = useCreativeTaskStore();
+const creativeBatchStore = useCreativeBatchStore();
+const { statusLabel, userFacingTaskType, userFacingEventMessage } = useCreativeFormatters();
 
-const logs = ref([
-  { id: 1, time: '10:00:01', msg: '初始化创作目标编排器...', type: 'info' },
-  { id: 2, time: '10:00:02', msg: '成功创建子任务: 角色草稿生成', type: 'success' },
-  { id: 3, time: '10:00:03', msg: 'Agent 开始执行提示词生成...', type: 'info' },
-]);
+const { activeCreativeProjectId, creativeProjectHistoryTasks } = storeToRefs(creativeProjectStore);
+const { promptWorkflowActivity, reviewResultActivity } = storeToRefs(creativeTaskStore);
+const { batchJobTasks, batchJobActivity } = storeToRefs(creativeBatchStore);
+
+const activeStatuses = new Set(['queued', 'running', 'retrying', 'cancelling']);
+
+const formatTime = (value: string) => {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleTimeString('zh-CN', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  });
+};
+
+const queueItems = computed(() => {
+  const tasksById = new Map<number, (typeof creativeProjectHistoryTasks.value)[number]>();
+  for (const task of creativeProjectHistoryTasks.value) {
+    if (task.projectId === activeCreativeProjectId.value) tasksById.set(task.id, task);
+  }
+  for (const task of batchJobTasks.value) {
+    if (task.projectId === activeCreativeProjectId.value) tasksById.set(task.id, task);
+  }
+
+  return Array.from(tasksById.values())
+    .sort((left, right) => {
+      const leftActive = activeStatuses.has(left.status) ? 1 : 0;
+      const rightActive = activeStatuses.has(right.status) ? 1 : 0;
+      if (leftActive !== rightActive) return rightActive - leftActive;
+      return right.updatedAt.localeCompare(left.updatedAt);
+    })
+    .slice(0, 8)
+    .map((task) => ({
+      id: task.id,
+      title: `#${task.sequenceNo || task.id} ${userFacingTaskType(task.taskType)}`,
+      status: task.status,
+      statusText: statusLabel(task.status),
+    }));
+});
+
+const logs = computed(() => [
+  ...promptWorkflowActivity.value.map((item) => ({
+    id: `prompt-${item.taskId}-${item.createdAt}`,
+    projectId: item.projectId,
+    time: formatTime(item.createdAt),
+    msg: userFacingEventMessage(item.message) || statusLabel(item.status),
+    type: item.status === 'failed' ? 'error' : item.status === 'succeeded' ? 'success' : 'info',
+  })),
+  ...reviewResultActivity.value.map((item) => ({
+    id: `review-${item.taskId}-${item.createdAt}`,
+    projectId: item.projectId,
+    time: formatTime(item.createdAt),
+    msg: userFacingEventMessage(item.message) || statusLabel(item.status),
+    type: item.status === 'failed' ? 'error' : item.status === 'succeeded' ? 'success' : 'info',
+  })),
+  ...batchJobActivity.value.map((item) => ({
+    id: `batch-${item.batchJobId}-${item.createdAt}`,
+    projectId: item.projectId,
+    time: formatTime(item.createdAt),
+    msg: userFacingEventMessage(item.message) || statusLabel(item.status),
+    type: item.status === 'failed' ? 'error' : item.status === 'completed' ? 'success' : 'info',
+  })),
+]
+  .filter((item) => !item.projectId || item.projectId === activeCreativeProjectId.value)
+  .slice(0, 80));
 </script>
 
 <template>
@@ -58,9 +124,12 @@ const logs = ref([
                 {{ item.title }}
               </div>
               <div class="text-xs mt-0.5" :class="item.status === 'running' ? 'text-blue-600' : 'text-slate-400'">
-                {{ item.status === 'running' ? '执行中...' : '排队中' }}
+                {{ item.statusText }}
               </div>
             </div>
+          </div>
+          <div v-if="!queueItems.length" class="rounded-lg border border-dashed border-slate-200 p-3 text-xs text-slate-400">
+            当前项目暂无任务队列记录
           </div>
         </div>
       </div>
@@ -80,6 +149,7 @@ const logs = ref([
               'text-sky-400': log.type === 'info'
             }">{{ log.msg }}</span>
           </div>
+          <div v-if="!logs.length" class="text-slate-500">当前项目暂无执行日志</div>
           <!-- Blinking cursor -->
           <div class="flex gap-2 mt-1">
             <span class="w-1.5 h-3 bg-slate-400 animate-pulse inline-block mt-0.5"></span>

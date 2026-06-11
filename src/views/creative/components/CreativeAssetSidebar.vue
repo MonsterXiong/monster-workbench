@@ -1,29 +1,86 @@
 <script setup lang="ts">
+import { computed } from 'vue';
+import { storeToRefs } from 'pinia';
 import { Folder, Image as ImageIcon, Book, Clapperboard, Hash } from 'lucide-vue-next';
+import { useCreativeProjectStore } from '../../../stores/creative-project';
 
 const emit = defineEmits<{
   (e: 'select', category: string): void
 }>();
 
-const projects = [
-  { id: 'p1', name: '默认创作项目', active: true },
-  { id: 'p2', name: '故事资产项目', active: false },
-  { id: 'p3', name: '批量生图项目', active: false },
-];
+const creativeProjectStore = useCreativeProjectStore();
+const {
+  activeCreativeProjectId,
+  creativeProjects,
+  creativeProjectIndexTasks,
+  creativeProjectIndexAssets,
+  creativeProjectIndexGoals,
+  creativeProjectIndexBatchJobs,
+} = storeToRefs(creativeProjectStore);
 
-const assetCategories = [
+const fallbackProjectNames: Record<string, string> = {
+  'creative-main-project': '默认创作项目',
+  'story-assets': '故事资产项目',
+  'goal-planning': '目标编排项目',
+  'batch-production': '批量生图项目',
+};
+
+const activeProjectAssets = computed(() =>
+  creativeProjectIndexAssets.value.filter(
+    (asset) => asset.projectId === activeCreativeProjectId.value
+  )
+);
+
+const projectRows = computed(() => {
+  const projectIds = new Set<string>([
+    activeCreativeProjectId.value,
+    ...Object.keys(fallbackProjectNames),
+  ]);
+
+  for (const project of creativeProjects.value) projectIds.add(project.id);
+  for (const task of creativeProjectIndexTasks.value) if (task.projectId) projectIds.add(task.projectId);
+  for (const asset of creativeProjectIndexAssets.value) if (asset.projectId) projectIds.add(asset.projectId);
+  for (const goal of creativeProjectIndexGoals.value) if (goal.projectId) projectIds.add(goal.projectId);
+  for (const batch of creativeProjectIndexBatchJobs.value) if (batch.projectId) projectIds.add(batch.projectId);
+
+  return Array.from(projectIds).map((id) => {
+    const project = creativeProjects.value.find((item) => item.id === id);
+    const taskCount = creativeProjectIndexTasks.value.filter((task) => task.projectId === id).length;
+    const assetCount = creativeProjectIndexAssets.value.filter((asset) => asset.projectId === id).length;
+    const goalCount = creativeProjectIndexGoals.value.filter((goal) => goal.projectId === id).length;
+    const batchCount = creativeProjectIndexBatchJobs.value.filter((batch) => batch.projectId === id).length;
+    return {
+      id,
+      name: project?.title || fallbackProjectNames[id] || id,
+      active: id === activeCreativeProjectId.value,
+      total: taskCount + assetCount + goalCount + batchCount,
+    };
+  });
+});
+
+const assetCategories = computed(() => [
   { id: 'character', name: '角色资产', icon: ImageIcon },
   { id: 'scene', name: '场景设定', icon: ImageIcon },
   { id: 'prop', name: '标志性道具', icon: ImageIcon },
   { id: 'storyboard', name: '分镜表', icon: Clapperboard },
   { id: 'bible', name: '项目设定集', icon: Book },
-];
+].map((category) => ({
+  ...category,
+  count: activeProjectAssets.value.filter((asset) => asset.assetType === category.id).length,
+})));
 
-const tags = [
-  { id: 't1', name: '草稿' },
-  { id: 't2', name: '已审查' },
-  { id: 't3', name: '待返工' },
-];
+const tags = computed(() => [
+  { id: 'ready', name: '已入库' },
+  { id: 'draft', name: '草稿' },
+  { id: 'failed', name: '需处理' },
+].map((tag) => ({
+  ...tag,
+  count: activeProjectAssets.value.filter((asset) => asset.status === tag.id).length,
+})));
+
+const selectProject = (projectId: string) => {
+  creativeProjectStore.setActiveCreativeProjectId(projectId);
+};
 </script>
 
 <template>
@@ -43,7 +100,7 @@ const tags = [
         </div>
         <div class="space-y-0.5">
           <button
-            v-for="project in projects"
+            v-for="project in projectRows"
             :key="project.id"
             class="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-left transition-colors"
             :class="[
@@ -51,9 +108,12 @@ const tags = [
                 ? 'bg-emerald-50 text-emerald-700 font-medium'
                 : 'text-slate-600 hover:bg-slate-100'
             ]"
+            type="button"
+            @click="selectProject(project.id)"
           >
             <Folder class="w-4 h-4 shrink-0" :class="project.active ? 'text-emerald-500' : 'text-slate-400'" />
             <span class="truncate">{{ project.name }}</span>
+            <span class="ml-auto shrink-0 text-[11px] font-semibold text-slate-400">{{ project.total }}</span>
           </button>
         </div>
       </section>
@@ -68,10 +128,12 @@ const tags = [
             v-for="category in assetCategories"
             :key="category.id"
             class="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-left text-slate-600 hover:bg-slate-100 transition-colors"
+            type="button"
             @click="emit('select', category.id)"
           >
             <component :is="category.icon" class="w-4 h-4 shrink-0 text-slate-400" />
             <span class="truncate">{{ category.name }}</span>
+            <span class="ml-auto shrink-0 text-[11px] font-semibold text-slate-400">{{ category.count }}</span>
           </button>
         </div>
       </section>
@@ -86,9 +148,11 @@ const tags = [
             v-for="tag in tags"
             :key="tag.id"
             class="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-left text-slate-600 hover:bg-slate-100 transition-colors"
+            type="button"
           >
             <Hash class="w-4 h-4 shrink-0 text-slate-300" />
             <span class="truncate">{{ tag.name }}</span>
+            <span class="ml-auto shrink-0 text-[11px] font-semibold text-slate-400">{{ tag.count }}</span>
           </button>
         </div>
       </section>
