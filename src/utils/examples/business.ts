@@ -115,10 +115,22 @@ export const businessUtilityBoundaryCases = [
     expected: businessUtilityExamples.sortControls.summary.activeDirection ?? "",
   },
   {
+    key: "compare-desc-top-item",
+    title: "compare descending top item",
+    input: "sortByValue(items, item => item.size, 'desc')",
+    expected: businessUtilityExamples.sortedItems[0]?.id ?? "",
+  },
+  {
     key: "search-filtered-match",
     title: "search query filtered match",
     input: "partitionSearchQuery(items, { keyword: 'report', filters: [{ value: 'ready' }] })",
     expected: String(businessUtilityExamples.searchPartition.summary.matchedCount),
+  },
+  {
+    key: "search-no-match",
+    title: "search query no match",
+    input: "rankSearchItemsWithSummary(items, 'missing', [item => item.title])",
+    expected: String(rankSearchItemsWithSummary(items, "missing", [(item) => item.title]).summary.matchedCount),
   },
   {
     key: "error-display-code",
@@ -127,16 +139,34 @@ export const businessUtilityBoundaryCases = [
     expected: businessUtilityExamples.errorReport.code,
   },
   {
+    key: "error-batch-count",
+    title: "error display batch count",
+    input: "createErrorDisplayReports([new Error('Network failed'), 'plain error'])",
+    expected: String(businessUtilityExamples.errorReports.length),
+  },
+  {
     key: "missing-template",
     title: "template missing key",
     input: "formatTemplateWithReport('Hello {name}, {missing}')",
     expected: businessUtilityExamples.template.missingKeys.join(", "),
   },
   {
+    key: "template-percent-format",
+    title: "format percent text",
+    input: "formatPercent(0.375)",
+    expected: businessUtilityExamples.percent,
+  },
+  {
     key: "invalid-record",
     title: "record validation",
     input: "createRecordValidationSchemaReport({ name: '', email: 'bad' })",
     expected: String(businessUtilityExamples.validation.summary.errorCount),
+  },
+  {
+    key: "record-valid-required",
+    title: "record required validator pass",
+    input: "runValidators('ok', [createRequiredValidator('required')])",
+    expected: String(runValidators("ok", [createRequiredValidator("required")]).valid),
   },
   {
     key: "unavailable-selection",

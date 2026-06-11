@@ -104,6 +104,12 @@ export const dataUtilityBoundaryCases = [
     expected: String(dataUtilityExamples.fileDeduplication.summary.duplicateCount),
   },
   {
+    key: "file-intake-rejected",
+    title: "file intake rejected count",
+    input: "createFileSelectionIntakeReport(files, { accept, maxFiles, maxSize })",
+    expected: String(dataUtilityExamples.fileIntake.summary.rejectedCount),
+  },
+  {
     key: "storage-empty",
     title: "storage empty values",
     input: "summarizeStorageEntries(entries)",
@@ -120,5 +126,17 @@ export const dataUtilityBoundaryCases = [
     title: "URL list invalid count",
     input: "summarizeUrls(['https://ok', 'notaurl'])",
     expected: String(dataUtilityExamples.urlList.invalidCount),
+  },
+  {
+    key: "url-duplicate-query",
+    title: "URL query duplicate keys",
+    input: "summarizeSearchParams(new URLSearchParams('tag=ai&tag=utils'))",
+    expected: String(dataUtilityExamples.querySummary.hasDuplicateKeys),
+  },
+  {
+    key: "url-empty-query-value",
+    title: "URL query empty values",
+    input: "summarizeSearchParams(new URLSearchParams('empty='))",
+    expected: String(dataUtilityExamples.querySummary.emptyValueCount),
   },
 ];

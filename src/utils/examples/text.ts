@@ -70,6 +70,18 @@ export const textUtilityBoundaryCases = [
     expected: String(summarizeText("   ").empty),
   },
   {
+    key: "text-mask-short-secret",
+    title: "masked secret text",
+    input: "maskText('sk-test-1234567890', 3, 4)",
+    expected: textUtilityExamples.masked,
+  },
+  {
+    key: "text-split-mixed-separators",
+    title: "mixed separator split",
+    input: "splitBySeparators('alpha,beta，gamma\\ndelta')",
+    expected: String(textUtilityExamples.splitValues.length),
+  },
+  {
     key: "unicode-id",
     title: "unicode stable id",
     input: "createStableHashId('中文路径/工具函数')",
@@ -98,5 +110,11 @@ export const textUtilityBoundaryCases = [
     title: "keyboard duplicate shortcuts",
     input: "summarizeKeyboardShortcuts(['Ctrl+S', 'Ctrl+S'])",
     expected: textUtilityExamples.keyboard.summary.labels.join(", ") || "-",
+  },
+  {
+    key: "shortcut-aria-label",
+    title: "keyboard aria shortcut",
+    input: "toAriaKeyShortcuts('Ctrl+Shift+P')",
+    expected: textUtilityExamples.keyboard.aria,
   },
 ];

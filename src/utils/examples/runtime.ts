@@ -77,6 +77,12 @@ export const runtimeUtilityExamples = {
 
 export const runtimeUtilityBoundaryCases = [
   {
+    key: "async-timeout-result",
+    title: "async timeout flag",
+    input: "summarizeTimeoutResult({ timedOut: true, value: null })",
+    expected: String(runtimeUtilityExamples.timeoutSummary.timedOut),
+  },
+  {
     key: "settled-partial",
     title: "settled results summary",
     input: "summarizeSettledResults([{ fulfilled }, { rejected }])",
@@ -87,6 +93,12 @@ export const runtimeUtilityBoundaryCases = [
     title: "invalid color fallback",
     input: "summarizeColorValue('invalid')",
     expected: String(summarizeColorValue("invalid").valid),
+  },
+  {
+    key: "color-normalized-short-hex",
+    title: "short hex normalization",
+    input: "normalizeHexColor('abc')",
+    expected: runtimeUtilityExamples.normalizedColor ?? "",
   },
   {
     key: "date-invalid-list",

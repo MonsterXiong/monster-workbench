@@ -12,6 +12,7 @@ import {
   summarizeClipboardCopyResult,
 } from "../clipboard";
 import {
+  mergeDomEventCleanups,
   summarizeRectInViewport,
 } from "../dom";
 
@@ -59,6 +60,15 @@ export const browserUtilityExamples = {
   clipboardSummary: summarizeClipboardCopyResult(createClipboardCopyResult(true, "clipboard-api", "hello")),
   clipboardReport: createClipboardCopyReport(createClipboardCopyResult(false, "none", "secret", new Error("denied"))),
   clipboardText: formatClipboardCopyResult(createClipboardCopyResult(false, "none", "secret", new Error("denied"))),
+  cleanupMerge: (() => {
+    let cleanupCount = 0;
+    const cleanup = mergeDomEventCleanups([
+      () => { cleanupCount += 1; },
+      () => { cleanupCount += 1; },
+    ]);
+    cleanup();
+    return { cleanupCount };
+  })(),
   rect: summarizeRectInViewport({
     left: 10,
     top: 20,
@@ -66,6 +76,14 @@ export const browserUtilityExamples = {
     bottom: 120,
     width: 100,
     height: 100,
+  } as DOMRect, mockWindow),
+  rectOutside: summarizeRectInViewport({
+    left: -320,
+    top: -240,
+    right: -120,
+    bottom: -40,
+    width: 200,
+    height: 200,
   } as DOMRect, mockWindow),
 };
 
@@ -99,5 +117,11 @@ export const browserUtilityBoundaryCases = [
     title: "rect in viewport",
     input: "summarizeRectInViewport(rect)",
     expected: String(browserUtilityExamples.rect.partiallyVisible),
+  },
+  {
+    key: "rect-outside",
+    title: "rect outside viewport",
+    input: "summarizeRectInViewport(outsideRect)",
+    expected: String(browserUtilityExamples.rectOutside.partiallyVisible),
   },
 ];
