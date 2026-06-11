@@ -1821,3 +1821,30 @@ Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `
 - `cargo check --manifest-path .\\src-tauri\\Cargo.toml`
 - `npm run typecheck`
 - `npm run check:architecture`
+
+## 2026-06-11 补充：sidecar 生命周期事件与节流
+
+本轮继续沿 `SidecarLifecycleService` 做控制面事件化，不改变 Python sidecar 的执行面职责，也不引入 worker pool。
+
+代码事实：
+
+- `src-tauri/src/services/sidecar_lifecycle_service.rs` 新增 `SidecarStatusEventPayload`，通过 Tauri 事件 `creative-sidecar-status-changed` 广播 sidecar 生命周期状态。
+- 事件覆盖 `starting`、`health_ok`、`health_failed`、`recovery_failed`、`recovery_backoff_active`、`stopping`、`stopped` 和 `process_exited` 等控制面状态。
+- 同一 status 的重复事件有 1 秒节流；状态变化或关键事件仍可立即发出，避免高频 health check 把前端事件流刷爆。
+- `src/services/sidecar.service.ts` 新增 `listenStatusChanged`，browser mock 也会在 start/check/stop 中派发同名事件，保持 Tauri 和 browser dev 结构一致。
+
+边界判定：
+
+| 区域 | 当前状态 | 下一步 |
+|---|---|---|
+| Tauri sidecar lifecycle event | 已有节流后的状态事件 | 后续可按 UI 需要接入侧边栏/诊断面板 |
+| Python sidecar `/events` | 已有空事件响应 stub，未接入 Rust polling | 后续再评估是否需要轮询 Python 内部 workflow event |
+| sidecar 状态持久化 | 当前只通过 Tauri event 和 status snapshot 暴露 | 如需跨会话审计，再设计持久化策略 |
+| workflow settle | 仍分散在 `TaskService` / `BatchJobService` | 下一阶段仍建议抽通用 submit/settle helper |
+
+本轮验证通过：
+
+- `cargo test --manifest-path .\\src-tauri\\Cargo.toml services::sidecar_lifecycle_service::tests:: -- --nocapture --test-threads=1`
+- `cargo check --manifest-path .\\src-tauri\\Cargo.toml`
+- `npm run typecheck`
+- `npm run check:architecture`
