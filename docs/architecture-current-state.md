@@ -1848,3 +1848,28 @@ Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `
 - `cargo check --manifest-path .\\src-tauri\\Cargo.toml`
 - `npm run typecheck`
 - `npm run check:architecture`
+
+## 2026-06-12 补充：Rust workflow settle 首个通用 helper
+
+本轮继续按 `TaskService` / `BatchJobService` 的边界复核推进，先抽出最稳定、最有复用价值的一段 Rust 可信落库逻辑，不改变 batch supervisor 归属，也不把业务执行面迁走。
+
+代码事实：
+
+- 新增 `src-tauri/src/services/workflow_settle_service.rs`，把 sidecar 结果的协议校验与事件落库抽成通用 helper。
+- `validate_sidecar_task_result` 统一检查 `protocolVersion` 与 `taskId`，避免 `TaskService` 和 `BatchJobService` 各自重复写一遍基础协议门。
+- `append_sidecar_result_events` 统一把 sidecar 返回的 `events` 持久化为 `task_events`，`TaskService` 继续保留自身的 `events` 聚合结果，`BatchJobService` 只关心可信落库。
+- `TaskService::run_generate_image_prompt_workflow`、`settle_batch_prompt_sidecar_response` 和 `settle_batch_image_sidecar_response` 都已切换到这个 helper；资产创建、取消/重试分支和最终状态映射仍然留在各自服务里。
+
+边界判定：
+
+| 区域 | 当前状态 | 下一步 |
+|---|---|---|
+| sidecar protocol 校验 | 已抽通用 helper | 保持不变 |
+| sidecar events 落库 | 已抽通用 helper | 保持不变 |
+| model run / asset / status settle | 仍分散在 `TaskService` / `BatchJobService` | 继续评估是否抽公共 model run/状态映射 helper |
+| batch supervisor | 仍保留 Rust | 不因 settle 收口就迁到 Python worker pool |
+
+本轮验证通过：
+
+- `cargo test --manifest-path .\\src-tauri\\Cargo.toml services::task_service::tests:: -- --nocapture --test-threads=1`
+- `cargo test --manifest-path .\\src-tauri\\Cargo.toml services::batch_job_service::tests:: -- --nocapture --test-threads=1`
