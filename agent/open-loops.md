@@ -11,7 +11,7 @@
 - [ ] 继续收口 Creative service / backend：前端 `task.service.ts` 已只剩后台任务兼容入口，下一步重点评估 Rust `TaskService` 是否继续按领域缩窄。
 - [ ] 评估前后端分域对齐：前端已拆出 `creative-task / creative-asset / creative-goal / creative-batch / creative-project` service/store，但 Rust 侧 asset CRUD 与 workflow 仍主要挂在 `TaskService + commands/creative_task.rs` 下。
 - [ ] 完成 `creative_db` 后续治理：补正式 migration、旧库兼容回归，以及 `creative_projects`、资产版本、来源建模。
-- [ ] 继续推进 Python workflow runtime：`generate_image_prompt`、`demo.image.prompt` 与 `demo.image.generate` 已落地 task request/result、model_runs 审计、失败/取消/重试映射和 cancel checkpoint；下一步重点是 sidecar lifecycle 复用、预算/超时协议和正式 workflow 类型命名。
+- [ ] 继续推进 Python workflow runtime：`generate_image_prompt`、`demo.image.prompt` 与 `demo.image.generate` 已落地 task request/result、model_runs 审计、失败/取消/重试映射、cancel checkpoint 与基础 budget/timeout 协议；下一步重点是 sidecar lifecycle 复用和正式 workflow 类型命名。
 
 ## 回归与验收待办
 

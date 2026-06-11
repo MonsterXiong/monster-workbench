@@ -1577,3 +1577,24 @@ Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `
   1. 将当前 per-task dev sidecar 启停策略升级为更清晰的 sidecar lifecycle 复用与超时/熔断策略。
   2. 把 `budget` 从 `Value::Null` 推进为明确的 workflow 预算/超时协议。
   3. 设计正式 batch task type 命名，避免把 `demo.image.*` 继续扩展成生产业务分类。
+
+## 2026-06-11 补充：sidecar budget / timeout 协议接入
+
+- `src-tauri/src/services/sidecar_lifecycle_service.rs` 已新增 `SidecarWorkflowBudget`，sidecar task request 不再使用 `budget: null` 作为占位。
+- `generate_image_prompt` 当前提交固定最小预算：`maxDurationMs=120000`、`maxTokens=1024`；batch prompt 会按 provider timeout 提交 `maxDurationMs` 与 `maxTokens=512`；batch image 会按 provider timeout 提交 `maxDurationMs` 与 `maxImages=1`。
+- Rust `post_json` 的 sidecar read timeout 现在会由 `budget.maxDurationMs + 5s` 推导，并保留最小/最大边界，避免所有 workflow 共用硬编码 120s。
+- `creative_health_server.py` 会读取 `budget` 并用它收敛 provider timeout；batch prompt 还会用 `budget.maxTokens` 控制 OpenAI-compatible `/chat/completions` 请求的 `max_tokens`。
+- 这一步仍不是完整预算/计费系统，但已把“预算由 Rust 控制、Python 按协议执行局部约束”的方向落到 request/result runtime 上，为后续 Goal / Batch / Workflow 预算配置化留出明确入口。
+- 本轮验证通过：
+  - `python -m py_compile src-tauri\\sidecars\\python\\creative_health_server.py`
+  - `cargo test --manifest-path .\\src-tauri\\Cargo.toml sidecar_budget_encodes_contract_and_drives_read_timeout -- --nocapture --test-threads=1`
+  - `cargo test --manifest-path .\\src-tauri\\Cargo.toml missing_sidecar_budget_uses_default_read_timeout -- --nocapture --test-threads=1`
+  - `cargo test --manifest-path .\\src-tauri\\Cargo.toml prompt_batch_worker_persists_prompt_asset_and_model_run -- --nocapture --test-threads=1`
+  - `cargo test --manifest-path .\\src-tauri\\Cargo.toml generate_batch_worker_persists_image_asset_files_and_model_run -- --nocapture --test-threads=1`
+  - `cargo test --manifest-path .\\src-tauri\\Cargo.toml prompt_batch_worker_observes_sidecar_cancel_checkpoint_after_provider_call -- --nocapture --test-threads=1`
+  - `cargo test --manifest-path .\\src-tauri\\Cargo.toml generate_batch_worker_observes_sidecar_cancel_checkpoint_after_provider_call -- --nocapture --test-threads=1`
+  - `cargo check --manifest-path .\\src-tauri\\Cargo.toml`
+  - `npm run check:architecture`
+- 下一步剩余重点：
+  1. 将当前 per-task dev sidecar 启停策略升级为更清晰的 sidecar lifecycle 复用与超时/熔断策略。
+  2. 设计正式 batch task type 命名，避免把 `demo.image.*` 继续扩展成生产业务分类。

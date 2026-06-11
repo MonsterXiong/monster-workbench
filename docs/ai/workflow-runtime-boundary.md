@@ -66,6 +66,7 @@ Provider Gateway -> 管业务状态
 - `src-tauri/sidecars/python/creative_health_server.py` 当前仍是最小 HTTP runtime：`GET /health`、`GET /events`、`POST /tasks`。其中 `generate_image_prompt` 已按本协议返回 `outputs / modelRuns / events / retry` 标准结果，`demo.image.prompt` 已能在 Python 侧调用 OpenAI-compatible `/chat/completions`，`demo.image.generate` 已能在 Python 侧调用 OpenAI-compatible `/images/generations`，并把图片保存到 Rust 授权的输出目录。
 - `src-tauri/src/services/worker_queue_service.rs` 已经有 SQLite-backed queue 的基础控制面：claim queued task、request cancel、cancel checkpoint、startup recovery。
 - `src-tauri/src/services/batch_job_service.rs` 当前仍在 Rust 内运行 batch supervisor 与 `demo.image.mock / demo.image.prompt / demo.image.generate` worker 壳层。其中 `demo.image.mock` 仍是本地 smoke worker；`demo.image.prompt` 与 `demo.image.generate` worker 已改为提交 sidecar workflow，Rust 负责结果校验、取消后的状态映射、输出文件路径校验、asset/model_runs/task_events 写入和事件广播。
+- Sidecar request 已不再使用空 `budget` 占位：Rust 会提交 `maxDurationMs / maxImages / maxTokens / maxCostEstimate` 形态的预算对象，sidecar HTTP read timeout 和 Python provider timeout 会按该预算收敛。
 
 因此下一阶段不是直接让 Python 任意读写主库，也不是继续把新生产型 worker 分支写进 `BatchJobService`；重点应转向 sidecar runtime 正式化、batch 取消 checkpoint、预算/超时协议、生命周期复用和正式 workflow 类型命名。
 
@@ -141,7 +142,7 @@ Rust 提交给 Python 的请求建议统一为：
 
 - `taskId` 必须来自 Rust 已落库的 `creative_tasks`。
 - `provider.apiKey` 不应落入 task payload、task_events 或普通日志；密钥由 Rust 按需注入 Python 进程请求，并在日志脱敏。
-- `budget` 来自 Goal / Batch / Workflow 配置，由 Rust 负责最终熔断。
+- `budget` 来自 Goal / Batch / Workflow / Provider 配置，由 Rust 负责最终熔断；Python 只按协议执行局部 timeout / token / image 数等约束。
 - `context` 只传 ID 和必要摘要；大图、大文本、完整资产内容按需通过 Rust 授权路径或后续受限读取协议获取。
 
 ## 9. Sidecar Task Result 草案
@@ -241,7 +242,7 @@ Python step boundary
 2. `demo.image.prompt` 的 provider 调用已从 Rust worker 迁到 Python workflow；Rust 仍负责 claim、running、结果落库和 batch progress event。
 3. `demo.image.generate` 的 provider 调用和图片处理已从 Rust worker 迁到 Python workflow；Rust 负责校验输出文件路径、创建 asset、复制 thumbnail、写 `model_runs`。
 4. 新增正式 batch 类型时不要继续使用 `demo.image.*` 命名；应使用业务语义，例如 `image.prompt.batch`、`image.generate.batch` 或后续领域命名。
-5. batch prompt / image sidecar workflow 已接入 cancel checkpoint；下一步优先补预算/超时协议和 sidecar lifecycle 复用。只有在这些协议稳定后，再讨论 supervisor 是否从 Rust 迁到 Python worker pool。
+5. batch prompt / image sidecar workflow 已接入 cancel checkpoint，并已具备基础 budget/timeout 协议；下一步优先补 sidecar lifecycle 复用。只有在这些协议稳定后，再讨论 supervisor 是否从 Rust 迁到 Python worker pool。
 
 ## 12. 不变量
 

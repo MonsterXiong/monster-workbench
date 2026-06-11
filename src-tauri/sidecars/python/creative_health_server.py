@@ -190,7 +190,11 @@ def run_batch_image_prompt(payload):
     provider = payload.get("provider") or {}
     started = time.time()
     try:
-        prompt_text, provider_metadata = request_provider_chat(provider, prompt_request)
+        prompt_text, provider_metadata = request_provider_chat(
+            provider,
+            prompt_request,
+            payload.get("budget") or {},
+        )
     except Exception as error:
         duration_ms = int((time.time() - started) * 1000)
         return build_batch_prompt_result(
@@ -239,7 +243,13 @@ def run_batch_image_generate(payload):
     provider = payload.get("provider") or {}
     started = time.time()
     try:
-        image_result = request_provider_image(provider, prompt_request, image_size, output_dir)
+        image_result = request_provider_image(
+            provider,
+            prompt_request,
+            image_size,
+            output_dir,
+            payload.get("budget") or {},
+        )
     except Exception as error:
         duration_ms = int((time.time() - started) * 1000)
         return build_batch_image_result(
@@ -272,7 +282,7 @@ def run_batch_image_generate(payload):
     )
 
 
-def request_provider_image(provider, prompt_request, image_size, output_dir):
+def request_provider_image(provider, prompt_request, image_size, output_dir, budget=None):
     base_url = str(provider.get("baseUrl") or "").rstrip("/")
     model = str(provider.get("model") or "").strip()
     if not base_url:
@@ -280,8 +290,7 @@ def request_provider_image(provider, prompt_request, image_size, output_dir):
     if not model:
         raise ValueError("provider.model is required")
 
-    timeout_ms = int(provider.get("timeoutMs") or 60000)
-    timeout = max(timeout_ms / 1000, 3)
+    timeout = resolve_provider_timeout(provider, budget)
     body = {
         "model": model,
         "prompt": prompt_request,
@@ -318,6 +327,7 @@ def request_provider_image(provider, prompt_request, image_size, output_dir):
             "requestedImageSize": image_size,
             "actualImageSize": first_file.get("dimensions") or image_size,
             "imageAttempts": 1,
+            "budget": budget or {},
         },
     }
 
@@ -507,7 +517,7 @@ def build_batch_image_result(
     }
 
 
-def request_provider_chat(provider, prompt_request):
+def request_provider_chat(provider, prompt_request, budget=None):
     base_url = str(provider.get("baseUrl") or "").rstrip("/")
     model = str(provider.get("model") or "").strip()
     if not base_url:
@@ -515,12 +525,11 @@ def request_provider_chat(provider, prompt_request):
     if not model:
         raise ValueError("provider.model is required")
 
-    timeout_ms = int(provider.get("timeoutMs") or 60000)
-    timeout = max(timeout_ms / 1000, 3)
+    timeout = resolve_provider_timeout(provider, budget)
     body = {
         "model": model,
         "messages": [{"role": "user", "content": prompt_request}],
-        "max_tokens": 512,
+        "max_tokens": resolve_max_tokens(budget, 512),
         "temperature": 0,
     }
     headers = {"Content-Type": "application/json"}
@@ -546,7 +555,31 @@ def request_provider_chat(provider, prompt_request):
         "baseUrl": base_url,
         "statusCode": getattr(response, "status", None),
         "message": "provider chat completed",
+        "budget": budget or {},
     }
+
+
+def resolve_provider_timeout(provider, budget=None):
+    provider_timeout_ms = positive_int(provider.get("timeoutMs"), 60000)
+    budget = budget or {}
+    budget_ms = positive_int(budget.get("maxDurationMs"), provider_timeout_ms)
+    if not budget.get("maxDurationMs") and budget.get("maxDurationSeconds"):
+        budget_ms = positive_int(budget.get("maxDurationSeconds"), provider_timeout_ms // 1000) * 1000
+    effective_ms = min(provider_timeout_ms, budget_ms) if budget_ms > 0 else provider_timeout_ms
+    return max(effective_ms / 1000, 3)
+
+
+def resolve_max_tokens(budget, default_value):
+    budget = budget or {}
+    return positive_int(budget.get("maxTokens"), default_value)
+
+
+def positive_int(value, default_value):
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default_value
+    return parsed if parsed > 0 else default_value
 
 
 def build_chat_url(base_url):

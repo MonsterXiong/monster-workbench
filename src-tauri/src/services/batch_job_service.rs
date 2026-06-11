@@ -14,7 +14,8 @@ use crate::services::ai_service::AiProviderConfig;
 use crate::services::cancel_checkpoint_service::start_cancel_checkpoint_server;
 use crate::services::sidecar_lifecycle_service::{
     BatchImageGenerateSidecarRequest, BatchImagePromptSidecarRequest, SidecarLifecycleService,
-    SidecarProviderConfig, SidecarWorkflowModelRun, SidecarWorkflowTaskResult,
+    SidecarProviderConfig, SidecarWorkflowBudget, SidecarWorkflowModelRun,
+    SidecarWorkflowTaskResult,
 };
 use crate::services::task_service::CreativeTaskEventPayload;
 use serde_json::{json, Value};
@@ -960,6 +961,12 @@ fn submit_batch_prompt_sidecar_workflow<R: Runtime>(
             request_type: "chat".to_string(),
             timeout_ms: Some(provider_config.timeout_ms),
         },
+        budget: Some(SidecarWorkflowBudget {
+            max_duration_ms: Some(provider_config.timeout_ms),
+            max_images: None,
+            max_tokens: Some(512),
+            max_cost_estimate: None,
+        }),
         attempt: task.retry_count + 1,
         max_retries: task.max_retries,
         cancel_checkpoint_url: cancel_checkpoint_url.map(ToString::to_string),
@@ -1570,6 +1577,12 @@ fn submit_batch_image_generate_sidecar_workflow<R: Runtime>(
             request_type: "image".to_string(),
             timeout_ms: Some(provider_config.timeout_ms),
         },
+        budget: Some(SidecarWorkflowBudget {
+            max_duration_ms: Some(provider_config.timeout_ms),
+            max_images: Some(1),
+            max_tokens: None,
+            max_cost_estimate: None,
+        }),
         attempt: task.retry_count + 1,
         max_retries: task.max_retries,
         cancel_checkpoint_url: cancel_checkpoint_url.map(ToString::to_string),

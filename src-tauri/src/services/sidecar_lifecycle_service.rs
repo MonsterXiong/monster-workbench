@@ -61,6 +61,15 @@ pub struct SidecarProviderConfig {
     pub timeout_ms: Option<u64>,
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SidecarWorkflowBudget {
+    pub max_duration_ms: Option<u64>,
+    pub max_images: Option<u64>,
+    pub max_tokens: Option<u64>,
+    pub max_cost_estimate: Option<f64>,
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BatchImagePromptSidecarRequest {
@@ -70,6 +79,7 @@ pub struct BatchImagePromptSidecarRequest {
     pub sequence_no: Option<i64>,
     pub prompt_request: String,
     pub provider: SidecarProviderConfig,
+    pub budget: Option<SidecarWorkflowBudget>,
     pub attempt: i64,
     pub max_retries: i64,
     pub cancel_checkpoint_url: Option<String>,
@@ -87,6 +97,7 @@ pub struct BatchImageGenerateSidecarRequest {
     pub image_size: String,
     pub output_dir: String,
     pub provider: SidecarProviderConfig,
+    pub budget: Option<SidecarWorkflowBudget>,
     pub attempt: i64,
     pub max_retries: i64,
     pub cancel_checkpoint_url: Option<String>,
@@ -276,6 +287,13 @@ impl<R: Runtime> SidecarLifecycleService<R> {
             .runtime_token
             .clone()
             .ok_or_else(|| AppError::Process("sidecar runtime token is missing".to_string()))?;
+        let budget = encode_budget(Some(SidecarWorkflowBudget {
+            max_duration_ms: Some(120_000),
+            max_images: None,
+            max_tokens: Some(1024),
+            max_cost_estimate: None,
+        }))?;
+        let read_timeout = budget_read_timeout(&budget);
 
         let payload = json!({
             "protocolVersion": 1,
@@ -286,7 +304,7 @@ impl<R: Runtime> SidecarLifecycleService<R> {
             "attempt": request.attempt,
             "maxRetries": request.max_retries,
             "cancelToken": format!("task-{}", request.task_id),
-            "budget": Value::Null,
+            "budget": budget,
             "provider": Value::Null,
             "cancelCheckpoint": request
                 .cancel_checkpoint_url
@@ -306,7 +324,7 @@ impl<R: Runtime> SidecarLifecycleService<R> {
                 "goalId": Value::Null,
             },
         });
-        let response = post_json(port, &token, "/tasks", &payload)?;
+        let response = post_json(port, &token, "/tasks", &payload, read_timeout)?;
         serde_json::from_str::<SidecarWorkflowTaskResult>(&response).map_err(|error| {
             AppError::Process(format!("failed to parse sidecar response: {error}"))
         })
@@ -325,6 +343,8 @@ impl<R: Runtime> SidecarLifecycleService<R> {
             .runtime_token
             .clone()
             .ok_or_else(|| AppError::Process("sidecar runtime token is missing".to_string()))?;
+        let budget = encode_budget(request.budget)?;
+        let read_timeout = budget_read_timeout(&budget);
 
         let payload = json!({
             "protocolVersion": 1,
@@ -335,7 +355,7 @@ impl<R: Runtime> SidecarLifecycleService<R> {
             "attempt": request.attempt,
             "maxRetries": request.max_retries,
             "cancelToken": format!("task-{}", request.task_id),
-            "budget": Value::Null,
+            "budget": budget,
             "provider": {
                 "providerId": request.provider.provider_id,
                 "providerType": request.provider.provider_type,
@@ -362,7 +382,7 @@ impl<R: Runtime> SidecarLifecycleService<R> {
                 "sequenceNo": request.sequence_no,
             },
         });
-        let response = post_json(port, &token, "/tasks", &payload)?;
+        let response = post_json(port, &token, "/tasks", &payload, read_timeout)?;
         serde_json::from_str::<SidecarWorkflowTaskResult>(&response).map_err(|error| {
             AppError::Process(format!("failed to parse sidecar response: {error}"))
         })
@@ -381,6 +401,8 @@ impl<R: Runtime> SidecarLifecycleService<R> {
             .runtime_token
             .clone()
             .ok_or_else(|| AppError::Process("sidecar runtime token is missing".to_string()))?;
+        let budget = encode_budget(request.budget)?;
+        let read_timeout = budget_read_timeout(&budget);
 
         let payload = json!({
             "protocolVersion": 1,
@@ -391,7 +413,7 @@ impl<R: Runtime> SidecarLifecycleService<R> {
             "attempt": request.attempt,
             "maxRetries": request.max_retries,
             "cancelToken": format!("task-{}", request.task_id),
-            "budget": Value::Null,
+            "budget": budget,
             "provider": {
                 "providerId": request.provider.provider_id,
                 "providerType": request.provider.provider_type,
@@ -420,7 +442,7 @@ impl<R: Runtime> SidecarLifecycleService<R> {
                 "sequenceNo": request.sequence_no,
             },
         });
-        let response = post_json(port, &token, "/tasks", &payload)?;
+        let response = post_json(port, &token, "/tasks", &payload, read_timeout)?;
         serde_json::from_str::<SidecarWorkflowTaskResult>(&response).map_err(|error| {
             AppError::Process(format!("failed to parse sidecar response: {error}"))
         })
@@ -516,7 +538,13 @@ fn health_check(port: u16, token: &str) -> AppResult<()> {
     )))
 }
 
-fn post_json(port: u16, token: &str, path: &str, payload: &Value) -> AppResult<String> {
+fn post_json(
+    port: u16,
+    token: &str,
+    path: &str,
+    payload: &Value,
+    read_timeout: Duration,
+) -> AppResult<String> {
     let mut stream = TcpStream::connect_timeout(
         &format!("127.0.0.1:{port}")
             .parse()
@@ -525,7 +553,7 @@ fn post_json(port: u16, token: &str, path: &str, payload: &Value) -> AppResult<S
     )
     .map_err(|error| AppError::Process(format!("sidecar connect failed: {error}")))?;
     stream
-        .set_read_timeout(Some(Duration::from_secs(120)))
+        .set_read_timeout(Some(read_timeout))
         .map_err(|error| AppError::Process(format!("failed to set read timeout: {error}")))?;
     stream
         .set_write_timeout(Some(Duration::from_secs(2)))
@@ -558,6 +586,53 @@ fn post_json(port: u16, token: &str, path: &str, payload: &Value) -> AppResult<S
         .nth(1)
         .map(|body| body.to_string())
         .ok_or_else(|| AppError::Process("sidecar response body is missing".to_string()))
+}
+
+fn encode_budget(budget: Option<SidecarWorkflowBudget>) -> AppResult<Value> {
+    budget
+        .map(serde_json::to_value)
+        .transpose()
+        .map_err(|error| AppError::Process(format!("failed to encode sidecar budget: {error}")))
+        .map(|value| value.unwrap_or(Value::Null))
+}
+
+fn budget_read_timeout(budget: &Value) -> Duration {
+    let max_duration_ms = budget
+        .get("maxDurationMs")
+        .and_then(Value::as_u64)
+        .unwrap_or(120_000);
+    let timeout_ms = max_duration_ms.saturating_add(5_000).clamp(3_000, 600_000);
+    Duration::from_millis(timeout_ms)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sidecar_budget_encodes_contract_and_drives_read_timeout() {
+        let budget = encode_budget(Some(SidecarWorkflowBudget {
+            max_duration_ms: Some(15_000),
+            max_images: Some(1),
+            max_tokens: Some(512),
+            max_cost_estimate: Some(0.25),
+        }))
+        .expect("budget should encode");
+
+        assert_eq!(budget["maxDurationMs"], 15_000);
+        assert_eq!(budget["maxImages"], 1);
+        assert_eq!(budget["maxTokens"], 512);
+        assert_eq!(budget["maxCostEstimate"], 0.25);
+        assert_eq!(budget_read_timeout(&budget), Duration::from_millis(20_000));
+    }
+
+    #[test]
+    fn missing_sidecar_budget_uses_default_read_timeout() {
+        let budget = encode_budget(None).expect("missing budget should encode as null");
+
+        assert!(budget.is_null());
+        assert_eq!(budget_read_timeout(&budget), Duration::from_millis(125_000));
+    }
 }
 
 fn spawn_python_sidecar(script_path: &Path, port: u16, token: &str) -> AppResult<Child> {
