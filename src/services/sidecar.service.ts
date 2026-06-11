@@ -1,4 +1,9 @@
 import { callTauri } from "./tauri";
+import {
+  nativeEventService,
+  type TauriUnlistenFn,
+} from "./native-event.service";
+import { isTauriRuntime } from "./runtime";
 
 export interface SidecarStatusSnapshot {
   status: string;
@@ -12,6 +17,40 @@ export interface SidecarStatusSnapshot {
   recoveryBackoffRemainingMs: number | null;
 }
 
+export interface SidecarStatusEventPayload extends SidecarStatusSnapshot {
+  eventType: string;
+  message: string | null;
+  createdAt: string;
+}
+
+function listenBrowserEvent<T>(
+  eventName: string,
+  callback: (payload: T) => void
+): TauriUnlistenFn {
+  const listener = (event: Event) => {
+    const customEvent = event as CustomEvent<T>;
+    callback(customEvent.detail);
+  };
+  window.addEventListener(eventName, listener as EventListener);
+  return async () => {
+    window.removeEventListener(eventName, listener as EventListener);
+  };
+}
+
+async function listenSidecarStatusChanged(
+  callback: (payload: SidecarStatusEventPayload) => void
+): Promise<TauriUnlistenFn | null> {
+  const eventName = "creative-sidecar-status-changed";
+  if (!isTauriRuntime()) {
+    return listenBrowserEvent<SidecarStatusEventPayload>(eventName, callback);
+  }
+
+  return nativeEventService.listenEvent<SidecarStatusEventPayload>(
+    eventName,
+    (event) => callback(event.payload)
+  );
+}
+
 export const sidecarService = {
   getStatus: () => callTauri<SidecarStatusSnapshot>("get_sidecar_status"),
   startDevHealthServer: () =>
@@ -19,4 +58,5 @@ export const sidecarService = {
   checkHealth: () => callTauri<SidecarStatusSnapshot>("check_sidecar_health"),
   stopDevHealthServer: () =>
     callTauri<SidecarStatusSnapshot>("stop_sidecar_dev_health_server"),
+  listenStatusChanged: listenSidecarStatusChanged,
 };

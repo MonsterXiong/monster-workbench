@@ -169,7 +169,7 @@ let mockBatchJobTimers = new Map<number, number>();
 let mockBatchTaskTimers = new Map<number, number>();
 let mockBatchJobs: any[] = [];
 type MockSidecarStatus = {
-  status: "running" | "stopped";
+  status: "starting" | "running" | "stopping" | "stopped" | "unhealthy" | "failed";
   port: number | null;
   pid: number | null;
   lastError: string | null;
@@ -211,6 +211,19 @@ function dispatchMockTaskEvent(eventName: string, payload: Record<string, unknow
     return;
   }
   window.dispatchEvent(new CustomEvent(eventName, { detail: payload }));
+}
+
+function dispatchMockSidecarStatusEvent(
+  eventType: string,
+  message: string,
+  payload: Record<string, unknown>
+) {
+  dispatchMockTaskEvent("creative-sidecar-status-changed", {
+    eventType,
+    message,
+    createdAt: formatCurrentIsoDateTime(" "),
+    ...payload,
+  });
 }
 
 function createMockCreativeTaskPayload(input: Record<string, unknown>): any {
@@ -2017,16 +2030,23 @@ export async function mockCallTauri<T = unknown>(
 
     case "start_sidecar_dev_health_server":
       mockSidecarStatus = {
-        status: "running",
+        status: "starting",
         port: 43123,
         pid: 43123,
         lastError: null,
         startedAt: formatCurrentIsoDateTime(" "),
-        checkedAt: formatCurrentIsoDateTime(" "),
+        checkedAt: null,
         recoveryFailureCount: 0,
         lastRecoveryFailureAt: null,
         recoveryBackoffRemainingMs: null,
       };
+      dispatchMockSidecarStatusEvent("starting", "sidecar starting", mockSidecarStatus);
+      mockSidecarStatus = {
+        ...mockSidecarStatus,
+        status: "running",
+        checkedAt: formatCurrentIsoDateTime(" "),
+      };
+      dispatchMockSidecarStatusEvent("health_ok", "sidecar health check ok", mockSidecarStatus);
       return mockSidecarStatus as T;
 
     case "check_sidecar_health":
@@ -2036,9 +2056,20 @@ export async function mockCallTauri<T = unknown>(
         checkedAt: formatCurrentIsoDateTime(" "),
         recoveryBackoffRemainingMs: null,
       };
+      dispatchMockSidecarStatusEvent(
+        "health_ok",
+        "sidecar health check ok",
+        mockSidecarStatus
+      );
       return mockSidecarStatus as T;
 
     case "stop_sidecar_dev_health_server":
+      mockSidecarStatus = {
+        ...mockSidecarStatus,
+        status: "stopping",
+        checkedAt: formatCurrentIsoDateTime(" "),
+      };
+      dispatchMockSidecarStatusEvent("stopping", "sidecar stopping", mockSidecarStatus);
       mockSidecarStatus = {
         status: "stopped",
         port: null,
@@ -2050,6 +2081,7 @@ export async function mockCallTauri<T = unknown>(
         lastRecoveryFailureAt: mockSidecarStatus.lastRecoveryFailureAt,
         recoveryBackoffRemainingMs: null,
       };
+      dispatchMockSidecarStatusEvent("stopped", "sidecar stopped", mockSidecarStatus);
       return mockSidecarStatus as T;
 
     // 日志系统

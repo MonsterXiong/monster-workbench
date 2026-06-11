@@ -5,7 +5,7 @@ use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use tauri::{AppHandle, Manager, Runtime, Wry};
+use tauri::{AppHandle, Emitter, Manager, Runtime, Wry};
 
 const PYTHON_SIDECAR_ENV_ALLOWLIST: &[&str] = &[
     "PATH",
@@ -27,6 +27,8 @@ const BATCH_IMAGE_GENERATE_TASK_TYPE: &str = "image.generate.batch";
 const BATCH_IMAGE_GENERATE_WORKFLOW_TYPE: &str = "image.generate.batch";
 const SIDECAR_RECOVERY_BACKOFF_MS: u128 = 5_000;
 const SIDECAR_SHUTDOWN_TIMEOUT_MS: u64 = 1_000;
+const SIDECAR_STATUS_EVENT_THROTTLE_MS: u128 = 1_000;
+const SIDECAR_STATUS_EVENT_NAME: &str = "creative-sidecar-status-changed";
 
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -40,6 +42,23 @@ pub struct SidecarStatusSnapshot {
     pub recovery_failure_count: u64,
     pub last_recovery_failure_at: Option<String>,
     pub recovery_backoff_remaining_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SidecarStatusEventPayload {
+    pub event_type: String,
+    pub message: Option<String>,
+    pub status: String,
+    pub port: Option<u16>,
+    pub pid: Option<u32>,
+    pub last_error: Option<String>,
+    pub started_at: Option<String>,
+    pub checked_at: Option<String>,
+    pub recovery_failure_count: u64,
+    pub last_recovery_failure_at: Option<String>,
+    pub recovery_backoff_remaining_ms: Option<u64>,
+    pub created_at: String,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -182,6 +201,8 @@ pub struct SidecarLifecycleService<R: Runtime = Wry> {
     child: Option<Child>,
     runtime_token: Option<String>,
     recovery_backoff_until: Option<u128>,
+    last_status_event_status: Option<String>,
+    last_status_event_at: Option<u128>,
     snapshot: SidecarStatusSnapshot,
 }
 
@@ -198,6 +219,8 @@ impl<R: Runtime> SidecarLifecycleService<R> {
             child: None,
             runtime_token: None,
             recovery_backoff_until: None,
+            last_status_event_status: None,
+            last_status_event_at: None,
             snapshot: SidecarStatusSnapshot {
                 status: "stopped".to_string(),
                 port: None,
@@ -231,12 +254,13 @@ impl<R: Runtime> SidecarLifecycleService<R> {
     fn mark_recovery_failure(&mut self, message: String) {
         let now = now_text();
         self.snapshot.status = "failed".to_string();
-        self.snapshot.last_error = Some(message);
+        self.snapshot.last_error = Some(message.clone());
         self.snapshot.checked_at = Some(now.clone());
         self.snapshot.recovery_failure_count =
             self.snapshot.recovery_failure_count.saturating_add(1);
         self.snapshot.last_recovery_failure_at = Some(now);
         self.open_recovery_circuit();
+        self.emit_status_event("recovery_failed", Some(message), true);
     }
 
     fn recovery_circuit_remaining_ms(&self) -> Option<u128> {
@@ -261,6 +285,41 @@ impl<R: Runtime> SidecarLifecycleService<R> {
                 }
             });
         snapshot
+    }
+
+    fn emit_status_event(&mut self, event_type: &str, message: Option<String>, force: bool) {
+        let now = now_millis();
+        let status_changed = self
+            .last_status_event_status
+            .as_deref()
+            .map(|status| status != self.snapshot.status)
+            .unwrap_or(true);
+        let throttle_expired = self
+            .last_status_event_at
+            .map(|last| now.saturating_sub(last) >= SIDECAR_STATUS_EVENT_THROTTLE_MS)
+            .unwrap_or(true);
+        if !force && !status_changed && !throttle_expired {
+            return;
+        }
+
+        let snapshot = self.snapshot_with_observability();
+        let payload = SidecarStatusEventPayload {
+            event_type: event_type.to_string(),
+            message,
+            status: snapshot.status.clone(),
+            port: snapshot.port,
+            pid: snapshot.pid,
+            last_error: snapshot.last_error,
+            started_at: snapshot.started_at,
+            checked_at: snapshot.checked_at,
+            recovery_failure_count: snapshot.recovery_failure_count,
+            last_recovery_failure_at: snapshot.last_recovery_failure_at,
+            recovery_backoff_remaining_ms: snapshot.recovery_backoff_remaining_ms,
+            created_at: now_text(),
+        };
+        let _ = self.app_handle.emit(SIDECAR_STATUS_EVENT_NAME, payload);
+        self.last_status_event_status = Some(snapshot.status);
+        self.last_status_event_at = Some(now);
     }
 
     #[cfg(test)]
@@ -294,6 +353,7 @@ impl<R: Runtime> SidecarLifecycleService<R> {
         self.snapshot.checked_at = None;
         self.runtime_token = Some(token);
         self.child = Some(child);
+        self.emit_status_event("starting", Some("sidecar starting".to_string()), true);
 
         std::thread::sleep(Duration::from_millis(250));
         self.check_health()
@@ -314,14 +374,21 @@ impl<R: Runtime> SidecarLifecycleService<R> {
                 self.snapshot.last_error = None;
                 self.snapshot.checked_at = Some(now_text());
                 self.reset_recovery_circuit();
+                self.emit_status_event(
+                    "health_ok",
+                    Some("sidecar health check ok".to_string()),
+                    false,
+                );
                 Ok(self.snapshot_with_observability())
             }
             Err(error) => {
                 if self.child.is_some() {
                     self.snapshot.status = "unhealthy".to_string();
                 }
-                self.snapshot.last_error = Some(error.to_string());
+                let message = error.to_string();
+                self.snapshot.last_error = Some(message.clone());
                 self.snapshot.checked_at = Some(now_text());
+                self.emit_status_event("health_failed", Some(message), false);
                 Ok(self.snapshot_with_observability())
             }
         }
@@ -329,6 +396,7 @@ impl<R: Runtime> SidecarLifecycleService<R> {
 
     pub fn stop_dev_health_server(&mut self) -> AppResult<SidecarStatusSnapshot> {
         self.snapshot.status = "stopping".to_string();
+        self.emit_status_event("stopping", Some("sidecar stopping".to_string()), true);
         if let (Some(port), Some(token)) = (self.snapshot.port, self.runtime_token.as_deref()) {
             let _ = request_shutdown(port, token);
         }
@@ -347,6 +415,7 @@ impl<R: Runtime> SidecarLifecycleService<R> {
         self.snapshot.checked_at = Some(now_text());
         self.runtime_token = None;
         self.reset_recovery_circuit();
+        self.emit_status_event("stopped", Some("sidecar stopped".to_string()), true);
         Ok(self.snapshot_with_observability())
     }
 
@@ -360,6 +429,13 @@ impl<R: Runtime> SidecarLifecycleService<R> {
             && self.recovery_circuit_is_open()
         {
             let remaining_ms = self.recovery_circuit_remaining_ms().unwrap_or(0);
+            self.emit_status_event(
+                "recovery_backoff_active",
+                Some(format!(
+                    "sidecar recovery backoff active for {remaining_ms}ms"
+                )),
+                false,
+            );
             return Err(AppError::Process(format!(
                 "sidecar recovery circuit open for {remaining_ms}ms after {}: {}",
                 self.snapshot.status,
@@ -637,6 +713,8 @@ impl<R: Runtime> SidecarLifecycleService<R> {
             self.snapshot.pid = None;
             self.runtime_token = None;
             self.child = None;
+            self.snapshot.checked_at = Some(now_text());
+            self.emit_status_event("process_exited", self.snapshot.last_error.clone(), true);
         }
     }
 
@@ -878,6 +956,29 @@ mod tests {
         assert_eq!(status.recovery_failure_count, 1);
         assert!(status.last_recovery_failure_at.is_some());
         assert!(status.recovery_backoff_remaining_ms.is_some());
+        assert_eq!(service.last_status_event_status.as_deref(), Some("failed"));
+    }
+
+    #[test]
+    fn status_events_throttle_repeated_status() {
+        let app = tauri::test::mock_app();
+        let mut service = SidecarLifecycleService::new(app.handle().clone());
+        service.snapshot.status = "running".to_string();
+
+        service.emit_status_event("health_ok", Some("ok".to_string()), false);
+        let first_event_at = service
+            .last_status_event_at
+            .expect("first event should set timestamp");
+
+        service.emit_status_event("health_ok", Some("ok again".to_string()), false);
+        assert_eq!(service.last_status_event_at, Some(first_event_at));
+
+        service.snapshot.status = "unhealthy".to_string();
+        service.emit_status_event("health_failed", Some("failed".to_string()), false);
+        assert_eq!(
+            service.last_status_event_status.as_deref(),
+            Some("unhealthy")
+        );
     }
 
     #[test]
