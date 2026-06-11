@@ -2209,39 +2209,53 @@ Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `
 - `npm run typecheck`
 - `git diff --check -- src-tauri\\src\\services\\worker_queue_service.rs src-tauri\\src\\commands\\worker_queue.rs src-tauri\\src\\main.rs docs\\ai\\workflow-runtime-boundary.md docs\\architecture-current-state.md agent\\open-loops.md`
 
-## 2026-06-12 补充：Rust TaskService / BatchJobService 编排边界再复核（三）
+## 2026-06-12 当前：Rust TaskService / BatchJobService 编排边界快照
 
-本轮继续按 `docs/ai/workflow-runtime-boundary.md` 对照实际代码，但只做边界评估与文档收口，不修改 Rust 代码、不新增 migration、不迁移 supervisor。
+本节按 `docs/ai/workflow-runtime-boundary.md` 重新对照当前代码，替代前面多轮过程性“再复核”结论；后续看当前边界时优先读本节和 `workflow-runtime-boundary.md`。
 
 代码事实：
 
-- `src-tauri/src/services/task_service.rs` 的 `run_generate_image_prompt_workflow_after_task` 仍是 Rust 控制面入口：创建 task、写 queued/running 事件、启动 cancel checkpoint、获取 sidecar endpoint、提交 `/tasks`、校验 sidecar result、写 asset/model_runs/task_events/status。
-- `TaskService::settle_sidecar_non_success` 只处理 sidecar 协议状态到 task status 的可信映射，仍没有承载真实 prompt、review、revision 或 consistency 业务规则。
-- `TaskService::run_review_asset_quality_stub` 仍是本地 stub，会生成 review result asset 和 revise draft task；该函数不应继续扩展成正式审查/返工工作流。
-- `src-tauri/src/services/batch_job_service.rs` 的 `run_batch_supervisor_inner` 仍持有 batch supervisor：snapshot 轮询、concurrency slot、queued claim、worker thread 派发、paused/cancelled/completed 收敛。
-- `run_prompt_task_worker` / `run_generate_task_worker` 已是过渡 worker shell：它们负责取消兜底、checkpoint server、sidecar submit、transport failure fallback 和 settle 分派；provider 调用、prompt builder 与图片生成已在 Python workflow。
-- `settle_batch_image_sidecar_response` 的成功分支仍在 `BatchJobService`，因为这里包含授权输出目录校验、thumbnail 生成、image-specific metadata、asset 写入和 model_runs 绑定。
-- `src-tauri/src/services/worker_queue_service.rs` 已有 `claim_next_task`、`check_cancel_checkpoint`、`complete_task` 和 `recover_interrupted_tasks`，但 `CreativeTask` / `creative_tasks` 当前只有 status、retry、started_at、finished_at 等基础字段，没有 worker identity、lease owner、lease deadline、heartbeat 或 claim token。
-- `creative_task_repo::claim_next_queued_task` 只把 queued task 原子改为 running；它还没有把任务绑定到某个 worker，也没有可续约租约。因此当前 WorkerQueue complete API 只能代表 Rust IPC/service 首段闭环，不能代表完整 Python worker-pool 协议。
+- `src-tauri/src/services/task_service.rs` 仍是 task / asset / asset_link / task_event 的可信入口，负责输入校验、repo 写读和 Tauri event emit。
+- `TaskService::run_generate_image_prompt_workflow_after_task` 是过渡 workflow 控制面：Rust 创建 task、写 queued/running 事件、启动 cancel checkpoint、获取 sidecar endpoint、提交 `/tasks`、校验 sidecar result，再写 asset、model_runs、task_events 和 task status。
+- `TaskService::settle_sidecar_non_success` 只把 sidecar 协议状态映射为受控 task status，没有承载真实 prompt、review、revision 或 consistency 业务规则。
+- `TaskService::run_review_asset_quality_stub` 仍是本地 stub，会生成 review result asset 和 revise draft task；该函数冻结为 demo 验证入口，不再扩展正式审查/返工逻辑。
+- `src-tauri/src/services/batch_job_service.rs` 已退出 `CreativeDbInfra` 和 `AiProviderConfig` 测试 DTO，当前通过 `creative_batch_repo`、`creative_task_repo`、`creative_asset_repo`、`creative_model_run_repo` 和 `BatchWorkflowProviderConfig` 组织可信写入与 workflow request。
+- `BatchJobService::run_batch_supervisor_inner` 仍是 Rust supervisor：轮询 snapshot、计算 concurrency slot、claim queued task、派发 prompt/image/mock worker，并收敛 paused、cancelled、completed 状态。
+- `run_prompt_task_worker` / `run_generate_task_worker` 已收窄为过渡 worker shell：取消兜底、checkpoint server、sidecar submit、transport failure fallback 和 settle 分派留在 Rust；provider 调用、prompt builder 与图片生成已在 Python workflow。
+- `src-tauri/src/services/workflow_settle_service.rs` 已抽出 sidecar 协议校验、result events 落库、model_runs 持久化和普通 ready asset 创建 helper。
+- `settle_batch_image_sidecar_response` 的 success 分支仍留在 `BatchJobService`，因为它包含授权输出目录 canonical 校验、thumbnail 生成、image-specific metadata、asset 写入和 model_runs 绑定。
+- `SidecarLifecycleService` 已具备共享 endpoint、runtime token、recovery backoff、graceful shutdown、runtime `/events` polling、`sidecar-runtime.log` 与 `sidecar-lifecycle.log` 摘要日志；这些仍是诊断/控制面，不替代 Rust settle 写入的 `task_events`。
+- `WorkerQueueService` 已有 `claim_next_task`、`check_cancel_checkpoint`、`complete_task` 和 `recover_interrupted_tasks`，但 `creative_tasks` 仍没有 worker identity、lease owner、lease deadline、heartbeat 或 claim token；`claim_next_queued_task` 只把 queued 原子改为 running。
 
-边界判定：
+当前边界判定：
 
 | 区域 | 当前结论 | 后续约束 |
 |---|---|---|
-| `TaskService` task/asset/event 方法 | 可短期保留为可信入口 | 不因为文件名偏宽就优先拆；先避免把真实 review/revision 规则写进 Rust |
-| `TaskService` 普通 workflow submit/settle | 合理过渡控制面 | 可继续抽通用 submit/settle helper，但真实 workflow 逻辑继续在 Python |
-| `BatchJobService` supervisor | 短期必须保留 Rust | 在 worker identity、租约、心跳、complete token、恢复协议稳定前，不迁给 Python |
+| `TaskService` task/asset/event 方法 | 可短期保留为 Rust 可信入口 | 不因为文件名偏宽就优先拆；先避免把真实 review/revision 规则写进 Rust |
+| `TaskService` 普通 workflow submit/settle | 合理过渡控制面 | 可继续抽通用 submit/settle helper；真实 workflow 逻辑继续在 Python |
+| `TaskService` review stub | demo/stub | 冻结；正式审查、返工、一致性检查迁入 Python workflow runtime |
+| `BatchJobService` supervisor | 短期必须保留 Rust | 在 worker identity、租约、心跳、complete token 和恢复协议稳定前，不迁给 Python |
 | prompt/image worker shell | 可作为过渡壳层保留 | 不新增正式生产 worker 分支；新增 workflow 走 sidecar request/result 协议 |
+| prompt builder / provider 调用 | 已迁入 Python workflow | 不回流到 `AiProviderService::test_provider` 或新的 Rust provider helper |
 | image success settle | 保留 Rust | 路径授权、thumbnail、asset/model_runs/task_events 可信写入不交给 Python |
+| Python `/events` | runtime 诊断流 | 不从诊断流全量回灌 `task_events`；可信审计继续来自 `/tasks` result settle |
 | WorkerQueue claim/checkpoint/complete | Rust IPC/service 首段闭环 | 还不是 localhost sidecar worker-pool 控制协议 |
+
+已经完成的旧问题，不再作为下一步重复推进：
+
+- batch prompt / image provider 执行已从 Rust worker 迁到 Python sidecar workflow。
+- batch 正式类型已支持 `image.prompt.batch` / `image.generate.batch`，旧 `demo.image.prompt/generate` 只作为兼容别名。
+- batch provider DTO 已退出 `AiProviderConfig` 测试语义。
+- batch prompt builder 已从 Rust 模板替换迁入 Python workflow。
+- sidecar `/events` 已明确为 runtime 诊断流，并已落 `sidecar-runtime.log` 摘要；lifecycle 控制面已落 `sidecar-lifecycle.log` 摘要。
 
 下一阶段前置条件：
 
 1. 先设计 Rust-owned localhost sidecar control API，而不是让 Python 直连 SQLite 或直接调用 Tauri command。
-2. control API 必须复用 sidecar runtime token 或等价鉴权，限制为 `127.0.0.1`，并且只暴露受控的 claim / checkpoint / heartbeat / complete 能力。
-3. claim 结果需要包含 `workerId`、`leaseId` 或 claim token、`leaseExpiresAt`、`runtimeInstanceId`，complete 时必须带回同一 lease/claim 信息，避免过期 worker 覆盖新 worker 的结果。
+2. control API 必须复用 sidecar runtime token 或等价鉴权，限制为 `127.0.0.1`，并且只暴露受控的 claim、checkpoint、heartbeat、complete 能力。
+3. claim 结果需要包含 `workerId`、`leaseId` 或 claim token、`leaseExpiresAt`、`runtimeInstanceId`；complete 时必须带回同一 lease / claim 信息，避免过期 worker 覆盖新 worker 的结果。
 4. heartbeat 需要能续约租期，并在 Rust 侧支持超时回收；没有心跳前，不能把 supervisor 的任务拥有权交给 Python worker pool。
-5. result settle contract 必须先定义：Python 只能返回 outputs/modelRuns/events 摘要和授权目录内文件引用；asset、model_runs、task_events、task status 仍由 Rust settle 写入。
+5. result settle contract 必须先定义：Python 只能返回 outputs、modelRuns、events 摘要和授权目录内文件引用；asset、model_runs、task_events、task status 仍由 Rust settle 写入。
 6. 若需要 schema 支撑，必须先按 `docs/ai/database-migration-policy.md` 设计 migration 与旧库兼容回归；不能在当前字段基础上假定已经有 worker 租约能力。
 
-因此，本轮结论是：`TaskService` 当前不是优先拆分对象；`BatchJobService` 的业务执行已经明显收窄，但 supervisor 仍不能迁移。下一刀应落在“worker-pool 控制协议与租约模型设计”，而不是继续抽 image success settle 或新增 Python 拉队列实现。
+结论：`TaskService` 当前不是优先拆分对象；`BatchJobService` 的业务执行已经明显收窄，但 supervisor 仍不能迁移。下一刀应落在 worker-pool 控制协议与租约模型设计，而不是继续抽 image success settle 或新增 Python 拉队列实现。
