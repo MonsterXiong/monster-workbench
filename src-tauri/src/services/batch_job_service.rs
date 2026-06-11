@@ -27,6 +27,12 @@ use std::time::Duration;
 use std::time::Instant;
 use tauri::{AppHandle, Emitter, Manager, Runtime, Wry};
 
+const BATCH_TYPE_MOCK_DEMO: &str = "demo.image.mock";
+const BATCH_TYPE_PROMPT_DEMO: &str = "demo.image.prompt";
+const BATCH_TYPE_GENERATE_DEMO: &str = "demo.image.generate";
+const BATCH_TYPE_PROMPT_FORMAL: &str = "image.prompt.batch";
+const BATCH_TYPE_GENERATE_FORMAL: &str = "image.generate.batch";
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateBatchImageJobInput {
@@ -105,7 +111,7 @@ impl<R: Runtime> BatchJobService<R> {
         let batch_type = input
             .batch_type
             .clone()
-            .unwrap_or_else(|| "demo.image.mock".to_string());
+            .unwrap_or_else(|| BATCH_TYPE_MOCK_DEMO.to_string());
         let total_count = input.total_count.unwrap_or(100).clamp(1, 1000);
         let concurrency = input.concurrency.unwrap_or(5).clamp(1, 10);
         let max_retries = input.max_retries.unwrap_or(0).clamp(0, 5);
@@ -531,14 +537,14 @@ fn run_batch_supervisor_inner<R: Runtime>(
                     let task_app_handle = app_handle.clone();
                     let batch_type = snapshot.job.batch_type.clone();
                     thread::spawn(move || {
-                        let _ = if batch_type == "demo.image.prompt" {
+                        let _ = if is_prompt_batch_type(&batch_type) {
                             run_prompt_task_worker(
                                 &task_app_handle,
                                 &task_db_path,
                                 batch_job_id,
                                 task,
                             )
-                        } else if batch_type == "demo.image.generate" {
+                        } else if is_generate_batch_type(&batch_type) {
                             run_generate_task_worker(
                                 &task_app_handle,
                                 &task_db_path,
@@ -611,11 +617,37 @@ fn resolve_max_consecutive_failures(batch: &CreativeBatchJob) -> i64 {
 }
 
 fn batch_worker_started_labels(batch_type: &str) -> (&'static str, &'static str) {
-    match batch_type {
-        "demo.image.prompt" => ("prompt_started", "prompt worker started"),
-        "demo.image.generate" => ("image_started", "image worker started"),
-        _ => ("mock_started", "mock worker started"),
+    if is_prompt_batch_type(batch_type) {
+        ("prompt_started", "prompt worker started")
+    } else if is_generate_batch_type(batch_type) {
+        ("image_started", "image worker started")
+    } else {
+        ("mock_started", "mock worker started")
     }
+}
+
+fn is_prompt_batch_type(batch_type: &str) -> bool {
+    matches!(
+        batch_type,
+        BATCH_TYPE_PROMPT_DEMO | BATCH_TYPE_PROMPT_FORMAL
+    )
+}
+
+fn is_generate_batch_type(batch_type: &str) -> bool {
+    matches!(
+        batch_type,
+        BATCH_TYPE_GENERATE_DEMO | BATCH_TYPE_GENERATE_FORMAL
+    )
+}
+
+fn is_supported_batch_type(batch_type: &str) -> bool {
+    matches!(batch_type, BATCH_TYPE_MOCK_DEMO)
+        || is_prompt_batch_type(batch_type)
+        || is_generate_batch_type(batch_type)
+}
+
+fn batch_type_requires_provider_config(batch_type: &str) -> bool {
+    is_prompt_batch_type(batch_type) || is_generate_batch_type(batch_type)
 }
 
 fn should_auto_pause_after_failure(
@@ -2305,11 +2337,8 @@ fn validate_create_batch_job_input(input: &CreateBatchImageJobInput) -> AppResul
     if input.name.trim().is_empty() {
         return Err(AppError::Config("batch job name is required".to_string()));
     }
-    let batch_type = input.batch_type.as_deref().unwrap_or("demo.image.mock");
-    if !matches!(
-        batch_type,
-        "demo.image.mock" | "demo.image.prompt" | "demo.image.generate"
-    ) {
+    let batch_type = input.batch_type.as_deref().unwrap_or(BATCH_TYPE_MOCK_DEMO);
+    if !is_supported_batch_type(batch_type) {
         return Err(AppError::Config(format!(
             "unsupported batch type: {batch_type}"
         )));
@@ -2328,9 +2357,7 @@ fn validate_create_batch_job_input(input: &CreateBatchImageJobInput) -> AppResul
             ));
         }
     }
-    if matches!(batch_type, "demo.image.prompt" | "demo.image.generate")
-        && input.provider_config.is_none()
-    {
+    if batch_type_requires_provider_config(batch_type) && input.provider_config.is_none() {
         return Err(AppError::Config(
             "provider_config is required for prompt/generate batch".to_string(),
         ));
@@ -2739,17 +2766,71 @@ mod tests {
     #[test]
     fn batch_worker_started_labels_match_batch_type() {
         assert_eq!(
-            batch_worker_started_labels("demo.image.mock"),
+            batch_worker_started_labels(BATCH_TYPE_MOCK_DEMO),
             ("mock_started", "mock worker started")
         );
         assert_eq!(
-            batch_worker_started_labels("demo.image.prompt"),
+            batch_worker_started_labels(BATCH_TYPE_PROMPT_DEMO),
             ("prompt_started", "prompt worker started")
         );
         assert_eq!(
-            batch_worker_started_labels("demo.image.generate"),
+            batch_worker_started_labels(BATCH_TYPE_PROMPT_FORMAL),
+            ("prompt_started", "prompt worker started")
+        );
+        assert_eq!(
+            batch_worker_started_labels(BATCH_TYPE_GENERATE_DEMO),
             ("image_started", "image worker started")
         );
+        assert_eq!(
+            batch_worker_started_labels(BATCH_TYPE_GENERATE_FORMAL),
+            ("image_started", "image worker started")
+        );
+    }
+
+    #[test]
+    fn formal_batch_types_are_supported_aliases_without_new_workers() {
+        assert!(is_supported_batch_type(BATCH_TYPE_PROMPT_FORMAL));
+        assert!(is_supported_batch_type(BATCH_TYPE_GENERATE_FORMAL));
+        assert!(is_prompt_batch_type(BATCH_TYPE_PROMPT_FORMAL));
+        assert!(is_generate_batch_type(BATCH_TYPE_GENERATE_FORMAL));
+        assert!(batch_type_requires_provider_config(
+            BATCH_TYPE_PROMPT_FORMAL
+        ));
+        assert!(batch_type_requires_provider_config(
+            BATCH_TYPE_GENERATE_FORMAL
+        ));
+
+        let provider = provider_config("http://127.0.0.1:9".to_string(), "test-model");
+        validate_create_batch_job_input(&CreateBatchImageJobInput {
+            project_id: Some("project-formal".to_string()),
+            name: "Formal Prompt Batch".to_string(),
+            batch_type: Some(BATCH_TYPE_PROMPT_FORMAL.to_string()),
+            total_count: Some(1),
+            concurrency: Some(1),
+            max_retries: Some(0),
+            prompt_template: Some("Prompt {{sequenceNo}}".to_string()),
+            provider_id: Some("local-test".to_string()),
+            model: Some("test-model".to_string()),
+            image_size: Some("1024x1024".to_string()),
+            budget_json: None,
+            provider_config: Some(provider.clone()),
+        })
+        .expect("formal prompt batch type should validate");
+        validate_create_batch_job_input(&CreateBatchImageJobInput {
+            project_id: Some("project-formal".to_string()),
+            name: "Formal Image Batch".to_string(),
+            batch_type: Some(BATCH_TYPE_GENERATE_FORMAL.to_string()),
+            total_count: Some(1),
+            concurrency: Some(1),
+            max_retries: Some(0),
+            prompt_template: Some("Render {{sequenceNo}}".to_string()),
+            provider_id: Some("local-test".to_string()),
+            model: Some("test-model".to_string()),
+            image_size: Some("1024x1024".to_string()),
+            budget_json: None,
+            provider_config: Some(provider),
+        })
+        .expect("formal image batch type should validate");
     }
 
     #[test]
