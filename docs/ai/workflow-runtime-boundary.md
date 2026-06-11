@@ -67,7 +67,7 @@ Provider Gateway -> 管业务状态
 - `src-tauri/src/services/worker_queue_service.rs` 已经有 SQLite-backed queue 的基础控制面：claim queued task、request cancel、cancel checkpoint、startup recovery。
 - `src-tauri/src/services/batch_job_service.rs` 当前仍在 Rust 内运行 `demo.image.mock / demo.image.prompt / demo.image.generate` worker，并且 prompt/image worker 仍直接调用 `AiProviderService::test_provider`。
 
-因此下一阶段不是直接让 Python 任意读写主库，而是在已落地的 `generate_image_prompt` 最小协议基础上，继续补 cancel checkpoint、失败恢复和 batch worker 迁移。
+因此下一阶段不是直接让 Python 任意读写主库，而是在已落地的 `generate_image_prompt` 最小协议和非成功状态映射基础上，继续补 cancel checkpoint 和 batch worker 迁移。
 
 ## 7. 推荐迁移模式：Rust 主动提交，Python 执行业务
 

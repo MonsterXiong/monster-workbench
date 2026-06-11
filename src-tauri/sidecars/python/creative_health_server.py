@@ -63,6 +63,11 @@ class CreativeHealthHandler(BaseHTTPRequestHandler):
 
         if payload.get("taskType") == "generate_image_prompt":
             task_payload = payload.get("input") or payload.get("payload") or {}
+            forced_status = resolve_forced_status(task_payload)
+            if forced_status:
+                self._write_json(HTTPStatus.OK, build_forced_result(payload, forced_status))
+                return
+
             prompt = build_image_prompt(task_payload)
             metadata = {
                 "source": "python-workflow-stub",
@@ -148,6 +153,54 @@ def build_image_prompt(payload):
         f"Aspect ratio: {aspect_ratio}. "
         "High detail, clear focal subject, production-ready image prompt."
     )
+
+
+def resolve_forced_status(payload):
+    brief = str(payload.get("brief") or "").strip()
+    prefix = "__sidecar_status:"
+    if not brief.startswith(prefix):
+        return None
+    status = brief[len(prefix):].strip().split()[0]
+    if status in {"failed", "cancelled", "retrying", "blocked"}:
+        return status
+    return None
+
+
+def build_forced_result(payload, status):
+    message = f"forced sidecar {status}"
+    retry = {"shouldRetry": status == "retrying", "reason": message if status == "retrying" else None}
+    return {
+        "protocolVersion": payload.get("protocolVersion") or 1,
+        "taskId": payload.get("taskId"),
+        "status": status,
+        "message": message,
+        "outputs": [],
+        "modelRuns": [{
+            "providerId": "creative-sidecar-stub",
+            "providerType": "python-sidecar",
+            "model": "creative_health_server_stub",
+            "requestType": "workflow",
+            "status": "failed" if status in {"failed", "retrying"} else status,
+            "durationMs": 10,
+            "promptHash": None,
+            "promptVersionId": f"workflow:{payload.get('taskId')}:forced",
+            "inputTokenCount": None,
+            "outputTokenCount": None,
+            "costEstimate": None,
+            "errorCode": f"forced_{status}",
+            "errorMessage": message,
+            "metadata": {
+                "workflowType": payload.get("workflowType") or "image_prompt",
+                "forcedStatus": status,
+            },
+        }],
+        "events": [{
+            "eventType": f"workflow_{status}",
+            "message": message,
+            "payload": {"forcedStatus": status},
+        }],
+        "retry": retry,
+    }
 
 
 if __name__ == "__main__":

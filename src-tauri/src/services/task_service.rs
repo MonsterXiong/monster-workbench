@@ -9,7 +9,8 @@ use crate::infra::creative_types::{
 use crate::infra::path::PathProvider;
 use crate::infra::{AppError, AppResult};
 use crate::services::sidecar_lifecycle_service::{
-    GenerateImagePromptSidecarRequest, SidecarLifecycleService,
+    GenerateImagePromptSidecarRequest, SidecarLifecycleService, SidecarWorkflowModelRun,
+    SidecarWorkflowTaskResult,
 };
 use serde_json::json;
 use tauri::{AppHandle, Emitter, Runtime, Wry};
@@ -287,6 +288,24 @@ impl<R: Runtime> TaskService<R> {
         match result {
             Ok(result) => Ok(result),
             Err(error) => {
+                if let Some(current_task) = creative_task_repo::get_task(&db_path, task.id)
+                    .ok()
+                    .flatten()
+                {
+                    if !matches!(current_task.status.as_str(), "queued" | "running") {
+                        let _ = self.emit_task_event(
+                            "creative-task-status-changed",
+                            CreativeTaskEventPayload {
+                                task_id: current_task.id,
+                                project_id: current_task.project_id.clone(),
+                                status: current_task.status.clone(),
+                                message: Some(error.to_string()),
+                                created_at: current_task.updated_at.clone(),
+                            },
+                        );
+                        return Err(error);
+                    }
+                }
                 let _ = creative_task_repo::append_task_event(
                     &db_path,
                     CreateTaskEventInput {
@@ -401,12 +420,6 @@ impl<R: Runtime> TaskService<R> {
                 task.id, sidecar_response.task_id
             )));
         }
-        if sidecar_response.status != "succeeded" {
-            return Err(AppError::Process(format!(
-                "sidecar workflow returned status {}",
-                sidecar_response.status
-            )));
-        }
         events.push(self.append_task_event(CreateTaskEventInput {
             task_id: task.id,
             event_type: "sidecar_completed".to_string(),
@@ -431,6 +444,13 @@ impl<R: Runtime> TaskService<R> {
                         })?,
                 })?,
             );
+        }
+        if sidecar_response.status != "succeeded" {
+            self.settle_sidecar_non_success(db_path, task, &sidecar_response)?;
+            return Err(AppError::Process(format!(
+                "sidecar workflow returned status {}",
+                sidecar_response.status
+            )));
         }
 
         let output =
@@ -531,6 +551,66 @@ impl<R: Runtime> TaskService<R> {
             asset,
             events,
         })
+    }
+
+    fn settle_sidecar_non_success(
+        &self,
+        db_path: &std::path::Path,
+        task: &CreativeTask,
+        sidecar_response: &SidecarWorkflowTaskResult,
+    ) -> AppResult<()> {
+        let model_run_ids =
+            persist_sidecar_model_runs(db_path, task, None, &sidecar_response.model_runs)?;
+        let next_status = resolve_sidecar_failure_status(task, sidecar_response);
+        let retry_increment = if next_status == "retrying" {
+            Some(1)
+        } else {
+            None
+        };
+        let result_json = json!({
+            "status": sidecar_response.status.clone(),
+            "message": sidecar_response.message.clone(),
+            "modelRunIds": model_run_ids.clone(),
+            "retry": sidecar_response.retry.clone(),
+        })
+        .to_string();
+        let updated_task = self.update_creative_task_status(UpdateCreativeTaskStatusInput {
+            id: task.id,
+            status: next_status.clone(),
+            result_json: Some(result_json),
+            error_message: sidecar_response.message.clone(),
+            asset_id: task.asset_id,
+            retry_count_increment: retry_increment,
+        })?;
+        let event_type = match next_status.as_str() {
+            "cancelled" => "workflow_cancelled",
+            "retrying" => "workflow_retrying",
+            "blocked" => "workflow_blocked",
+            _ => "workflow_failed",
+        };
+        self.append_task_event(CreateTaskEventInput {
+            task_id: task.id,
+            event_type: event_type.to_string(),
+            message: sidecar_response.message.clone(),
+            payload_json: Some(
+                json!({
+                    "sidecarStatus": sidecar_response.status.clone(),
+                    "taskStatus": next_status,
+                    "modelRunIds": model_run_ids,
+                })
+                .to_string(),
+            ),
+        })?;
+        self.emit_task_event(
+            "creative-task-status-changed",
+            CreativeTaskEventPayload {
+                task_id: updated_task.id,
+                project_id: updated_task.project_id,
+                status: updated_task.status,
+                message: sidecar_response.message.clone(),
+                created_at: updated_task.updated_at,
+            },
+        )
     }
 
     pub fn run_review_asset_quality_stub(
@@ -673,6 +753,73 @@ impl<R: Runtime> TaskService<R> {
             revise_task,
             events,
         })
+    }
+}
+
+fn persist_sidecar_model_runs(
+    db_path: &std::path::Path,
+    task: &CreativeTask,
+    asset_id: Option<i64>,
+    model_runs: &[SidecarWorkflowModelRun],
+) -> AppResult<Vec<i64>> {
+    let mut model_run_ids = Vec::new();
+    for model_run in model_runs {
+        let persisted = creative_model_run_repo::create_model_run(
+            db_path,
+            CreateModelRunInput {
+                project_id: task.project_id.clone(),
+                task_id: Some(task.id),
+                asset_id,
+                provider_id: model_run.provider_id.clone(),
+                provider_type: model_run.provider_type.clone(),
+                model: model_run.model.clone(),
+                request_type: model_run.request_type.clone(),
+                status: model_run.status.clone(),
+                duration_ms: model_run.duration_ms,
+                prompt_hash: model_run.prompt_hash.clone(),
+                prompt_version_id: model_run.prompt_version_id.clone(),
+                input_token_count: model_run.input_token_count,
+                output_token_count: model_run.output_token_count,
+                cost_estimate: model_run.cost_estimate,
+                error_code: model_run.error_code.clone(),
+                error_message: model_run.error_message.clone(),
+                metadata_json: model_run
+                    .metadata
+                    .as_ref()
+                    .map(serde_json::to_string)
+                    .transpose()
+                    .map_err(|error| {
+                        AppError::Config(format!(
+                            "failed to encode sidecar model run metadata: {error}"
+                        ))
+                    })?,
+                finished_at: None,
+            },
+        )?;
+        model_run_ids.push(persisted.id);
+    }
+    Ok(model_run_ids)
+}
+
+fn resolve_sidecar_failure_status(
+    task: &CreativeTask,
+    sidecar_response: &SidecarWorkflowTaskResult,
+) -> String {
+    match sidecar_response.status.as_str() {
+        "cancelled" => "cancelled".to_string(),
+        "blocked" => "blocked".to_string(),
+        "retrying" if task.retry_count < task.max_retries => "retrying".to_string(),
+        "failed"
+            if sidecar_response
+                .retry
+                .as_ref()
+                .map(|retry| retry.should_retry)
+                .unwrap_or(false)
+                && task.retry_count < task.max_retries =>
+        {
+            "retrying".to_string()
+        }
+        _ => "failed".to_string(),
     }
 }
 
@@ -837,9 +984,11 @@ mod tests {
     use crate::infra::creative_db_schema::init_schema;
     use crate::infra::creative_model_run_repo;
     use crate::infra::creative_task_repo;
-    use crate::infra::creative_types::ListModelRunsFilter;
+    use crate::infra::creative_types::{ListCreativeTasksFilter, ListModelRunsFilter};
     use crate::infra::path::PathProvider;
-    use crate::services::sidecar_lifecycle_service::SidecarLifecycleService;
+    use crate::services::sidecar_lifecycle_service::{
+        SidecarLifecycleService, SidecarWorkflowRetry, SidecarWorkflowTaskResult,
+    };
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -852,6 +1001,46 @@ mod tests {
             "monster-workbench-task-service-{name}-{}-{stamp}",
             std::process::id()
         ))
+    }
+
+    fn task_with_retry_budget(retry_count: i64, max_retries: i64) -> CreativeTask {
+        CreativeTask {
+            id: 1,
+            project_id: Some("project-test".to_string()),
+            goal_id: None,
+            batch_job_id: None,
+            task_type: "generate_image_prompt".to_string(),
+            status: "running".to_string(),
+            priority: 0,
+            payload_json: None,
+            result_json: None,
+            error_message: None,
+            retry_count,
+            max_retries,
+            parent_task_id: None,
+            asset_id: None,
+            sequence_no: None,
+            created_at: "0".to_string(),
+            updated_at: "0".to_string(),
+            started_at: None,
+            finished_at: None,
+        }
+    }
+
+    fn sidecar_result(status: &str, should_retry: bool) -> SidecarWorkflowTaskResult {
+        SidecarWorkflowTaskResult {
+            protocol_version: 1,
+            task_id: 1,
+            status: status.to_string(),
+            message: Some(format!("sidecar {status}")),
+            outputs: Vec::new(),
+            model_runs: Vec::new(),
+            events: Vec::new(),
+            retry: Some(SidecarWorkflowRetry {
+                should_retry,
+                reason: None,
+            }),
+        }
     }
 
     #[test]
@@ -942,6 +1131,112 @@ mod tests {
         .expect("model runs should list");
         assert_eq!(model_runs.len(), 1);
         assert_eq!(model_runs[0].asset_id, Some(result.asset.id));
+        assert_eq!(
+            model_runs[0].provider_type.as_deref(),
+            Some("python-sidecar")
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn sidecar_failure_status_respects_retry_budget() {
+        assert_eq!(
+            resolve_sidecar_failure_status(
+                &task_with_retry_budget(0, 2),
+                &sidecar_result("failed", true)
+            ),
+            "retrying"
+        );
+        assert_eq!(
+            resolve_sidecar_failure_status(
+                &task_with_retry_budget(2, 2),
+                &sidecar_result("failed", true)
+            ),
+            "failed"
+        );
+        assert_eq!(
+            resolve_sidecar_failure_status(
+                &task_with_retry_budget(0, 2),
+                &sidecar_result("cancelled", false)
+            ),
+            "cancelled"
+        );
+        assert_eq!(
+            resolve_sidecar_failure_status(
+                &task_with_retry_budget(0, 2),
+                &sidecar_result("blocked", false)
+            ),
+            "blocked"
+        );
+    }
+
+    #[test]
+    fn generate_image_prompt_workflow_maps_sidecar_failure_result() {
+        let app = tauri::test::mock_app();
+        let root = temp_root("generate_prompt_failure");
+        let db_path = root.join("monster_workbench.db");
+        let path_provider = PathProvider::new_for_test(root.clone(), db_path.clone());
+        let task_service = TaskService::new(app.handle().clone(), path_provider.clone());
+        let mut sidecar_service = SidecarLifecycleService::new(app.handle().clone());
+
+        init_schema(&db_path).expect("schema should init");
+
+        let result = task_service.run_generate_image_prompt_workflow(
+            GenerateImagePromptWorkflowInput {
+                project_id: Some("project-failure".to_string()),
+                brief: "__sidecar_status:failed".to_string(),
+                style: Some("test".to_string()),
+                mood: Some("test".to_string()),
+                aspect_ratio: Some("1:1".to_string()),
+            },
+            &mut sidecar_service,
+        );
+        assert!(
+            result.is_err(),
+            "forced sidecar failure should return an error"
+        );
+
+        let tasks = creative_task_repo::list_tasks(
+            &db_path,
+            ListCreativeTasksFilter {
+                project_id: Some("project-failure".to_string()),
+                task_type: Some("generate_image_prompt".to_string()),
+                limit: Some(10),
+                offset: Some(0),
+                ..Default::default()
+            },
+        )
+        .expect("tasks should list");
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].status, "failed");
+        assert_eq!(tasks[0].asset_id, None);
+        assert!(tasks[0]
+            .error_message
+            .as_deref()
+            .unwrap_or_default()
+            .contains("forced sidecar failed"));
+
+        let events = creative_task_repo::list_task_events(&db_path, tasks[0].id)
+            .expect("events should list");
+        assert!(
+            events
+                .iter()
+                .any(|event| event.event_type == "workflow_failed"),
+            "failure mapping should persist workflow_failed event"
+        );
+
+        let model_runs = creative_model_run_repo::list_model_runs(
+            &db_path,
+            ListModelRunsFilter {
+                task_id: Some(tasks[0].id),
+                ..Default::default()
+            },
+        )
+        .expect("model runs should list");
+        assert_eq!(model_runs.len(), 1);
+        assert_eq!(model_runs[0].status, "failed");
+        assert_eq!(model_runs[0].asset_id, None);
         assert_eq!(
             model_runs[0].provider_type.as_deref(),
             Some("python-sidecar")

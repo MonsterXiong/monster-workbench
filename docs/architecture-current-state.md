@@ -1491,5 +1491,22 @@ Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `
   - `cargo check --manifest-path .\\src-tauri\\Cargo.toml`
 - 下一步应继续补：
   1. Python sidecar cancel checkpoint API。
-  2. sidecar failure / retry result 到 Rust 状态机的映射。
-  3. 将 batch prompt worker 的 provider 调用改成 sidecar workflow，而不是继续扩展 Rust worker 分支。
+  2. 将 batch prompt worker 的 provider 调用改成 sidecar workflow，而不是继续扩展 Rust worker 分支。
+
+## 2026-06-11 补充：sidecar 非成功结果状态映射
+
+- `src-tauri/src/services/task_service.rs` 已补齐 `generate_image_prompt` 的 sidecar 非成功结果映射：
+  - `failed` 按失败落库；
+  - `cancelled` 按取消落库；
+  - `blocked` 按阻塞落库；
+  - `retrying` 或 `failed + retry.shouldRetry` 会在 retry budget 允许时转为 `retrying`，否则转为 `failed`。
+- 非成功结果现在也会先落 `model_runs` 审计和 sidecar events，再更新 task 状态；外层错误兜底不会再覆盖已经映射过的受控状态。
+- `creative_health_server.py` 增加了测试用 forced status stub，用于验证 Rust 对非成功结果的状态映射，不代表正式业务输入协议。
+- 本轮验证通过：
+  - `python -m py_compile src-tauri\\sidecars\\python\\creative_health_server.py`
+  - `cargo test --manifest-path .\\src-tauri\\Cargo.toml generate_image_prompt_workflow_maps_sidecar_failure_result -- --nocapture`
+  - `cargo test --manifest-path .\\src-tauri\\Cargo.toml sidecar_failure_status_respects_retry_budget -- --nocapture`
+  - `cargo check --manifest-path .\\src-tauri\\Cargo.toml`
+- 下一步剩余重点：
+  1. Python sidecar cancel checkpoint API。
+  2. 将 batch prompt worker 的 provider 调用迁到 sidecar workflow。
