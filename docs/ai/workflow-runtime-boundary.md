@@ -68,7 +68,7 @@ Provider Gateway -> 管业务状态
 - `src-tauri/src/services/batch_job_service.rs` 当前仍在 Rust 内运行 batch supervisor 与 `demo.image.mock / demo.image.prompt / demo.image.generate` worker 壳层。其中 `demo.image.mock` 仍是本地 smoke worker；`demo.image.prompt` 与 `demo.image.generate` worker 已改为提交 sidecar workflow，Rust 负责结果校验、取消后的状态映射、输出文件路径校验、asset/model_runs/task_events 写入和事件广播。
 - Sidecar request 已不再使用空 `budget` 占位：Rust 会提交 `maxDurationMs / maxImages / maxTokens / maxCostEstimate` 形态的预算对象，sidecar HTTP read timeout 和 Python provider timeout 会按该预算收敛。
 - `TaskService::run_review_asset_quality_stub` 仍在 Rust 内生成 review result 和 revise draft task；这只能作为 stub，不应扩展成真实审查/返工/一致性规则。
-- `batch_job_service.rs` 的 prompt/image worker 已不再直接每个任务独立 new/stop sidecar；生产路径会优先复用 Tauri app-managed `SidecarLifecycleService`，未注入 state 的测试/孤立调用才退回临时 sidecar。
+- `batch_job_service.rs` 的 prompt/image worker 已不再直接每个任务独立 new/stop sidecar；生产路径会优先复用 Tauri app-managed `SidecarLifecycleService`，未注入 state 的测试/孤立调用才退回临时 sidecar。当前 batch 提交只在确保 sidecar endpoint 时持有 lifecycle 锁，实际 `/tasks` 长请求在锁外执行，避免 Rust lifecycle mutex 把 batch 并发槽位串行化。
 
 因此下一阶段不是直接让 Python 任意读写主库，也不是继续把新生产型 worker 分支写进 `BatchJobService`；重点应转向 sidecar runtime 正式化、生命周期复用和正式 workflow 类型命名。
 
@@ -101,7 +101,7 @@ Vue
 | batch supervisor / concurrency slots | 短期是 | 在正式 worker pool、恢复协议、熔断和生命周期复用稳定前，先由 Rust 保留 |
 | prompt builder / review / revision / consistency | 否 | 正式业务逻辑应进入 Python workflow runtime |
 | provider 调用和图片处理 | 否 | prompt/image provider 执行已经迁到 Python；后续不要回流到 Rust worker |
-| batch sidecar lifecycle | 首段可保留 | batch worker 已优先复用 app-managed lifecycle；下一步补健康熔断、并发提交策略和更明确的 shutdown/recovery |
+| batch sidecar lifecycle | 首段可保留 | batch worker 已优先复用 app-managed lifecycle，并已把 endpoint 获取和 HTTP task request 分离；下一步补完整健康熔断、事件节流和更明确的 shutdown/recovery |
 
 中期才评估 Python 拉队列模式：
 
@@ -256,7 +256,7 @@ Python step boundary
 2. `demo.image.prompt` 的 provider 调用已从 Rust worker 迁到 Python workflow；Rust 仍负责 claim、running、结果落库和 batch progress event。
 3. `demo.image.generate` 的 provider 调用和图片处理已从 Rust worker 迁到 Python workflow；Rust 负责校验输出文件路径、创建 asset、复制 thumbnail、写 `model_runs`。
 4. 新增正式 batch 类型时不要继续使用 `demo.image.*` 命名；应使用业务语义，例如 `image.prompt.batch`、`image.generate.batch` 或后续领域命名。
-5. batch prompt / image sidecar workflow 已接入 cancel checkpoint，并已具备基础 budget/timeout 协议；batch worker 已优先复用 app-managed sidecar lifecycle。下一步优先补健康熔断、并发提交策略和正式 workflow 命名，只有这些协议稳定后，再讨论 supervisor 是否从 Rust 迁到 Python worker pool。
+5. batch prompt / image sidecar workflow 已接入 cancel checkpoint，并已具备基础 budget/timeout 协议；batch worker 已优先复用 app-managed sidecar lifecycle，且 batch `/tasks` 提交不再长时间持有 lifecycle mutex。下一步优先补完整健康熔断、事件节流和正式 workflow 命名，只有这些协议稳定后，再讨论 supervisor 是否从 Rust 迁到 Python worker pool。
 
 ## 12. 不变量
 

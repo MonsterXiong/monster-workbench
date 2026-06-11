@@ -1491,7 +1491,7 @@ Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `
 | `BatchJobService` supervisor | Rust 用 `active_supervisors`、`std::thread::spawn`、concurrency slot、queued claim 驱动 batch | 短期仍适合留在 Rust；它承担桌面控制面、暂停/恢复/取消和可信状态转移 | 在 sidecar lifecycle、恢复、熔断协议稳定前，不迁给 Python worker pool |
 | `BatchJobService` prompt/image worker shell | prompt/image 已提交 Python sidecar；Rust 仍构造 request、校验 protocol/taskId/status、落库 asset/model_runs/events | 方向正确，但仍是偏宽 orchestrator；新增生产 worker 不应继续在这里分支扩展 | 后续新增正式 workflow 走 sidecar runtime；Rust 只保留 claim、submit、settle、audit |
 | `BatchJobService` prompt 模板替换 | `build_prompt_request` 在 Rust 内处理 `{{sequenceNo}}` / `{{index}}` | 这是 demo-era prompt 构建残留，生产场景不应扩大 | 正式 batch prompt builder 放到 Python；Rust 只传 template/input/context |
-| `BatchJobService` sidecar lifecycle | batch prompt/image worker 已优先使用 app-managed `SidecarLifecycleService`；没有注入 state 的测试/孤立调用才回退临时 sidecar | 已从 per-task dev sidecar 启停推进到首段生命周期复用，但仍缺少健康熔断与并发提交策略 | 下一步补熔断、恢复、事件节流和正式 workflow 命名，再讨论 supervisor 迁移 |
+| `BatchJobService` sidecar lifecycle | batch prompt/image worker 已优先使用 app-managed `SidecarLifecycleService`；没有注入 state 的测试/孤立调用才回退临时 sidecar；batch `/tasks` 请求已移到 lifecycle mutex 锁外执行 | 已从 per-task dev sidecar 启停推进到首段生命周期复用和并发提交锁粒度收口，但仍缺少完整健康熔断与事件节流策略 | 下一步补熔断、事件节流和正式 workflow 命名，再讨论 supervisor 迁移 |
 | `demo.image.*` task type | `demo.image.mock/prompt/generate` 仍是唯一 batch 类型白名单 | 可保留为过渡验证命名，不能扩展成正式业务分类 | 新增正式类型前先定义 `workflowType` / `taskType` 命名规范 |
 
 本轮二次结论：
@@ -1634,4 +1634,22 @@ Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `
   - `cargo check --manifest-path .\\src-tauri\\Cargo.toml`
 - 下一步剩余重点：
   1. 为共享 sidecar 补健康熔断、异常重启和事件节流策略。
+  2. 设计正式 `taskType` / `workflowType` 命名，避免继续扩展 `demo.image.*`。
+
+## 2026-06-11 补充：batch sidecar 并发提交锁粒度收口
+
+- `src-tauri/src/services/sidecar_lifecycle_service.rs` 新增 `SidecarRuntimeEndpoint` 与 `ensure_runtime_endpoint()`，把“确保 sidecar 已启动、健康检查、读取 port/token”和“提交 `/tasks` 长请求”拆开。
+- `SidecarLifecycleService::ensure_dev_server()` 遇到 `unhealthy/failed` 时会先尝试一次受控重启，再返回失败；这只是恢复策略首段，不等同于完整熔断系统。
+- `src-tauri/src/services/batch_job_service.rs` 的 `submit_with_batch_sidecar` 现在只在获取 endpoint 时持有 app-managed lifecycle mutex；prompt/image workflow 的 HTTP `/tasks` 请求在锁外执行，避免 batch concurrency slots 被 Rust lifecycle mutex 串行化。
+- 临时 sidecar fallback 仍会在提交期间持有本地 `SidecarLifecycleService` 实例生命周期，并继续依赖 `Drop` 做兜底清理。
+- 本轮验证通过：
+  - `cargo test --manifest-path .\\src-tauri\\Cargo.toml submit_with_batch_sidecar_uses_managed_lifecycle_and_releases_lock -- --nocapture --test-threads=1`
+  - `cargo test --manifest-path .\\src-tauri\\Cargo.toml prompt_batch_worker_persists_prompt_asset_and_model_run -- --nocapture --test-threads=1`
+  - `cargo test --manifest-path .\\src-tauri\\Cargo.toml generate_batch_worker_persists_image_asset_files_and_model_run -- --nocapture --test-threads=1`
+  - `cargo test --manifest-path .\\src-tauri\\Cargo.toml services::batch_job_service::tests:: -- --nocapture --test-threads=1`
+  - `cargo check --manifest-path .\\src-tauri\\Cargo.toml`
+  - `npm run check:architecture`
+  - `npm run typecheck`
+- 下一步剩余重点：
+  1. 为共享 sidecar 补完整健康熔断、事件节流和更明确的 shutdown 语义。
   2. 设计正式 `taskType` / `workflowType` 命名，避免继续扩展 `demo.image.*`。

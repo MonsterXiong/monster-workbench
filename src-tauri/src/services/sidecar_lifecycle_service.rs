@@ -162,6 +162,12 @@ pub struct SidecarWorkflowTaskResult {
     pub retry: Option<SidecarWorkflowRetry>,
 }
 
+#[derive(Debug, Clone)]
+pub struct SidecarRuntimeEndpoint {
+    pub port: u16,
+    pub token: String,
+}
+
 pub struct SidecarLifecycleService<R: Runtime = Wry> {
     app_handle: AppHandle<R>,
     child: Option<Child>,
@@ -198,9 +204,12 @@ impl<R: Runtime> SidecarLifecycleService<R> {
     }
 
     #[cfg(test)]
-    pub(crate) fn set_test_status(&mut self, status: &str, pid: Option<u32>) {
-        self.snapshot.status = status.to_string();
-        self.snapshot.pid = pid;
+    pub(crate) fn set_test_endpoint(&mut self, port: u16, token: &str) {
+        self.snapshot.status = "running".to_string();
+        self.snapshot.port = Some(port);
+        self.snapshot.pid = Some(42);
+        self.snapshot.last_error = None;
+        self.runtime_token = Some(token.to_string());
     }
 
     pub fn start_dev_health_server(&mut self) -> AppResult<SidecarStatusSnapshot> {
@@ -277,28 +286,57 @@ impl<R: Runtime> SidecarLifecycleService<R> {
 
     pub fn ensure_dev_server(&mut self) -> AppResult<SidecarStatusSnapshot> {
         let status = self.start_dev_health_server()?;
-        if status.status != "running" {
+        if status.status == "running" {
+            return Ok(status);
+        }
+
+        if matches!(status.status.as_str(), "unhealthy" | "failed") {
+            let previous_status = status.status.clone();
+            let previous_error = status.last_error.clone();
+            let _ = self.stop_dev_health_server();
+            let recovered = self.start_dev_health_server()?;
+            if recovered.status == "running" {
+                return Ok(recovered);
+            }
+
             return Err(AppError::Process(format!(
-                "sidecar did not reach running state: {}",
-                status.status
+                "sidecar recovery failed after {previous_status}: {}; previous error: {}",
+                recovered.status,
+                previous_error.unwrap_or_else(|| "unknown".to_string())
             )));
         }
-        Ok(status)
+
+        Err(AppError::Process(format!(
+            "sidecar did not reach running state: {}",
+            status.status
+        )))
     }
 
-    pub fn submit_generate_image_prompt(
-        &mut self,
-        request: GenerateImagePromptSidecarRequest,
-    ) -> AppResult<SidecarWorkflowTaskResult> {
-        self.ensure_dev_server()?;
-        let port = self
-            .snapshot
+    pub fn ensure_runtime_endpoint(&mut self) -> AppResult<SidecarRuntimeEndpoint> {
+        let status = self.ensure_dev_server()?;
+        let port = status
             .port
             .ok_or_else(|| AppError::Process("sidecar port is missing".to_string()))?;
         let token = self
             .runtime_token
             .clone()
             .ok_or_else(|| AppError::Process("sidecar runtime token is missing".to_string()))?;
+
+        Ok(SidecarRuntimeEndpoint { port, token })
+    }
+
+    pub fn submit_generate_image_prompt(
+        &mut self,
+        request: GenerateImagePromptSidecarRequest,
+    ) -> AppResult<SidecarWorkflowTaskResult> {
+        let endpoint = self.ensure_runtime_endpoint()?;
+        Self::submit_generate_image_prompt_to_endpoint(&endpoint, request)
+    }
+
+    pub fn submit_generate_image_prompt_to_endpoint(
+        endpoint: &SidecarRuntimeEndpoint,
+        request: GenerateImagePromptSidecarRequest,
+    ) -> AppResult<SidecarWorkflowTaskResult> {
         let budget = encode_budget(Some(SidecarWorkflowBudget {
             max_duration_ms: Some(120_000),
             max_images: None,
@@ -336,25 +374,31 @@ impl<R: Runtime> SidecarLifecycleService<R> {
                 "goalId": Value::Null,
             },
         });
-        let response = post_json(port, &token, "/tasks", &payload, read_timeout)?;
+        let response = post_json(
+            endpoint.port,
+            &endpoint.token,
+            "/tasks",
+            &payload,
+            read_timeout,
+        )?;
         serde_json::from_str::<SidecarWorkflowTaskResult>(&response).map_err(|error| {
             AppError::Process(format!("failed to parse sidecar response: {error}"))
         })
     }
 
+    #[allow(dead_code)]
     pub fn submit_batch_image_prompt(
         &mut self,
         request: BatchImagePromptSidecarRequest,
     ) -> AppResult<SidecarWorkflowTaskResult> {
-        self.ensure_dev_server()?;
-        let port = self
-            .snapshot
-            .port
-            .ok_or_else(|| AppError::Process("sidecar port is missing".to_string()))?;
-        let token = self
-            .runtime_token
-            .clone()
-            .ok_or_else(|| AppError::Process("sidecar runtime token is missing".to_string()))?;
+        let endpoint = self.ensure_runtime_endpoint()?;
+        Self::submit_batch_image_prompt_to_endpoint(&endpoint, request)
+    }
+
+    pub fn submit_batch_image_prompt_to_endpoint(
+        endpoint: &SidecarRuntimeEndpoint,
+        request: BatchImagePromptSidecarRequest,
+    ) -> AppResult<SidecarWorkflowTaskResult> {
         let budget = encode_budget(request.budget)?;
         let read_timeout = budget_read_timeout(&budget);
 
@@ -394,25 +438,31 @@ impl<R: Runtime> SidecarLifecycleService<R> {
                 "sequenceNo": request.sequence_no,
             },
         });
-        let response = post_json(port, &token, "/tasks", &payload, read_timeout)?;
+        let response = post_json(
+            endpoint.port,
+            &endpoint.token,
+            "/tasks",
+            &payload,
+            read_timeout,
+        )?;
         serde_json::from_str::<SidecarWorkflowTaskResult>(&response).map_err(|error| {
             AppError::Process(format!("failed to parse sidecar response: {error}"))
         })
     }
 
+    #[allow(dead_code)]
     pub fn submit_batch_image_generate(
         &mut self,
         request: BatchImageGenerateSidecarRequest,
     ) -> AppResult<SidecarWorkflowTaskResult> {
-        self.ensure_dev_server()?;
-        let port = self
-            .snapshot
-            .port
-            .ok_or_else(|| AppError::Process("sidecar port is missing".to_string()))?;
-        let token = self
-            .runtime_token
-            .clone()
-            .ok_or_else(|| AppError::Process("sidecar runtime token is missing".to_string()))?;
+        let endpoint = self.ensure_runtime_endpoint()?;
+        Self::submit_batch_image_generate_to_endpoint(&endpoint, request)
+    }
+
+    pub fn submit_batch_image_generate_to_endpoint(
+        endpoint: &SidecarRuntimeEndpoint,
+        request: BatchImageGenerateSidecarRequest,
+    ) -> AppResult<SidecarWorkflowTaskResult> {
         let budget = encode_budget(request.budget)?;
         let read_timeout = budget_read_timeout(&budget);
 
@@ -454,7 +504,13 @@ impl<R: Runtime> SidecarLifecycleService<R> {
                 "sequenceNo": request.sequence_no,
             },
         });
-        let response = post_json(port, &token, "/tasks", &payload, read_timeout)?;
+        let response = post_json(
+            endpoint.port,
+            &endpoint.token,
+            "/tasks",
+            &payload,
+            read_timeout,
+        )?;
         serde_json::from_str::<SidecarWorkflowTaskResult>(&response).map_err(|error| {
             AppError::Process(format!("failed to parse sidecar response: {error}"))
         })

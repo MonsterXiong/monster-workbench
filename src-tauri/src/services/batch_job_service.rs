@@ -14,7 +14,7 @@ use crate::services::ai_service::AiProviderConfig;
 use crate::services::cancel_checkpoint_service::start_cancel_checkpoint_server;
 use crate::services::sidecar_lifecycle_service::{
     BatchImageGenerateSidecarRequest, BatchImagePromptSidecarRequest, SidecarLifecycleService,
-    SidecarProviderConfig, SidecarWorkflowBudget, SidecarWorkflowModelRun,
+    SidecarProviderConfig, SidecarRuntimeEndpoint, SidecarWorkflowBudget, SidecarWorkflowModelRun,
     SidecarWorkflowTaskResult,
 };
 use crate::services::task_service::CreativeTaskEventPayload;
@@ -944,48 +944,55 @@ fn submit_batch_prompt_sidecar_workflow<R: Runtime>(
     cancel_checkpoint_url: Option<&str>,
     cancel_checkpoint_token: Option<&str>,
 ) -> AppResult<SidecarWorkflowTaskResult> {
-    submit_with_batch_sidecar(app_handle, |sidecar_service| {
-        sidecar_service.submit_batch_image_prompt(BatchImagePromptSidecarRequest {
-            task_id: task.id,
-            project_id: task.project_id.clone(),
-            batch_job_id,
-            sequence_no: task.sequence_no,
-            prompt_request: prompt_request.to_string(),
-            provider: SidecarProviderConfig {
-                provider_id: Some(provider_config.display_name.clone()),
-                provider_type: Some(provider_config.provider.clone()),
-                display_name: Some(provider_config.display_name.clone()),
-                base_url: provider_config.base_url.clone(),
-                api_key: provider_config.api_key.clone(),
-                model: provider_config.model.clone(),
-                request_type: "chat".to_string(),
-                timeout_ms: Some(provider_config.timeout_ms),
+    submit_with_batch_sidecar(app_handle, |endpoint| {
+        SidecarLifecycleService::<R>::submit_batch_image_prompt_to_endpoint(
+            endpoint,
+            BatchImagePromptSidecarRequest {
+                task_id: task.id,
+                project_id: task.project_id.clone(),
+                batch_job_id,
+                sequence_no: task.sequence_no,
+                prompt_request: prompt_request.to_string(),
+                provider: SidecarProviderConfig {
+                    provider_id: Some(provider_config.display_name.clone()),
+                    provider_type: Some(provider_config.provider.clone()),
+                    display_name: Some(provider_config.display_name.clone()),
+                    base_url: provider_config.base_url.clone(),
+                    api_key: provider_config.api_key.clone(),
+                    model: provider_config.model.clone(),
+                    request_type: "chat".to_string(),
+                    timeout_ms: Some(provider_config.timeout_ms),
+                },
+                budget: Some(SidecarWorkflowBudget {
+                    max_duration_ms: Some(provider_config.timeout_ms),
+                    max_images: None,
+                    max_tokens: Some(512),
+                    max_cost_estimate: None,
+                }),
+                attempt: task.retry_count + 1,
+                max_retries: task.max_retries,
+                cancel_checkpoint_url: cancel_checkpoint_url.map(ToString::to_string),
+                cancel_checkpoint_token: cancel_checkpoint_token.map(ToString::to_string),
             },
-            budget: Some(SidecarWorkflowBudget {
-                max_duration_ms: Some(provider_config.timeout_ms),
-                max_images: None,
-                max_tokens: Some(512),
-                max_cost_estimate: None,
-            }),
-            attempt: task.retry_count + 1,
-            max_retries: task.max_retries,
-            cancel_checkpoint_url: cancel_checkpoint_url.map(ToString::to_string),
-            cancel_checkpoint_token: cancel_checkpoint_token.map(ToString::to_string),
-        })
+        )
     })
 }
 
 fn submit_with_batch_sidecar<R: Runtime>(
     app_handle: &AppHandle<R>,
-    submit: impl FnOnce(&mut SidecarLifecycleService<R>) -> AppResult<SidecarWorkflowTaskResult>,
+    submit: impl FnOnce(&SidecarRuntimeEndpoint) -> AppResult<SidecarWorkflowTaskResult>,
 ) -> AppResult<SidecarWorkflowTaskResult> {
     if let Some(sidecar_state) = app_handle.try_state::<Mutex<SidecarLifecycleService<R>>>() {
-        let mut sidecar_service = sidecar_state.lock().unwrap_or_else(|e| e.into_inner());
-        return submit(&mut sidecar_service);
+        let endpoint = {
+            let mut sidecar_service = sidecar_state.lock().unwrap_or_else(|e| e.into_inner());
+            sidecar_service.ensure_runtime_endpoint()?
+        };
+        return submit(&endpoint);
     }
 
     let mut sidecar_service = SidecarLifecycleService::new(app_handle.clone());
-    submit(&mut sidecar_service)
+    let endpoint = sidecar_service.ensure_runtime_endpoint()?;
+    submit(&endpoint)
 }
 
 fn settle_batch_prompt_sidecar_response<R: Runtime>(
@@ -1570,36 +1577,39 @@ fn submit_batch_image_generate_sidecar_workflow<R: Runtime>(
     cancel_checkpoint_url: Option<&str>,
     cancel_checkpoint_token: Option<&str>,
 ) -> AppResult<SidecarWorkflowTaskResult> {
-    submit_with_batch_sidecar(app_handle, |sidecar_service| {
-        sidecar_service.submit_batch_image_generate(BatchImageGenerateSidecarRequest {
-            task_id: task.id,
-            project_id: task.project_id.clone(),
-            batch_job_id,
-            sequence_no: task.sequence_no,
-            prompt_request: prompt_request.to_string(),
-            image_size: image_size.to_string(),
-            output_dir: output_dir.to_string_lossy().to_string(),
-            provider: SidecarProviderConfig {
-                provider_id: Some(provider_config.display_name.clone()),
-                provider_type: Some(provider_config.provider.clone()),
-                display_name: Some(provider_config.display_name.clone()),
-                base_url: provider_config.base_url.clone(),
-                api_key: provider_config.api_key.clone(),
-                model: provider_config.image_model.clone(),
-                request_type: "image".to_string(),
-                timeout_ms: Some(provider_config.timeout_ms),
+    submit_with_batch_sidecar(app_handle, |endpoint| {
+        SidecarLifecycleService::<R>::submit_batch_image_generate_to_endpoint(
+            endpoint,
+            BatchImageGenerateSidecarRequest {
+                task_id: task.id,
+                project_id: task.project_id.clone(),
+                batch_job_id,
+                sequence_no: task.sequence_no,
+                prompt_request: prompt_request.to_string(),
+                image_size: image_size.to_string(),
+                output_dir: output_dir.to_string_lossy().to_string(),
+                provider: SidecarProviderConfig {
+                    provider_id: Some(provider_config.display_name.clone()),
+                    provider_type: Some(provider_config.provider.clone()),
+                    display_name: Some(provider_config.display_name.clone()),
+                    base_url: provider_config.base_url.clone(),
+                    api_key: provider_config.api_key.clone(),
+                    model: provider_config.image_model.clone(),
+                    request_type: "image".to_string(),
+                    timeout_ms: Some(provider_config.timeout_ms),
+                },
+                budget: Some(SidecarWorkflowBudget {
+                    max_duration_ms: Some(provider_config.timeout_ms),
+                    max_images: Some(1),
+                    max_tokens: None,
+                    max_cost_estimate: None,
+                }),
+                attempt: task.retry_count + 1,
+                max_retries: task.max_retries,
+                cancel_checkpoint_url: cancel_checkpoint_url.map(ToString::to_string),
+                cancel_checkpoint_token: cancel_checkpoint_token.map(ToString::to_string),
             },
-            budget: Some(SidecarWorkflowBudget {
-                max_duration_ms: Some(provider_config.timeout_ms),
-                max_images: Some(1),
-                max_tokens: None,
-                max_cost_estimate: None,
-            }),
-            attempt: task.retry_count + 1,
-            max_retries: task.max_retries,
-            cancel_checkpoint_url: cancel_checkpoint_url.map(ToString::to_string),
-            cancel_checkpoint_token: cancel_checkpoint_token.map(ToString::to_string),
-        })
+        )
     })
 }
 
@@ -2679,6 +2689,22 @@ mod tests {
         stream.flush().expect("response should flush");
     }
 
+    fn start_sidecar_health_server(token: &'static str) -> (u16, JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("health listener should bind");
+        let port = listener
+            .local_addr()
+            .expect("health listener addr should exist")
+            .port();
+        let handle = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("health request should arrive");
+            let request = read_http_request(&mut stream);
+            assert!(request.starts_with("GET /health "));
+            assert!(request.contains(&format!("X-Monster-Token: {token}")));
+            write_json_response(&mut stream, 200, "{\"ok\":true}");
+        });
+        (port, handle)
+    }
+
     fn cleanup_asset_files(asset: &CreativeAsset) {
         if let Some(path) = &asset.file_path {
             let _ = std::fs::remove_file(path);
@@ -2692,6 +2718,22 @@ mod tests {
         let sidecar_state = app_handle.state::<Mutex<SidecarLifecycleService<R>>>();
         let mut sidecar_service = sidecar_state.lock().unwrap_or_else(|e| e.into_inner());
         sidecar_service.get_status()
+    }
+
+    fn set_sidecar_endpoint_from_state<R: Runtime>(
+        app_handle: &AppHandle<R>,
+        port: u16,
+        token: &str,
+    ) {
+        let sidecar_state = app_handle.state::<Mutex<SidecarLifecycleService<R>>>();
+        let mut sidecar_service = sidecar_state.lock().unwrap_or_else(|e| e.into_inner());
+        sidecar_service.set_test_endpoint(port, token);
+    }
+
+    fn sidecar_lifecycle_lock_is_available<R: Runtime>(app_handle: &AppHandle<R>) -> bool {
+        let sidecar_state = app_handle.state::<Mutex<SidecarLifecycleService<R>>>();
+        let lock_available = sidecar_state.try_lock().is_ok();
+        lock_available
     }
 
     #[test]
@@ -2935,14 +2977,22 @@ mod tests {
     }
 
     #[test]
-    fn submit_with_batch_sidecar_uses_managed_lifecycle_when_present() {
+    fn submit_with_batch_sidecar_uses_managed_lifecycle_and_releases_lock() {
+        let token = "managed-batch-sidecar-test";
+        let (port, health_handle) = start_sidecar_health_server(token);
         let app = tauri::test::mock_app();
         app.manage(Mutex::new(SidecarLifecycleService::new(
             app.handle().clone(),
         )));
+        set_sidecar_endpoint_from_state(app.handle(), port, token);
 
-        let result = submit_with_batch_sidecar(app.handle(), |sidecar_service| {
-            sidecar_service.set_test_status("running", Some(42));
+        let result = submit_with_batch_sidecar(app.handle(), |endpoint| {
+            assert_eq!(endpoint.port, port);
+            assert_eq!(endpoint.token, token);
+            assert!(
+                sidecar_lifecycle_lock_is_available(app.handle()),
+                "batch sidecar submit should not hold lifecycle lock during HTTP task request"
+            );
             Ok(SidecarWorkflowTaskResult {
                 protocol_version: 1,
                 task_id: 1,
@@ -2956,6 +3006,7 @@ mod tests {
         })
         .expect("managed sidecar should be used");
         assert_eq!(result.task_id, 1);
+        health_handle.join().expect("health server should finish");
 
         let status = sidecar_status_from_state(app.handle());
         assert_eq!(status.status, "running");
