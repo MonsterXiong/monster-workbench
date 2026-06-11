@@ -1415,3 +1415,62 @@ Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `
   1. `creative_db_schema.rs` / `creative_db_tests.rs` 与 repo 的边界是否继续细分；
   2. `batch_job_service.rs` 剩余 orchestration 是否继续留在 Rust，还是为后续 Python runtime 正式化预留迁移边界。
 - 本轮验证通过：`cargo check --manifest-path .\\src-tauri\\Cargo.toml`，并通过代码检索确认生产代码层面不再出现 `CreativeDbInfra` 直接引用。
+
+## 2026-06-11 补充：Rust TaskService / BatchJobService 编排边界评估
+
+本轮按 `docs/rust-backend.md`、`docs/ai/creative-architecture-guardrails.md` 与 `docs/ai/workflow-runtime-boundary.md` 重新核对 Rust 侧 creative runtime 边界。
+
+当前基线判断：
+
+- `src-tauri/src/services/task_service.rs` 约 844 行，职责仍分三类：
+  1. 可信状态入口：task / asset / asset_link / task_event 的校验、repo 写读与 Tauri event emit。
+  2. 过渡 workflow 入口：`run_generate_image_prompt_workflow` 负责创建任务、调用 `SidecarLifecycleService`、落库 sidecar 返回的 prompt asset、更新 task 状态。
+  3. demo / stub 业务逻辑：`run_review_asset_quality_stub` 与 `build_review_result` 在 Rust 内生成 review result、创建 review asset，并在失败时创建 `revise_asset_quality` draft task。
+- `src-tauri/src/services/batch_job_service.rs` 约 2439 行，是当前更明显的 Rust 编排集中点。它已经不再依赖旧 `CreativeDbInfra`，但仍同时承担：
+  1. batch job 创建、snapshot 查询、pause/resume/cancel。
+  2. supervisor thread：按并发度 claim queued tasks，spawn worker thread，检查完成条件。
+  3. mock / prompt / image worker：执行任务、处理取消、重试、失败自动暂停。
+  4. provider 调用：prompt 和 image worker 直接构造 `AiProviderConfig` 并调用 `AiProviderService::test_provider`。
+  5. 结果持久化：创建 `demo_image_prompt` / `demo_image` asset，写入 `model_runs`，维护 task result/event/status。
+
+按文档边界，Rust 当前适合继续保留的职责是：
+
+- IPC command 薄代理、权限与路径控制。
+- SQLite 可信状态写入，包括 task/batch/asset/model_run 的最终落库。
+- task / batch 状态机的最小可信转移：queued、running、cancelling、cancelled、succeeded、failed、paused、completed。
+- Tauri event bridge，把 task/batch 状态变化广播给前端。
+- sidecar lifecycle：启动、健康检查、runtime token、localhost 边界。
+- 取消、暂停、恢复、启动恢复等桌面控制面入口。
+
+按文档边界，不应继续在 Rust 内扩大的职责是：
+
+- prompt 构建策略。
+- review / revision / consistency 规则。
+- 多 Agent 创作策略。
+- provider 调用编排与 worker pool 业务逻辑。
+- 图片生成 workflow 的业务分支。
+- 基于业务语义的失败处理策略不断扩展到 Rust worker 中。
+
+因此当前结论不是“马上删除 Rust supervisor”，而是把边界分成短中期两层：
+
+1. 短期保留 Rust 作为 batch 控制面。`BatchJobService` 可以继续负责 batch job 生命周期、并发槽位、claim、pause/resume/cancel、事件和最终可信落库。
+2. 短期停止在 `BatchJobService` 里继续新增生产型 worker 分支。`demo.image.mock` 可保留作本地验证；`demo.image.prompt` 与 `demo.image.generate` 应视为过渡链路。
+3. 下一步若要新增正式 workflow，优先走 `SidecarLifecycleService -> Python workflow runtime`：Rust 创建/claim task，Python 执行 prompt/provider/review/image workflow，Rust 根据返回结果写入 task/asset/model_runs/event。
+4. 中期再决定 supervisor 归属：
+   - 方案 A：Rust 保留 supervisor，只把每个 claimed task 提交给 Python 执行；这是最平滑的迁移路径。
+   - 方案 B：Python worker 拉取 SQLite-backed queue；这需要先固化 DB 写入协议、取消 checkpoint、崩溃恢复和权限边界，不能让 Python 任意改主库。
+
+建议的收口顺序：
+
+1. 先不要新增新的 Rust batch worker 类型；把 `demo.image.prompt/generate` 标记为过渡实现。
+2. 把 `TaskService::run_review_asset_quality_stub` 维持为 stub，不继续扩展真实审查规则；真实 review/revision 应进入 Python workflow runtime。
+3. 把 `BatchJobService` 中的 provider 调用边界收口：后续优先改为提交给 sidecar，而不是继续通过 `AiProviderService::test_provider` 作为生产 batch runtime。
+4. 保留 `model_runs` 作为所有 AI 调用的强制审计点；即使执行搬到 Python，最终审计记录也应由 Rust 可信写入或经过严格协议写入。
+5. 后续拆代码时，优先拆“worker 执行业务”而不是拆“batch 状态控制”。也就是说，先让 Rust 从 prompt/image 业务执行中退出，再讨论 supervisor 是否迁走。
+
+架构风险提示：
+
+- `AiProviderService::test_provider` 当前语义仍偏“连接测试/Provider 测试”，继续把它作为 batch 生产执行入口，会让测试链路和正式 creative runtime 混淆。
+- `demo.image.*` 命名说明当前 batch 类型仍带 demo 语义；在正式业务类型出现前，不应把这套命名直接扩展成生产分类体系。
+- 当前 worker 使用 `std::thread::spawn` 直接派发，适合本地 demo 和短任务验证；正式长任务需要更明确的 lifecycle、预算、kill switch、恢复和事件节流策略。
+- `TaskService` 下仍挂着 asset CRUD 与 workflow stub，Rust 侧命名还没有完全和前端 `creative-task / creative-asset / creative-batch` 对齐；但当前更高风险点仍是 batch worker 业务执行，而不是 asset CRUD 所在文件名。
