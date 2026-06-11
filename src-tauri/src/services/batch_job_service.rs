@@ -90,6 +90,49 @@ struct BatchExecutionBudget {
     max_consecutive_failures: Option<i64>,
 }
 
+#[derive(Debug, Clone, Copy)]
+enum BatchWorkerKind {
+    Prompt,
+    Image,
+}
+
+impl BatchWorkerKind {
+    fn retry_event_type(self) -> &'static str {
+        match self {
+            BatchWorkerKind::Prompt => "prompt_retry_scheduled",
+            BatchWorkerKind::Image => "image_retry_scheduled",
+        }
+    }
+
+    fn retry_message(self) -> &'static str {
+        match self {
+            BatchWorkerKind::Prompt => "prompt worker scheduled retry",
+            BatchWorkerKind::Image => "image worker scheduled retry",
+        }
+    }
+
+    fn failed_event_type(self) -> &'static str {
+        match self {
+            BatchWorkerKind::Prompt => "prompt_failed",
+            BatchWorkerKind::Image => "image_failed",
+        }
+    }
+
+    fn failed_message(self) -> &'static str {
+        match self {
+            BatchWorkerKind::Prompt => "prompt worker finished with failure",
+            BatchWorkerKind::Image => "image worker finished with failure",
+        }
+    }
+
+    fn cancelled_event_type(self) -> &'static str {
+        match self {
+            BatchWorkerKind::Prompt => "prompt_cancelled",
+            BatchWorkerKind::Image => "image_cancelled",
+        }
+    }
+}
+
 pub struct BatchJobService<R: Runtime = Wry> {
     app_handle: AppHandle<R>,
     path_provider: PathProvider,
@@ -1055,13 +1098,14 @@ fn settle_batch_prompt_sidecar_response<R: Runtime>(
             Some(prompt_hash.as_str()),
             "batch prompt sidecar model run metadata",
         )?;
-        return handle_prompt_cancelled(
+        return handle_batch_worker_cancelled(
             app_handle,
             db_path,
             batch_job_id,
             task,
             "prompt task cancelled after sidecar provider call".to_string(),
             model_run_ids,
+            BatchWorkerKind::Prompt,
         );
     }
 
@@ -1074,7 +1118,7 @@ fn settle_batch_prompt_sidecar_response<R: Runtime>(
             Some(prompt_hash.as_str()),
             "batch prompt sidecar model run metadata",
         )?;
-        return handle_prompt_cancelled(
+        return handle_batch_worker_cancelled(
             app_handle,
             db_path,
             batch_job_id,
@@ -1084,6 +1128,7 @@ fn settle_batch_prompt_sidecar_response<R: Runtime>(
                 .clone()
                 .unwrap_or_else(|| "prompt worker cancelled".to_string()),
             model_run_ids,
+            BatchWorkerKind::Prompt,
         );
     }
 
@@ -1096,7 +1141,7 @@ fn settle_batch_prompt_sidecar_response<R: Runtime>(
             Some(prompt_hash.as_str()),
             "batch prompt sidecar model run metadata",
         )?;
-        return handle_prompt_failure_with_model_runs(
+        return handle_batch_worker_failure_with_model_runs(
             app_handle,
             db_path,
             batch_job_id,
@@ -1106,6 +1151,7 @@ fn settle_batch_prompt_sidecar_response<R: Runtime>(
                 .clone()
                 .unwrap_or_else(|| "prompt sidecar workflow failed".to_string()),
             model_run_ids,
+            BatchWorkerKind::Prompt,
         );
     }
 
@@ -1255,23 +1301,25 @@ fn handle_prompt_transport_failure<R: Runtime>(
             finished_at: None,
         },
     )?;
-    handle_prompt_failure_with_model_runs(
+    handle_batch_worker_failure_with_model_runs(
         app_handle,
         db_path,
         batch_job_id,
         task,
         error_message,
         vec![model_run.id],
+        BatchWorkerKind::Prompt,
     )
 }
 
-fn handle_prompt_failure_with_model_runs<R: Runtime>(
+fn handle_batch_worker_failure_with_model_runs<R: Runtime>(
     app_handle: &AppHandle<R>,
     db_path: &std::path::Path,
     batch_job_id: i64,
     task: &CreativeTask,
     error_message: String,
     model_run_ids: Vec<i64>,
+    worker_kind: BatchWorkerKind,
 ) -> AppResult<()> {
     if current_task_retry_allowed(task) {
         let retry_task = creative_task_repo::update_task_status(
@@ -1289,8 +1337,8 @@ fn handle_prompt_failure_with_model_runs<R: Runtime>(
             db_path,
             CreateTaskEventInput {
                 task_id: task.id,
-                event_type: "prompt_retry_scheduled".to_string(),
-                message: Some("prompt worker scheduled retry".to_string()),
+                event_type: worker_kind.retry_event_type().to_string(),
+                message: Some(worker_kind.retry_message().to_string()),
                 payload_json: Some(
                     json!({
                         "retryCount": retry_task.retry_count,
@@ -1312,7 +1360,7 @@ fn handle_prompt_failure_with_model_runs<R: Runtime>(
             app_handle,
             &retry_task,
             "creative-task-event",
-            "prompt worker scheduled retry",
+            worker_kind.retry_message(),
         )?;
         return Ok(());
     }
@@ -1338,8 +1386,8 @@ fn handle_prompt_failure_with_model_runs<R: Runtime>(
         db_path,
         CreateTaskEventInput {
             task_id: task.id,
-            event_type: "prompt_failed".to_string(),
-            message: Some("prompt worker finished with failure".to_string()),
+            event_type: worker_kind.failed_event_type().to_string(),
+            message: Some(worker_kind.failed_message().to_string()),
             payload_json: Some(
                 json!({
                     "error": error_message,
@@ -1359,19 +1407,20 @@ fn handle_prompt_failure_with_model_runs<R: Runtime>(
         app_handle,
         &failed_task,
         "creative-task-event",
-        "prompt worker finished with failure",
+        worker_kind.failed_message(),
     )?;
     let _ = maybe_auto_pause_batch_after_failure(app_handle, db_path, batch_job_id, &error_message);
     Ok(())
 }
 
-fn handle_prompt_cancelled<R: Runtime>(
+fn handle_batch_worker_cancelled<R: Runtime>(
     app_handle: &AppHandle<R>,
     db_path: &std::path::Path,
     batch_job_id: i64,
     task: &CreativeTask,
     message: String,
     model_run_ids: Vec<i64>,
+    worker_kind: BatchWorkerKind,
 ) -> AppResult<()> {
     let cancelled_task = creative_task_repo::update_task_status(
         db_path,
@@ -1394,7 +1443,7 @@ fn handle_prompt_cancelled<R: Runtime>(
         db_path,
         CreateTaskEventInput {
             task_id: task.id,
-            event_type: "prompt_cancelled".to_string(),
+            event_type: worker_kind.cancelled_event_type().to_string(),
             message: Some(message.clone()),
             payload_json: Some(
                 json!({
@@ -1590,13 +1639,14 @@ fn settle_batch_image_sidecar_response<R: Runtime>(
             Some(prompt_hash.as_str()),
             "batch sidecar model run metadata",
         )?;
-        return handle_generate_cancelled(
+        return handle_batch_worker_cancelled(
             app_handle,
             db_path,
             batch_job_id,
             task,
             "image task cancelled after sidecar provider call".to_string(),
             model_run_ids,
+            BatchWorkerKind::Image,
         );
     }
 
@@ -1609,7 +1659,7 @@ fn settle_batch_image_sidecar_response<R: Runtime>(
             Some(prompt_hash.as_str()),
             "batch sidecar model run metadata",
         )?;
-        return handle_generate_cancelled(
+        return handle_batch_worker_cancelled(
             app_handle,
             db_path,
             batch_job_id,
@@ -1619,6 +1669,7 @@ fn settle_batch_image_sidecar_response<R: Runtime>(
                 .clone()
                 .unwrap_or_else(|| "image worker cancelled".to_string()),
             model_run_ids,
+            BatchWorkerKind::Image,
         );
     }
 
@@ -1631,7 +1682,7 @@ fn settle_batch_image_sidecar_response<R: Runtime>(
             Some(prompt_hash.as_str()),
             "batch sidecar model run metadata",
         )?;
-        return handle_generate_failure_with_model_runs(
+        return handle_batch_worker_failure_with_model_runs(
             app_handle,
             db_path,
             batch_job_id,
@@ -1641,6 +1692,7 @@ fn settle_batch_image_sidecar_response<R: Runtime>(
                 .clone()
                 .unwrap_or_else(|| "image sidecar workflow failed".to_string()),
             model_run_ids,
+            BatchWorkerKind::Image,
         );
     }
 
@@ -1781,164 +1833,15 @@ fn handle_generate_transport_failure<R: Runtime>(
             finished_at: None,
         },
     )?;
-    handle_generate_failure_with_model_runs(
+    handle_batch_worker_failure_with_model_runs(
         app_handle,
         db_path,
         batch_job_id,
         task,
         error_message,
         vec![model_run.id],
+        BatchWorkerKind::Image,
     )
-}
-
-fn handle_generate_failure_with_model_runs<R: Runtime>(
-    app_handle: &AppHandle<R>,
-    db_path: &std::path::Path,
-    batch_job_id: i64,
-    task: &CreativeTask,
-    error_message: String,
-    model_run_ids: Vec<i64>,
-) -> AppResult<()> {
-    if current_task_retry_allowed(task) {
-        let retry_task = creative_task_repo::update_task_status(
-            db_path,
-            UpdateCreativeTaskStatusInput {
-                id: task.id,
-                status: "queued".to_string(),
-                result_json: None,
-                error_message: Some(error_message.clone()),
-                asset_id: task.asset_id,
-                retry_count_increment: Some(1),
-            },
-        )?;
-        let _ = creative_task_repo::append_task_event(
-            db_path,
-            CreateTaskEventInput {
-                task_id: task.id,
-                event_type: "image_retry_scheduled".to_string(),
-                message: Some("image worker scheduled retry".to_string()),
-                payload_json: Some(
-                    json!({
-                        "retryCount": retry_task.retry_count,
-                        "maxRetries": retry_task.max_retries,
-                        "error": error_message,
-                        "modelRunIds": model_run_ids,
-                    })
-                    .to_string(),
-                ),
-            },
-        );
-        emit_task_status(
-            app_handle,
-            &retry_task,
-            "creative-task-status-changed",
-            "status changed to queued",
-        )?;
-        emit_task_status(
-            app_handle,
-            &retry_task,
-            "creative-task-event",
-            "image worker scheduled retry",
-        )?;
-        return Ok(());
-    }
-
-    let failed_task = creative_task_repo::update_task_status(
-        db_path,
-        UpdateCreativeTaskStatusInput {
-            id: task.id,
-            status: "failed".to_string(),
-            result_json: Some(
-                json!({
-                    "error": error_message,
-                    "modelRunIds": model_run_ids,
-                })
-                .to_string(),
-            ),
-            error_message: Some(error_message.clone()),
-            asset_id: task.asset_id,
-            retry_count_increment: None,
-        },
-    )?;
-    let _ = creative_task_repo::append_task_event(
-        db_path,
-        CreateTaskEventInput {
-            task_id: task.id,
-            event_type: "image_failed".to_string(),
-            message: Some("image worker finished with failure".to_string()),
-            payload_json: Some(
-                json!({
-                    "error": error_message,
-                    "modelRunIds": model_run_ids,
-                })
-                .to_string(),
-            ),
-        },
-    );
-    emit_task_status(
-        app_handle,
-        &failed_task,
-        "creative-task-status-changed",
-        "status changed to failed",
-    )?;
-    emit_task_status(
-        app_handle,
-        &failed_task,
-        "creative-task-event",
-        "image worker finished with failure",
-    )?;
-    let _ = maybe_auto_pause_batch_after_failure(app_handle, db_path, batch_job_id, &error_message);
-    Ok(())
-}
-
-fn handle_generate_cancelled<R: Runtime>(
-    app_handle: &AppHandle<R>,
-    db_path: &std::path::Path,
-    batch_job_id: i64,
-    task: &CreativeTask,
-    message: String,
-    model_run_ids: Vec<i64>,
-) -> AppResult<()> {
-    let cancelled_task = creative_task_repo::update_task_status(
-        db_path,
-        UpdateCreativeTaskStatusInput {
-            id: task.id,
-            status: "cancelled".to_string(),
-            result_json: Some(
-                json!({
-                    "batchJobId": batch_job_id,
-                    "modelRunIds": model_run_ids,
-                })
-                .to_string(),
-            ),
-            error_message: Some(message.clone()),
-            asset_id: task.asset_id,
-            retry_count_increment: None,
-        },
-    )?;
-    let _ = creative_task_repo::append_task_event(
-        db_path,
-        CreateTaskEventInput {
-            task_id: task.id,
-            event_type: "image_cancelled".to_string(),
-            message: Some(message.clone()),
-            payload_json: Some(
-                json!({
-                    "batchJobId": batch_job_id,
-                    "modelRunIds": model_run_ids,
-                })
-                .to_string(),
-            ),
-        },
-    );
-    emit_task_status(
-        app_handle,
-        &cancelled_task,
-        "creative-task-status-changed",
-        "status changed to cancelled",
-    )?;
-    emit_task_status(app_handle, &cancelled_task, "creative-task-event", &message)?;
-    Ok(())
 }
 
 fn resolve_batch_image_output_dir<R: Runtime>(
