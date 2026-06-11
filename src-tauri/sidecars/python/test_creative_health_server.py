@@ -67,10 +67,14 @@ class CreativeHealthServerEventsTest(unittest.TestCase):
 
         events_result = self.request_json("/events?after=0&limit=10")
         self.assertTrue(events_result["ok"])
+        self.assertTrue(events_result["runtimeInstanceId"])
+        self.assertTrue(events_result["runtimeStartedAt"].endswith("Z"))
         self.assertEqual(events_result["nextCursor"], 1)
         self.assertEqual(len(events_result["events"]), 1)
         event = events_result["events"][0]
         self.assertEqual(event["id"], 1)
+        self.assertEqual(event["runtimeInstanceId"], events_result["runtimeInstanceId"])
+        self.assertEqual(event["runtimeStartedAt"], events_result["runtimeStartedAt"])
         self.assertEqual(event["taskId"], 77)
         self.assertEqual(event["workflowType"], "image_prompt")
         self.assertEqual(event["eventType"], "workflow_step_completed")
@@ -79,6 +83,8 @@ class CreativeHealthServerEventsTest(unittest.TestCase):
 
         empty_result = self.request_json("/events?after=1&limit=10")
         self.assertTrue(empty_result["ok"])
+        self.assertEqual(empty_result["runtimeInstanceId"], events_result["runtimeInstanceId"])
+        self.assertEqual(empty_result["runtimeStartedAt"], events_result["runtimeStartedAt"])
         self.assertEqual(empty_result["nextCursor"], 1)
         self.assertEqual(empty_result["events"], [])
 

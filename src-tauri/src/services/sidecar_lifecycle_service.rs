@@ -194,6 +194,10 @@ pub struct SidecarWorkflowTaskResult {
 #[serde(rename_all = "camelCase")]
 pub struct SidecarRuntimeEvent {
     pub id: u64,
+    #[serde(default)]
+    pub runtime_instance_id: Option<String>,
+    #[serde(default)]
+    pub runtime_started_at: Option<String>,
     pub task_id: Option<i64>,
     pub workflow_type: Option<String>,
     pub event_type: String,
@@ -206,6 +210,10 @@ pub struct SidecarRuntimeEvent {
 #[serde(rename_all = "camelCase")]
 pub struct SidecarRuntimeEventsResponse {
     pub ok: bool,
+    #[serde(default)]
+    pub runtime_instance_id: Option<String>,
+    #[serde(default)]
+    pub runtime_started_at: Option<String>,
     pub next_cursor: u64,
     pub events: Vec<SidecarRuntimeEvent>,
 }
@@ -1159,7 +1167,7 @@ mod tests {
                 .expect("events request should send");
             write_test_json_response(
                 &mut stream,
-                r#"{"ok":true,"nextCursor":15,"events":[{"id":13,"taskId":77,"workflowType":"image_prompt","eventType":"workflow_step_completed","message":"prompt built","payload":{"workflowType":"image_prompt"},"createdAt":"2026-06-12T08:00:00Z"}]}"#,
+                r#"{"ok":true,"runtimeInstanceId":"runtime-test-1","runtimeStartedAt":"2026-06-12T07:59:00Z","nextCursor":15,"events":[{"id":13,"runtimeInstanceId":"runtime-test-1","runtimeStartedAt":"2026-06-12T07:59:00Z","taskId":77,"workflowType":"image_prompt","eventType":"workflow_step_completed","message":"prompt built","payload":{"workflowType":"image_prompt"},"createdAt":"2026-06-12T08:00:00Z"}]}"#,
             );
         });
 
@@ -1181,9 +1189,22 @@ mod tests {
         assert!(request.starts_with("GET /events?after=12&limit=2 "));
         assert!(request.contains(&format!("X-Monster-Token: {token}")));
         assert!(events.ok);
+        assert_eq!(events.runtime_instance_id.as_deref(), Some("runtime-test-1"));
+        assert_eq!(
+            events.runtime_started_at.as_deref(),
+            Some("2026-06-12T07:59:00Z")
+        );
         assert_eq!(events.next_cursor, 15);
         assert_eq!(events.events.len(), 1);
         assert_eq!(events.events[0].id, 13);
+        assert_eq!(
+            events.events[0].runtime_instance_id.as_deref(),
+            Some("runtime-test-1")
+        );
+        assert_eq!(
+            events.events[0].runtime_started_at.as_deref(),
+            Some("2026-06-12T07:59:00Z")
+        );
         assert_eq!(events.events[0].task_id, Some(77));
         assert_eq!(
             events.events[0].workflow_type.as_deref(),

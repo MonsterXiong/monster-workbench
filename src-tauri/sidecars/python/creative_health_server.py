@@ -20,8 +20,15 @@ SIDECAR_EVENT_BUFFER_LIMIT = 1000
 
 
 class SidecarEventBuffer:
-    def __init__(self, limit=SIDECAR_EVENT_BUFFER_LIMIT):
+    def __init__(
+        self,
+        limit=SIDECAR_EVENT_BUFFER_LIMIT,
+        runtime_instance_id=None,
+        runtime_started_at=None,
+    ):
         self.limit = max(int(limit or SIDECAR_EVENT_BUFFER_LIMIT), 1)
+        self.runtime_instance_id = runtime_instance_id or str(uuid.uuid4())
+        self.runtime_started_at = runtime_started_at or utc_now_text()
         self._events = []
         self._next_id = 1
         self._lock = threading.Lock()
@@ -46,6 +53,8 @@ class SidecarEventBuffer:
             self._next_id += 1
             event = {
                 "id": event_id,
+                "runtimeInstanceId": self.runtime_instance_id,
+                "runtimeStartedAt": self.runtime_started_at,
                 "taskId": task_id,
                 "workflowType": workflow_type,
                 "eventType": event_type,
@@ -64,7 +73,13 @@ class SidecarEventBuffer:
         with self._lock:
             events = [event for event in self._events if event["id"] > after][:limit]
             next_cursor = events[-1]["id"] if events else after
-        return {"ok": True, "nextCursor": next_cursor, "events": events}
+        return {
+            "ok": True,
+            "runtimeInstanceId": self.runtime_instance_id,
+            "runtimeStartedAt": self.runtime_started_at,
+            "nextCursor": next_cursor,
+            "events": events,
+        }
 
 
 def parse_args():

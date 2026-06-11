@@ -191,6 +191,8 @@ let mockSidecarStatus: MockSidecarStatus = {
   lastRecoveryFailureAt: null,
   recoveryBackoffRemainingMs: null,
 };
+let mockSidecarRuntimeInstanceId = `browser-mock-runtime-${getCurrentTimestampMs()}`;
+let mockSidecarRuntimeStartedAt = formatCurrentIsoDateTime(" ");
 const MOCK_IMAGE_DATA_URL =
   "data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%201024%201024%22%3E%3Cdefs%3E%3ClinearGradient%20id%3D%22g%22%20x1%3D%220%22%20x2%3D%221%22%20y1%3D%220%22%20y2%3D%221%22%3E%3Cstop%20stop-color%3D%22%2310b981%22/%3E%3Cstop%20offset%3D%221%22%20stop-color%3D%22%232563eb%22/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect%20width%3D%221024%22%20height%3D%221024%22%20rx%3D%2280%22%20fill%3D%22url(%23g)%22/%3E%3Ccircle%20cx%3D%22512%22%20cy%3D%22440%22%20r%3D%22140%22%20fill%3D%22white%22%20opacity%3D%22.88%22/%3E%3Crect%20x%3D%22272%22%20y%3D%22616%22%20width%3D%22480%22%20height%3D%2272%22%20rx%3D%2236%22%20fill%3D%22white%22%20opacity%3D%22.88%22/%3E%3Ctext%20x%3D%22512%22%20y%3D%22804%22%20text-anchor%3D%22middle%22%20font-family%3D%22Arial%2Csans-serif%22%20font-size%3D%2256%22%20font-weight%3D%22700%22%20fill%3D%22white%22%3EMock%20Image%3C/text%3E%3C/svg%3E";
 const MOCK_IMAGE_DATA_URL_ALT =
@@ -2029,6 +2031,8 @@ export async function mockCallTauri<T = unknown>(
       return mockSidecarStatus as T;
 
     case "start_sidecar_dev_health_server":
+      mockSidecarRuntimeInstanceId = `browser-mock-runtime-${getCurrentTimestampMs()}`;
+      mockSidecarRuntimeStartedAt = formatCurrentIsoDateTime(" ");
       mockSidecarStatus = {
         status: "starting",
         port: 43123,
@@ -2087,6 +2091,8 @@ export async function mockCallTauri<T = unknown>(
     case "poll_sidecar_runtime_events":
       return {
         ok: true,
+        runtimeInstanceId: mockSidecarRuntimeInstanceId,
+        runtimeStartedAt: mockSidecarRuntimeStartedAt,
         nextCursor: Number(args.after ?? 0),
         events: [],
       } as T;

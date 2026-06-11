@@ -25,6 +25,8 @@ export interface SidecarStatusEventPayload extends SidecarStatusSnapshot {
 
 export interface SidecarRuntimeEvent {
   id: number;
+  runtimeInstanceId: string | null;
+  runtimeStartedAt: string | null;
   taskId: number | null;
   workflowType: string | null;
   eventType: string;
@@ -35,6 +37,8 @@ export interface SidecarRuntimeEvent {
 
 export interface SidecarRuntimeEventsResponse {
   ok: boolean;
+  runtimeInstanceId: string | null;
+  runtimeStartedAt: string | null;
   nextCursor: number;
   events: SidecarRuntimeEvent[];
 }
