@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
+import { storeToRefs } from "pinia";
 import { useI18n } from "../../../../composables/useI18n";
 import { useCreativeFormatters } from "../../../../composables/useCreativeFormatters";
+import { useCreativeProjectStore } from "../../../../stores/creative-project";
 import BaseSearchInput from "@/components/common/BaseSearchInput.vue";
 import BaseSegmented from "@/components/common/BaseSegmented.vue";
 import BaseDataState from "@/components/common/BaseDataState.vue";
@@ -20,15 +22,23 @@ export interface CreativeProjectCardRecord {
 
 const props = defineProps<{
   activeId: string;
-  cards: CreativeProjectCardRecord[];
 }>();
 
 const emit = defineEmits<{
   (e: "update:activeId", value: string): void;
+  (e: "update:activeCard", value: CreativeProjectCardRecord): void;
 }>();
 
 const { t } = useI18n();
-const { statusLabel } = useCreativeFormatters();
+const { statusLabel, userFacingTaskType, userFacingAssetType } = useCreativeFormatters();
+
+const creativeProjectStore = useCreativeProjectStore();
+const {
+  creativeProjectIndexTasks,
+  creativeProjectIndexAssets,
+  creativeProjectIndexGoals,
+  creativeProjectIndexBatchJobs,
+} = storeToRefs(creativeProjectStore);
 
 const projectSearchQuery = ref("");
 const projectStatusFilter = ref("all");
@@ -39,6 +49,138 @@ const projectStatusFilterOptions = computed(() => [
   { label: t("creativePage.project.filters.running"), value: "running" },
   { label: t("creativePage.project.filters.attention"), value: "attention" },
 ]);
+
+const projectSeedItems = [
+  {
+    projectId: "creative-main-project",
+    title: "默认创作项目",
+    description: "承接日常提示词、审查和资产入库。",
+  },
+  {
+    projectId: "story-assets",
+    title: "故事资产项目",
+    description: "管理角色、场景、道具、分镜和设定集。",
+  },
+  {
+    projectId: "goal-planning",
+    title: "目标编排项目",
+    description: "把创作目标拆成可执行的协作任务。",
+  },
+  {
+    projectId: "batch-production",
+    title: "批量生图项目",
+    description: "验证批量提示词和图片生成链路。",
+  },
+];
+
+const creativeProjectCards = computed(() => {
+  const records = new Map<string, CreativeProjectCardRecord>();
+
+  for (const seed of projectSeedItems) {
+    records.set(seed.projectId, {
+      projectId: seed.projectId,
+      title: seed.title,
+      description: seed.description,
+      tasks: 0,
+      assets: 0,
+      goals: 0,
+      batchJobs: 0,
+      latestAt: null,
+      status: "idle",
+    });
+  }
+
+  const touchRecord = (projectId: string | null, updater: (record: CreativeProjectCardRecord) => void) => {
+    if (!projectId) return;
+    if (!records.has(projectId)) {
+      records.set(projectId, createSeedRecord(projectId));
+    }
+    const record = records.get(projectId);
+    if (!record) return;
+    updater(record);
+  };
+
+  function createSeedRecord(projectId: string): CreativeProjectCardRecord {
+    return {
+      projectId,
+      title: projectId,
+      description: "项目记录已同步，等待进一步整理命名。",
+      tasks: 0,
+      assets: 0,
+      goals: 0,
+      batchJobs: 0,
+      latestAt: null,
+      status: "idle",
+    };
+  }
+
+  for (const task of creativeProjectIndexTasks.value) {
+    touchRecord(task.projectId, (record) => {
+      record.tasks += 1;
+      if (!record.latestAt || task.updatedAt > record.latestAt) {
+        record.latestAt = task.updatedAt;
+        record.status = task.status;
+      }
+      if (!record.description || record.description === "项目记录已同步，等待进一步整理命名。") {
+        record.description = userFacingTaskType(task.taskType);
+      }
+    });
+  }
+
+  for (const asset of creativeProjectIndexAssets.value) {
+    touchRecord(asset.projectId, (record) => {
+      record.assets += 1;
+      if (!record.latestAt || asset.updatedAt > record.latestAt) {
+        record.latestAt = asset.updatedAt;
+        record.status = asset.status;
+      }
+      if (record.description === "项目记录已同步，等待进一步整理命名。" && asset.assetType) {
+        record.description = userFacingAssetType(asset.assetType);
+      }
+    });
+  }
+
+  for (const goal of creativeProjectIndexGoals.value) {
+    touchRecord(goal.projectId, (record) => {
+      record.goals += 1;
+      if (!record.latestAt || goal.updatedAt > record.latestAt) {
+        record.latestAt = goal.updatedAt;
+        record.status = goal.status;
+      }
+      if (record.description === "项目记录已同步，等待进一步整理命名。" && goal.title) {
+        record.description = goal.title;
+      }
+    });
+  }
+
+  for (const batchJob of creativeProjectIndexBatchJobs.value) {
+    touchRecord(batchJob.projectId, (record) => {
+      record.batchJobs += 1;
+      if (!record.latestAt || batchJob.updatedAt > record.latestAt) {
+        record.latestAt = batchJob.updatedAt;
+        record.status = batchJob.status;
+      }
+      if (record.description === "项目记录已同步，等待进一步整理命名。" && batchJob.name) {
+        record.description = batchJob.name;
+      }
+    });
+  }
+
+  if (props.activeId && !records.has(props.activeId)) {
+    records.set(props.activeId, {
+      ...createSeedRecord(props.activeId),
+      description: t("creativePage.project.currentFallback"),
+    });
+  }
+
+  return Array.from(records.values()).sort((left, right) => {
+    if (left.projectId === props.activeId) return -1;
+    if (right.projectId === props.activeId) return 1;
+    const leftTime = left.latestAt || "";
+    const rightTime = right.latestAt || "";
+    return rightTime.localeCompare(leftTime);
+  });
+});
 
 const projectMatchesStatusFilter = (project: CreativeProjectCardRecord) => {
   if (projectStatusFilter.value === "active") {
@@ -55,7 +197,7 @@ const projectMatchesStatusFilter = (project: CreativeProjectCardRecord) => {
 
 const filteredCreativeProjectCards = computed(() => {
   const query = projectSearchQuery.value.trim().toLowerCase();
-  return props.cards.filter((project) => {
+  return creativeProjectCards.value.filter((project) => {
     if (!projectMatchesStatusFilter(project)) return false;
     if (!query) return true;
     return [project.title, project.description, project.projectId, statusLabel(project.status)]
@@ -78,13 +220,33 @@ const projectStatsLabel = (project: CreativeProjectCardRecord) =>
 const selectCreativeProject = (projectId: string) => {
   emit("update:activeId", projectId);
 };
+
+watch(
+  () => [props.activeId, creativeProjectCards.value],
+  () => {
+    const activeCard = creativeProjectCards.value.find((item) => item.projectId === props.activeId) || {
+      projectId: props.activeId,
+      title: props.activeId,
+      description: t("creativePage.project.currentFallback"),
+      tasks: 0,
+      assets: 0,
+      goals: 0,
+      batchJobs: 0,
+      latestAt: null,
+      status: "idle",
+    };
+    emit("update:activeCard", activeCard);
+  },
+  { immediate: true, deep: true }
+);
+
 </script>
 
 <template>
   <aside class="creative-project-list">
     <div class="creative-project-list__header">
       <h2>{{ t("creativePage.project.listTitle") }}</h2>
-      <span>{{ filteredCreativeProjectCards.length }} / {{ cards.length }}</span>
+      <span>{{ filteredCreativeProjectCards.length }} / {{ creativeProjectCards.length }}</span>
     </div>
     <div class="creative-project-list__toolbar">
       <BaseSearchInput

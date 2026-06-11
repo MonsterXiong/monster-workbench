@@ -1,80 +1,213 @@
 <script setup lang="ts">
+import { ref, computed } from "vue";
+import { storeToRefs } from "pinia";
 import { useI18n } from "../../../../composables/useI18n";
+import { useCreativeFormatters } from "../../../../composables/useCreativeFormatters";
+import { useCreativeTaskStore } from "../../../../stores/creative-task";
+import { useCreativeAssetStore } from "../../../../stores/creative-asset";
+import { useCreativeProjectStore } from "../../../../stores/creative-project";
+import type { CreativeAssetLink } from "../../../../stores/creative-asset";
 import CreativeSection from "../CreativeSection.vue";
-
-interface ReviewWorkflowForm {
-  contentHint: string;
-  reviewKind: string;
-}
-
-interface DomainAssetForm {
-  characterTitle: string;
-  sceneTitle: string;
-  propTitle: string;
-  storyboardTitle: string;
-  novelChapterTitle: string;
-  scriptSceneTitle: string;
-  bibleTitle: string;
-}
-
-interface TimelineItem {
-  key: string;
-  title: string;
-  time: string;
-  description: string;
-  type: "primary" | "success" | "warning" | "danger";
-  tag: string;
-}
-
-interface DescriptionListItem {
-  key: string;
-  label: string;
-  value: string;
-}
+import BaseSkeletonCard from "@/components/common/BaseSkeletonCard.vue";
 
 const props = defineProps<{
-  reviewForm: ReviewWorkflowForm;
-  reviewIsRunning: boolean;
-  reviewRawStatus: string;
-  reviewDisplayStatus: string;
-  reviewAssetId: number | null;
-  reviewRevisionTaskId: number | null;
-  reviewTimelineItems: TimelineItem[];
-  reviewError: string | null;
-  reviewSummaryItems: DescriptionListItem[];
-  reviewProblems: string[];
-  revisionInstructionCode: string;
-  domainAssetForm: DomainAssetForm;
-  domainAssetIsRunning: boolean;
-  domainAssetCount: number;
-  domainAssetLinkCount: number;
-  domainAssetTimelineItems: TimelineItem[];
-  domainAssetError: string | null;
-  linkSnapshotItems: DescriptionListItem[];
-}>();
-
-const emit = defineEmits<{
-  (e: "update:reviewForm", value: ReviewWorkflowForm): void;
-  (e: "submitReview"): void;
-  (e: "update:domainAssetForm", value: DomainAssetForm): void;
-  (e: "submitDomainAssets"): void;
+  activeProjectId: string;
 }>();
 
 const { t } = useI18n();
+const {
+  statusLabel,
+  userFacingEventMessage,
+  userFacingApproval,
+  userFacingAssetType,
+  compactTimelineDescription,
+  userFacingLinkType,
+} = useCreativeFormatters();
 
-const updateReviewFormField = (key: keyof ReviewWorkflowForm, value: string) => {
-  emit("update:reviewForm", {
-    ...props.reviewForm,
-    [key]: value,
-  });
+const creativeTaskStore = useCreativeTaskStore();
+const creativeAssetStore = useCreativeAssetStore();
+const creativeProjectStore = useCreativeProjectStore();
+
+const {
+  promptWorkflowTask,
+  promptWorkflowAsset,
+  reviewTaskResult,
+  reviewAssetResult,
+  reviewRevisionTask,
+  reviewResultPayload,
+  reviewResultActivity,
+  reviewResultError,
+  reviewResultRunning,
+} = storeToRefs(creativeTaskStore);
+
+const {
+  domainAssets,
+  domainAssetLinks,
+  domainAssetError,
+  domainAssetRunning,
+} = storeToRefs(creativeAssetStore);
+
+const reviewForm = ref({
+  contentHint: "一张干净的产品海报，主体明确，光线清晰。",
+  reviewKind: "review.asset_quality",
+});
+
+const domainAssetForm = ref({
+  characterTitle: "主角设定",
+  sceneTitle: "开场场景",
+  propTitle: "标志性道具",
+  storyboardTitle: "开场分镜",
+  novelChapterTitle: "第一章",
+  scriptSceneTitle: "第一场",
+  bibleTitle: "项目设定集",
+});
+
+const reviewTimelineItems = computed(() =>
+  reviewResultActivity.value.map((item, index) => ({
+    key: `${item.taskId}-${item.createdAt}-${index}`,
+    title: `${statusLabel(item.status)} · ${userFacingEventMessage(item.message) || t("creativePage.workflow.labels.task")}`,
+    time: item.createdAt,
+    description: userFacingEventMessage(item.message) || t("creativePage.workflow.empty.description"),
+    type:
+      item.status === "failed"
+        ? ("danger" as const)
+        : item.status === "succeeded"
+          ? ("success" as const)
+          : item.status === "manual_approval"
+            ? ("warning" as const)
+            : ("primary" as const),
+    tag: statusLabel(item.status),
+  }))
+);
+
+const reviewSummaryItems = computed(() => [
+  {
+    key: "reviewTaskId",
+    label: t("creativePage.workflow.labels.reviewTask"),
+    value: String(reviewTaskResult.value?.id || "-"),
+  },
+  {
+    key: "pass",
+    label: t("creativePage.workflow.labels.pass"),
+    value:
+      reviewResultPayload.value?.pass === true
+        ? t("creativePage.workflow.labels.yes")
+        : reviewResultPayload.value?.pass === false
+          ? t("creativePage.workflow.labels.no")
+          : "-",
+  },
+  {
+    key: "score",
+    label: t("creativePage.workflow.labels.qualityScore"),
+    value: String(reviewResultPayload.value?.qualityScore ?? "-"),
+  },
+  {
+    key: "approval",
+    label: t("creativePage.workflow.labels.approval"),
+    value: userFacingApproval(reviewResultPayload.value?.manualApprovalStatus),
+  },
+]);
+
+const domainAssetTimelineItems = computed(() =>
+  domainAssets.value.map((asset, index) => ({
+    key: `${asset.id}-${index}`,
+    title: `${userFacingAssetType(asset.assetType)} · ${asset.title || asset.id}`,
+    time: asset.createdAt,
+    description: compactTimelineDescription(asset.metadataJson || asset.content),
+    type: "primary" as const,
+    tag: statusLabel(asset.status),
+  }))
+);
+
+const linkSnapshotItems = computed(() => [
+  {
+    key: "links",
+    label: t("creativePage.workflow.labels.links"),
+    value: String(domainAssetLinks.value.length),
+  },
+  {
+    key: "linkTypes",
+    label: t("creativePage.workflow.labels.relations"),
+    value:
+      Array.from(
+        new Set(domainAssetLinks.value.map((link: CreativeAssetLink) => userFacingLinkType(link.linkType)))
+      ).join("、") || "-",
+  },
+  {
+    key: "characters",
+    label: t("creativePage.workflow.fields.character"),
+    value: domainAssetForm.value.characterTitle,
+  },
+  {
+    key: "scene",
+    label: t("creativePage.workflow.fields.scene"),
+    value: domainAssetForm.value.sceneTitle,
+  },
+  {
+    key: "prop",
+    label: t("creativePage.workflow.fields.prop"),
+    value: domainAssetForm.value.propTitle,
+  },
+  {
+    key: "bible",
+    label: t("creativePage.workflow.fields.bible"),
+    value: domainAssetForm.value.bibleTitle,
+  },
+]);
+
+const runReviewWorkflow = async () => {
+  try {
+    if (!promptWorkflowAsset.value?.id) {
+      reviewForm.value.contentHint = reviewForm.value.contentHint || "生成并审查资产";
+      await creativeTaskStore.runReviewAssetQualityStub({
+        projectId: props.activeProjectId,
+        sourceAssetId: promptWorkflowAsset.value?.id ?? 0,
+        sourceTaskId: promptWorkflowTask.value?.id ?? null,
+        reviewKind: reviewForm.value.reviewKind,
+        contentHint: reviewForm.value.contentHint,
+      });
+      await Promise.all([
+        creativeProjectStore.loadCreativeProjectIndex(),
+        creativeProjectStore.loadCreativeProjectHistory(props.activeProjectId),
+      ]);
+      return;
+    }
+
+    await creativeTaskStore.runReviewAssetQualityStub({
+      projectId: props.activeProjectId,
+      sourceAssetId: promptWorkflowAsset.value.id,
+      sourceTaskId: promptWorkflowTask.value?.id ?? null,
+      reviewKind: reviewForm.value.reviewKind,
+      contentHint: reviewForm.value.contentHint,
+    });
+    await Promise.all([
+      creativeProjectStore.loadCreativeProjectIndex(),
+      creativeProjectStore.loadCreativeProjectHistory(props.activeProjectId),
+    ]);
+  } catch {
+    // store records the error state.
+  }
 };
 
-const updateDomainAssetField = (key: keyof DomainAssetForm, value: string) => {
-  emit("update:domainAssetForm", {
-    ...props.domainAssetForm,
-    [key]: value,
-  });
+const runDomainAssetDraft = async () => {
+  try {
+    await creativeAssetStore.runDomainAssetDraft({
+      ...domainAssetForm.value,
+      projectId: props.activeProjectId,
+      sourceAssetId: reviewAssetResult.value?.id ?? promptWorkflowAsset.value?.id ?? null,
+      sourceTaskId: reviewTaskResult.value?.id ?? promptWorkflowTask.value?.id ?? null,
+    });
+    await Promise.all([
+      creativeProjectStore.loadCreativeProjectIndex(),
+      creativeProjectStore.loadCreativeProjectHistory(props.activeProjectId),
+    ]);
+  } catch {
+    // store records the error state.
+  }
 };
+
+const reviewRawStatus = computed(() => reviewTaskResult.value?.status || (reviewResultRunning.value ? 'running' : 'idle'));
+const reviewDisplayStatus = computed(() => statusLabel(reviewRawStatus.value));
 </script>
 
 <template>
@@ -90,10 +223,9 @@ const updateDomainAssetField = (key: keyof DomainAssetForm, value: string) => {
       >
         <div class="workflow-form">
           <BaseTextarea
-            :model-value="reviewForm.contentHint"
+            v-model="reviewForm.contentHint"
             :label="t('creativePage.workflow.fields.contentHint')"
             :rows="3"
-            @update:model-value="updateReviewFormField('contentHint', $event)"
           />
         </div>
         <template #footer>
@@ -101,9 +233,9 @@ const updateDomainAssetField = (key: keyof DomainAssetForm, value: string) => {
             <BaseButton
               type="primary"
               size="sm"
-              :disabled="reviewIsRunning"
-              :loading="reviewIsRunning"
-              @click="emit('submitReview')"
+              :disabled="reviewResultRunning"
+              :loading="reviewResultRunning"
+              @click="runReviewWorkflow"
             >
               {{ t("creativePage.workflow.actions.runReview") }}
             </BaseButton>
@@ -122,15 +254,17 @@ const updateDomainAssetField = (key: keyof DomainAssetForm, value: string) => {
           >
             {{ reviewDisplayStatus }}
           </BaseBadge>
-          <BaseBadge v-if="reviewAssetId" type="success" size="sm">
-            {{ t("creativePage.workflow.labels.reviewAsset") }} {{ reviewAssetId }}
+          <BaseBadge v-if="reviewAssetResult?.id" type="success" size="sm">
+            {{ t("creativePage.workflow.labels.reviewAsset") }} {{ reviewAssetResult.id }}
           </BaseBadge>
-          <BaseBadge v-if="reviewRevisionTaskId" type="warning" size="sm">
-            {{ t("creativePage.workflow.labels.revisionTask") }} {{ reviewRevisionTaskId }}
+          <BaseBadge v-if="reviewRevisionTask?.id" type="warning" size="sm">
+            {{ t("creativePage.workflow.labels.revisionTask") }} {{ reviewRevisionTask.id }}
           </BaseBadge>
         </div>
         <div class="creative-scroll-region creative-scroll-region--sm">
+          <BaseSkeletonCard v-if="reviewResultRunning && !reviewTimelineItems.length" animated compact :lines="2" />
           <BaseTimeline
+            v-else
             :items="reviewTimelineItems"
             size="sm"
             dense
@@ -140,7 +274,7 @@ const updateDomainAssetField = (key: keyof DomainAssetForm, value: string) => {
             :aria-label="t('creativePage.workflow.aria.reviewEvents')"
           />
         </div>
-        <p v-if="reviewError" class="workflow-error">{{ reviewError }}</p>
+        <p v-if="reviewResultError" class="workflow-error">{{ reviewResultError }}</p>
       </BasePanel>
     </div>
 
@@ -149,17 +283,22 @@ const updateDomainAssetField = (key: keyof DomainAssetForm, value: string) => {
         :title="t('creativePage.workflow.panels.reviewResult')"
         :subtitle="t('creativePage.workflow.panels.reviewResultSubtitle')"
       >
-        <BaseDescriptionList :items="reviewSummaryItems" />
-        <p v-if="reviewProblems.length" class="workflow-note">
-          {{ reviewProblems.join("; ") }}
-        </p>
+        <BaseSkeletonCard v-if="reviewResultRunning && !reviewResultPayload" animated compact :lines="4" />
+        <template v-else>
+          <BaseDescriptionList :items="reviewSummaryItems" />
+          <p v-if="reviewResultPayload?.problems?.length" class="workflow-note">
+            {{ reviewResultPayload.problems.join("; ") }}
+          </p>
+        </template>
       </BasePanel>
       <BasePanel
         :title="t('creativePage.workflow.panels.revisionInstruction')"
         :subtitle="t('creativePage.workflow.panels.revisionInstructionSubtitle')"
       >
+        <BaseSkeletonCard v-if="reviewResultRunning && !reviewResultPayload" animated compact :lines="3" />
         <BaseCodeBlock
-          :code="revisionInstructionCode"
+          v-else
+          :code="reviewResultPayload?.revisionInstruction || t('creativePage.workflow.empty.revisionInstruction')"
           language="text"
           copyable
           :copy-label="t('creativePage.workflow.actions.copyRevision')"
@@ -174,22 +313,22 @@ const updateDomainAssetField = (key: keyof DomainAssetForm, value: string) => {
         :subtitle="t('creativePage.workflow.panels.domainAssetsSubtitle')"
       >
         <div class="workflow-form">
-          <BaseInput :model-value="domainAssetForm.characterTitle" :label="t('creativePage.workflow.fields.character')" @update:model-value="updateDomainAssetField('characterTitle', $event)" />
-          <BaseInput :model-value="domainAssetForm.sceneTitle" :label="t('creativePage.workflow.fields.scene')" @update:model-value="updateDomainAssetField('sceneTitle', $event)" />
-          <BaseInput :model-value="domainAssetForm.propTitle" :label="t('creativePage.workflow.fields.prop')" @update:model-value="updateDomainAssetField('propTitle', $event)" />
-          <BaseInput :model-value="domainAssetForm.storyboardTitle" :label="t('creativePage.workflow.fields.storyboard')" @update:model-value="updateDomainAssetField('storyboardTitle', $event)" />
-          <BaseInput :model-value="domainAssetForm.novelChapterTitle" :label="t('creativePage.workflow.fields.novelChapter')" @update:model-value="updateDomainAssetField('novelChapterTitle', $event)" />
-          <BaseInput :model-value="domainAssetForm.scriptSceneTitle" :label="t('creativePage.workflow.fields.scriptScene')" @update:model-value="updateDomainAssetField('scriptSceneTitle', $event)" />
-          <BaseInput :model-value="domainAssetForm.bibleTitle" :label="t('creativePage.workflow.fields.bible')" @update:model-value="updateDomainAssetField('bibleTitle', $event)" />
+          <BaseInput v-model="domainAssetForm.characterTitle" :label="t('creativePage.workflow.fields.character')" />
+          <BaseInput v-model="domainAssetForm.sceneTitle" :label="t('creativePage.workflow.fields.scene')" />
+          <BaseInput v-model="domainAssetForm.propTitle" :label="t('creativePage.workflow.fields.prop')" />
+          <BaseInput v-model="domainAssetForm.storyboardTitle" :label="t('creativePage.workflow.fields.storyboard')" />
+          <BaseInput v-model="domainAssetForm.novelChapterTitle" :label="t('creativePage.workflow.fields.novelChapter')" />
+          <BaseInput v-model="domainAssetForm.scriptSceneTitle" :label="t('creativePage.workflow.fields.scriptScene')" />
+          <BaseInput v-model="domainAssetForm.bibleTitle" :label="t('creativePage.workflow.fields.bible')" />
         </div>
         <template #footer>
           <div class="step-actions">
             <BaseButton
               type="primary"
               size="sm"
-              :disabled="domainAssetIsRunning"
-              :loading="domainAssetIsRunning"
-              @click="emit('submitDomainAssets')"
+              :disabled="domainAssetRunning"
+              :loading="domainAssetRunning"
+              @click="runDomainAssetDraft"
             >
               {{ t("creativePage.workflow.actions.createDomainAssets") }}
             </BaseButton>
@@ -202,15 +341,17 @@ const updateDomainAssetField = (key: keyof DomainAssetForm, value: string) => {
         :subtitle="t('creativePage.workflow.panels.domainStateSubtitle')"
       >
         <div class="workflow-status">
-          <BaseBadge v-if="domainAssetCount" type="primary" size="sm">
-            {{ t("creativePage.workflow.labels.assets") }} {{ domainAssetCount }}
+          <BaseBadge v-if="domainAssets.length" type="primary" size="sm">
+            {{ t("creativePage.workflow.labels.assets") }} {{ domainAssets.length }}
           </BaseBadge>
-          <BaseBadge v-if="domainAssetLinkCount" type="success" size="sm">
-            {{ t("creativePage.workflow.labels.links") }} {{ domainAssetLinkCount }}
+          <BaseBadge v-if="domainAssetLinks.length" type="success" size="sm">
+            {{ t("creativePage.workflow.labels.links") }} {{ domainAssetLinks.length }}
           </BaseBadge>
         </div>
         <div class="creative-scroll-region">
+          <BaseSkeletonCard v-if="domainAssetRunning && !domainAssetTimelineItems.length" animated compact :lines="4" />
           <BaseTimeline
+            v-else
             :items="domainAssetTimelineItems"
             size="sm"
             dense

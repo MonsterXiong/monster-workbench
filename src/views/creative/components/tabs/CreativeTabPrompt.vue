@@ -1,46 +1,72 @@
 <script setup lang="ts">
+import { ref, computed } from "vue";
+import { storeToRefs } from "pinia";
 import { useI18n } from "../../../../composables/useI18n";
+import { useCreativeFormatters } from "../../../../composables/useCreativeFormatters";
+import { useCreativeTaskStore } from "../../../../stores/creative-task";
+import { useCreativeProjectStore } from "../../../../stores/creative-project";
 import CreativeSection from "../CreativeSection.vue";
-
-interface PromptWorkflowForm {
-  brief: string;
-  style: string;
-  mood: string;
-  aspectRatio: string;
-}
-
-interface PromptTimelineItem {
-  key: string;
-  title: string;
-  time: string;
-  description: string;
-  type: "primary" | "success" | "warning" | "danger";
-  tag: string;
-}
+import BaseSkeletonCard from "@/components/common/BaseSkeletonCard.vue";
 
 const props = defineProps<{
-  form: PromptWorkflowForm;
-  isRunning: boolean;
-  rawStatus: string;
-  displayStatus: string;
-  assetId: number | null;
-  timelineItems: PromptTimelineItem[];
-  error: string | null;
-  promptAssetCode: string;
-}>();
-
-const emit = defineEmits<{
-  (e: "update:form", value: PromptWorkflowForm): void;
-  (e: "submit"): void;
+  activeProjectId: string;
 }>();
 
 const { t } = useI18n();
+const { statusLabel, userFacingEventMessage } = useCreativeFormatters();
 
-const updateFormField = (key: keyof PromptWorkflowForm, value: string) => {
-  emit("update:form", {
-    ...props.form,
-    [key]: value,
-  });
+const creativeTaskStore = useCreativeTaskStore();
+const creativeProjectStore = useCreativeProjectStore();
+
+const {
+  promptWorkflowTask,
+  promptWorkflowAsset,
+  promptWorkflowActivity,
+  promptWorkflowError,
+  promptWorkflowRunning,
+} = storeToRefs(creativeTaskStore);
+
+const form = ref({
+  brief: "一张干净的产品海报，主体明确，光线清晰。",
+  style: "编辑部风格产品插画",
+  mood: "专注、现代、高对比",
+  aspectRatio: "16:9",
+});
+
+const timelineItems = computed(() =>
+  promptWorkflowActivity.value.map((item, index) => ({
+    key: `${item.taskId}-${item.createdAt}-${index}`,
+    title: `${statusLabel(item.status)} · ${userFacingEventMessage(item.message) || t("creativePage.workflow.labels.task")}`,
+    time: item.createdAt,
+    description: userFacingEventMessage(item.message) || t("creativePage.workflow.empty.description"),
+    type:
+      item.status === "failed"
+        ? ("danger" as const)
+        : item.status === "succeeded"
+          ? ("success" as const)
+          : ("primary" as const),
+    tag: statusLabel(item.status),
+  }))
+);
+
+const rawStatus = computed(() => promptWorkflowTask.value?.status || (promptWorkflowRunning.value ? 'running' : 'idle'));
+const displayStatus = computed(() => statusLabel(rawStatus.value));
+const assetId = computed(() => promptWorkflowTask.value?.assetId ?? null);
+const promptAssetCode = computed(() => promptWorkflowAsset.value?.content || t("creativePage.workflow.empty.promptAsset"));
+
+const runPromptWorkflow = async () => {
+  try {
+    await creativeTaskStore.runGenerateImagePromptWorkflow({
+      ...form.value,
+      projectId: props.activeProjectId,
+    });
+    await Promise.all([
+      creativeProjectStore.loadCreativeProjectIndex(),
+      creativeProjectStore.loadCreativeProjectHistory(props.activeProjectId),
+    ]);
+  } catch {
+    // store records the error state.
+  }
 };
 </script>
 
@@ -57,25 +83,21 @@ const updateFormField = (key: keyof PromptWorkflowForm, value: string) => {
       >
         <div class="workflow-form">
           <BaseTextarea
-            :model-value="form.brief"
+            v-model="form.brief"
             :label="t('creativePage.workflow.fields.brief')"
             :rows="3"
-            @update:model-value="updateFormField('brief', $event)"
           />
           <BaseInput
-            :model-value="form.style"
+            v-model="form.style"
             :label="t('creativePage.workflow.fields.style')"
-            @update:model-value="updateFormField('style', $event)"
           />
           <BaseInput
-            :model-value="form.mood"
+            v-model="form.mood"
             :label="t('creativePage.workflow.fields.mood')"
-            @update:model-value="updateFormField('mood', $event)"
           />
           <BaseInput
-            :model-value="form.aspectRatio"
+            v-model="form.aspectRatio"
             :label="t('creativePage.workflow.fields.aspectRatio')"
-            @update:model-value="updateFormField('aspectRatio', $event)"
           />
         </div>
         <template #footer>
@@ -83,9 +105,9 @@ const updateFormField = (key: keyof PromptWorkflowForm, value: string) => {
             <BaseButton
               type="primary"
               size="sm"
-              :disabled="isRunning"
-              :loading="isRunning"
-              @click="emit('submit')"
+              :disabled="promptWorkflowRunning"
+              :loading="promptWorkflowRunning"
+              @click="runPromptWorkflow"
             >
               {{ t("creativePage.workflow.actions.runWorkflow") }}
             </BaseButton>
@@ -109,7 +131,9 @@ const updateFormField = (key: keyof PromptWorkflowForm, value: string) => {
           </BaseBadge>
         </div>
         <div class="creative-scroll-region creative-scroll-region--sm">
+          <BaseSkeletonCard v-if="promptWorkflowRunning && !timelineItems.length" animated compact :lines="2" />
           <BaseTimeline
+            v-else
             :items="timelineItems"
             size="sm"
             dense
@@ -119,7 +143,7 @@ const updateFormField = (key: keyof PromptWorkflowForm, value: string) => {
             :aria-label="t('creativePage.workflow.aria.promptEvents')"
           />
         </div>
-        <p v-if="error" class="workflow-error">{{ error }}</p>
+        <p v-if="promptWorkflowError" class="workflow-error">{{ promptWorkflowError }}</p>
       </BasePanel>
     </div>
 
@@ -128,7 +152,9 @@ const updateFormField = (key: keyof PromptWorkflowForm, value: string) => {
         :title="t('creativePage.workflow.panels.promptAsset')"
         :subtitle="t('creativePage.workflow.panels.promptAssetSubtitle')"
       >
+        <BaseSkeletonCard v-if="promptWorkflowRunning && !promptWorkflowAsset" animated compact :lines="3" />
         <BaseCodeBlock
+          v-else
           :code="promptAssetCode"
           language="text"
           copyable

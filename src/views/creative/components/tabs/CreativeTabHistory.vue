@@ -1,27 +1,31 @@
 <script setup lang="ts">
 import { computed } from "vue";
+import { storeToRefs } from "pinia";
 import { useI18n } from "../../../../composables/useI18n";
 import { useCreativeFormatters } from "../../../../composables/useCreativeFormatters";
-import type { CreativeAsset } from "../../../../stores/creative-asset";
-import type { CreativeBatchJob } from "../../../../stores/creative-batch";
-import type { CreativeGoal } from "../../../../stores/creative-goal";
-import type { CreativeTask } from "../../../../stores/creative-task";
+import { useCreativeProjectStore } from "../../../../stores/creative-project";
+import BaseSkeletonCard from "@/components/common/BaseSkeletonCard.vue";
 
 const props = defineProps<{
-  tasks: CreativeTask[];
-  assets: CreativeAsset[];
-  goals: CreativeGoal[];
-  batchJobs: CreativeBatchJob[];
-  loading: boolean;
-  error: string | null;
+  activeProjectId: string;
 }>();
 
 const { t } = useI18n();
 const { statusLabel, userFacingAssetType, userFacingBatchType, userFacingTaskType, compactTimelineDescription } =
   useCreativeFormatters();
 
+const creativeProjectStore = useCreativeProjectStore();
+const {
+  creativeProjectHistoryTasks,
+  creativeProjectHistoryAssets,
+  creativeProjectHistoryGoals,
+  creativeProjectHistoryBatchJobs,
+  creativeProjectHistoryLoading,
+  creativeProjectHistoryError,
+} = storeToRefs(creativeProjectStore);
+
 const taskTimelineItems = computed(() =>
-  props.tasks.map((task) => ({
+  creativeProjectHistoryTasks.value.map((task) => ({
     key: String(task.id),
     title: `${userFacingTaskType(task.taskType)} · ${statusLabel(task.status)}`,
     time: task.updatedAt,
@@ -39,7 +43,7 @@ const taskTimelineItems = computed(() =>
 );
 
 const assetTimelineItems = computed(() =>
-  props.assets.map((asset) => ({
+  creativeProjectHistoryAssets.value.map((asset) => ({
     key: String(asset.id),
     title: `${userFacingAssetType(asset.assetType)} · ${asset.title || asset.id}`,
     time: asset.updatedAt,
@@ -56,7 +60,7 @@ const assetTimelineItems = computed(() =>
 
 const milestoneTimelineItems = computed(() =>
   [
-    ...props.batchJobs.map((job) => ({
+    ...creativeProjectHistoryBatchJobs.value.map((job) => ({
       key: `batch-${job.id}`,
       title: `${t("creativePage.project.batchJob")} · ${job.name}`,
       time: job.updatedAt,
@@ -71,7 +75,7 @@ const milestoneTimelineItems = computed(() =>
               : ("primary" as const),
       tag: statusLabel(job.status),
     })),
-    ...props.goals.map((goal) => ({
+    ...creativeProjectHistoryGoals.value.map((goal) => ({
       key: `goal-${goal.id}`,
       title: `${t("creativePage.project.goal")} · ${goal.title}`,
       time: goal.updatedAt,
@@ -94,7 +98,9 @@ const milestoneTimelineItems = computed(() =>
   <div class="creative-history-grid">
     <BasePanel :title="t('creativePage.project.historyTasks')" :subtitle="t('creativePage.project.historyTasksSubtitle')">
       <div class="creative-scroll-region creative-scroll-region--history">
+        <BaseSkeletonCard v-if="creativeProjectHistoryLoading && !taskTimelineItems.length" animated compact :lines="8" />
         <BaseTimeline
+          v-else
           :items="taskTimelineItems"
           size="sm"
           dense
@@ -106,7 +112,9 @@ const milestoneTimelineItems = computed(() =>
     </BasePanel>
     <BasePanel :title="t('creativePage.project.historyAssets')" :subtitle="t('creativePage.project.historyAssetsSubtitle')">
       <div class="creative-scroll-region creative-scroll-region--history">
+        <BaseSkeletonCard v-if="creativeProjectHistoryLoading && !assetTimelineItems.length" animated compact :lines="8" />
         <BaseTimeline
+          v-else
           :items="assetTimelineItems"
           size="sm"
           dense
@@ -118,7 +126,9 @@ const milestoneTimelineItems = computed(() =>
     </BasePanel>
     <BasePanel :title="t('creativePage.project.historyMilestones')" :subtitle="t('creativePage.project.historyMilestonesSubtitle')">
       <div class="creative-scroll-region creative-scroll-region--history">
+        <BaseSkeletonCard v-if="creativeProjectHistoryLoading && !milestoneTimelineItems.length" animated compact :lines="8" />
         <BaseTimeline
+          v-else
           :items="milestoneTimelineItems"
           size="sm"
           dense
@@ -129,11 +139,8 @@ const milestoneTimelineItems = computed(() =>
       </div>
     </BasePanel>
   </div>
-  <p v-if="loading" class="workflow-note">
-    {{ t("creativePage.project.loadingHistory") }}
-  </p>
-  <p v-if="error" class="workflow-error">
-    {{ error }}
+  <p v-if="creativeProjectHistoryError" class="workflow-error">
+    {{ creativeProjectHistoryError }}
   </p>
 </template>
 
@@ -143,6 +150,10 @@ const milestoneTimelineItems = computed(() =>
 }
 
 .creative-scroll-region--history {
-  @apply min-h-[280px] max-h-[420px];
+  @apply min-h-[280px] max-h-[420px] overflow-y-auto pr-1;
+}
+
+.workflow-error {
+  @apply mt-3 text-xs font-bold text-red-600 dark:text-red-400;
 }
 </style>
