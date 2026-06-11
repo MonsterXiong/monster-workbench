@@ -1,6 +1,8 @@
 import argparse
 import json
 import time
+import urllib.error
+import urllib.request
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -63,6 +65,10 @@ class CreativeHealthHandler(BaseHTTPRequestHandler):
 
         if payload.get("taskType") == "generate_image_prompt":
             task_payload = payload.get("input") or payload.get("payload") or {}
+            if is_cancel_requested(payload):
+                self._write_json(HTTPStatus.OK, build_forced_result(payload, "cancelled"))
+                return
+
             forced_status = resolve_forced_status(task_payload)
             if forced_status:
                 self._write_json(HTTPStatus.OK, build_forced_result(payload, forced_status))
@@ -78,6 +84,10 @@ class CreativeHealthHandler(BaseHTTPRequestHandler):
                 "aspectRatio": task_payload.get("aspectRatio"),
             }
             time.sleep(0.2)
+            if is_cancel_requested(payload):
+                self._write_json(HTTPStatus.OK, build_forced_result(payload, "cancelled"))
+                return
+
             self._write_json(
                 HTTPStatus.OK,
                 {
@@ -153,6 +163,25 @@ def build_image_prompt(payload):
         f"Aspect ratio: {aspect_ratio}. "
         "High detail, clear focal subject, production-ready image prompt."
     )
+
+
+def is_cancel_requested(payload):
+    checkpoint = payload.get("cancelCheckpoint") or {}
+    url = checkpoint.get("url")
+    token = checkpoint.get("token")
+    if not url or not token:
+        return False
+    request = urllib.request.Request(url, headers={"X-Monster-Token": token})
+    try:
+        with urllib.request.urlopen(request, timeout=1.0) as response:
+            body = response.read().decode("utf-8")
+    except (urllib.error.URLError, TimeoutError, ValueError):
+        return False
+    try:
+        result = json.loads(body or "{}")
+    except json.JSONDecodeError:
+        return False
+    return bool(result.get("cancelRequested"))
 
 
 def resolve_forced_status(payload):

@@ -13,6 +13,14 @@ use crate::services::sidecar_lifecycle_service::{
     SidecarWorkflowTaskResult,
 };
 use serde_json::json;
+use std::io::{Read, Write};
+use std::net::{TcpListener, TcpStream};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
+use std::thread::{self, JoinHandle};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Runtime, Wry};
 
 #[derive(serde::Serialize, Clone)]
@@ -397,6 +405,7 @@ impl<R: Runtime> TaskService<R> {
             payload_json: None,
         })?);
 
+        let checkpoint_server = start_cancel_checkpoint_server(db_path.to_path_buf(), task.id)?;
         let sidecar_response =
             sidecar_service.submit_generate_image_prompt(GenerateImagePromptSidecarRequest {
                 task_id: task.id,
@@ -407,6 +416,8 @@ impl<R: Runtime> TaskService<R> {
                 aspect_ratio: input.aspect_ratio.clone(),
                 attempt: task.retry_count + 1,
                 max_retries: task.max_retries,
+                cancel_checkpoint_url: Some(checkpoint_server.url.clone()),
+                cancel_checkpoint_token: Some(checkpoint_server.token.clone()),
             })?;
         if sidecar_response.protocol_version != 1 {
             return Err(AppError::Process(format!(
@@ -823,6 +834,123 @@ fn resolve_sidecar_failure_status(
     }
 }
 
+struct CancelCheckpointServer {
+    url: String,
+    token: String,
+    stop: Arc<AtomicBool>,
+    handle: Option<JoinHandle<()>>,
+}
+
+impl Drop for CancelCheckpointServer {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::SeqCst);
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+    }
+}
+
+fn start_cancel_checkpoint_server(
+    db_path: std::path::PathBuf,
+    task_id: i64,
+) -> AppResult<CancelCheckpointServer> {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .map_err(|error| AppError::Process(format!("failed to bind cancel checkpoint: {error}")))?;
+    listener.set_nonblocking(true).map_err(|error| {
+        AppError::Process(format!("failed to configure cancel checkpoint: {error}"))
+    })?;
+    let port = listener
+        .local_addr()
+        .map_err(|error| {
+            AppError::Process(format!(
+                "failed to read cancel checkpoint endpoint: {error}"
+            ))
+        })?
+        .port();
+    let token = format!("monster-cancel-{}-{}", task_id, now_millis());
+    let expected_token = token.clone();
+    let stop = Arc::new(AtomicBool::new(false));
+    let stop_for_thread = stop.clone();
+    let handle = thread::spawn(move || {
+        while !stop_for_thread.load(Ordering::SeqCst) {
+            match listener.accept() {
+                Ok((mut stream, _)) => {
+                    let _ = stream.set_read_timeout(Some(Duration::from_millis(500)));
+                    let _ = stream.set_write_timeout(Some(Duration::from_millis(500)));
+                    let cancel_requested =
+                        task_cancel_requested(&db_path, task_id).unwrap_or(false);
+                    let authorized = read_checkpoint_token(&mut stream)
+                        .map(|value| value == expected_token)
+                        .unwrap_or(false);
+                    let _ = write_checkpoint_response(&mut stream, authorized, cancel_requested);
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    thread::sleep(Duration::from_millis(20));
+                }
+                Err(_) => break,
+            }
+        }
+    });
+
+    Ok(CancelCheckpointServer {
+        url: format!("http://127.0.0.1:{port}/cancel-checkpoint"),
+        token,
+        stop,
+        handle: Some(handle),
+    })
+}
+
+fn task_cancel_requested(db_path: &std::path::Path, task_id: i64) -> AppResult<bool> {
+    let task = creative_task_repo::get_task(db_path, task_id)?
+        .ok_or_else(|| AppError::Database("task not found for cancel checkpoint".to_string()))?;
+    Ok(matches!(task.status.as_str(), "cancelling" | "cancelled"))
+}
+
+fn read_checkpoint_token(stream: &mut TcpStream) -> Option<String> {
+    let mut buffer = [0_u8; 2048];
+    let size = stream.read(&mut buffer).ok()?;
+    let request = String::from_utf8_lossy(&buffer[..size]);
+    request.lines().find_map(|line| {
+        let (name, value) = line.split_once(':')?;
+        if name.eq_ignore_ascii_case("x-monster-token") {
+            Some(value.trim().to_string())
+        } else {
+            None
+        }
+    })
+}
+
+fn write_checkpoint_response(
+    stream: &mut TcpStream,
+    authorized: bool,
+    cancel_requested: bool,
+) -> std::io::Result<()> {
+    let (status_line, body) = if authorized {
+        (
+            "HTTP/1.1 200 OK",
+            json!({ "ok": true, "cancelRequested": cancel_requested }).to_string(),
+        )
+    } else {
+        (
+            "HTTP/1.1 401 Unauthorized",
+            json!({ "ok": false, "error": "unauthorized" }).to_string(),
+        )
+    };
+    let response = format!(
+        "{status_line}\r\nContent-Type: application/json; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        body.len(),
+        body
+    );
+    stream.write_all(response.as_bytes())
+}
+
+fn now_millis() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+}
+
 fn validate_create_task_input(input: &CreateCreativeTaskInput) -> AppResult<()> {
     if input.task_type.trim().is_empty() {
         return Err(AppError::Config("task_type is required".to_string()));
@@ -989,6 +1117,8 @@ mod tests {
     use crate::services::sidecar_lifecycle_service::{
         SidecarLifecycleService, SidecarWorkflowRetry, SidecarWorkflowTaskResult,
     };
+    use std::io::{Read, Write};
+    use std::net::TcpStream;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -1041,6 +1171,25 @@ mod tests {
                 reason: None,
             }),
         }
+    }
+
+    fn read_checkpoint_cancel_requested(url: &str, token: &str) -> bool {
+        let endpoint = url.trim_start_matches("http://");
+        let (host, path) = endpoint
+            .split_once('/')
+            .expect("checkpoint url should include a path");
+        let mut stream = TcpStream::connect(host).expect("checkpoint should accept connections");
+        let request = format!(
+            "GET /{path} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\nX-Monster-Token: {token}\r\n\r\n"
+        );
+        stream
+            .write_all(request.as_bytes())
+            .expect("checkpoint request should write");
+        let mut response = String::new();
+        stream
+            .read_to_string(&mut response)
+            .expect("checkpoint response should read");
+        response.contains("\"cancelRequested\":true")
     }
 
     #[test]
@@ -1169,6 +1318,58 @@ mod tests {
             ),
             "blocked"
         );
+    }
+
+    #[test]
+    fn cancel_checkpoint_server_reads_task_cancel_status() {
+        let root = temp_root("cancel_checkpoint");
+        let db_path = root.join("monster_workbench.db");
+        init_schema(&db_path).expect("schema should init");
+        let task = creative_task_repo::create_task(
+            &db_path,
+            CreateCreativeTaskInput {
+                project_id: Some("project-cancel".to_string()),
+                goal_id: None,
+                batch_job_id: None,
+                task_type: "generate_image_prompt".to_string(),
+                status: Some("running".to_string()),
+                priority: Some(0),
+                payload_json: None,
+                max_retries: Some(0),
+                parent_task_id: None,
+                asset_id: None,
+                sequence_no: None,
+            },
+        )
+        .expect("task should create");
+        let checkpoint =
+            start_cancel_checkpoint_server(db_path.clone(), task.id).expect("checkpoint starts");
+
+        assert!(!read_checkpoint_cancel_requested(
+            &checkpoint.url,
+            &checkpoint.token
+        ));
+
+        creative_task_repo::update_task_status(
+            &db_path,
+            UpdateCreativeTaskStatusInput {
+                id: task.id,
+                status: "cancelling".to_string(),
+                result_json: None,
+                error_message: Some("test cancel".to_string()),
+                asset_id: None,
+                retry_count_increment: None,
+            },
+        )
+        .expect("task should update");
+
+        assert!(read_checkpoint_cancel_requested(
+            &checkpoint.url,
+            &checkpoint.token
+        ));
+
+        drop(checkpoint);
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]

@@ -1510,3 +1510,16 @@ Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `
 - 下一步剩余重点：
   1. Python sidecar cancel checkpoint API。
   2. 将 batch prompt worker 的 provider 调用迁到 sidecar workflow。
+
+## 2026-06-11 补充：generate_image_prompt cancel checkpoint 落地
+
+- `src-tauri/src/services/task_service.rs` 现在会为单次 `generate_image_prompt` workflow 启动临时 localhost cancel checkpoint 回调服务。
+- `SidecarLifecycleService` 会把 `cancelCheckpoint.url/token` 放入 sidecar task request；该回调只监听 `127.0.0.1`，并通过 `X-Monster-Token` 校验请求。
+- `creative_health_server.py` 在 workflow 步骤边界查询 cancel checkpoint：开始执行前检查一次，模拟耗时步骤后再检查一次；若 Rust 侧任务状态已是 `cancelling/cancelled`，Python 返回标准 `cancelled` workflow result，由 Rust 侧既有非成功映射落库。
+- 这一步让 Python sidecar 不需要直接读 SQLite，也不需要知道 Tauri IPC；取消判断仍由 Rust 可信状态提供。
+- 本轮验证通过：
+  - `python -m py_compile src-tauri\\sidecars\\python\\creative_health_server.py`
+  - `cargo test --manifest-path .\\src-tauri\\Cargo.toml cancel_checkpoint_server_reads_task_cancel_status -- --nocapture`
+  - `cargo test --manifest-path .\\src-tauri\\Cargo.toml generate_image_prompt_workflow_persists_task_asset_and_events -- --nocapture`
+  - `cargo check --manifest-path .\\src-tauri\\Cargo.toml`
+- 下一步剩余重点：将 batch prompt worker 的 provider 调用迁到 sidecar workflow，减少 `BatchJobService` 内的生产型 provider 编排。

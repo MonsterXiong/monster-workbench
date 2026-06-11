@@ -44,6 +44,8 @@ pub struct GenerateImagePromptSidecarRequest {
     pub aspect_ratio: Option<String>,
     pub attempt: i64,
     pub max_retries: i64,
+    pub cancel_checkpoint_url: Option<String>,
+    pub cancel_checkpoint_token: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -241,6 +243,11 @@ impl<R: Runtime> SidecarLifecycleService<R> {
             "cancelToken": format!("task-{}", request.task_id),
             "budget": Value::Null,
             "provider": Value::Null,
+            "cancelCheckpoint": request
+                .cancel_checkpoint_url
+                .zip(request.cancel_checkpoint_token)
+                .map(|(url, token)| json!({ "url": url, "token": token }))
+                .unwrap_or(Value::Null),
             "input": {
                 "brief": request.brief,
                 "style": request.style,
