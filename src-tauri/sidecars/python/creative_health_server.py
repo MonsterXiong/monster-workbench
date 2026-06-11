@@ -1,8 +1,13 @@
 import argparse
+import base64
+import binascii
 import json
+import os
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
+import uuid
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -139,6 +144,10 @@ class CreativeHealthHandler(BaseHTTPRequestHandler):
             self._write_json(HTTPStatus.OK, run_batch_image_prompt(payload))
             return
 
+        if payload.get("taskType") == "demo.image.generate":
+            self._write_json(HTTPStatus.OK, run_batch_image_generate(payload))
+            return
+
         self._write_json(
             HTTPStatus.ACCEPTED,
             {"ok": True, "status": "accepted", "mode": "stub", "task": payload},
@@ -212,6 +221,290 @@ def run_batch_image_prompt(payload):
         duration_ms=duration_ms,
         provider_metadata=provider_metadata,
     )
+
+
+def run_batch_image_generate(payload):
+    if is_cancel_requested(payload):
+        return build_batch_image_result(payload, "cancelled", None, "batch image cancelled")
+
+    task_payload = payload.get("input") or {}
+    prompt_request = str(task_payload.get("promptRequest") or "").strip()
+    image_size = str(task_payload.get("imageSize") or "1024x1024").strip()
+    output_dir = str(task_payload.get("outputDir") or "").strip()
+    if not prompt_request:
+        return build_batch_image_result(payload, "failed", None, "promptRequest is required")
+    if not output_dir:
+        return build_batch_image_result(payload, "failed", None, "outputDir is required")
+
+    provider = payload.get("provider") or {}
+    started = time.time()
+    try:
+        image_result = request_provider_image(provider, prompt_request, image_size, output_dir)
+    except Exception as error:
+        duration_ms = int((time.time() - started) * 1000)
+        return build_batch_image_result(
+            payload,
+            "failed",
+            None,
+            "batch image provider failed: {0}".format(error),
+            duration_ms=duration_ms,
+            provider_metadata={"error": str(error)},
+        )
+
+    duration_ms = int((time.time() - started) * 1000)
+    if is_cancel_requested(payload):
+        return build_batch_image_result(
+            payload,
+            "cancelled",
+            image_result,
+            "batch image cancelled after provider call",
+            duration_ms=duration_ms,
+            provider_metadata=image_result.get("metadata") or {},
+        )
+
+    return build_batch_image_result(
+        payload,
+        "succeeded",
+        image_result,
+        "batch image workflow completed",
+        duration_ms=duration_ms,
+        provider_metadata=image_result.get("metadata") or {},
+    )
+
+
+def request_provider_image(provider, prompt_request, image_size, output_dir):
+    base_url = str(provider.get("baseUrl") or "").rstrip("/")
+    model = str(provider.get("model") or "").strip()
+    if not base_url:
+        raise ValueError("provider.baseUrl is required")
+    if not model:
+        raise ValueError("provider.model is required")
+
+    timeout_ms = int(provider.get("timeoutMs") or 60000)
+    timeout = max(timeout_ms / 1000, 3)
+    body = {
+        "model": model,
+        "prompt": prompt_request,
+        "n": 1,
+        "size": image_size or "1024x1024",
+    }
+    headers = {"Content-Type": "application/json"}
+    api_key = str(provider.get("apiKey") or "")
+    if api_key:
+        headers["Authorization"] = "Bearer " + api_key
+
+    request = urllib.request.Request(
+        build_images_url(base_url),
+        data=json.dumps(body).encode("utf-8"),
+        headers=headers,
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        raw = response.read().decode("utf-8")
+        parsed = json.loads(raw or "{}")
+
+    saved_files = parse_images(parsed, output_dir, timeout, base_url)
+    if not saved_files:
+        raise ValueError("provider returned no saved image")
+
+    first_file = saved_files[0]
+    return {
+        "filePath": first_file.get("path"),
+        "savedFiles": saved_files,
+        "metadata": {
+            "baseUrl": base_url,
+            "statusCode": getattr(response, "status", None),
+            "message": "provider image completed",
+            "requestedImageSize": image_size,
+            "actualImageSize": first_file.get("dimensions") or image_size,
+            "imageAttempts": 1,
+        },
+    }
+
+
+def build_images_url(base_url):
+    if base_url.endswith("/images/generations"):
+        return base_url
+    return base_url + "/images/generations"
+
+
+def parse_images(payload, output_dir, timeout, provider_base_url):
+    saved_files = []
+    for item in (payload.get("data") or [])[:1]:
+        if not isinstance(item, dict):
+            continue
+        if item.get("b64_json"):
+            saved = save_base64_image(output_dir, item["b64_json"])
+            if saved:
+                saved_files.append(saved)
+        elif item.get("url"):
+            saved = download_image_to_file(
+                output_dir,
+                str(item["url"]),
+                timeout,
+                provider_base_url,
+            )
+            if saved:
+                saved_files.append(saved)
+    return saved_files
+
+
+def save_base64_image(output_dir, value):
+    b64_value = str(value)
+    ext = ".png"
+    if "," in b64_value and b64_value.startswith("data:"):
+        header, b64_value = b64_value.split(",", 1)
+        if "jpeg" in header or "jpg" in header:
+            ext = ".jpg"
+        elif "webp" in header:
+            ext = ".webp"
+    try:
+        data = base64.b64decode(b64_value, validate=True)
+    except binascii.Error as error:
+        raise ValueError("invalid image base64: {0}".format(error))
+    return save_bytes(output_dir, data, ext, mime_from_extension(ext))
+
+
+def download_image_to_file(output_dir, url, timeout, provider_base_url):
+    if not is_safe_image_url(url, provider_base_url):
+        raise ValueError("unsafe image url")
+    request = urllib.request.Request(url, method="GET")
+    with urllib.request.urlopen(request, timeout=max(timeout, 3)) as response:
+        data = response.read(25 * 1024 * 1024 + 1)
+        if len(data) > 25 * 1024 * 1024:
+            raise ValueError("image response is too large")
+        content_type = response.headers.get("Content-Type", "")
+    return save_bytes(output_dir, data, guess_extension(content_type), content_type or None)
+
+
+def save_bytes(output_dir, data, ext, mime_type=None):
+    os.makedirs(output_dir, exist_ok=True)
+    target_path = os.path.join(output_dir, "sidecar-image-{0}{1}".format(uuid.uuid4().hex, ext))
+    with open(target_path, "wb") as file:
+        file.write(data)
+    return {
+        "path": target_path,
+        "sizeBytes": len(data),
+        "mimeType": mime_type or mime_from_extension(ext),
+        "dimensions": image_dimensions_from_bytes(data) or None,
+    }
+
+
+def guess_extension(content_type, fallback=".png"):
+    clean = (content_type or "").lower()
+    if "jpeg" in clean or "jpg" in clean:
+        return ".jpg"
+    if "webp" in clean:
+        return ".webp"
+    if "gif" in clean:
+        return ".gif"
+    return fallback
+
+
+def mime_from_extension(ext):
+    clean = (ext or "").lower()
+    if clean in (".jpg", ".jpeg"):
+        return "image/jpeg"
+    if clean == ".webp":
+        return "image/webp"
+    if clean == ".gif":
+        return "image/gif"
+    return "image/png"
+
+
+def image_dimensions_from_bytes(data):
+    if len(data) >= 24 and data.startswith(b"\x89PNG\r\n\x1a\n"):
+        width = int.from_bytes(data[16:20], "big")
+        height = int.from_bytes(data[20:24], "big")
+        if width > 0 and height > 0:
+            return "{0}x{1}".format(width, height)
+    return ""
+
+
+def is_safe_image_url(url, provider_base_url):
+    parsed_url = urllib.parse.urlparse(url)
+    parsed_provider = urllib.parse.urlparse(provider_base_url)
+    if parsed_url.scheme not in {"http", "https"}:
+        return False
+    if parsed_url.hostname in {"127.0.0.1", "localhost"}:
+        return parsed_provider.hostname in {"127.0.0.1", "localhost"}
+    return parsed_url.scheme == "https"
+
+
+def build_batch_image_result(
+    payload,
+    status,
+    image_result,
+    message,
+    duration_ms=0,
+    provider_metadata=None,
+):
+    provider = payload.get("provider") or {}
+    context = payload.get("context") or {}
+    task_payload = payload.get("input") or {}
+    task_id = payload.get("taskId")
+    batch_job_id = context.get("batchJobId")
+    sequence_no = context.get("sequenceNo")
+    retry = {
+        "shouldRetry": status == "failed",
+        "reason": message if status == "failed" else None,
+    }
+    outputs = []
+    if status == "succeeded":
+        outputs.append({
+            "assetType": "demo_image",
+            "title": "Batch image #{0}".format(sequence_no or task_id),
+            "content": message,
+            "filePath": image_result.get("filePath") if image_result else None,
+            "thumbnailPath": None,
+            "metadata": {
+                "source": "python-sidecar",
+                "workflowType": payload.get("workflowType") or "batch_image_generate",
+                "batchJobId": batch_job_id,
+                "sourceTaskId": task_id,
+                "sequenceNo": sequence_no,
+                "promptTemplate": task_payload.get("promptRequest"),
+                "savedFiles": image_result.get("savedFiles") if image_result else [],
+                "providerResult": provider_metadata or {},
+            },
+        })
+
+    model_status = "succeeded" if status == "succeeded" else status
+    if status == "retrying":
+        model_status = "failed"
+    return {
+        "protocolVersion": payload.get("protocolVersion") or 1,
+        "taskId": task_id,
+        "status": status,
+        "message": message,
+        "outputs": outputs,
+        "modelRuns": [{
+            "providerId": provider.get("providerId") or provider.get("displayName"),
+            "providerType": provider.get("providerType"),
+            "model": provider.get("model"),
+            "requestType": provider.get("requestType") or "image",
+            "status": model_status,
+            "durationMs": duration_ms,
+            "promptHash": None,
+            "promptVersionId": "batch:{0}:{1}".format(batch_job_id, task_id),
+            "inputTokenCount": None,
+            "outputTokenCount": None,
+            "costEstimate": None,
+            "errorCode": None if status == "succeeded" else "provider_error",
+            "errorMessage": None if status == "succeeded" else message,
+            "metadata": provider_metadata or {},
+        }],
+        "events": [{
+            "eventType": "batch_image_workflow_completed" if status == "succeeded" else "batch_image_workflow_failed",
+            "message": message,
+            "payload": {
+                "batchJobId": batch_job_id,
+                "sequenceNo": sequence_no,
+                "workflowType": payload.get("workflowType") or "batch_image_generate",
+            },
+        }],
+        "retry": retry,
+    }
 
 
 def request_provider_chat(provider, prompt_request):

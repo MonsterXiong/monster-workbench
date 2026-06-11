@@ -10,10 +10,10 @@ use crate::infra::creative_types::{
 };
 use crate::infra::path::PathProvider;
 use crate::infra::{AppError, AppResult};
-use crate::services::ai_service::{AiProviderConfig, AiProviderService};
+use crate::services::ai_service::AiProviderConfig;
 use crate::services::sidecar_lifecycle_service::{
-    BatchImagePromptSidecarRequest, SidecarLifecycleService, SidecarProviderConfig,
-    SidecarWorkflowModelRun, SidecarWorkflowTaskResult,
+    BatchImageGenerateSidecarRequest, BatchImagePromptSidecarRequest, SidecarLifecycleService,
+    SidecarProviderConfig, SidecarWorkflowModelRun, SidecarWorkflowTaskResult,
 };
 use crate::services::task_service::CreativeTaskEventPayload;
 use serde_json::{json, Value};
@@ -1487,164 +1487,573 @@ fn run_generate_task_worker<R: Runtime>(
     let prompt_request = build_prompt_request(&task)?;
     let provider_config =
         build_image_provider_config(&task, &prompt_request, batch.image_size.as_deref())?;
-    let model_started = Instant::now();
-    let ai_service = AiProviderService::new(app_handle.clone());
-    let provider_result = ai_service.test_provider(
-        provider_config.clone(),
-        "image".to_string(),
-        Some(format!("batch-image-task-{}", task.id)),
-        None,
+    let output_dir = resolve_batch_image_output_dir(app_handle)?;
+    let workflow_started = Instant::now();
+    let sidecar_result = submit_batch_image_generate_sidecar_workflow(
+        app_handle,
+        &task,
+        batch_job_id,
+        &prompt_request,
+        &provider_config,
+        batch.image_size.as_deref().unwrap_or("1024x1024"),
+        &output_dir,
     );
-    let duration_ms = model_started.elapsed().as_millis() as i64;
+    let duration_ms = workflow_started.elapsed().as_millis() as i64;
 
-    match provider_result {
-        Ok(result) if result.ok => {
-            let (file_path, thumbnail_path, saved_files) =
-                resolve_generate_image_paths(db_path, batch_job_id, task.id, &result)?;
-            let image_asset = creative_asset_repo::create_asset(
-                db_path,
-                CreateCreativeAssetInput {
-                    project_id: task.project_id.clone(),
-                    asset_type: "demo_image".to_string(),
-                    title: Some(format!(
-                        "Batch image #{}",
-                        task.sequence_no.unwrap_or(task.id)
-                    )),
-                    content: Some(result.message.clone()),
-                    file_path: Some(file_path.clone()),
-                    thumbnail_path: Some(thumbnail_path.clone()),
-                    metadata_json: Some(
-                        json!({
-                            "batchJobId": batch_job_id,
-                            "sourceTaskId": task.id,
-                            "sequenceNo": task.sequence_no,
-                            "promptTemplate": prompt_request,
-                            "providerResult": result,
-                            "savedFiles": saved_files,
-                            "filePath": file_path,
-                            "thumbnailPath": thumbnail_path,
-                        })
-                        .to_string(),
-                    ),
-                    status: Some("ready".to_string()),
-                },
-            )?;
-
-            let model_run = creative_model_run_repo::create_model_run(
-                db_path,
-                CreateModelRunInput {
-                    project_id: task.project_id.clone(),
-                    task_id: Some(task.id),
-                    asset_id: Some(image_asset.id),
-                    provider_id: Some(provider_config.display_name.clone()),
-                    provider_type: Some(provider_config.provider.clone()),
-                    model: Some(provider_config.image_model.clone()),
-                    request_type: "image".to_string(),
-                    status: "succeeded".to_string(),
-                    duration_ms: Some(duration_ms),
-                    prompt_hash: Some(simple_prompt_hash(&prompt_request)),
-                    prompt_version_id: Some(format!("batch:{}:{}", batch_job_id, task.id)),
-                    input_token_count: None,
-                    output_token_count: None,
-                    cost_estimate: None,
-                    error_code: None,
-                    error_message: None,
-                    metadata_json: Some(
-                        json!({
-                            "requestId": result.request_id,
-                            "baseUrl": result.base_url,
-                            "queueWaitMs": result.queue_wait_ms,
-                            "message": result.message,
-                            "apiImageSize": result.api_image_size,
-                            "requestedImageSize": result.requested_image_size,
-                            "actualImageSize": result.actual_image_size,
-                            "fallbackImageSize": result.fallback_image_size,
-                            "imageAttempts": result.image_attempts,
-                        })
-                        .to_string(),
-                    ),
-                    finished_at: None,
-                },
-            )?;
-
-            let updated_task = creative_task_repo::update_task_status(
-                db_path,
-                UpdateCreativeTaskStatusInput {
-                    id: task.id,
-                    status: "succeeded".to_string(),
-                    result_json: Some(
-                        json!({
-                            "assetId": image_asset.id,
-                            "modelRunId": model_run.id,
-                            "filePath": file_path,
-                            "thumbnailPath": thumbnail_path,
-                            "promptExcerpt": summarize_prompt_text(&prompt_request),
-                            "durationMs": duration_ms,
-                        })
-                        .to_string(),
-                    ),
-                    error_message: None,
-                    asset_id: Some(image_asset.id),
-                    retry_count_increment: None,
-                },
-            )?;
-            let _ = creative_task_repo::append_task_event(
-                db_path,
-                CreateTaskEventInput {
-                    task_id: task.id,
-                    event_type: "image_asset_saved".to_string(),
-                    message: Some(format!("image asset created: {}", image_asset.id)),
-                    payload_json: Some(
-                        json!({
-                            "assetId": image_asset.id,
-                            "modelRunId": model_run.id,
-                            "filePath": file_path,
-                            "thumbnailPath": thumbnail_path,
-                        })
-                        .to_string(),
-                    ),
-                },
-            );
-            emit_task_status(
-                app_handle,
-                &updated_task,
-                "creative-task-status-changed",
-                "status changed to succeeded",
-            )?;
-            emit_task_status(
-                app_handle,
-                &updated_task,
-                "creative-task-event",
-                "image worker finished successfully",
-            )?;
-        }
-        Ok(result) => {
-            handle_generate_failure(
-                app_handle,
-                db_path,
-                batch_job_id,
-                task,
-                &provider_config,
-                prompt_request,
-                duration_ms,
-                result.message.clone(),
-            )?;
-        }
-        Err(error) => {
-            handle_generate_failure(
-                app_handle,
-                db_path,
-                batch_job_id,
-                task,
-                &provider_config,
-                prompt_request,
-                duration_ms,
-                error.to_string(),
-            )?;
-        }
+    match sidecar_result {
+        Ok(sidecar_response) => settle_batch_image_sidecar_response(
+            app_handle,
+            db_path,
+            batch_job_id,
+            &task,
+            &prompt_request,
+            &provider_config,
+            duration_ms,
+            &output_dir,
+            sidecar_response,
+        )?,
+        Err(error) => handle_generate_transport_failure(
+            app_handle,
+            db_path,
+            batch_job_id,
+            &current_task,
+            &prompt_request,
+            &provider_config,
+            duration_ms,
+            error.to_string(),
+        )?,
     }
 
     Ok(())
+}
+
+fn submit_batch_image_generate_sidecar_workflow<R: Runtime>(
+    app_handle: &AppHandle<R>,
+    task: &CreativeTask,
+    batch_job_id: i64,
+    prompt_request: &str,
+    provider_config: &AiProviderConfig,
+    image_size: &str,
+    output_dir: &std::path::Path,
+) -> AppResult<SidecarWorkflowTaskResult> {
+    let mut sidecar_service = SidecarLifecycleService::new(app_handle.clone());
+    let result = sidecar_service.submit_batch_image_generate(BatchImageGenerateSidecarRequest {
+        task_id: task.id,
+        project_id: task.project_id.clone(),
+        batch_job_id,
+        sequence_no: task.sequence_no,
+        prompt_request: prompt_request.to_string(),
+        image_size: image_size.to_string(),
+        output_dir: output_dir.to_string_lossy().to_string(),
+        provider: SidecarProviderConfig {
+            provider_id: Some(provider_config.display_name.clone()),
+            provider_type: Some(provider_config.provider.clone()),
+            display_name: Some(provider_config.display_name.clone()),
+            base_url: provider_config.base_url.clone(),
+            api_key: provider_config.api_key.clone(),
+            model: provider_config.image_model.clone(),
+            request_type: "image".to_string(),
+            timeout_ms: Some(provider_config.timeout_ms),
+        },
+        attempt: task.retry_count + 1,
+        max_retries: task.max_retries,
+        cancel_checkpoint_url: None,
+        cancel_checkpoint_token: None,
+    });
+    let _ = sidecar_service.stop_dev_health_server();
+    result
+}
+
+fn settle_batch_image_sidecar_response<R: Runtime>(
+    app_handle: &AppHandle<R>,
+    db_path: &std::path::Path,
+    batch_job_id: i64,
+    task: &CreativeTask,
+    prompt_request: &str,
+    provider_config: &AiProviderConfig,
+    duration_ms: i64,
+    output_dir: &std::path::Path,
+    sidecar_response: SidecarWorkflowTaskResult,
+) -> AppResult<()> {
+    if sidecar_response.protocol_version != 1 {
+        return Err(AppError::Process(format!(
+            "unsupported sidecar protocol version: {}",
+            sidecar_response.protocol_version
+        )));
+    }
+    if sidecar_response.task_id != task.id {
+        return Err(AppError::Process(format!(
+            "sidecar task id mismatch: expected {}, got {}",
+            task.id, sidecar_response.task_id
+        )));
+    }
+
+    append_sidecar_task_events(db_path, task.id, &sidecar_response)?;
+
+    if sidecar_response.status == "succeeded"
+        && batch_prompt_cancel_requested(db_path, batch_job_id, task.id)?
+    {
+        let model_run_ids = persist_batch_sidecar_model_runs(
+            db_path,
+            task,
+            None,
+            prompt_request,
+            &sidecar_response.model_runs,
+        )?;
+        return handle_generate_cancelled(
+            app_handle,
+            db_path,
+            batch_job_id,
+            task,
+            "image task cancelled after sidecar provider call".to_string(),
+            model_run_ids,
+        );
+    }
+
+    if sidecar_response.status == "cancelled" {
+        let model_run_ids = persist_batch_sidecar_model_runs(
+            db_path,
+            task,
+            None,
+            prompt_request,
+            &sidecar_response.model_runs,
+        )?;
+        return handle_generate_cancelled(
+            app_handle,
+            db_path,
+            batch_job_id,
+            task,
+            sidecar_response
+                .message
+                .clone()
+                .unwrap_or_else(|| "image worker cancelled".to_string()),
+            model_run_ids,
+        );
+    }
+
+    if sidecar_response.status != "succeeded" {
+        let model_run_ids = persist_batch_sidecar_model_runs(
+            db_path,
+            task,
+            None,
+            prompt_request,
+            &sidecar_response.model_runs,
+        )?;
+        return handle_generate_failure_with_model_runs(
+            app_handle,
+            db_path,
+            batch_job_id,
+            task,
+            sidecar_response
+                .message
+                .clone()
+                .unwrap_or_else(|| "image sidecar workflow failed".to_string()),
+            model_run_ids,
+        );
+    }
+
+    let output =
+        sidecar_response.outputs.first().cloned().ok_or_else(|| {
+            AppError::Process("batch image sidecar returned no outputs".to_string())
+        })?;
+    if output.asset_type != "demo_image" {
+        return Err(AppError::Process(format!(
+            "unexpected batch image asset type: {}",
+            output.asset_type
+        )));
+    }
+    let source_file_path = output.file_path.clone().ok_or_else(|| {
+        AppError::Process("batch image sidecar returned no file path".to_string())
+    })?;
+    let file_path = validate_sidecar_output_file(output_dir, &source_file_path)?;
+    let thumbnail_path = copy_sidecar_thumbnail(&file_path)?;
+
+    let image_asset = creative_asset_repo::create_asset(
+        db_path,
+        CreateCreativeAssetInput {
+            project_id: task.project_id.clone(),
+            asset_type: output.asset_type,
+            title: output.title,
+            content: output.content,
+            file_path: Some(file_path.clone()),
+            thumbnail_path: Some(thumbnail_path.clone()),
+            metadata_json: Some(
+                json!({
+                    "batchJobId": batch_job_id,
+                    "sourceTaskId": task.id,
+                    "sequenceNo": task.sequence_no,
+                    "promptTemplate": prompt_request,
+                    "sidecarMetadata": output.metadata,
+                    "filePath": file_path,
+                    "thumbnailPath": thumbnail_path,
+                })
+                .to_string(),
+            ),
+            status: Some("ready".to_string()),
+        },
+    )?;
+    let model_run_ids = persist_batch_sidecar_model_runs(
+        db_path,
+        task,
+        Some(image_asset.id),
+        prompt_request,
+        &sidecar_response.model_runs,
+    )?;
+
+    let updated_task = creative_task_repo::update_task_status(
+        db_path,
+        UpdateCreativeTaskStatusInput {
+            id: task.id,
+            status: "succeeded".to_string(),
+            result_json: Some(
+                json!({
+                    "assetId": image_asset.id,
+                    "modelRunIds": model_run_ids,
+                    "filePath": file_path,
+                    "thumbnailPath": thumbnail_path,
+                    "promptExcerpt": summarize_prompt_text(prompt_request),
+                    "durationMs": duration_ms,
+                    "sidecarStatus": sidecar_response.status,
+                })
+                .to_string(),
+            ),
+            error_message: None,
+            asset_id: Some(image_asset.id),
+            retry_count_increment: None,
+        },
+    )?;
+    let _ = creative_task_repo::append_task_event(
+        db_path,
+        CreateTaskEventInput {
+            task_id: task.id,
+            event_type: "image_asset_saved".to_string(),
+            message: Some(format!("image asset created: {}", image_asset.id)),
+            payload_json: Some(
+                json!({
+                    "assetId": image_asset.id,
+                    "modelRunIds": model_run_ids,
+                    "filePath": file_path,
+                    "thumbnailPath": thumbnail_path,
+                    "provider": provider_config.display_name.clone(),
+                })
+                .to_string(),
+            ),
+        },
+    );
+    emit_task_status(
+        app_handle,
+        &updated_task,
+        "creative-task-status-changed",
+        "status changed to succeeded",
+    )?;
+    emit_task_status(
+        app_handle,
+        &updated_task,
+        "creative-task-event",
+        "image worker finished successfully",
+    )?;
+    Ok(())
+}
+
+fn handle_generate_transport_failure<R: Runtime>(
+    app_handle: &AppHandle<R>,
+    db_path: &std::path::Path,
+    batch_job_id: i64,
+    task: &CreativeTask,
+    prompt_request: &str,
+    provider_config: &AiProviderConfig,
+    duration_ms: i64,
+    error_message: String,
+) -> AppResult<()> {
+    let model_run = creative_model_run_repo::create_model_run(
+        db_path,
+        CreateModelRunInput {
+            project_id: task.project_id.clone(),
+            task_id: Some(task.id),
+            asset_id: None,
+            provider_id: Some(provider_config.display_name.clone()),
+            provider_type: Some(provider_config.provider.clone()),
+            model: Some(provider_config.image_model.clone()),
+            request_type: "image".to_string(),
+            status: "failed".to_string(),
+            duration_ms: Some(duration_ms),
+            prompt_hash: Some(simple_prompt_hash(prompt_request)),
+            prompt_version_id: Some(format!("batch:{}:{}", batch_job_id, task.id)),
+            input_token_count: None,
+            output_token_count: None,
+            cost_estimate: None,
+            error_code: Some("sidecar_error".to_string()),
+            error_message: Some(error_message.clone()),
+            metadata_json: Some(json!({ "transportFailure": true }).to_string()),
+            finished_at: None,
+        },
+    )?;
+    handle_generate_failure_with_model_runs(
+        app_handle,
+        db_path,
+        batch_job_id,
+        task,
+        error_message,
+        vec![model_run.id],
+    )
+}
+
+fn handle_generate_failure_with_model_runs<R: Runtime>(
+    app_handle: &AppHandle<R>,
+    db_path: &std::path::Path,
+    batch_job_id: i64,
+    task: &CreativeTask,
+    error_message: String,
+    model_run_ids: Vec<i64>,
+) -> AppResult<()> {
+    if current_task_retry_allowed(task) {
+        let retry_task = creative_task_repo::update_task_status(
+            db_path,
+            UpdateCreativeTaskStatusInput {
+                id: task.id,
+                status: "queued".to_string(),
+                result_json: None,
+                error_message: Some(error_message.clone()),
+                asset_id: task.asset_id,
+                retry_count_increment: Some(1),
+            },
+        )?;
+        let _ = creative_task_repo::append_task_event(
+            db_path,
+            CreateTaskEventInput {
+                task_id: task.id,
+                event_type: "image_retry_scheduled".to_string(),
+                message: Some("image worker scheduled retry".to_string()),
+                payload_json: Some(
+                    json!({
+                        "retryCount": retry_task.retry_count,
+                        "maxRetries": retry_task.max_retries,
+                        "error": error_message,
+                        "modelRunIds": model_run_ids,
+                    })
+                    .to_string(),
+                ),
+            },
+        );
+        emit_task_status(
+            app_handle,
+            &retry_task,
+            "creative-task-status-changed",
+            "status changed to queued",
+        )?;
+        emit_task_status(
+            app_handle,
+            &retry_task,
+            "creative-task-event",
+            "image worker scheduled retry",
+        )?;
+        return Ok(());
+    }
+
+    let failed_task = creative_task_repo::update_task_status(
+        db_path,
+        UpdateCreativeTaskStatusInput {
+            id: task.id,
+            status: "failed".to_string(),
+            result_json: Some(
+                json!({
+                    "error": error_message,
+                    "modelRunIds": model_run_ids,
+                })
+                .to_string(),
+            ),
+            error_message: Some(error_message.clone()),
+            asset_id: task.asset_id,
+            retry_count_increment: None,
+        },
+    )?;
+    let _ = creative_task_repo::append_task_event(
+        db_path,
+        CreateTaskEventInput {
+            task_id: task.id,
+            event_type: "image_failed".to_string(),
+            message: Some("image worker finished with failure".to_string()),
+            payload_json: Some(
+                json!({
+                    "error": error_message,
+                    "modelRunIds": model_run_ids,
+                })
+                .to_string(),
+            ),
+        },
+    );
+    emit_task_status(
+        app_handle,
+        &failed_task,
+        "creative-task-status-changed",
+        "status changed to failed",
+    )?;
+    emit_task_status(
+        app_handle,
+        &failed_task,
+        "creative-task-event",
+        "image worker finished with failure",
+    )?;
+    let _ = maybe_auto_pause_batch_after_failure(app_handle, db_path, batch_job_id, &error_message);
+    Ok(())
+}
+
+fn handle_generate_cancelled<R: Runtime>(
+    app_handle: &AppHandle<R>,
+    db_path: &std::path::Path,
+    batch_job_id: i64,
+    task: &CreativeTask,
+    message: String,
+    model_run_ids: Vec<i64>,
+) -> AppResult<()> {
+    let cancelled_task = creative_task_repo::update_task_status(
+        db_path,
+        UpdateCreativeTaskStatusInput {
+            id: task.id,
+            status: "cancelled".to_string(),
+            result_json: Some(
+                json!({
+                    "batchJobId": batch_job_id,
+                    "modelRunIds": model_run_ids,
+                })
+                .to_string(),
+            ),
+            error_message: Some(message.clone()),
+            asset_id: task.asset_id,
+            retry_count_increment: None,
+        },
+    )?;
+    let _ = creative_task_repo::append_task_event(
+        db_path,
+        CreateTaskEventInput {
+            task_id: task.id,
+            event_type: "image_cancelled".to_string(),
+            message: Some(message.clone()),
+            payload_json: Some(
+                json!({
+                    "batchJobId": batch_job_id,
+                    "modelRunIds": model_run_ids,
+                })
+                .to_string(),
+            ),
+        },
+    );
+    emit_task_status(
+        app_handle,
+        &cancelled_task,
+        "creative-task-status-changed",
+        "status changed to cancelled",
+    )?;
+    emit_task_status(app_handle, &cancelled_task, "creative-task-event", &message)?;
+    Ok(())
+}
+
+fn resolve_batch_image_output_dir<R: Runtime>(
+    app_handle: &AppHandle<R>,
+) -> AppResult<std::path::PathBuf> {
+    #[cfg(test)]
+    if let Some(test_path) = std::env::var_os("MONSTER_TOOLS_TEST_OUTPUT_DIR") {
+        let output_dir = std::path::PathBuf::from(test_path);
+        fs::create_dir_all(&output_dir).map_err(|error| {
+            AppError::Io(format!("failed to create test image output dir: {error}"))
+        })?;
+        return Ok(output_dir);
+    }
+
+    let output_dir = PathProvider::new(app_handle.clone())
+        .get_app_local_data_dir()?
+        .join("ai")
+        .join("generated");
+    fs::create_dir_all(&output_dir)
+        .map_err(|error| AppError::Io(format!("failed to create image output dir: {error}")))?;
+    Ok(output_dir)
+}
+
+fn validate_sidecar_output_file(
+    output_dir: &std::path::Path,
+    file_path: &str,
+) -> AppResult<String> {
+    let output_root = output_dir
+        .canonicalize()
+        .map_err(|error| AppError::Io(format!("failed to read image output dir: {error}")))?;
+    let file = std::path::PathBuf::from(file_path);
+    let canonical_file = file
+        .canonicalize()
+        .map_err(|error| AppError::Io(format!("failed to read sidecar image file: {error}")))?;
+    if !canonical_file.starts_with(&output_root) {
+        return Err(AppError::Process(
+            "sidecar image path is outside authorized output dir".to_string(),
+        ));
+    }
+    Ok(canonical_file.to_string_lossy().to_string())
+}
+
+fn copy_sidecar_thumbnail(file_path: &str) -> AppResult<String> {
+    let source_path = std::path::PathBuf::from(file_path);
+    let thumbnail_path = source_path.with_file_name(format!(
+        "{}-thumb{}",
+        source_path
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .unwrap_or("image"),
+        source_path
+            .extension()
+            .and_then(|value| value.to_str())
+            .map(|ext| format!(".{ext}"))
+            .unwrap_or_else(|| ".png".to_string())
+    ));
+    fs::copy(&source_path, &thumbnail_path)
+        .map_err(|error| AppError::Io(format!("failed to create image thumbnail: {error}")))?;
+    Ok(thumbnail_path.to_string_lossy().to_string())
+}
+
+fn persist_batch_sidecar_model_runs(
+    db_path: &std::path::Path,
+    task: &CreativeTask,
+    asset_id: Option<i64>,
+    prompt_request: &str,
+    model_runs: &[SidecarWorkflowModelRun],
+) -> AppResult<Vec<i64>> {
+    let mut model_run_ids = Vec::new();
+    for model_run in model_runs {
+        let persisted = creative_model_run_repo::create_model_run(
+            db_path,
+            CreateModelRunInput {
+                project_id: task.project_id.clone(),
+                task_id: Some(task.id),
+                asset_id,
+                provider_id: model_run.provider_id.clone(),
+                provider_type: model_run.provider_type.clone(),
+                model: model_run.model.clone(),
+                request_type: model_run.request_type.clone(),
+                status: model_run.status.clone(),
+                duration_ms: model_run.duration_ms,
+                prompt_hash: model_run
+                    .prompt_hash
+                    .clone()
+                    .or_else(|| Some(simple_prompt_hash(prompt_request))),
+                prompt_version_id: model_run.prompt_version_id.clone(),
+                input_token_count: model_run.input_token_count,
+                output_token_count: model_run.output_token_count,
+                cost_estimate: model_run.cost_estimate,
+                error_code: model_run.error_code.clone(),
+                error_message: model_run.error_message.clone(),
+                metadata_json: model_run
+                    .metadata
+                    .as_ref()
+                    .map(serde_json::to_string)
+                    .transpose()
+                    .map_err(|error| {
+                        AppError::Config(format!(
+                            "failed to encode batch sidecar model run metadata: {error}"
+                        ))
+                    })?,
+                finished_at: None,
+            },
+        )?;
+        model_run_ids.push(persisted.id);
+    }
+    Ok(model_run_ids)
 }
 
 fn emit_batch_progress<R: Runtime>(
@@ -1825,189 +2234,6 @@ fn build_image_provider_config(
     })
 }
 
-fn resolve_generate_image_paths(
-    db_path: &std::path::Path,
-    batch_job_id: i64,
-    task_id: i64,
-    result: &crate::services::ai_service::AiProviderTestResult,
-) -> AppResult<(String, String, String)> {
-    let source_path = result
-        .image_paths
-        .as_ref()
-        .and_then(|paths| paths.first().cloned())
-        .or_else(|| {
-            result
-                .saved_files
-                .as_ref()
-                .and_then(|files| files.first().map(|file| file.path.clone()))
-        })
-        .ok_or_else(|| AppError::Process("image provider returned no saved file".to_string()))?;
-
-    let source_path = std::path::PathBuf::from(&source_path);
-    let thumbnail_path = source_path.with_file_name(format!(
-        "{}-thumb{}",
-        source_path
-            .file_stem()
-            .and_then(|value| value.to_str())
-            .unwrap_or("image"),
-        source_path
-            .extension()
-            .and_then(|value| value.to_str())
-            .map(|ext| format!(".{ext}"))
-            .unwrap_or_else(|| ".png".to_string())
-    ));
-
-    if source_path.exists() {
-        let _ = fs::copy(&source_path, &thumbnail_path);
-    }
-
-    let _ = db_path;
-    let _ = batch_job_id;
-    let _ = task_id;
-
-    Ok((
-        source_path.to_string_lossy().to_string(),
-        thumbnail_path.to_string_lossy().to_string(),
-        serde_json::to_string(&result.saved_files).unwrap_or_else(|_| "[]".to_string()),
-    ))
-}
-
-fn handle_generate_failure<R: Runtime>(
-    app_handle: &AppHandle<R>,
-    db_path: &std::path::Path,
-    batch_job_id: i64,
-    task: CreativeTask,
-    provider_config: &AiProviderConfig,
-    prompt_request: String,
-    duration_ms: i64,
-    error_message: String,
-) -> AppResult<()> {
-    if current_retry_count(&task) < task.max_retries {
-        let retry_task = creative_task_repo::update_task_status(
-            db_path,
-            UpdateCreativeTaskStatusInput {
-                id: task.id,
-                status: "queued".to_string(),
-                result_json: None,
-                error_message: Some(error_message.clone()),
-                asset_id: task.asset_id,
-                retry_count_increment: Some(1),
-            },
-        )?;
-        let _ = creative_model_run_repo::create_model_run(
-            db_path,
-            CreateModelRunInput {
-                project_id: task.project_id.clone(),
-                task_id: Some(task.id),
-                asset_id: None,
-                provider_id: Some(provider_config.display_name.clone()),
-                provider_type: Some(provider_config.provider.clone()),
-                model: Some(provider_config.image_model.clone()),
-                request_type: "image".to_string(),
-                status: "failed".to_string(),
-                duration_ms: Some(duration_ms),
-                prompt_hash: Some(simple_prompt_hash(&prompt_request)),
-                prompt_version_id: Some(format!("batch:{}:{}", batch_job_id, task.id)),
-                input_token_count: None,
-                output_token_count: None,
-                cost_estimate: None,
-                error_code: Some("provider_error".to_string()),
-                error_message: Some(error_message.clone()),
-                metadata_json: Some(json!({ "retryScheduled": true }).to_string()),
-                finished_at: None,
-            },
-        );
-        let _ = creative_task_repo::append_task_event(
-            db_path,
-            CreateTaskEventInput {
-                task_id: task.id,
-                event_type: "image_retry_scheduled".to_string(),
-                message: Some("image worker scheduled retry".to_string()),
-                payload_json: Some(
-                    json!({
-                        "retryCount": retry_task.retry_count,
-                        "maxRetries": retry_task.max_retries,
-                        "error": error_message,
-                    })
-                    .to_string(),
-                ),
-            },
-        );
-        emit_task_status(
-            app_handle,
-            &retry_task,
-            "creative-task-status-changed",
-            "status changed to queued",
-        )?;
-        emit_task_status(
-            app_handle,
-            &retry_task,
-            "creative-task-event",
-            "image worker scheduled retry",
-        )?;
-    } else {
-        let failed_task = creative_task_repo::update_task_status(
-            db_path,
-            UpdateCreativeTaskStatusInput {
-                id: task.id,
-                status: "failed".to_string(),
-                result_json: None,
-                error_message: Some(error_message.clone()),
-                asset_id: task.asset_id,
-                retry_count_increment: None,
-            },
-        )?;
-        let _ = creative_model_run_repo::create_model_run(
-            db_path,
-            CreateModelRunInput {
-                project_id: task.project_id.clone(),
-                task_id: Some(task.id),
-                asset_id: None,
-                provider_id: Some(provider_config.display_name.clone()),
-                provider_type: Some(provider_config.provider.clone()),
-                model: Some(provider_config.image_model.clone()),
-                request_type: "image".to_string(),
-                status: "failed".to_string(),
-                duration_ms: Some(duration_ms),
-                prompt_hash: Some(simple_prompt_hash(&prompt_request)),
-                prompt_version_id: Some(format!("batch:{}:{}", batch_job_id, task.id)),
-                input_token_count: None,
-                output_token_count: None,
-                cost_estimate: None,
-                error_code: Some("provider_error".to_string()),
-                error_message: Some(error_message.clone()),
-                metadata_json: Some(json!({ "retryScheduled": false }).to_string()),
-                finished_at: None,
-            },
-        );
-        let _ = creative_task_repo::append_task_event(
-            db_path,
-            CreateTaskEventInput {
-                task_id: task.id,
-                event_type: "image_failed".to_string(),
-                message: Some("image worker finished with failure".to_string()),
-                payload_json: Some(json!({ "error": error_message }).to_string()),
-            },
-        );
-        emit_task_status(
-            app_handle,
-            &failed_task,
-            "creative-task-status-changed",
-            "status changed to failed",
-        )?;
-        emit_task_status(
-            app_handle,
-            &failed_task,
-            "creative-task-event",
-            "image worker finished with failure",
-        )?;
-        let _ =
-            maybe_auto_pause_batch_after_failure(app_handle, db_path, batch_job_id, &error_message);
-    }
-
-    Ok(())
-}
-
 fn summarize_prompt_text(value: &str) -> String {
     let trimmed = value.trim();
     const MAX_CHARS: usize = 120;
@@ -2061,10 +2287,6 @@ fn validate_create_batch_job_input(input: &CreateBatchImageJobInput) -> AppResul
         ));
     }
     Ok(())
-}
-
-fn current_retry_count(task: &CreativeTask) -> i64 {
-    task.retry_count
 }
 
 #[cfg(test)]

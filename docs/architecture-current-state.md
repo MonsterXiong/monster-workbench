@@ -743,8 +743,8 @@ sequenceDiagram
 | 领域资产 | `/creative` assets tab | `TaskService::create_creative_asset/link` | demo/stub |
 | Goal + 多 Agent stub | `/creative` goal tab | `GoalService::create_goal_multi_agent_stub` | fan-out stub |
 | Batch mock | `/creative` batch tab | `BatchJobService` mock worker | demo |
-| Batch prompt | `/creative` batch tab | `BatchJobService` prompt worker + model_runs | demo |
-| Batch real image | `/creative` batch tab | `BatchJobService` image worker + file path/thumbnail/model_runs | demo |
+| Batch prompt | `/creative` batch tab | `BatchJobService` prompt worker shell + Python sidecar workflow + model_runs | demo |
+| Batch real image | `/creative` batch tab | `BatchJobService` image worker shell + Python sidecar workflow + file path/thumbnail/model_runs | demo |
 | Worker queue skeleton | command/service | `WorkerQueueService` | 骨架 |
 
 ---
@@ -870,7 +870,8 @@ sequenceDiagram
   participant Repo as creative_batch_repo / creative_task_repo / creative_asset_repo / creative_model_run_repo
   participant Supervisor as Batch Supervisor Thread
   participant Worker as Mock/Prompt/Image Worker
-  participant AiSvc as AiProviderService
+  participant Sidecar as SidecarLifecycleService
+  participant Py as creative_health_server.py
   participant Event as Tauri Event
 
   UI->>Store: createBatchImageJob(input)
@@ -892,11 +893,15 @@ sequenceDiagram
     alt demo.image.mock
       Worker->>Repo: mock result / retry / failed / succeeded
     else demo.image.prompt
-      Worker->>AiSvc: provider chat request
-      Worker->>Repo: create demo_image_prompt asset + model_run
+      Worker->>Sidecar: submit_batch_image_prompt
+      Sidecar->>Py: OpenAI-compatible chat workflow
+      Py-->>Sidecar: outputs / modelRuns / events
+      Worker->>Repo: validate result + create demo_image_prompt asset + model_runs
     else demo.image.generate
-      Worker->>AiSvc: provider image request
-      Worker->>Repo: create demo_image asset + file_path/thumbnail + model_run
+      Worker->>Sidecar: submit_batch_image_generate
+      Sidecar->>Py: OpenAI-compatible image workflow + save file
+      Py-->>Sidecar: filePath / modelRuns / events
+      Worker->>Repo: validate authorized file path + create demo_image asset + model_runs
     end
     Worker->>Event: creative-task-event/status
     Supervisor->>Event: batch-job-progress
@@ -910,6 +915,7 @@ Batch 当前核心语义：
 - `batch_jobs.status` 表示批次状态。
 - 每个子任务是 `creative_tasks`，通过 `batch_job_id` 和 `sequence_no` 归属。
 - 并发由 Rust supervisor 控制，不由 Vue 控制。
+- prompt 和 image provider 执行已迁到 Python sidecar workflow；Rust 仍负责结果校验、可信落库和事件广播。
 - prompt 和 image 任务都会记录 `model_runs`。
 - real image 任务通过文件路径和缩略图路径回填结果，不向前端传大 base64。
 - 连续失败预算可以触发自动暂停。
@@ -1401,7 +1407,7 @@ Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `
 ## 2026-06-11 补充：batch service 数据访问去集中化
 
 - `src-tauri/src/services/batch_job_service.rs` 已去掉对 `CreativeDbInfra` 的直接依赖，当前 batch 顶层 CRUD、snapshot、分页任务、取消链路，以及 mock/prompt/generate worker 中的 task/event/asset/model_run 持久化都已改为直接调用领域 repo。
-- 当前该服务主要通过 `creative_batch_repo`、`creative_task_repo`、`creative_asset_repo`、`creative_model_run_repo` 组织数据访问，`BatchJobService` 自身继续承担流程编排、事件发射、provider 调用和 supervisor 控制。
+- 当前该服务主要通过 `creative_batch_repo`、`creative_task_repo`、`creative_asset_repo`、`creative_model_run_repo` 组织数据访问，`BatchJobService` 自身继续承担流程编排、事件发射、sidecar 提交/结果归档和 supervisor 控制。
 - `src-tauri/src/infra/creative_batch_repo.rs` 与 `src-tauri/src/infra/creative_model_run_repo.rs` 也已改为直接依赖 `creative_db_schema::init_schema()`，并在 repo 内部补齐本地 `non_empty_filter`，与 task/asset/goal/project repo 的收口方式保持一致。
 - 这一步意味着 Rust Creative 运行时里最显著的“数据访问型集中点”已经继续后退，`batch_job_service.rs` 现在更像一个仍然偏宽的 orchestrator，而不是同时兼任数据 façade。
 - 本轮验证通过：`cargo check --manifest-path .\\src-tauri\\Cargo.toml`、`npm run verify`。
@@ -1422,16 +1428,16 @@ Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `
 
 当前基线判断：
 
-- `src-tauri/src/services/task_service.rs` 约 844 行，职责仍分三类：
+- `src-tauri/src/services/task_service.rs` 生产职责仍分三类：
   1. 可信状态入口：task / asset / asset_link / task_event 的校验、repo 写读与 Tauri event emit。
   2. 过渡 workflow 入口：`run_generate_image_prompt_workflow` 负责创建任务、调用 `SidecarLifecycleService`、落库 sidecar 返回的 prompt asset、更新 task 状态。
   3. demo / stub 业务逻辑：`run_review_asset_quality_stub` 与 `build_review_result` 在 Rust 内生成 review result、创建 review asset，并在失败时创建 `revise_asset_quality` draft task。
-- `src-tauri/src/services/batch_job_service.rs` 约 2439 行，是当前更明显的 Rust 编排集中点。它已经不再依赖旧 `CreativeDbInfra`，但仍同时承担：
+- `src-tauri/src/services/batch_job_service.rs` 是当前更明显的 Rust 编排集中点。它已经不再依赖旧 `CreativeDbInfra`，也已经把 prompt / image 的 provider 执行迁到 Python sidecar，但仍同时承担：
   1. batch job 创建、snapshot 查询、pause/resume/cancel。
   2. supervisor thread：按并发度 claim queued tasks，spawn worker thread，检查完成条件。
-  3. mock / prompt / image worker：执行任务、处理取消、重试、失败自动暂停。
-  4. provider 调用：prompt 和 image worker 直接构造 `AiProviderConfig` 并调用 `AiProviderService::test_provider`。
-  5. 结果持久化：创建 `demo_image_prompt` / `demo_image` asset，写入 `model_runs`，维护 task result/event/status。
+  3. mock worker：执行本地 smoke 任务、处理取消、重试、失败自动暂停。
+  4. prompt / image worker shell：构造受控 sidecar request，提交 Python workflow，校验 protocol/taskId/status。
+  5. 结果归档：校验 sidecar 输出文件路径，创建 `demo_image_prompt` / `demo_image` asset，写入 `model_runs`，维护 task result/event/status。
 
 按文档边界，Rust 当前适合继续保留的职责是：
 
@@ -1454,7 +1460,7 @@ Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `
 因此当前结论不是“马上删除 Rust supervisor”，而是把边界分成短中期两层：
 
 1. 短期保留 Rust 作为 batch 控制面。`BatchJobService` 可以继续负责 batch job 生命周期、并发槽位、claim、pause/resume/cancel、事件和最终可信落库。
-2. 短期停止在 `BatchJobService` 里继续新增生产型 worker 分支。`demo.image.mock` 可保留作本地验证；`demo.image.prompt` 与 `demo.image.generate` 应视为过渡链路。
+2. 短期停止在 `BatchJobService` 里继续新增生产型 worker 分支。`demo.image.mock` 可保留作本地验证；`demo.image.prompt` 与 `demo.image.generate` 已迁为 sidecar workflow，但命名和生命周期仍属于过渡链路。
 3. 下一步若要新增正式 workflow，优先走 `SidecarLifecycleService -> Python workflow runtime`：Rust 创建/claim task，Python 执行 prompt/provider/review/image workflow，Rust 根据返回结果写入 task/asset/model_runs/event。
 4. 中期再决定 supervisor 归属：
    - 方案 A：Rust 保留 supervisor，只把每个 claimed task 提交给 Python 执行；这是最平滑的迁移路径。
@@ -1462,15 +1468,15 @@ Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `
 
 建议的收口顺序：
 
-1. 先不要新增新的 Rust batch worker 类型；把 `demo.image.prompt/generate` 标记为过渡实现。
+1. 先不要新增新的 Rust batch worker 类型；把 `demo.image.prompt/generate` 标记为过渡实现，并在正式业务类型出现前避免继续扩展 `demo.image.*` 语义。
 2. 把 `TaskService::run_review_asset_quality_stub` 维持为 stub，不继续扩展真实审查规则；真实 review/revision 应进入 Python workflow runtime。
-3. 把 `BatchJobService` 中的 provider 调用边界收口：后续优先改为提交给 sidecar，而不是继续通过 `AiProviderService::test_provider` 作为生产 batch runtime。
+3. 继续把 `BatchJobService` 中的执行面边界收口：后续新增 workflow 优先提交给 sidecar，而不是通过 `AiProviderService::test_provider` 或新的 Rust provider helper 作为生产 batch runtime。
 4. 保留 `model_runs` 作为所有 AI 调用的强制审计点；即使执行搬到 Python，最终审计记录也应由 Rust 可信写入或经过严格协议写入。
 5. 后续拆代码时，优先拆“worker 执行业务”而不是拆“batch 状态控制”。也就是说，先让 Rust 从 prompt/image 业务执行中退出，再讨论 supervisor 是否迁走。
 
 架构风险提示：
 
-- `AiProviderService::test_provider` 当前语义仍偏“连接测试/Provider 测试”，继续把它作为 batch 生产执行入口，会让测试链路和正式 creative runtime 混淆。
+- `AiProviderService::test_provider` 当前语义仍偏“连接测试/Provider 测试”，不应重新作为 batch 生产执行入口，否则会让测试链路和正式 creative runtime 混淆。
 - `demo.image.*` 命名说明当前 batch 类型仍带 demo 语义；在正式业务类型出现前，不应把这套命名直接扩展成生产分类体系。
 - 当前 worker 使用 `std::thread::spawn` 直接派发，适合本地 demo 和短任务验证；正式长任务需要更明确的 lifecycle、预算、kill switch、恢复和事件节流策略。
 - `TaskService` 下仍挂着 asset CRUD 与 workflow stub，Rust 侧命名还没有完全和前端 `creative-task / creative-asset / creative-batch` 对齐；但当前更高风险点仍是 batch worker 业务执行，而不是 asset CRUD 所在文件名。
@@ -1484,7 +1490,7 @@ Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `
   - `model_runs`
   - `task_events`
   - 最终 `creative_tasks.result_json/status/asset_id`
-- 这一步只迁了最小 prompt workflow，不代表 batch worker 已迁出 Rust。当前 `demo.image.prompt/generate` 仍在 `BatchJobService` 内直接调用 `AiProviderService::test_provider`。
+- 这一步只迁了最小 prompt workflow；当时 batch worker 尚未迁出 Rust。
 - 本轮验证通过：
   - `python -m py_compile src-tauri\\sidecars\\python\\creative_health_server.py`
   - `cargo test --manifest-path .\\src-tauri\\Cargo.toml generate_image_prompt_workflow_persists_task_asset_and_events -- --nocapture`
@@ -1522,16 +1528,33 @@ Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `
   - `cargo test --manifest-path .\\src-tauri\\Cargo.toml cancel_checkpoint_server_reads_task_cancel_status -- --nocapture`
   - `cargo test --manifest-path .\\src-tauri\\Cargo.toml generate_image_prompt_workflow_persists_task_asset_and_events -- --nocapture`
   - `cargo check --manifest-path .\\src-tauri\\Cargo.toml`
-- 下一步剩余重点：将 batch prompt worker 的 provider 调用迁到 sidecar workflow，减少 `BatchJobService` 内的生产型 provider 编排。
+- 该阶段下一步重点是将 batch prompt worker 的 provider 调用迁到 sidecar workflow，减少 `BatchJobService` 内的生产型 provider 编排。
 
 ## 2026-06-11 补充：batch prompt worker 迁到 sidecar workflow
 
 - `src-tauri/src/services/batch_job_service.rs` 的 `demo.image.prompt` worker 已不再直接调用 `AiProviderService::test_provider`；Rust 仍负责 batch supervisor、claim、running、retry/cancel/failure 映射、asset/model_runs/task_events 可信落库与事件 emit。
 - `src-tauri/src/services/sidecar_lifecycle_service.rs` 新增 `submit_batch_image_prompt`，按 `protocolVersion / taskId / workflowType / provider / input / context` 把 batch prompt task 提交给 Python sidecar。
 - `src-tauri/sidecars/python/creative_health_server.py` 新增 `demo.image.prompt` workflow：Python 侧调用 OpenAI-compatible `/chat/completions`，返回标准 `outputs / modelRuns / events / retry` workflow result。
-- 这一步完成了“先让 Rust 从 prompt provider 执行中退出，再讨论 supervisor 是否迁走”的第一段迁移；`demo.image.mock` 仍是 Rust smoke worker，`demo.image.generate` 仍是下一步待迁移的 provider/image worker。
+- 这一步完成了“先让 Rust 从 prompt provider 执行中退出，再讨论 supervisor 是否迁走”的第一段迁移；当时 `demo.image.mock` 仍是 Rust smoke worker，`demo.image.generate` 尚未迁移。
 - 本轮验证通过：
   - `python -m py_compile src-tauri\\sidecars\\python\\creative_health_server.py`
   - `cargo test --manifest-path .\\src-tauri\\Cargo.toml prompt_batch_worker_persists_prompt_asset_and_model_run -- --nocapture --test-threads=1`
   - `cargo check --manifest-path .\\src-tauri\\Cargo.toml`
-- 下一步剩余重点：将 `demo.image.generate` 的 provider 调用与图片处理迁到 sidecar workflow，并继续保持 Rust 对文件路径、asset、model_runs 和 task_events 的可信写入。
+- 该阶段下一步重点是将 `demo.image.generate` 的 provider 调用与图片处理迁到 sidecar workflow，并继续保持 Rust 对文件路径、asset、model_runs 和 task_events 的可信写入。
+
+## 2026-06-11 补充：batch image worker 迁到 sidecar workflow
+
+- `src-tauri/src/services/batch_job_service.rs` 的 `demo.image.generate` worker 已不再直接调用 `AiProviderService::test_provider`；Rust 仍负责 batch supervisor、claim、running、retry/cancel/failure 映射、输出文件路径授权校验、asset/model_runs/task_events 可信落库与事件 emit。
+- `src-tauri/src/services/sidecar_lifecycle_service.rs` 新增 `submit_batch_image_generate`，按 `protocolVersion / taskId / workflowType / provider / input / context` 把 batch image task 提交给 Python sidecar，并把 Rust 授权的 `outputDir` 明确传入执行面。
+- `src-tauri/sidecars/python/creative_health_server.py` 新增 `demo.image.generate` workflow：Python 侧调用 OpenAI-compatible `/images/generations`，保存 `b64_json` 或安全图片 URL 到授权输出目录，再返回标准 `outputs / modelRuns / events / retry` workflow result。
+- Rust 收到 sidecar result 后会校验 `protocolVersion`、`taskId`、`assetType` 和输出文件 canonical path，确认图片文件仍位于授权输出目录内，再复制 thumbnail、创建 `demo_image` asset 并写入 `model_runs`。
+- 这一步完成了 batch prompt / image 两条 provider 执行链路从 Rust worker 到 Python sidecar workflow 的迁移；`BatchJobService` 当前更清晰地保留为 Rust 控制面和可信落库面，但仍偏宽，后续应优先硬化 sidecar lifecycle、batch cancel checkpoint、预算/超时协议和正式 workflow 命名。
+- 本轮验证通过：
+  - `python -m py_compile src-tauri\\sidecars\\python\\creative_health_server.py`
+  - `cargo test --manifest-path .\\src-tauri\\Cargo.toml generate_batch_worker_persists_image_asset_files_and_model_run -- --nocapture --test-threads=1`
+  - `cargo test --manifest-path .\\src-tauri\\Cargo.toml prompt_batch_worker_persists_prompt_asset_and_model_run -- --nocapture --test-threads=1`
+  - `cargo check --manifest-path .\\src-tauri\\Cargo.toml`
+- 下一步剩余重点：
+  1. 给 batch prompt / image sidecar workflow 接入真实 cancel checkpoint，而不是只在 Rust worker 提交前后判断取消。
+  2. 将当前 per-task dev sidecar 启停策略升级为更清晰的 sidecar lifecycle 复用与超时/熔断策略。
+  3. 设计正式 batch task type 命名，避免把 `demo.image.*` 继续扩展成生产业务分类。
