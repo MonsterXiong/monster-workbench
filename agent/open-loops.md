@@ -11,7 +11,7 @@
 - [ ] 继续收口 Creative service / backend：Rust `TaskService` 二次评估结论是短期可保留 task/asset/event 可信入口，先冻结 `run_review_asset_quality_stub` 的业务扩展，正式 review/revision 迁入 Python workflow runtime。
 - [ ] 评估前后端分域对齐：前端已拆出 `creative-task / creative-asset / creative-goal / creative-batch / creative-project` service/store；Rust 侧 asset CRUD 暂不为拆文件名而拆，后续等资产版本、来源建模稳定后再决定是否独立 `AssetService`。
 - [ ] 完成 `creative_db` 后续治理：补正式 migration、旧库兼容回归，以及 `creative_projects`、资产版本、来源建模。
-- [ ] 继续推进 Python workflow runtime：`generate_image_prompt`、`demo.image.prompt` 与 `demo.image.generate` 已落地 task request/result、model_runs 审计、失败/取消/重试映射、cancel checkpoint、基础 budget/timeout 协议与 batch sidecar lifecycle 首段复用；下一步补共享 sidecar 健康熔断/恢复/并发提交策略、正式 workflow 类型命名，并避免在 `batch_job_service.rs` 新增生产 worker 分支。
+- [ ] 继续推进 Python workflow runtime：`generate_image_prompt`、`image.prompt.batch` 与 `image.generate.batch` 已落地 task request/result、model_runs 审计、失败/取消/重试映射、cancel checkpoint、基础 budget/timeout 协议、正式 workflow 类型命名和 batch sidecar lifecycle 首段硬化；下一步优先补 Python sidecar `/events` 事件缓冲、Rust polling/持久化策略和受控 worker-pool API，并避免在 `batch_job_service.rs` 新增生产 worker 分支。
 
 ## 回归与验收待办
 
