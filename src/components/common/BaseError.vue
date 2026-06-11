@@ -52,6 +52,11 @@ const titleId = computed(() => `${errorId}-title`);
 const messageId = computed(() => `${errorId}-message`);
 const resolvedTitle = computed(() => props.title || t("common.error"));
 const resolvedSize = computed(() => (props.compact ? "sm" : props.size));
+const elementIconType = computed(() => {
+  if (props.tone === "warning") return "warning";
+  if (props.tone === "neutral") return "info";
+  return "error";
+});
 const iconSize = computed(() => {
   if (resolvedSize.value === "sm") return 24;
   if (resolvedSize.value === "lg") return 40;
@@ -97,28 +102,40 @@ const handleRetry = () => {
     :aria-describedby="message ? messageId : undefined"
     :aria-disabled="disabled ? 'true' : undefined"
   >
-    <div class="base-error__icon" aria-hidden="true">
-      <BaseIcon :name="icon" :size="iconSize" aria-hidden="true" />
-    </div>
-    <h4 :id="titleId" class="base-error__title">
-      {{ resolvedTitle }}
-    </h4>
-    <p v-if="message" :id="messageId" class="base-error__message">
-      {{ message }}
-    </p>
-    <BaseButton
-      v-if="showRetry"
-      :type="retryButtonType"
-      size="sm"
-      class="base-error__retry"
-      :disabled="isRetryDisabled"
-      @click="handleRetry"
-    >
-      {{ retryText || t('common.retry') }}
-    </BaseButton>
-    <div v-if="$slots.default" class="base-error__extra" role="group" :aria-label="resolvedExtraLabel">
-      <slot></slot>
-    </div>
+    <el-result class="base-error__result" :icon="elementIconType">
+      <template #icon>
+        <div class="base-error__icon" aria-hidden="true">
+          <BaseIcon :name="icon" :size="iconSize" aria-hidden="true" />
+        </div>
+      </template>
+      <template #title>
+        <h4 :id="titleId" class="base-error__title">
+          {{ resolvedTitle }}
+        </h4>
+      </template>
+      <template v-if="message" #sub-title>
+        <p :id="messageId" class="base-error__message">
+          {{ message }}
+        </p>
+      </template>
+      <template v-if="showRetry || $slots.default" #extra>
+        <div class="base-error__actions">
+          <BaseButton
+            v-if="showRetry"
+            :type="retryButtonType"
+            size="sm"
+            class="base-error__retry"
+            :disabled="isRetryDisabled"
+            @click="handleRetry"
+          >
+            {{ retryText || t('common.retry') }}
+          </BaseButton>
+          <div v-if="$slots.default" class="base-error__extra" role="group" :aria-label="resolvedExtraLabel">
+            <slot></slot>
+          </div>
+        </div>
+      </template>
+    </el-result>
   </div>
 </template>
 
@@ -153,6 +170,38 @@ const handleRetry = () => {
 
 .base-error--compact {
   @apply py-6;
+}
+
+.base-error__result {
+  @apply flex w-full min-w-0 flex-col items-center p-0;
+}
+
+.base-error--start .base-error__result {
+  @apply items-start;
+}
+
+.base-error :deep(.el-result__icon) {
+  @apply mb-0 flex justify-center;
+}
+
+.base-error--start :deep(.el-result__icon) {
+  @apply justify-start;
+}
+
+.base-error :deep(.el-result__title) {
+  @apply mt-0 text-center leading-normal;
+}
+
+.base-error--start :deep(.el-result__title) {
+  @apply text-left;
+}
+
+.base-error :deep(.el-result__subtitle) {
+  @apply mt-0;
+}
+
+.base-error :deep(.el-result__extra) {
+  @apply mt-0;
 }
 
 .base-error__icon {
@@ -201,12 +250,20 @@ const handleRetry = () => {
   @apply text-sm leading-6;
 }
 
+.base-error__actions {
+  @apply mt-4 flex max-w-full flex-col items-center gap-3;
+}
+
+.base-error--start .base-error__actions {
+  @apply items-start;
+}
+
 .base-error__retry {
-  @apply mt-4 transition-transform hover:scale-105;
+  @apply transition-transform hover:scale-105;
 }
 
 .base-error__extra {
-  @apply mt-3 flex max-w-full flex-wrap items-center justify-center gap-2;
+  @apply flex max-w-full flex-wrap items-center justify-center gap-2;
 }
 
 .base-error--start .base-error__extra {

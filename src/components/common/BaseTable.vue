@@ -64,16 +64,102 @@ const tableLabel = computed(() => props.ariaLabel || props.caption || t("common.
 const skeletonCount = computed(() => toIntegerAtLeast(props.skeletonRows, 1, 3));
 const resolvedLoadingText = computed(() => props.loadingText || t("common.loading"));
 const tableStyle = computed(() => ({ "--base-table-min-width": props.minWidth } as Record<string, string>));
+const minWidthPixels = computed(() => {
+  const parsed = Number.parseFloat(props.minWidth);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 520;
+});
+const skeletonRows = computed(() =>
+  Array.from({ length: skeletonCount.value }, (_, index) => ({
+    __baseTableSkeleton: index,
+  }))
+);
+const tableData = computed(() => (props.loading ? skeletonRows.value : props.data));
+const elementSize = computed(() => {
+  if (props.size === "sm") return "small";
+  if (props.size === "lg") return "large";
+  return "default";
+});
+
+const isSkeletonRow = (row: any) => Boolean(row?.__baseTableSkeleton !== undefined);
 
 const getRowKey = (row: any, index: number) => {
+  if (isSkeletonRow(row)) return `__base-table-skeleton-${row.__baseTableSkeleton}`;
   if (typeof props.rowKey === "function") return props.rowKey(row, index);
   const rowKeyValue = props.rowKey ? getByPath(row, props.rowKey) : undefined;
   if (rowKeyValue !== undefined) return String(rowKeyValue);
   return index;
 };
 
-const isRowSelected = (row: any, index: number) => hasSelectionKey(props.selectedKeys, getRowKey(row, index));
+const getElementRowKey = (row: any) => {
+  if (isSkeletonRow(row)) return getRowKey(row, row.__baseTableSkeleton);
+  const rowIndex = props.data.indexOf(row);
+  return getRowKey(row, rowIndex >= 0 ? rowIndex : 0);
+};
+
+const isRowSelected = (row: any, index: number) => {
+  if (isSkeletonRow(row)) return false;
+  return hasSelectionKey(props.selectedKeys, getRowKey(row, index));
+};
+
 const getCellValue = (row: any, key: string) => getByPath(row, key, "");
+
+const getColumnWidth = (column: BaseTableColumn) => {
+  if (!column.width) return undefined;
+  const width = String(column.width).trim();
+
+  if (width.endsWith("%")) {
+    return undefined;
+  }
+
+  if (width.endsWith("px")) {
+    const pixels = Number.parseFloat(width);
+    return Number.isFinite(pixels) ? pixels : undefined;
+  }
+
+  const numericWidth = Number.parseFloat(width);
+  return Number.isFinite(numericWidth) ? numericWidth : undefined;
+};
+
+const getColumnMinWidth = (column: BaseTableColumn) => {
+  if (!column.width) return 120;
+  const width = String(column.width).trim();
+
+  if (!width.endsWith("%")) return undefined;
+
+  const percent = Number.parseFloat(width);
+  return Number.isFinite(percent) ? Math.max(72, Math.round((minWidthPixels.value * percent) / 100)) : undefined;
+};
+
+const getRowClassName = ({ row, rowIndex }: { row: any; rowIndex: number }) => {
+  if (isSkeletonRow(row)) return "base-table__row base-table__row--loading";
+
+  return [
+    "base-table__row",
+    props.striped && rowIndex % 2 === 1 ? "is-striped" : "",
+    isRowSelected(row, rowIndex) ? "is-selected" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+};
+
+const getColumnCellClass = (column: BaseTableColumn) => {
+  return [
+    "base-table__cell",
+    column.align ? `base-table__cell--${column.align}` : "",
+    column.wrap || props.wrapCells ? "base-table__cell--wrap" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+};
+
+const getColumnHeaderClass = (column: BaseTableColumn) => {
+  return [
+    "base-table__head-cell",
+    column.headerAlign || column.align ? `base-table__cell--${column.headerAlign || column.align}` : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+};
 </script>
 
 <template>
@@ -90,81 +176,63 @@ const getCellValue = (row: any, key: string) => getByPath(row, key, "");
         'is-disabled': disabled,
       },
     ]"
+    :style="tableStyle"
     role="region"
     :aria-label="tableLabel"
     :aria-busy="loading ? 'true' : 'false'"
     :aria-disabled="disabled ? 'true' : undefined"
   >
-    <table class="base-table__table" :style="tableStyle">
-      <caption v-if="caption" class="base-table__caption">
-        {{ caption }}
-      </caption>
-      <thead>
-        <tr class="base-table__head-row">
-          <th
-            v-for="col in columns"
-            :key="col.key"
-            :style="{ width: col.width }"
-            class="base-table__head-cell"
-            :class="col.headerAlign || col.align ? `base-table__cell--${col.headerAlign || col.align}` : ''"
-            scope="col"
-            :aria-label="col.ariaLabel || undefined"
-          >
-            {{ col.title }}
-          </th>
-        </tr>
-      </thead>
-      <tbody>
-        <template v-if="loading">
-          <tr>
-            <td :colspan="columns.length" class="sr-only" role="status" aria-live="polite">
-              {{ resolvedLoadingText }}
-            </td>
-          </tr>
-          <tr v-for="i in skeletonCount" :key="i" class="base-table__row" aria-hidden="true">
-            <td v-for="col in columns" :key="col.key" class="base-table__cell">
-              <div class="base-table__skeleton" aria-hidden="true"></div>
-            </td>
-          </tr>
+    <span v-if="caption" class="base-table__caption">{{ caption }}</span>
+    <span v-if="loading" class="sr-only" role="status" aria-live="polite">
+      {{ resolvedLoadingText }}
+    </span>
+
+    <el-table
+      class="base-table__table"
+      :data="tableData"
+      :size="elementSize"
+      :row-key="getElementRowKey"
+      :row-class-name="getRowClassName"
+      :show-header="true"
+      :stripe="false"
+      :border="false"
+      :fit="true"
+      :scrollbar-always-on="true"
+      table-layout="fixed"
+      :highlight-current-row="false"
+      :aria-label="tableLabel"
+    >
+      <el-table-column
+        v-for="column in columns"
+        :key="column.key"
+        :prop="column.key"
+        :label="column.title"
+        :width="getColumnWidth(column)"
+        :min-width="getColumnMinWidth(column)"
+        :align="column.align || 'left'"
+        :header-align="column.headerAlign || column.align || 'left'"
+        :class-name="getColumnCellClass(column)"
+        :label-class-name="getColumnHeaderClass(column)"
+        :show-overflow-tooltip="!wrapCells && !column.wrap"
+      >
+        <template #header>
+          <span :aria-label="column.ariaLabel || undefined">{{ column.title }}</span>
         </template>
-        <template v-else-if="data.length === 0">
-          <tr>
-            <td :colspan="columns.length" class="base-table__empty-cell">
-              <div class="base-table__empty" role="status">
-                <BaseIcon :name="emptyIcon" size="28" aria-hidden="true" />
-                <span>{{ emptyText || t('common.noData') }}</span>
-              </div>
-            </td>
-          </tr>
+        <template #default="scope">
+          <div v-if="isSkeletonRow(scope.row)" class="base-table__skeleton" aria-hidden="true"></div>
+          <slot v-else :name="column.key" :row="scope.row" :index="scope.$index">
+            {{ getCellValue(scope.row, column.key) }}
+          </slot>
         </template>
-        <template v-else>
-          <tr
-            v-for="(row, idx) in data"
-            :key="getRowKey(row, idx)"
-            class="base-table__row"
-            :class="{
-              'is-striped': striped && idx % 2 === 1,
-              'is-selected': isRowSelected(row, idx),
-            }"
-            :aria-selected="isRowSelected(row, idx) ? 'true' : undefined"
-          >
-            <td
-              v-for="col in columns"
-              :key="col.key"
-              class="base-table__cell"
-              :class="[
-                col.align ? `base-table__cell--${col.align}` : '',
-                col.wrap ? 'base-table__cell--wrap' : '',
-              ]"
-            >
-              <slot :name="col.key" :row="row" :index="idx">
-                {{ getCellValue(row, col.key) }}
-              </slot>
-            </td>
-          </tr>
-        </template>
-      </tbody>
-    </table>
+      </el-table-column>
+
+      <template #empty>
+        <div class="base-table__empty" role="status">
+          <BaseIcon :name="emptyIcon" size="28" aria-hidden="true" />
+          <span>{{ emptyText || t("common.noData") }}</span>
+        </div>
+      </template>
+    </el-table>
   </div>
 </template>
 
@@ -197,95 +265,122 @@ const getCellValue = (row: any, key: string) => getByPath(row, key, "");
   @apply pointer-events-none opacity-70;
 }
 
-.base-table__table {
-  min-width: var(--base-table-min-width, 520px);
-  @apply w-full table-fixed border-collapse;
-}
-
 .base-table__caption {
   @apply sr-only;
 }
 
-.base-table__head-row {
-  @apply border-b border-slate-200 bg-slate-50/80 text-slate-500 dark:border-slate-800 dark:bg-slate-800/60 dark:text-slate-400;
+.base-table__table {
+  min-width: min(var(--base-table-min-width, 520px), 100%);
+  --el-table-border-color: rgb(226 232 240);
+  --el-table-header-bg-color: rgb(248 250 252 / 0.86);
+  --el-table-row-hover-bg-color: rgb(248 250 252);
+  --el-table-text-color: rgb(30 41 59);
+  --el-table-header-text-color: rgb(100 116 139);
+  --el-table-bg-color: transparent;
+  --el-table-tr-bg-color: transparent;
+  --el-table-expanded-cell-bg-color: transparent;
+  @apply h-full w-full;
 }
 
-.base-table__head-cell {
-  @apply px-4 py-3 text-left text-xs font-black;
+:global(.dark) .base-table__table {
+  --el-table-border-color: rgb(30 41 59);
+  --el-table-header-bg-color: rgb(30 41 59 / 0.62);
+  --el-table-row-hover-bg-color: rgb(30 41 59 / 0.5);
+  --el-table-text-color: rgb(226 232 240);
+  --el-table-header-text-color: rgb(148 163 184);
 }
 
-.base-table--sm .base-table__head-cell {
-  @apply px-3 py-2 text-[11px];
+:deep(.base-table__table.el-table) {
+  background-color: transparent;
+  color: inherit;
 }
 
-.base-table--lg .base-table__head-cell {
-  @apply px-5 py-4 text-sm;
+:deep(.base-table__table .el-table__inner-wrapper::before) {
+  display: none;
 }
 
-.base-table__row {
-  @apply border-b border-slate-100 transition duration-150 dark:border-slate-800/50;
+:deep(.base-table__table th.el-table__cell),
+:deep(.base-table__table td.el-table__cell) {
+  @apply border-b border-slate-100 p-0 dark:border-slate-800/50;
 }
 
-.base-table__row.is-striped {
-  @apply bg-slate-50/40 dark:bg-slate-800/20;
+:deep(.base-table__table th.el-table__cell) {
+  @apply bg-slate-50/80 dark:bg-slate-800/60;
 }
 
-.base-table--hover .base-table__row:hover {
-  @apply bg-slate-50 dark:bg-slate-800/50;
+:deep(.base-table__head-cell .cell) {
+  @apply px-4 py-3 text-xs font-black text-slate-500 dark:text-slate-400;
 }
 
-.base-table__row.is-selected {
-  background-color: rgba(var(--color-primary), 0.08);
-}
-
-.base-table__cell {
+:deep(.base-table__cell .cell) {
   @apply min-w-0 truncate px-4 py-3 text-sm text-slate-800 dark:text-slate-200;
   vertical-align: top;
 }
 
-.base-table__cell :deep(.el-button),
-.base-table__cell :deep(.base-badge) {
-  max-width: 100%;
-  min-width: 0;
+:deep(.base-table__cell--center .cell) {
+  @apply text-center;
 }
 
-.base-table__cell :deep(.el-button > span),
-.base-table__cell :deep(.base-badge) {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+:deep(.base-table__cell--right .cell) {
+  @apply text-right;
 }
 
-.base-table--wrap-cells .base-table__cell,
-.base-table__cell--wrap {
+:deep(.base-table__cell--wrap .cell),
+.base-table--wrap-cells :deep(.base-table__cell .cell) {
   overflow: visible;
   overflow-wrap: anywhere;
   text-overflow: clip;
   white-space: normal;
 }
 
-.base-table--sm .base-table__cell {
+.base-table--sm :deep(.base-table__head-cell .cell) {
+  @apply px-3 py-2 text-[11px];
+}
+
+.base-table--sm :deep(.base-table__cell .cell) {
   @apply px-3 py-2.5 text-[11px] leading-relaxed;
 }
 
-.base-table--lg .base-table__cell {
+.base-table--lg :deep(.base-table__head-cell .cell) {
+  @apply px-5 py-4 text-sm;
+}
+
+.base-table--lg :deep(.base-table__cell .cell) {
   @apply px-5 py-4 text-base;
 }
 
-.base-table__cell--center {
-  @apply text-center;
+:deep(.base-table__row) {
+  @apply transition duration-150;
 }
 
-.base-table__cell--right {
-  @apply text-right;
+:deep(.base-table__row.is-striped > td.el-table__cell) {
+  @apply bg-slate-50/40 dark:bg-slate-800/20;
 }
 
-.base-table__empty-cell {
-  @apply py-12 text-center text-slate-400 dark:text-slate-500;
+.base-table--hover :deep(.base-table__row:hover > td.el-table__cell),
+.base-table--hover :deep(.base-table__table .el-table__body tr.hover-row > td.el-table__cell) {
+  @apply bg-slate-50 dark:bg-slate-800/50;
+}
+
+:deep(.base-table__row.is-selected > td.el-table__cell) {
+  background-color: rgba(var(--color-primary), 0.08) !important;
+}
+
+:deep(.base-table__cell .el-button),
+:deep(.base-table__cell .base-badge) {
+  max-width: 100%;
+  min-width: 0;
+}
+
+:deep(.base-table__cell .el-button > span),
+:deep(.base-table__cell .base-badge) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .base-table__empty {
-  @apply flex flex-col items-center justify-center gap-2 text-xs font-bold;
+  @apply flex min-h-36 flex-col items-center justify-center gap-2 py-12 text-center text-xs font-bold text-slate-400 dark:text-slate-500;
 }
 
 .base-table__skeleton {
@@ -294,7 +389,7 @@ const getCellValue = (row: any, key: string) => getByPath(row, key, "");
 
 @media (prefers-reduced-motion: reduce) {
   .base-table,
-  .base-table__row,
+  :deep(.base-table__row),
   .base-table__skeleton {
     animation: none !important;
     transition: none !important;

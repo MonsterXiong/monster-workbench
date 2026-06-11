@@ -23,7 +23,7 @@ const datePresets = [
 
 <template>
   <section class="detail-stack">
-    <PlaygroundDemoSection title="日期范围" subtitle="时间筛选、发布窗口、日志范围和统计报表都可以复用。" icon="CalendarRange">
+    <PlaygroundDemoSection title="日期范围" subtitle="时间筛选、周起始、发布窗口、日志范围和统计报表都可以复用。" icon="CalendarRange">
       <div class="demo-grid">
         <BaseDateRange
           v-model="dateRangeValue"

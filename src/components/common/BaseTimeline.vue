@@ -164,7 +164,7 @@ const getSlotState = (item: TimelineItem, index: number): TimelineSlotState => (
 </script>
 
 <template>
-  <ol
+  <div
     class="base-timeline"
     :class="[
       `base-timeline--${size}`,
@@ -186,7 +186,7 @@ const getSlotState = (item: TimelineItem, index: number): TimelineSlotState => (
     :aria-busy="loading ? 'true' : undefined"
     :aria-disabled="disabled ? 'true' : undefined"
   >
-    <li
+    <div
       v-if="loading"
       class="base-timeline__item base-timeline__item--state"
       aria-live="polite"
@@ -197,8 +197,8 @@ const getSlotState = (item: TimelineItem, index: number): TimelineSlotState => (
       <div class="base-timeline__content">
         <span :id="loadingId" class="base-timeline__state-text">{{ resolvedLoadingText }}</span>
       </div>
-    </li>
-    <li
+    </div>
+    <div
       v-else-if="!hasItems"
       class="base-timeline__item base-timeline__item--state"
     >
@@ -208,9 +208,9 @@ const getSlotState = (item: TimelineItem, index: number): TimelineSlotState => (
       <div class="base-timeline__content">
         <span :id="emptyId" class="base-timeline__state-text">{{ resolvedEmptyText }}</span>
       </div>
-    </li>
-    <template v-else>
-      <li
+    </div>
+    <el-timeline v-else class="base-timeline__list">
+      <el-timeline-item
         v-for="(entry, visualIndex) in renderedEntries"
         :key="entry.item.key"
         class="base-timeline__item"
@@ -222,14 +222,16 @@ const getSlotState = (item: TimelineItem, index: number): TimelineSlotState => (
             'is-selected': isItemSelected(entry.item),
           },
         ]"
+        :hide-timestamp="true"
         :aria-disabled="isItemDisabled(entry.item) ? 'true' : undefined"
         :aria-current="isItemSelected(entry.item) ? 'step' : undefined"
       >
-        <span class="base-timeline__line" aria-hidden="true"></span>
-        <span class="base-timeline__marker" aria-hidden="true">
-          <BaseIcon v-if="marker === 'icon' && entry.item.icon" :name="entry.item.icon" size="12" aria-hidden="true" />
-          <span v-else-if="marker === 'number'" class="base-timeline__number">{{ visualIndex + 1 }}</span>
-        </span>
+        <template #dot>
+          <span class="base-timeline__marker" aria-hidden="true">
+            <BaseIcon v-if="marker === 'icon' && entry.item.icon" :name="entry.item.icon" size="12" aria-hidden="true" />
+            <span v-else-if="marker === 'number'" class="base-timeline__number">{{ visualIndex + 1 }}</span>
+          </span>
+        </template>
         <div class="base-timeline__content">
           <div
             class="base-timeline__main"
@@ -259,22 +261,35 @@ const getSlotState = (item: TimelineItem, index: number): TimelineSlotState => (
             <slot name="actions" v-bind="getSlotState(entry.item, entry.index)"></slot>
           </div>
         </div>
-      </li>
-    </template>
-  </ol>
+      </el-timeline-item>
+    </el-timeline>
+  </div>
 </template>
 
 <style scoped>
 .base-timeline {
-  @apply flex min-w-0 flex-col gap-3;
+  @apply min-w-0;
 }
 
-.base-timeline--dense {
-  @apply gap-2;
+.base-timeline__list {
+  @apply min-w-0 p-0;
 }
 
 .base-timeline__item {
-  @apply relative min-w-0 pl-8;
+  @apply relative min-w-0;
+  padding-bottom: 0.75rem;
+}
+
+.base-timeline--dense .base-timeline__item {
+  padding-bottom: 0.5rem;
+}
+
+.base-timeline__item:last-child {
+  padding-bottom: 0;
+}
+
+.base-timeline__item--state {
+  @apply flex min-w-0 items-start gap-2;
 }
 
 .base-timeline__item.is-disabled {
@@ -301,16 +316,26 @@ const getSlotState = (item: TimelineItem, index: number): TimelineSlotState => (
   color: #fff;
 }
 
-.base-timeline__line {
-  @apply absolute left-3 top-6 h-[calc(100%+0.75rem)] w-px bg-slate-200 dark:bg-slate-800;
+.base-timeline__item :deep(.el-timeline-item__tail) {
+  left: 12px;
+  top: 24px;
+  height: calc(100% - 24px);
+  border-left-width: 1px;
+  @apply border-slate-200 dark:border-slate-800;
 }
 
-.base-timeline__item:last-child .base-timeline__line {
-  @apply hidden;
+.base-timeline__item :deep(.el-timeline-item__wrapper) {
+  top: 0;
+  padding-left: 2rem;
+}
+
+.base-timeline__item :deep(.el-timeline-item__dot) {
+  left: 0;
+  top: 0;
 }
 
 .base-timeline__marker {
-  @apply absolute left-0 top-0 flex h-6 w-6 items-center justify-center rounded-full border-2 bg-white dark:bg-slate-900;
+  @apply flex h-6 w-6 items-center justify-center rounded-full border-2 bg-white dark:bg-slate-900;
   border-color: var(--timeline-color);
   color: var(--timeline-color);
 }
@@ -437,11 +462,17 @@ const getSlotState = (item: TimelineItem, index: number): TimelineSlotState => (
 }
 
 .base-timeline--sm .base-timeline__item {
-  @apply pl-7;
+  padding-bottom: 0.5rem;
 }
 
-.base-timeline--sm .base-timeline__line {
-  @apply left-2.5 top-5;
+.base-timeline--sm .base-timeline__item :deep(.el-timeline-item__tail) {
+  left: 10px;
+  top: 20px;
+  height: calc(100% - 20px);
+}
+
+.base-timeline--sm .base-timeline__item :deep(.el-timeline-item__wrapper) {
+  padding-left: 1.75rem;
 }
 
 .base-timeline--sm .base-timeline__marker {
@@ -472,11 +503,17 @@ const getSlotState = (item: TimelineItem, index: number): TimelineSlotState => (
 }
 
 .base-timeline--lg .base-timeline__item {
-  @apply pl-10;
+  padding-bottom: 1rem;
 }
 
-.base-timeline--lg .base-timeline__line {
-  @apply left-4 top-8;
+.base-timeline--lg .base-timeline__item :deep(.el-timeline-item__tail) {
+  left: 16px;
+  top: 32px;
+  height: calc(100% - 32px);
+}
+
+.base-timeline--lg .base-timeline__item :deep(.el-timeline-item__wrapper) {
+  padding-left: 2.5rem;
 }
 
 .base-timeline--lg .base-timeline__marker {

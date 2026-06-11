@@ -62,6 +62,7 @@ const emit = defineEmits<{
 const groupId = useId();
 const optionRefs = ref<Array<HTMLButtonElement | null>>([]);
 const isReadonly = computed(() => props.disabled || props.readonly || props.loading);
+const usesNativeSegmented = computed(() => !props.detailed && !props.wrap && !props.readonly && !props.loading);
 const enabledOptions = computed(() => filterByFalsyValue(props.options, (option) => option.disabled));
 const focusableValue = computed(() => {
   if (props.disabled || props.loading || !enabledOptions.value.length) return undefined;
@@ -129,6 +130,32 @@ const handleKeydown = (event: KeyboardEvent) => {
   }
 };
 
+const nativeSegmentedProps = {
+  label: "label",
+  value: "value",
+  disabled: "disabled",
+};
+
+const isSegmentedValue = (value: unknown): value is string | number => {
+  return typeof value === "string" || typeof value === "number";
+};
+
+const handleNativeValueUpdate = (value: unknown) => {
+  if (!isSegmentedValue(value)) return;
+  emit("update:modelValue", value);
+};
+
+const handleNativeChange = (value: unknown) => {
+  if (!isSegmentedValue(value)) return;
+  emit("change", value);
+};
+
+const elementSize = computed(() => {
+  if (props.size === "sm") return "small";
+  if (props.size === "lg") return "large";
+  return "default";
+});
+
 const iconSize = computed(() => {
   if (props.size === "sm") return 13;
   if (props.size === "lg") return 16;
@@ -141,7 +168,49 @@ const optionButtonId = (index: number) => `${groupId}-option-${index}`;
 </script>
 
 <template>
+  <el-segmented
+    v-if="usesNativeSegmented"
+    :id="id || undefined"
+    class="base-segmented base-segmented--native"
+    :class="[
+      `base-segmented--${size}`,
+      {
+        'base-segmented--disabled': disabled,
+        'base-segmented--compact': compact,
+        'base-segmented--block': block,
+        'base-segmented--error': error,
+        'base-segmented--success': success
+      }
+    ]"
+    :model-value="currentValue"
+    :options="options"
+    :props="nativeSegmentedProps"
+    :block="block"
+    :size="elementSize"
+    :disabled="disabled"
+    :validate-event="false"
+    :aria-label="ariaLabelledby ? undefined : ariaLabel || undefined"
+    :aria-labelledby="ariaLabelledby || undefined"
+    :aria-describedby="ariaDescribedby || undefined"
+    :aria-disabled="disabled ? 'true' : undefined"
+    :aria-invalid="error ? 'true' : undefined"
+    @update:model-value="handleNativeValueUpdate"
+    @change="handleNativeChange"
+    @keydown="emit('keydown', $event)"
+    @focusin="emit('focus', $event)"
+    @focusout="emit('blur', $event)"
+  >
+    <template #default="{ item }">
+      <span class="base-segmented__native-content">
+        <BaseIcon v-if="item.icon" :name="item.icon" :size="iconSize" aria-hidden="true" />
+        <span class="base-segmented__label">{{ item.label }}</span>
+        <small v-if="item.meta" class="base-segmented__meta">{{ item.meta }}</small>
+      </span>
+    </template>
+  </el-segmented>
+
   <div
+    v-else
     :id="id || undefined"
     class="base-segmented"
     :class="[
@@ -219,6 +288,19 @@ const optionButtonId = (index: number) => `${groupId}-option-${index}`;
   @apply inline-flex w-fit rounded-2xl border border-slate-200 bg-slate-100 p-1 dark:border-slate-800 dark:bg-slate-950;
 }
 
+.base-segmented--native {
+  --el-segmented-color: rgb(100 116 139);
+  --el-segmented-bg-color: rgb(241 245 249);
+  --el-segmented-padding: 2px;
+  --el-segmented-item-selected-color: #ffffff;
+  --el-segmented-item-selected-bg-color: rgb(var(--color-primary));
+  --el-segmented-item-selected-disabled-bg-color: rgb(var(--color-primary) / 0.72);
+  --el-segmented-item-hover-color: rgb(15 23 42);
+  --el-segmented-item-hover-bg-color: rgb(226 232 240);
+  --el-segmented-item-active-bg-color: rgb(203 213 225);
+  --el-segmented-item-disabled-color: rgb(148 163 184);
+}
+
 .base-segmented--block {
   @apply flex w-full;
 }
@@ -240,8 +322,60 @@ const optionButtonId = (index: number) => `${groupId}-option-${index}`;
   @apply bg-slate-50 dark:bg-slate-950;
 }
 
+.base-segmented--native.base-segmented--success {
+  --el-segmented-item-selected-bg-color: rgb(16 185 129);
+  --el-segmented-item-selected-disabled-bg-color: rgb(16 185 129 / 0.72);
+  --el-segmented-item-hover-bg-color: rgb(236 253 245);
+  --el-segmented-item-active-bg-color: rgb(209 250 229);
+}
+
+.base-segmented--native.base-segmented--error {
+  --el-segmented-item-selected-bg-color: rgb(239 68 68);
+  --el-segmented-item-selected-disabled-bg-color: rgb(239 68 68 / 0.72);
+  --el-segmented-item-hover-bg-color: rgb(254 242 242);
+  --el-segmented-item-active-bg-color: rgb(254 226 226);
+}
+
+.base-segmented--native.base-segmented--compact {
+  --el-segmented-padding: 2px;
+}
+
 .base-segmented__item {
   @apply inline-flex shrink-0 items-center justify-center gap-1.5 rounded-xl border border-transparent font-black text-slate-500 transition-colors disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-400;
+}
+
+.base-segmented--native :deep(.el-segmented__group) {
+  align-items: stretch;
+}
+
+.base-segmented--native :deep(.el-segmented__item) {
+  min-width: 0;
+  justify-content: center;
+}
+
+.base-segmented--native :deep(.el-segmented__item-label) {
+  @apply flex min-w-0 items-center justify-center gap-1.5;
+}
+
+.base-segmented--native .base-segmented__native-content {
+  @apply inline-flex min-w-0 items-center justify-center gap-1.5;
+}
+
+.base-segmented--native .base-segmented__label {
+  @apply min-w-0 truncate;
+}
+
+.base-segmented--native .base-segmented__meta {
+  @apply shrink-0 rounded-full px-1.5 py-0.5 text-[9px] font-black leading-none text-inherit;
+  background-color: rgb(255 255 255 / 0.18);
+}
+
+.base-segmented--native :deep(.el-segmented__item.is-selected .base-segmented__meta) {
+  background-color: rgb(255 255 255 / 0.16);
+}
+
+.base-segmented--native :deep(.el-segmented__item:not(.is-disabled):not(.is-selected):hover .base-segmented__meta) {
+  background-color: rgb(148 163 184 / 0.18);
 }
 
 .base-segmented--block .base-segmented__item {

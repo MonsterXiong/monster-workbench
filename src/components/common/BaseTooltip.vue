@@ -1,26 +1,9 @@
 <script setup lang="ts">
-import { computed, getCurrentInstance, nextTick, onBeforeUnmount, onMounted, ref, useSlots, watch } from "vue";
-import {
-  addDomEventListener,
-  clampNumberToBounds,
-  clearAnimationFrameHandle,
-  clearTimeoutHandle,
-  createAnimationFrame,
-  createDomId,
-  createTimeout,
-  formatCssPixelValue,
-  formatRoundedCssPixelValue,
-  getViewportAvailableHeight,
-  getViewportAvailableWidth,
-  isEscapeKey,
-  mergeDomEventCleanups,
-  toNonNegativeNumber,
-  type AnimationFrameHandle,
-  type DomEventCleanup,
-  type TimeoutHandle,
-} from "../../utils";
+import { computed, getCurrentInstance, ref, useSlots, watch } from "vue";
+import { clampNumberToBounds, createDomId, formatCssPixelValue, toNonNegativeNumber } from "../../utils";
 
 type TooltipPlacement = "top" | "bottom" | "left" | "right";
+type TooltipTrigger = "hover" | "focus";
 
 interface Props {
   content?: string;
@@ -55,296 +38,134 @@ const emit = defineEmits<{
 
 const instance = getCurrentInstance();
 const slots = useSlots();
-const rootRef = ref<HTMLElement | null>(null);
-const tooltipRef = ref<HTMLElement | null>(null);
 const localOpen = ref(false);
-const tooltipStyle = ref<Record<string, string>>({});
-const arrowStyle = ref<Record<string, string>>({});
-const resolvedPlacement = ref<TooltipPlacement>(props.placement);
 const tooltipId = createDomId("base-tooltip");
+const tooltipTrigger: TooltipTrigger[] = ["hover", "focus"];
 const isControlled = computed(() => Boolean(instance?.vnode.props && "open" in instance.vnode.props));
 const hasContent = computed(() => Boolean(props.content || slots.content));
 const canRender = computed(() => !props.disabled && hasContent.value);
+const normalizedMaxWidth = computed(() => clampNumberToBounds(props.maxWidth, 120, 520, 224));
+const normalizedOffset = computed(() => Math.max(0, toNonNegativeNumber(props.offset)));
+const normalizedViewportPadding = computed(() => Math.max(4, toNonNegativeNumber(props.viewportPadding)));
+const normalizedShowDelay = computed(() => Math.max(0, toNonNegativeNumber(props.showDelay)));
+const normalizedHideDelay = computed(() => Math.max(0, toNonNegativeNumber(props.hideDelay)));
+const resolvedPlacement = computed(() => (props.placement === "top" ? "top" : props.placement));
+const resolvedPopperClass = computed(() =>
+  ["base-tooltip-popper", props.multiline ? "base-tooltip-popper--multiline" : ""].filter(Boolean).join(" ")
+);
+const popperStyle = computed(() => ({
+  maxWidth: formatCssPixelValue(normalizedMaxWidth.value),
+}));
+const popperOptions = computed(() => ({
+  modifiers: [
+    { name: "preventOverflow", options: { padding: normalizedViewportPadding.value } },
+    { name: "flip", options: { padding: normalizedViewportPadding.value } },
+  ],
+}));
+
 const isOpen = computed(() => (isControlled.value ? Boolean(props.open) : localOpen.value) && canRender.value);
-let showTimer: TimeoutHandle | null = null;
-let hideTimer: TimeoutHandle | null = null;
-let positionFrame: AnimationFrameHandle | null = null;
-let stopGlobalListeners: DomEventCleanup | null = null;
 
-const clearTooltipTimers = () => {
-  clearTimeoutHandle(showTimer);
-  clearTimeoutHandle(hideTimer);
-  showTimer = null;
-  hideTimer = null;
-};
-
-const getViewportPadding = () => toNonNegativeNumber(props.viewportPadding);
-const getOffset = () => toNonNegativeNumber(props.offset);
-
-const setTooltipOpen = (value: boolean) => {
+const setOpen = (value: boolean) => {
   const nextValue = value && canRender.value;
-  if (isOpen.value === nextValue) return;
-
   if (!isControlled.value) {
     localOpen.value = nextValue;
   }
-
   emit("update:open", nextValue);
 };
 
-const scheduleShow = () => {
-  if (!canRender.value) return;
-  clearTimeoutHandle(hideTimer);
-  hideTimer = null;
-  clearTimeoutHandle(showTimer);
-  showTimer = createTimeout(() => setTooltipOpen(true), props.showDelay);
-};
-
-const showImmediately = () => {
-  if (!canRender.value) return;
-  clearTooltipTimers();
-  setTooltipOpen(true);
-};
-
-const scheduleHide = () => {
-  clearTimeoutHandle(showTimer);
-  showTimer = null;
-  clearTimeoutHandle(hideTimer);
-  hideTimer = createTimeout(() => setTooltipOpen(false), props.hideDelay);
-};
-
-const getResolvedPlacement = (rect: DOMRect, tooltipWidth: number, tooltipHeight: number): TooltipPlacement => {
-  const offset = getOffset();
-  const padding = getViewportPadding();
-  const spaceAbove = toNonNegativeNumber(rect.top - padding - offset);
-  const spaceBelow = toNonNegativeNumber(window.innerHeight - rect.bottom - padding - offset);
-  const spaceLeft = toNonNegativeNumber(rect.left - padding - offset);
-  const spaceRight = toNonNegativeNumber(window.innerWidth - rect.right - padding - offset);
-
-  if (props.placement === "top" && spaceAbove < tooltipHeight && spaceBelow > spaceAbove) return "bottom";
-  if (props.placement === "bottom" && spaceBelow < tooltipHeight && spaceAbove > spaceBelow) return "top";
-  if (props.placement === "left" && spaceLeft < tooltipWidth && spaceRight > spaceLeft) return "right";
-  if (props.placement === "right" && spaceRight < tooltipWidth && spaceLeft > spaceRight) return "left";
-
-  return props.placement;
-};
-
-const updateTooltipPosition = () => {
-  const root = rootRef.value;
-  const tooltip = tooltipRef.value;
-  if (!root || !tooltip || !isOpen.value) return;
-
-  const rect = root.getBoundingClientRect();
-  if (rect.width <= 0 || rect.height <= 0) {
-    setTooltipOpen(false);
-    return;
+watch(canRender, (enabled) => {
+  if (!enabled) {
+    setOpen(false);
   }
-
-  const padding = getViewportPadding();
-  const offset = getOffset();
-  const maxWidth = clampNumberToBounds(props.maxWidth, 120, getViewportAvailableWidth(padding, 120), 224);
-  const maxHeight = getViewportAvailableHeight(padding, 48);
-  const tooltipRect = tooltip.getBoundingClientRect();
-  const tooltipWidth = Math.min(tooltipRect.width || maxWidth, maxWidth);
-  const tooltipHeight = Math.min(tooltipRect.height || 32, maxHeight);
-  const placement = getResolvedPlacement(rect, tooltipWidth, tooltipHeight);
-  const triggerCenterX = rect.left + rect.width / 2;
-  const triggerCenterY = rect.top + rect.height / 2;
-  let left = triggerCenterX - tooltipWidth / 2;
-  let top = rect.top - tooltipHeight - offset;
-
-  if (placement === "bottom") {
-    top = rect.bottom + offset;
-  } else if (placement === "left") {
-    left = rect.left - tooltipWidth - offset;
-    top = triggerCenterY - tooltipHeight / 2;
-  } else if (placement === "right") {
-    left = rect.right + offset;
-    top = triggerCenterY - tooltipHeight / 2;
-  }
-
-  const clampedLeft = clampNumberToBounds(left, padding, window.innerWidth - padding - tooltipWidth, padding);
-  const clampedTop = clampNumberToBounds(top, padding, window.innerHeight - padding - tooltipHeight, padding);
-  const arrowOffset =
-    placement === "top" || placement === "bottom"
-      ? clampNumberToBounds(triggerCenterX - clampedLeft, 12, tooltipWidth - 12, tooltipWidth / 2)
-      : clampNumberToBounds(triggerCenterY - clampedTop, 12, tooltipHeight - 12, tooltipHeight / 2);
-
-  resolvedPlacement.value = placement;
-  tooltipStyle.value = {
-    left: formatRoundedCssPixelValue(clampedLeft),
-    top: formatRoundedCssPixelValue(clampedTop),
-    maxWidth: formatCssPixelValue(maxWidth),
-    maxHeight: formatCssPixelValue(maxHeight),
-  };
-  arrowStyle.value =
-    placement === "top" || placement === "bottom"
-      ? { left: formatRoundedCssPixelValue(arrowOffset) }
-      : { top: formatRoundedCssPixelValue(arrowOffset) };
-};
-
-const scheduleTooltipPosition = () => {
-  if (!isOpen.value) return;
-  clearAnimationFrameHandle(positionFrame);
-  positionFrame = createAnimationFrame(() => {
-    positionFrame = null;
-    updateTooltipPosition();
-  });
-};
-
-const handleFocusout = (event: FocusEvent) => {
-  const nextTarget = event.relatedTarget;
-  if (nextTarget instanceof Node && rootRef.value?.contains(nextTarget)) return;
-  scheduleHide();
-};
-
-const handleKeydown = (event: KeyboardEvent) => {
-  if (!isEscapeKey(event) || !isOpen.value) return;
-  event.preventDefault();
-  setTooltipOpen(false);
-};
-
-onMounted(() => {
-  const root = rootRef.value;
-  stopGlobalListeners = mergeDomEventCleanups([
-    addDomEventListener(root, "pointerenter", scheduleShow),
-    addDomEventListener(root, "pointerdown", showImmediately, { capture: true }),
-    addDomEventListener(root, "pointerleave", scheduleHide),
-    addDomEventListener(root, "focusin", scheduleShow),
-    addDomEventListener(root, "focusout", (event) => handleFocusout(event as FocusEvent)),
-    addDomEventListener(root, "keydown", (event) => handleKeydown(event as KeyboardEvent)),
-    addDomEventListener(root, "click", showImmediately, { capture: true }),
-    addDomEventListener(window, "resize", scheduleTooltipPosition),
-    addDomEventListener(window, "scroll", scheduleTooltipPosition, true),
-  ]);
 });
-
-onBeforeUnmount(() => {
-  clearTooltipTimers();
-  clearAnimationFrameHandle(positionFrame);
-  positionFrame = null;
-  stopGlobalListeners?.();
-  stopGlobalListeners = null;
-});
-
-watch(
-  () => [props.disabled, props.content],
-  () => {
-    if (!canRender.value) {
-      clearTooltipTimers();
-      localOpen.value = false;
-      emit("update:open", false);
-      return;
-    }
-
-    scheduleTooltipPosition();
-  },
-);
-
-watch(
-  () => [props.placement, props.maxWidth, props.offset, props.viewportPadding, props.multiline],
-  scheduleTooltipPosition,
-);
-
-watch(isOpen, (open, wasOpen) => {
-  if (open) {
-    emit("show");
-    void nextTick(() => {
-      updateTooltipPosition();
-      void nextTick(updateTooltipPosition);
-    });
-    return;
-  }
-
-  if (wasOpen === undefined) return;
-  emit("hide");
-  clearAnimationFrameHandle(positionFrame);
-  positionFrame = null;
-}, { immediate: true });
 </script>
 
 <template>
-  <span
-    ref="rootRef"
+  <el-tooltip
     class="base-tooltip"
-    :class="{ 'base-tooltip--disabled': disabled }"
-    :aria-describedby="canRender ? tooltipId : undefined"
-    @pointerenter="scheduleShow"
-    @pointerdown.capture="showImmediately"
-    @pointerleave="scheduleHide"
-    @focusin="scheduleShow"
-    @focusout="handleFocusout"
-    @keydown="handleKeydown"
-    @click.capture="showImmediately"
+    :visible="isOpen"
+    :content="content"
+    :placement="resolvedPlacement"
+    :disabled="!canRender"
+    :show-after="normalizedShowDelay"
+    :hide-after="normalizedHideDelay"
+    :offset="normalizedOffset"
+    :popper-class="resolvedPopperClass"
+    :popper-style="popperStyle"
+    :popper-options="popperOptions"
+    :teleported="true"
+    :persistent="false"
+    :show-arrow="true"
+    effect="dark"
+    :trigger="tooltipTrigger"
+    @update:visible="setOpen"
+    @show="emit('show')"
+    @hide="emit('hide')"
   >
-    <slot :tooltip-id="tooltipId" :open="isOpen"></slot>
+    <span class="base-tooltip__trigger" :aria-describedby="canRender ? tooltipId : undefined">
+      <slot :tooltip-id="tooltipId" :open="isOpen"></slot>
+    </span>
 
-    <Teleport to="body">
-      <span
-        v-if="canRender"
-        v-show="isOpen"
-        :id="tooltipId"
-        ref="tooltipRef"
-        class="base-tooltip__floating"
-        :class="{ 'base-tooltip__floating--multiline': multiline }"
-        :style="tooltipStyle"
-        :data-placement="resolvedPlacement"
-        role="tooltip"
-      >
-        <span class="base-tooltip__content">
-          <slot name="content">{{ content }}</slot>
-        </span>
-        <span class="base-tooltip__arrow" :style="arrowStyle" aria-hidden="true"></span>
+    <template #content>
+      <span :id="tooltipId" class="base-tooltip__content">
+        <slot name="content">{{ content }}</slot>
       </span>
-    </Teleport>
-  </span>
+    </template>
+  </el-tooltip>
 </template>
 
 <style scoped>
-.base-tooltip {
+.base-tooltip,
+.base-tooltip__trigger {
   @apply inline-flex min-w-0 max-w-full align-middle;
 }
 
-.base-tooltip--disabled {
-  @apply cursor-default;
-}
-
-.base-tooltip__floating {
-  @apply pointer-events-none fixed z-[1300] overflow-hidden rounded-lg border border-slate-800 bg-slate-900 px-2.5 py-1.5 text-[11px] font-bold text-white dark:border-slate-100 dark:bg-slate-100 dark:text-slate-900;
+:global(.base-tooltip-popper.el-popper) {
+  --el-color-primary: rgb(var(--color-primary));
+  --el-popper-border-radius: 8px;
+  border: 1px solid #1e293b;
+  border-radius: 8px;
+  background: #0f172a;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.35;
   box-shadow: 0 14px 30px rgba(15, 23, 42, 0.22);
 }
 
-.base-tooltip__content {
-  @apply block min-w-0 overflow-hidden text-ellipsis whitespace-nowrap;
+:global(.base-tooltip-popper .el-popper__arrow::before) {
+  border-color: #1e293b;
+  background: #0f172a;
 }
 
-.base-tooltip__floating--multiline .base-tooltip__content {
-  @apply whitespace-normal leading-5;
+:global(.base-tooltip-popper .base-tooltip__content) {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:global(.base-tooltip-popper--multiline .base-tooltip__content) {
+  overflow: visible;
   overflow-wrap: anywhere;
+  text-overflow: clip;
+  white-space: normal;
 }
 
-.base-tooltip__arrow {
-  @apply absolute h-2 w-2 rotate-45 bg-slate-900 dark:bg-slate-100;
+:global(.dark .base-tooltip-popper.el-popper) {
+  border-color: #e2e8f0;
+  background: #f8fafc;
+  color: #0f172a;
 }
 
-.base-tooltip__floating[data-placement="top"] .base-tooltip__arrow {
-  @apply -bottom-1 -translate-x-1/2;
-}
-
-.base-tooltip__floating[data-placement="bottom"] .base-tooltip__arrow {
-  @apply -top-1 -translate-x-1/2;
-}
-
-.base-tooltip__floating[data-placement="left"] .base-tooltip__arrow {
-  @apply -right-1 -translate-y-1/2;
-}
-
-.base-tooltip__floating[data-placement="right"] .base-tooltip__arrow {
-  @apply -left-1 -translate-y-1/2;
+:global(.dark .base-tooltip-popper .el-popper__arrow::before) {
+  border-color: #e2e8f0;
+  background: #f8fafc;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .base-tooltip__floating {
+  :global(.base-tooltip-popper.el-popper) {
     transition: none !important;
   }
 }

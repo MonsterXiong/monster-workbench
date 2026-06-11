@@ -1,22 +1,12 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, useId, watch } from "vue";
-import type { ComponentPublicInstance } from "vue";
-import {
-  filterByFalsyValue,
-  findIndexByValue,
-  focusElementPreventScroll,
-  getBoundaryItem,
-  getKeyboardBoundaryPosition,
-  getKeyboardNavigationDirection,
-  getNextCircularIndex,
-  hasItem,
-  sanitizeDomIdSegment,
-  toggleSelectionKeyByMode,
-} from "../../utils";
+import { computed, ref, watch } from "vue";
+import { hasItem } from "../../utils";
 
 type AccordionSize = "sm" | "md" | "lg";
 type AccordionSurface = "card" | "muted" | "plain";
 type BadgeType = "primary" | "success" | "warning" | "danger" | "neutral";
+type CollapseName = string | number;
+type CollapseModelValue = CollapseName | CollapseName[];
 
 export interface AccordionItem {
   key: string;
@@ -72,18 +62,55 @@ defineSlots<{
   [name: string]: ((props: { item: AccordionItem; expanded: boolean }) => any) | undefined;
 }>();
 
-const accordionId = useId();
 const internalValue = ref<string[]>([...props.defaultValue]);
-const triggerRefs = ref(new Map<string, HTMLButtonElement>());
+const pendingToggleKey = ref("");
 
 const activeKeys = computed(() => props.modelValue ?? internalValue.value);
-const enabledItems = computed(() => filterByFalsyValue(props.items, isItemDisabled));
-
 const isExpanded = (key: string) => hasItem(activeKeys.value, key);
 const isItemDisabled = (item: AccordionItem) => Boolean(props.disabled || item.disabled);
-const stableKey = (key: string) => sanitizeDomIdSegment(key);
-const panelId = (key: string) => `${accordionId}-panel-${stableKey(key)}`;
-const triggerId = (key: string) => `${accordionId}-trigger-${stableKey(key)}`;
+
+const normalizeCollapseValue = (value: CollapseModelValue): string[] => {
+  const values = Array.isArray(value) ? value : [value];
+  return values.map((item) => String(item)).filter(Boolean);
+};
+
+const getChangedKey = (previousValue: readonly string[], nextValue: readonly string[]) => {
+  return nextValue.find((key) => !hasItem(previousValue, key)) || previousValue.find((key) => !hasItem(nextValue, key)) || "";
+};
+
+const isSameValue = (previousValue: readonly string[], nextValue: readonly string[]) => {
+  return previousValue.length === nextValue.length && previousValue.every((key, index) => key === nextValue[index]);
+};
+
+const collapseValue = computed<CollapseModelValue>({
+  get: () => (props.multiple ? activeKeys.value : activeKeys.value[0] || ""),
+  set: (value) => {
+    const nextValue = props.multiple ? normalizeCollapseValue(value) : normalizeCollapseValue(value).slice(0, 1);
+    if (isSameValue(activeKeys.value, nextValue)) return;
+
+    const changedKey = pendingToggleKey.value || getChangedKey(activeKeys.value, nextValue);
+    pendingToggleKey.value = "";
+
+    if (props.modelValue === undefined) {
+      internalValue.value = nextValue;
+    }
+
+    emit("update:modelValue", nextValue);
+    if (changedKey) {
+      emit("toggle", { key: changedKey, expanded: hasItem(nextValue, changedKey) });
+    }
+  },
+});
+
+const handleBeforeCollapse = (name: CollapseName) => {
+  const key = String(name);
+  const item = props.items.find((current) => current.key === key);
+  pendingToggleKey.value = key;
+
+  if (!item || isItemDisabled(item)) return false;
+  if (!props.allowCollapse && isExpanded(key)) return false;
+  return true;
+};
 
 watch(
   () => props.defaultValue,
@@ -91,74 +118,13 @@ watch(
     if (props.modelValue === undefined) {
       internalValue.value = [...value];
     }
-  },
+  }
 );
-
-const setTriggerRef = (key: string, element: Element | ComponentPublicInstance | null) => {
-  if (!element) {
-    triggerRefs.value.delete(key);
-    return;
-  }
-
-  if (element instanceof HTMLButtonElement) {
-    triggerRefs.value.set(key, element);
-  }
-};
-
-const focusTrigger = (key: string) => {
-  void nextTick(() => {
-    focusElementPreventScroll(triggerRefs.value.get(key));
-  });
-};
-
-const commitValue = (nextValue: string[], payload: { key: string; expanded: boolean }) => {
-  if (props.modelValue === undefined) {
-    internalValue.value = nextValue;
-  }
-
-  emit("update:modelValue", nextValue);
-  emit("toggle", payload);
-};
-
-const toggleItem = (item: AccordionItem) => {
-  if (isItemDisabled(item)) return;
-
-  const expanded = isExpanded(item.key);
-  if (expanded && !props.allowCollapse) return;
-
-  const nextValue = toggleSelectionKeyByMode(activeKeys.value, item.key, { multiple: props.multiple });
-
-  commitValue(nextValue, { key: item.key, expanded: !expanded });
-};
-
-const moveFocus = (item: AccordionItem, direction: 1 | -1) => {
-  if (!enabledItems.value.length) return;
-  const currentIndex = findIndexByValue(enabledItems.value, (current) => current.key, item.key);
-  const nextIndex = getNextCircularIndex(enabledItems.value.length, currentIndex, direction);
-  focusTrigger(enabledItems.value[nextIndex].key);
-};
-
-const handleTriggerKeydown = (event: KeyboardEvent, item: AccordionItem) => {
-  if (isItemDisabled(item)) return;
-
-  const direction = getKeyboardNavigationDirection(event);
-  if (direction) {
-    event.preventDefault();
-    moveFocus(item, direction);
-    return;
-  }
-
-  const boundaryPosition = getKeyboardBoundaryPosition(event);
-  if (boundaryPosition) {
-    event.preventDefault();
-    const targetItem = getBoundaryItem(enabledItems.value, boundaryPosition);
-    if (targetItem) focusTrigger(targetItem.key);
-  }
-};
 </script>
 
 <template>
-  <div
+  <el-collapse
+    v-model="collapseValue"
     class="base-accordion"
     :class="[
       `base-accordion--${size}`,
@@ -168,62 +134,49 @@ const handleTriggerKeydown = (event: KeyboardEvent, item: AccordionItem) => {
         'base-accordion--bordered': bordered,
         'base-accordion--divided': divided,
         'base-accordion--keep-mounted': keepMounted,
+        'base-accordion--hide-chevron': !showChevron,
         'is-disabled': disabled,
       },
     ]"
+    :accordion="!multiple"
+    :before-collapse="handleBeforeCollapse"
+    expand-icon-position="right"
     :aria-label="ariaLabel || undefined"
     :aria-disabled="disabled ? 'true' : undefined"
   >
-    <section
+    <el-collapse-item
       v-for="item in items"
       :key="item.key"
       class="base-accordion__item"
       :class="{ 'is-disabled': isItemDisabled(item), 'is-expanded': isExpanded(item.key) }"
+      :name="item.key"
+      :disabled="isItemDisabled(item)"
     >
-      <button
-        :ref="(element) => setTriggerRef(item.key, element)"
-        type="button"
-        class="base-accordion__trigger"
-        :id="triggerId(item.key)"
-        :disabled="isItemDisabled(item)"
-        :aria-expanded="isExpanded(item.key)"
-        :aria-controls="panelId(item.key)"
-        @click="toggleItem(item)"
-        @keydown="handleTriggerKeydown($event, item)"
-      >
-        <div class="base-accordion__meta">
-          <span v-if="item.icon" class="base-accordion__icon" aria-hidden="true">
-            <BaseIcon :name="item.icon" size="16" aria-hidden="true" />
-          </span>
-          <div class="base-accordion__text">
-            <div class="base-accordion__title-row">
-              <strong>{{ item.title }}</strong>
-              <BaseBadge v-if="item.badge" :type="item.badgeType || 'neutral'" size="xs">{{ item.badge }}</BaseBadge>
+      <template #title>
+        <div class="base-accordion__trigger">
+          <div class="base-accordion__meta">
+            <span v-if="item.icon" class="base-accordion__icon" aria-hidden="true">
+              <BaseIcon :name="item.icon" size="16" aria-hidden="true" />
+            </span>
+            <div class="base-accordion__text">
+              <div class="base-accordion__title-row">
+                <strong>{{ item.title }}</strong>
+                <BaseBadge v-if="item.badge" :type="item.badgeType || 'neutral'" size="xs">{{ item.badge }}</BaseBadge>
+              </div>
+              <small v-if="item.description">{{ item.description }}</small>
             </div>
-            <small v-if="item.description">{{ item.description }}</small>
+          </div>
+          <div class="base-accordion__right">
+            <span v-if="item.meta" class="base-accordion__item-meta">{{ item.meta }}</span>
+            <slot name="actions" :item="item" :expanded="isExpanded(item.key)"></slot>
           </div>
         </div>
-        <div class="base-accordion__right">
-          <span v-if="item.meta" class="base-accordion__item-meta">{{ item.meta }}</span>
-          <slot name="actions" :item="item" :expanded="isExpanded(item.key)"></slot>
-          <BaseIcon
-            v-if="showChevron"
-            name="ChevronDown"
-            size="16"
-            class="base-accordion__chevron"
-            :class="{ 'is-expanded': isExpanded(item.key) }"
-            aria-hidden="true"
-          />
-        </div>
-      </button>
+      </template>
 
       <div
         v-if="keepMounted || isExpanded(item.key)"
         v-show="isExpanded(item.key)"
-        :id="panelId(item.key)"
         class="base-accordion__content"
-        role="region"
-        :aria-labelledby="triggerId(item.key)"
       >
         <slot :name="item.key" :item="item" :expanded="isExpanded(item.key)">
           <slot :item="item" :expanded="isExpanded(item.key)">
@@ -231,13 +184,14 @@ const handleTriggerKeydown = (event: KeyboardEvent, item: AccordionItem) => {
           </slot>
         </slot>
       </div>
-    </section>
-  </div>
+    </el-collapse-item>
+  </el-collapse>
 </template>
 
 <style scoped>
 .base-accordion {
   @apply overflow-hidden rounded-2xl bg-white shadow-sm dark:bg-slate-900;
+  border: 0;
 }
 
 .base-accordion.is-disabled {
@@ -264,40 +218,66 @@ const handleTriggerKeydown = (event: KeyboardEvent, item: AccordionItem) => {
   @apply rounded-xl;
 }
 
-.base-accordion--divided .base-accordion__item + .base-accordion__item {
+.base-accordion__item {
+  @apply min-w-0;
+}
+
+.base-accordion :deep(.el-collapse-item__wrap),
+.base-accordion :deep(.el-collapse-item__header) {
+  border: 0;
+}
+
+.base-accordion--divided :deep(.el-collapse-item + .el-collapse-item) {
   @apply border-t border-slate-100 dark:border-slate-800;
 }
 
-.base-accordion__item.is-disabled {
-  @apply opacity-55;
+.base-accordion :deep(.el-collapse-item__header) {
+  @apply h-auto min-w-0 bg-transparent px-0 py-0 text-left leading-normal transition hover:bg-slate-50 dark:hover:bg-slate-950;
 }
 
-.base-accordion__item.is-expanded .base-accordion__trigger {
+.base-accordion :deep(.el-collapse-item__header.is-active) {
   @apply bg-slate-50 dark:bg-slate-950;
 }
 
-.base-accordion--muted .base-accordion__item.is-expanded .base-accordion__trigger {
+.base-accordion--muted :deep(.el-collapse-item__header:hover),
+.base-accordion--muted :deep(.el-collapse-item__header.is-active) {
   @apply bg-white dark:bg-slate-900;
 }
 
-.base-accordion--plain .base-accordion__item.is-expanded .base-accordion__trigger {
-  @apply bg-slate-50 dark:bg-slate-900;
-}
-
-.base-accordion__trigger {
-  @apply flex w-full min-w-0 items-center justify-between gap-3 px-4 py-3 text-left transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:hover:bg-transparent dark:hover:bg-slate-950;
-}
-
-.base-accordion--muted .base-accordion__trigger:hover {
-  @apply bg-white dark:bg-slate-900;
-}
-
-.base-accordion--plain .base-accordion__trigger {
+.base-accordion--plain :deep(.el-collapse-item__header) {
   @apply rounded-xl;
 }
 
-.base-accordion__trigger:focus-visible {
+.base-accordion--plain :deep(.el-collapse-item__header.is-active) {
+  @apply bg-slate-50 dark:bg-slate-900;
+}
+
+.base-accordion :deep(.el-collapse-item__header:focus-visible) {
   @apply outline-none ring-2 ring-primary ring-opacity-20;
+}
+
+.base-accordion :deep(.el-collapse-item__arrow) {
+  @apply mr-4 shrink-0 text-slate-400 transition-transform duration-150 dark:text-slate-500;
+}
+
+.base-accordion :deep(.el-collapse-item__arrow.is-active) {
+  @apply text-primary;
+}
+
+.base-accordion--hide-chevron :deep(.el-collapse-item__arrow) {
+  @apply hidden;
+}
+
+.base-accordion :deep(.el-collapse-item__content) {
+  @apply p-0;
+}
+
+.base-accordion :deep(.el-collapse-item.is-disabled .el-collapse-item__header) {
+  @apply cursor-not-allowed opacity-55;
+}
+
+.base-accordion__trigger {
+  @apply flex w-full min-w-0 items-center justify-between gap-3 px-4 py-3;
 }
 
 .base-accordion--compact .base-accordion__trigger {
@@ -339,14 +319,6 @@ const handleTriggerKeydown = (event: KeyboardEvent, item: AccordionItem) => {
 
 .base-accordion__item-meta {
   @apply hidden text-[10px] font-black text-slate-400 dark:text-slate-500 sm:inline;
-}
-
-.base-accordion__chevron {
-  @apply shrink-0 text-slate-400 transition-transform duration-150;
-}
-
-.base-accordion__chevron.is-expanded {
-  @apply rotate-180 text-primary;
 }
 
 .base-accordion__content {
@@ -402,8 +374,8 @@ const handleTriggerKeydown = (event: KeyboardEvent, item: AccordionItem) => {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .base-accordion__trigger,
-  .base-accordion__chevron {
+  .base-accordion :deep(.el-collapse-item__header),
+  .base-accordion :deep(.el-collapse-item__arrow) {
     transition: none !important;
   }
 }

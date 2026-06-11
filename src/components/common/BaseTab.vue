@@ -1,15 +1,13 @@
 <script setup lang="ts">
-import { computed, nextTick, ref } from "vue";
-import type { ComponentPublicInstance } from "vue";
-import { filterByFalsyValue, findByValue, findNextCircularItem, firstItem, focusElementPreventScroll, getBoundaryItem, getKeyboardBoundaryPosition, getKeyboardNavigationDirection } from "../../utils";
+import { computed } from "vue";
 import BaseIcon from "./BaseIcon.vue";
 
 interface TabItem {
   key: string | number;
   title: string;
-  icon?: any; // 可以是字符串(图标名)或 Vue 组件
+  icon?: any;
   badge?: string | number;
-  badgeColor?: string; // 如 bg-red-500 text-white 等标准的 Tailwind 类名
+  badgeColor?: string;
   disabled?: boolean;
   ariaLabel?: string;
 }
@@ -18,6 +16,14 @@ type TabVariant = "pills" | "underline";
 type TabSize = "sm" | "md" | "lg";
 type TabSurface = "default" | "muted" | "plain";
 type TabAlign = "start" | "center" | "end" | "between";
+
+interface ElementPaneLike {
+  paneName?: { value?: string | number } | string | number;
+  props?: {
+    name?: string | number;
+    disabled?: boolean;
+  };
+}
 
 interface Props {
   modelValue: string | number;
@@ -55,152 +61,173 @@ defineSlots<{
   badge?: (props: { tab: TabItem; active: boolean; disabled: boolean }) => any;
 }>();
 
-const tabButtonRefs = ref(new Map<TabItem["key"], HTMLButtonElement>());
+const rootClasses = computed(() => [
+  `base-tab--${props.variant}`,
+  `base-tab--${props.size}`,
+  `base-tab--surface-${props.surface}`,
+  `base-tab--align-${props.align}`,
+  {
+    "base-tab--full": props.fullWidth || props.variant === "underline",
+    "base-tab--equal": props.equal,
+    "base-tab--wrap": props.wrap,
+    "is-disabled": props.disabled,
+  },
+]);
 
-const enabledTabs = computed(() => filterByFalsyValue(props.tabs, (tab) => tab.disabled));
+const resolvePaneKey = (pane: ElementPaneLike) => {
+  const paneName = pane.paneName;
+  if (paneName && typeof paneName === "object") {
+    return paneName.value ?? pane.props?.name;
+  }
 
-const focusableKey = computed(() => {
-  if (props.disabled) return undefined;
-  return findByValue(enabledTabs.value, (tab) => tab.key, props.modelValue)?.key ?? firstItem(enabledTabs.value)?.key;
-});
+  return paneName ?? pane.props?.name;
+};
 
 const isTabDisabled = (tab: TabItem) => Boolean(props.disabled || tab.disabled);
 
 const isTabActive = (tab: TabItem) => tab.key === props.modelValue;
 
-const getTabIndex = (tab: TabItem) => {
-  if (isTabDisabled(tab)) return -1;
-  return tab.key === focusableKey.value ? 0 : -1;
-};
+const findTabByKey = (key: string | number) => props.tabs.find((tab) => tab.key === key);
 
-const setTabButtonRef = (key: TabItem["key"], element: Element | ComponentPublicInstance | null) => {
-  if (!element) {
-    tabButtonRefs.value.delete(key);
-    return;
-  }
-
-  if (element instanceof HTMLButtonElement) {
-    tabButtonRefs.value.set(key, element);
-  }
-};
-
-const focusTab = (key: TabItem["key"]) => {
-  void nextTick(() => {
-    focusElementPreventScroll(tabButtonRefs.value.get(key));
-  });
-};
-
-const selectTab = (tab: TabItem, options: { focus?: boolean } = {}) => {
-  if (isTabDisabled(tab)) return;
-  emit("update:modelValue", tab.key);
-  emit("select", tab);
-
-  if (options.focus) {
-    focusTab(tab.key);
-  }
-};
-
-const moveTab = (direction: 1 | -1) => {
-  if (!enabledTabs.value.length) return;
-  const nextTab = findNextCircularItem(enabledTabs.value, (tab) => tab.key === props.modelValue, direction);
-  if (nextTab) selectTab(nextTab, { focus: true });
-};
-
-const handleKeydown = (event: KeyboardEvent) => {
+const handleValueUpdate = (key: string | number) => {
   if (props.disabled) return;
+  emit("update:modelValue", key);
+};
 
-  const direction = getKeyboardNavigationDirection(event);
-  if (direction) {
-    event.preventDefault();
-    moveTab(direction);
-    return;
-  }
+const handleTabChange = (key: string | number) => {
+  const tab = findTabByKey(key);
+  if (!tab || isTabDisabled(tab)) return;
+  emit("select", tab);
+};
 
-  const boundaryPosition = getKeyboardBoundaryPosition(event);
-  if (boundaryPosition) {
-    event.preventDefault();
-    const targetTab = getBoundaryItem(enabledTabs.value, boundaryPosition);
-    if (targetTab) selectTab(targetTab, { focus: true });
-  }
+const handleTabClick = (pane: ElementPaneLike) => {
+  const key = resolvePaneKey(pane);
+  if (key === undefined) return;
+
+  const tab = findTabByKey(key);
+  if (!tab || isTabDisabled(tab) || key !== props.modelValue) return;
+  emit("select", tab);
 };
 </script>
 
 <template>
-  <div
+  <el-tabs
+    :model-value="modelValue"
+    :stretch="equal"
+    :tabindex="disabled ? -1 : 0"
     class="base-tab"
-    :class="[
-      `base-tab--${variant}`,
-      `base-tab--${size}`,
-      `base-tab--surface-${surface}`,
-      `base-tab--align-${align}`,
-      {
-        'base-tab--full': fullWidth || variant === 'underline',
-        'base-tab--equal': equal,
-        'base-tab--wrap': wrap,
-        'is-disabled': disabled,
-      },
-    ]"
-    role="tablist"
+    :class="rootClasses"
     :aria-label="ariaLabel || '标签页'"
     :aria-disabled="disabled ? 'true' : undefined"
-    @keydown="handleKeydown"
+    @update:model-value="handleValueUpdate"
+    @tab-change="handleTabChange"
+    @tab-click="handleTabClick"
   >
-    <button
+    <el-tab-pane
       v-for="(tab, index) in tabs"
       :key="tab.key"
-      :ref="(element) => setTabButtonRef(tab.key, element)"
-      type="button"
-      role="tab"
-      class="base-tab__button"
-      :class="{
-        'is-active': isTabActive(tab),
-        'is-disabled': isTabDisabled(tab),
-      }"
+      :name="tab.key"
       :disabled="isTabDisabled(tab)"
-      :aria-selected="isTabActive(tab)"
-      :aria-label="tab.ariaLabel"
-      :tabindex="getTabIndex(tab)"
-      @click="selectTab(tab)"
+      lazy
     >
-      <slot name="tab" :tab="tab" :active="isTabActive(tab)" :disabled="isTabDisabled(tab)" :index="index">
-        <span v-if="tab.icon" class="base-tab__icon" aria-hidden="true">
-          <BaseIcon v-if="typeof tab.icon === 'string'" :name="tab.icon" size="15" aria-hidden="true" />
-          <component :is="tab.icon" v-else class="h-3.5 w-3.5" aria-hidden="true" />
+      <template #label>
+        <span class="base-tab__button-content" :aria-label="tab.ariaLabel || undefined">
+          <slot name="tab" :tab="tab" :active="isTabActive(tab)" :disabled="isTabDisabled(tab)" :index="index">
+            <span v-if="tab.icon" class="base-tab__icon" aria-hidden="true">
+              <BaseIcon v-if="typeof tab.icon === 'string'" :name="tab.icon" size="15" aria-hidden="true" />
+              <component :is="tab.icon" v-else class="h-3.5 w-3.5" aria-hidden="true" />
+            </span>
+
+            <span class="base-tab__title">{{ tab.title }}</span>
+
+            <slot name="badge" :tab="tab" :active="isTabActive(tab)" :disabled="isTabDisabled(tab)">
+              <span
+                v-if="tab.badge !== undefined && tab.badge !== ''"
+                class="base-tab__badge"
+                :class="tab.badgeColor || 'base-tab__badge--default'"
+              >
+                {{ tab.badge }}
+              </span>
+            </slot>
+          </slot>
         </span>
-
-        <span class="base-tab__title">{{ tab.title }}</span>
-
-        <slot name="badge" :tab="tab" :active="isTabActive(tab)" :disabled="isTabDisabled(tab)">
-          <span
-            v-if="tab.badge !== undefined && tab.badge !== ''"
-            class="base-tab__badge"
-            :class="tab.badgeColor || 'base-tab__badge--default'"
-          >
-            {{ tab.badge }}
-          </span>
-        </slot>
-      </slot>
-    </button>
-  </div>
+      </template>
+    </el-tab-pane>
+  </el-tabs>
 </template>
 
 <style scoped>
 .base-tab {
-  @apply flex min-w-0 max-w-full select-none items-center overflow-x-auto overflow-y-hidden;
-  -ms-overflow-style: none;
-  scrollbar-width: none;
+  @apply min-w-0 max-w-full select-none;
+  --base-tab-gap: 0.25rem;
 }
 
-.base-tab::-webkit-scrollbar {
+.base-tab :deep(.el-tabs__content) {
   display: none;
 }
 
+.base-tab :deep(.el-tabs__header) {
+  @apply m-0 min-w-0 max-w-full;
+}
+
+.base-tab :deep(.el-tabs__nav-wrap) {
+  @apply min-w-0 max-w-full;
+}
+
+.base-tab :deep(.el-tabs__nav-wrap::after) {
+  display: none;
+}
+
+.base-tab :deep(.el-tabs__nav-scroll) {
+  @apply min-w-0 max-w-full;
+}
+
+.base-tab :deep(.el-tabs__nav) {
+  @apply min-w-0 items-center;
+  gap: var(--base-tab-gap);
+  width: max-content;
+}
+
+.base-tab :deep(.el-tabs__active-bar) {
+  display: none;
+}
+
+.base-tab :deep(.el-tabs__item) {
+  @apply relative inline-flex min-w-0 shrink-0 cursor-pointer items-center justify-center whitespace-nowrap border-0 font-bold text-slate-500 transition-all duration-200 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200;
+  padding: 0;
+}
+
+.base-tab :deep(.el-tabs__item:focus-visible) {
+  @apply outline-none ring-2 ring-primary ring-opacity-20;
+  box-shadow: none;
+}
+
+.base-tab :deep(.el-tabs__item.is-disabled) {
+  @apply cursor-not-allowed opacity-45;
+}
+
+.base-tab :deep(.el-tabs__nav-prev),
+.base-tab :deep(.el-tabs__nav-next) {
+  @apply top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-lg bg-white/90 text-slate-500 shadow-sm ring-1 ring-slate-200 transition hover:text-primary dark:bg-slate-900/90 dark:text-slate-400 dark:ring-slate-700;
+  line-height: 1;
+}
+
+.base-tab :deep(.el-tabs__nav-prev.is-disabled),
+.base-tab :deep(.el-tabs__nav-next.is-disabled) {
+  @apply opacity-35;
+}
+
+.base-tab :deep(.el-tabs__nav-wrap.is-scrollable) {
+  @apply px-8;
+}
+
 .base-tab--pills {
-  @apply w-fit gap-1 rounded-2xl border p-1;
+  @apply w-fit rounded-2xl border p-1;
 }
 
 .base-tab--underline {
-  @apply w-full gap-5 border-b;
+  @apply w-full border-b;
+  --base-tab-gap: 1.25rem;
 }
 
 .base-tab--surface-default.base-tab--pills {
@@ -228,88 +255,105 @@ const handleKeydown = (event: KeyboardEvent) => {
   @apply w-full;
 }
 
-.base-tab--align-start {
+.base-tab--full :deep(.el-tabs__header),
+.base-tab--full :deep(.el-tabs__nav-wrap),
+.base-tab--full :deep(.el-tabs__nav-scroll) {
+  @apply w-full;
+}
+
+.base-tab--full :deep(.el-tabs__nav) {
+  min-width: 100%;
+}
+
+.base-tab--equal :deep(.el-tabs__nav) {
+  width: 100%;
+  max-width: 100%;
+}
+
+.base-tab--align-start :deep(.el-tabs__nav) {
   @apply justify-start;
 }
 
-.base-tab--align-center {
+.base-tab--align-center :deep(.el-tabs__nav) {
   @apply justify-center;
 }
 
-.base-tab--align-end {
+.base-tab--align-end :deep(.el-tabs__nav) {
   @apply justify-end;
 }
 
-.base-tab--align-between {
+.base-tab--align-between :deep(.el-tabs__nav) {
   @apply justify-between;
 }
 
-.base-tab--wrap {
-  @apply flex-wrap overflow-visible;
+.base-tab--wrap :deep(.el-tabs__nav-wrap),
+.base-tab--wrap :deep(.el-tabs__nav-scroll) {
+  overflow: visible;
+}
+
+.base-tab--wrap :deep(.el-tabs__nav) {
+  @apply flex-wrap;
+  white-space: normal;
+}
+
+.base-tab--equal :deep(.el-tabs__item) {
+  @apply min-w-0 flex-1 basis-0;
 }
 
 .base-tab.is-disabled {
   @apply opacity-70;
 }
 
-.base-tab__button {
-  @apply relative inline-flex min-w-0 shrink-0 cursor-pointer items-center justify-center gap-2 whitespace-nowrap font-bold text-slate-500 transition-all duration-200 hover:text-slate-800 disabled:cursor-not-allowed disabled:opacity-45 dark:text-slate-400 dark:hover:text-slate-200;
-}
-
-.base-tab__button:focus-visible {
-  @apply outline-none ring-2 ring-primary ring-opacity-20;
-}
-
-.base-tab--equal .base-tab__button {
-  @apply min-w-0 flex-1 basis-0;
-}
-
-.base-tab--sm .base-tab__button {
+.base-tab--sm :deep(.el-tabs__item) {
   @apply text-[11px];
 }
 
-.base-tab--md .base-tab__button {
+.base-tab--md :deep(.el-tabs__item) {
   @apply text-xs;
 }
 
-.base-tab--lg .base-tab__button {
+.base-tab--lg :deep(.el-tabs__item) {
   @apply text-sm;
 }
 
-.base-tab--pills.base-tab--sm .base-tab__button {
+.base-tab--pills.base-tab--sm :deep(.el-tabs__item) {
   @apply rounded-xl px-2.5 py-1.5;
 }
 
-.base-tab--pills.base-tab--md .base-tab__button {
+.base-tab--pills.base-tab--md :deep(.el-tabs__item) {
   @apply rounded-xl px-4 py-2;
 }
 
-.base-tab--pills.base-tab--lg .base-tab__button {
+.base-tab--pills.base-tab--lg :deep(.el-tabs__item) {
   @apply rounded-2xl px-5 py-2.5;
 }
 
-.base-tab--pills .base-tab__button.is-active {
+.base-tab--pills :deep(.el-tabs__item.is-active) {
   @apply border border-slate-200 bg-white text-slate-800 shadow-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100;
 }
 
-.base-tab--pills .base-tab__button:not(.is-active):not(.is-disabled) {
+.base-tab--pills :deep(.el-tabs__item:not(.is-active):not(.is-disabled)) {
   @apply hover:bg-white hover:shadow-sm dark:hover:bg-slate-800;
 }
 
-.base-tab--underline .base-tab__button {
+.base-tab--underline :deep(.el-tabs__item) {
   @apply -mb-px border-b-2 border-transparent px-1 py-3;
 }
 
-.base-tab--underline.base-tab--sm .base-tab__button {
+.base-tab--underline.base-tab--sm :deep(.el-tabs__item) {
   @apply py-2 text-[11px];
 }
 
-.base-tab--underline.base-tab--lg .base-tab__button {
+.base-tab--underline.base-tab--lg :deep(.el-tabs__item) {
   @apply py-3.5 text-sm;
 }
 
-.base-tab--underline .base-tab__button.is-active {
+.base-tab--underline :deep(.el-tabs__item.is-active) {
   @apply border-primary text-primary;
+}
+
+.base-tab__button-content {
+  @apply flex min-w-0 items-center justify-center gap-2;
 }
 
 .base-tab__icon {
@@ -329,7 +373,10 @@ const handleKeydown = (event: KeyboardEvent) => {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .base-tab__button {
+  .base-tab :deep(.el-tabs__nav),
+  .base-tab :deep(.el-tabs__item),
+  .base-tab :deep(.el-tabs__nav-prev),
+  .base-tab :deep(.el-tabs__nav-next) {
     transition: none !important;
   }
 }

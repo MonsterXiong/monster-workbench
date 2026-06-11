@@ -23,6 +23,7 @@ interface Props {
   disabled?: boolean;
   readonly?: boolean;
   loading?: boolean;
+  loadingText?: string;
   error?: boolean;
   success?: boolean;
   placeholder?: string;
@@ -48,6 +49,7 @@ const props = withDefaults(defineProps<Props>(), {
   disabled: false,
   readonly: false,
   loading: false,
+  loadingText: "",
   error: false,
   success: false,
   placeholder: "",
@@ -78,6 +80,7 @@ type NumberControlRef = HTMLElement | { $el?: Element | null } | null;
 const numberControlRef = ref<NumberControlRef>(null);
 
 const isReadonly = computed(() => props.readonly || props.disabled || props.loading);
+const resolvedLoadingText = computed(() => props.loadingText || t("common.loading"));
 const resolvedAriaLabel = computed(() => props.ariaLabel || props.placeholder || t("common.inputPlaceholder"));
 const resolvedAriaDisabled = computed(() => (props.disabled || props.loading ? "true" : undefined));
 const resolvedAriaReadonly = computed(() => (props.readonly || props.loading ? "true" : undefined));
@@ -268,7 +271,9 @@ onUpdated(() => {
       @keyup.capture="emit('keyup', $event)"
     >
       <template v-if="loading || unit" #suffix>
-        <LoaderCircle v-if="loading" class="base-number-input__loading" aria-hidden="true" />
+        <span v-if="loading" class="base-number-input__loading" role="status" aria-live="polite" :aria-label="resolvedLoadingText">
+          <LoaderCircle class="h-3.5 w-3.5" aria-hidden="true" />
+        </span>
         <span v-if="unit" class="base-number-input__unit" aria-hidden="true">{{ unit }}</span>
       </template>
     </el-input-number>
@@ -427,7 +432,10 @@ onUpdated(() => {
 }
 
 .base-number-input__loading {
-  @apply mr-1 h-3.5 w-3.5 shrink-0 text-slate-400 dark:text-slate-500;
+  @apply mr-1 inline-flex h-5 w-5 shrink-0 items-center justify-center text-slate-400 dark:text-slate-500;
+}
+
+.base-number-input__loading svg {
   animation: base-number-input-spin 0.9s linear infinite;
 }
 
@@ -447,7 +455,7 @@ onUpdated(() => {
   .base-number-input,
   :deep(.el-input-number__decrease),
   :deep(.el-input-number__increase),
-  .base-number-input__loading {
+  .base-number-input__loading svg {
     transition: none !important;
     animation: none !important;
   }

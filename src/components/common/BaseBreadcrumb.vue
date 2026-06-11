@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, nextTick, ref, watch, watchEffect } from "vue";
 import { ArrowLeft, ChevronRight, MoreHorizontal } from "lucide-vue-next";
 import { useI18n } from "../../composables/useI18n";
-import { collapseMiddleItems, dropRight, findLastItem, hasNextIndex, isLastIndex, joinBy, preventAndStopDomEvent } from "../../utils";
+import { collapseMiddleItems, dropRight, findLastItem, isLastIndex, joinBy, preventAndStopDomEvent } from "../../utils";
+import { getElementPlusControlRoot, type ElementPlusControlRef } from "./elementPlusDom";
 
 type BreadcrumbSize = "sm" | "md" | "lg";
 type BreadcrumbSurface = "plain" | "muted" | "card";
@@ -51,6 +52,7 @@ const props = withDefaults(defineProps<Props>(), {
 });
 
 const { t } = useI18n();
+const breadcrumbRef = ref<ElementPlusControlRef>(null);
 
 const emit = defineEmits<{
   (e: "select", item: BreadcrumbItem): void;
@@ -85,7 +87,9 @@ const lastSelectableItem = computed(() => {
   return findLastItem(dropRight(props.items, 1), (item) => !item.disabled);
 });
 
-const separatorLabel = computed(() => (props.separator === "slash" ? "/" : ""));
+const separatorText = computed(() => (props.separator === "slash" ? "/" : ""));
+const separatorIcon = computed(() => (props.separator === "chevron" ? ChevronRight : undefined));
+const resolvedAriaLabel = computed(() => props.ariaLabel || t("common.breadcrumb"));
 
 const itemsFingerprint = computed(() => joinBy(props.items, (item) => item.key, "|"));
 
@@ -131,10 +135,37 @@ const handleBack = () => {
 
   emit("back");
 };
+
+const syncBreadcrumbAttributes = async () => {
+  await nextTick();
+  const breadcrumbElement = getElementPlusControlRoot(breadcrumbRef.value);
+  if (!breadcrumbElement) return;
+
+  breadcrumbElement.setAttribute("aria-label", resolvedAriaLabel.value);
+  if (props.disabled) {
+    breadcrumbElement.setAttribute("aria-disabled", "true");
+  } else {
+    breadcrumbElement.removeAttribute("aria-disabled");
+  }
+
+  breadcrumbElement.querySelectorAll<HTMLElement>(".el-breadcrumb__inner").forEach((inner) => {
+    inner.removeAttribute("role");
+  });
+};
+
+watchEffect(() => {
+  void resolvedAriaLabel.value;
+  void props.disabled;
+  void expanded.value;
+  void itemsFingerprint.value;
+  void renderedItems.value.length;
+  void syncBreadcrumbAttributes();
+});
 </script>
 
 <template>
-  <nav
+  <el-breadcrumb
+    ref="breadcrumbRef"
     class="base-breadcrumb"
     :class="[
       `base-breadcrumb--${size}`,
@@ -146,8 +177,8 @@ const handleBack = () => {
         'is-expanded': expanded,
       },
     ]"
-    :aria-label="ariaLabel || t('common.breadcrumb')"
-    :aria-disabled="disabled ? 'true' : undefined"
+    :separator="separatorText"
+    :separator-icon="separatorIcon"
   >
     <button
       v-if="showBack"
@@ -160,69 +191,66 @@ const handleBack = () => {
     >
       <ArrowLeft class="base-breadcrumb__back-icon" aria-hidden="true" />
     </button>
-    <ol class="base-breadcrumb__list">
-      <li v-for="(crumb, visibleIndex) in renderedItems" :key="crumb.type === 'item' ? crumb.item.key : crumb.key" class="base-breadcrumb__item">
-        <button
-          v-if="crumb.type === 'ellipsis' && expandableEllipsis && !disabled"
-          type="button"
-          class="base-breadcrumb__ellipsis"
-          :aria-label="getEllipsisLabel(crumb.hiddenCount)"
-          :title="getEllipsisLabel(crumb.hiddenCount)"
-          :aria-expanded="expanded"
-          @click="handleEllipsisClick(crumb.hiddenCount)"
-        >
-          <MoreHorizontal class="base-breadcrumb__ellipsis-icon" aria-hidden="true" />
-        </button>
-        <span
-          v-else-if="crumb.type === 'ellipsis'"
-          class="base-breadcrumb__ellipsis base-breadcrumb__ellipsis--static"
-          :aria-label="getEllipsisLabel(crumb.hiddenCount)"
-          :title="getEllipsisLabel(crumb.hiddenCount)"
-        >
-          <MoreHorizontal class="base-breadcrumb__ellipsis-icon" aria-hidden="true" />
-        </span>
-        <button
-          v-else-if="!crumb.item.href"
-          type="button"
-          class="base-breadcrumb__button"
-          :class="{ 'is-current': crumb.isLast, 'is-disabled': isItemUnavailable(crumb.item, crumb.isLast) }"
-          :disabled="isItemUnavailable(crumb.item, crumb.isLast)"
-          :aria-current="crumb.isLast ? 'page' : undefined"
-          @click="handleSelect(crumb.item, crumb.isLast)"
-        >
-          <slot name="item" :item="crumb.item" :index="crumb.index" :current="crumb.isLast">
-            <BaseIcon v-if="crumb.item.icon" :name="crumb.item.icon" size="14" aria-hidden="true" />
-            <span class="base-breadcrumb__label">{{ crumb.item.label }}</span>
-            <BaseBadge v-if="crumb.item.badge" :type="crumb.item.badgeType || 'neutral'" size="xs">{{ crumb.item.badge }}</BaseBadge>
-          </slot>
-        </button>
-        <a
-          v-else
-          class="base-breadcrumb__button"
-          :class="{ 'is-current': crumb.isLast, 'is-disabled': isItemUnavailable(crumb.item, crumb.isLast) }"
-          :href="isItemUnavailable(crumb.item, crumb.isLast) ? undefined : crumb.item.href"
-          :aria-current="crumb.isLast ? 'page' : undefined"
-          :aria-disabled="isItemUnavailable(crumb.item, crumb.isLast) ? 'true' : undefined"
-          @click="handleLinkSelect($event, crumb.item, crumb.isLast)"
-        >
-          <slot name="item" :item="crumb.item" :index="crumb.index" :current="crumb.isLast">
-            <BaseIcon v-if="crumb.item.icon" :name="crumb.item.icon" size="14" aria-hidden="true" />
-            <span class="base-breadcrumb__label">{{ crumb.item.label }}</span>
-            <BaseBadge v-if="crumb.item.badge" :type="crumb.item.badgeType || 'neutral'" size="xs">{{ crumb.item.badge }}</BaseBadge>
-          </slot>
-        </a>
-        <span v-if="hasNextIndex(renderedItems, visibleIndex)" class="base-breadcrumb__separator" aria-hidden="true">
-          <ChevronRight v-if="separator === 'chevron'" class="base-breadcrumb__separator-icon" aria-hidden="true" />
-          <span v-else>{{ separatorLabel }}</span>
-        </span>
-      </li>
-    </ol>
-  </nav>
+    <el-breadcrumb-item
+      v-for="crumb in renderedItems"
+      :key="crumb.type === 'item' ? crumb.item.key : crumb.key"
+    >
+      <button
+        v-if="crumb.type === 'ellipsis' && expandableEllipsis && !disabled"
+        type="button"
+        class="base-breadcrumb__ellipsis"
+        :aria-label="getEllipsisLabel(crumb.hiddenCount)"
+        :title="getEllipsisLabel(crumb.hiddenCount)"
+        :aria-expanded="expanded"
+        @click="handleEllipsisClick(crumb.hiddenCount)"
+      >
+        <MoreHorizontal class="base-breadcrumb__ellipsis-icon" aria-hidden="true" />
+      </button>
+      <span
+        v-else-if="crumb.type === 'ellipsis'"
+        class="base-breadcrumb__ellipsis base-breadcrumb__ellipsis--static"
+        :aria-label="getEllipsisLabel(crumb.hiddenCount)"
+        :title="getEllipsisLabel(crumb.hiddenCount)"
+      >
+        <MoreHorizontal class="base-breadcrumb__ellipsis-icon" aria-hidden="true" />
+      </span>
+      <button
+        v-else-if="!crumb.item.href"
+        type="button"
+        class="base-breadcrumb__button"
+        :class="{ 'is-current': crumb.isLast, 'is-disabled': isItemUnavailable(crumb.item, crumb.isLast) }"
+        :disabled="isItemUnavailable(crumb.item, crumb.isLast)"
+        :aria-current="crumb.isLast ? 'page' : undefined"
+        @click="handleSelect(crumb.item, crumb.isLast)"
+      >
+        <slot name="item" :item="crumb.item" :index="crumb.index" :current="crumb.isLast">
+          <BaseIcon v-if="crumb.item.icon" :name="crumb.item.icon" size="14" aria-hidden="true" />
+          <span class="base-breadcrumb__label">{{ crumb.item.label }}</span>
+          <BaseBadge v-if="crumb.item.badge" :type="crumb.item.badgeType || 'neutral'" size="xs">{{ crumb.item.badge }}</BaseBadge>
+        </slot>
+      </button>
+      <a
+        v-else
+        class="base-breadcrumb__button"
+        :class="{ 'is-current': crumb.isLast, 'is-disabled': isItemUnavailable(crumb.item, crumb.isLast) }"
+        :href="isItemUnavailable(crumb.item, crumb.isLast) ? undefined : crumb.item.href"
+        :aria-current="crumb.isLast ? 'page' : undefined"
+        :aria-disabled="isItemUnavailable(crumb.item, crumb.isLast) ? 'true' : undefined"
+        @click="handleLinkSelect($event, crumb.item, crumb.isLast)"
+      >
+        <slot name="item" :item="crumb.item" :index="crumb.index" :current="crumb.isLast">
+          <BaseIcon v-if="crumb.item.icon" :name="crumb.item.icon" size="14" aria-hidden="true" />
+          <span class="base-breadcrumb__label">{{ crumb.item.label }}</span>
+          <BaseBadge v-if="crumb.item.badge" :type="crumb.item.badgeType || 'neutral'" size="xs">{{ crumb.item.badge }}</BaseBadge>
+        </slot>
+      </a>
+    </el-breadcrumb-item>
+  </el-breadcrumb>
 </template>
 
 <style scoped>
 .base-breadcrumb {
-  @apply flex min-w-0 max-w-full items-center gap-2;
+  @apply flex min-w-0 max-w-full items-center gap-1;
 }
 
 .base-breadcrumb.is-disabled {
@@ -237,39 +265,49 @@ const handleBack = () => {
   @apply rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-950;
 }
 
-.base-breadcrumb__list {
-  @apply flex min-w-0 items-center gap-1;
-}
-
-.base-breadcrumb:not(.base-breadcrumb--nowrap) .base-breadcrumb__list {
+.base-breadcrumb:not(.base-breadcrumb--nowrap) {
   @apply flex-wrap;
 }
 
-.base-breadcrumb--nowrap .base-breadcrumb__list {
+.base-breadcrumb--nowrap {
   @apply flex-nowrap overflow-x-auto overflow-y-hidden;
   scrollbar-color: #cbd5e1 transparent;
   scrollbar-width: thin;
 }
 
-.base-breadcrumb--nowrap .base-breadcrumb__list::-webkit-scrollbar {
+.base-breadcrumb--nowrap::-webkit-scrollbar {
   height: 4px;
 }
 
-.base-breadcrumb--nowrap .base-breadcrumb__list::-webkit-scrollbar-track {
+.base-breadcrumb--nowrap::-webkit-scrollbar-track {
   background: transparent;
 }
 
-.base-breadcrumb--nowrap .base-breadcrumb__list::-webkit-scrollbar-thumb {
+.base-breadcrumb--nowrap::-webkit-scrollbar-thumb {
   background: #cbd5e1;
   border-radius: 999px;
 }
 
-.base-breadcrumb__item {
-  @apply flex min-w-0 items-center gap-1;
+.base-breadcrumb :deep(.el-breadcrumb__item) {
+  @apply inline-flex min-w-0 items-center gap-1;
 }
 
-.base-breadcrumb--nowrap .base-breadcrumb__item {
+.base-breadcrumb--nowrap :deep(.el-breadcrumb__item) {
   @apply shrink-0;
+}
+
+.base-breadcrumb :deep(.el-breadcrumb__inner) {
+  @apply inline-flex min-w-0 items-center text-inherit;
+}
+
+.base-breadcrumb :deep(.el-breadcrumb__inner.is-link) {
+  @apply text-inherit;
+  font-weight: inherit;
+}
+
+.base-breadcrumb :deep(.el-breadcrumb__inner:hover),
+.base-breadcrumb :deep(.el-breadcrumb__inner.is-link:hover) {
+  @apply text-inherit;
 }
 
 .base-breadcrumb__back {
@@ -321,11 +359,16 @@ const handleBack = () => {
   @apply h-3.5 w-3.5;
 }
 
-.base-breadcrumb__separator {
+.base-breadcrumb :deep(.el-breadcrumb__separator) {
   @apply inline-flex h-4 min-w-4 shrink-0 items-center justify-center text-[11px] font-black text-slate-300 dark:text-slate-600;
+  margin: 0;
 }
 
-.base-breadcrumb__separator-icon {
+.base-breadcrumb :deep(.el-breadcrumb__item:last-child .el-breadcrumb__separator) {
+  display: none;
+}
+
+.base-breadcrumb :deep(.el-breadcrumb__separator svg) {
   @apply h-3.5 w-3.5;
 }
 

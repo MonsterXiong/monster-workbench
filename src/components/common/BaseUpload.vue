@@ -1,22 +1,19 @@
 <script setup lang="ts">
-import { computed, ref, useId, useSlots } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, useId, useSlots, watchEffect } from "vue";
+import type { UploadFile, UploadFiles, UploadInstance } from "element-plus";
 import { useI18n } from "../../composables/useI18n";
 import BaseIcon from "./BaseIcon.vue";
 import {
   formatBytes,
   formatTemplate,
   buildAcceptString,
-  getDragEventFiles,
-  getEventTargetFiles,
   getNativeAcceptValue,
   hasDragEventFiles,
   hasFiles,
-  handleActivationKeydown,
   isAcceptAll,
   isRelatedTargetInsideCurrentTarget,
   joinAriaIds,
   joinTextList,
-  setEventTargetValue,
   validateFileList,
   type FileValidationRejectReason,
 } from "../../utils";
@@ -87,14 +84,15 @@ const emit = defineEmits<{
   (e: "reject", payload: UploadRejectPayload): void;
 }>();
 
+type UploadRef = (UploadInstance & { $el?: Element | null }) | null;
+
 const isDragActive = ref(false);
-const fileInputRef = ref<HTMLInputElement | null>(null);
+const uploadRef = ref<UploadRef>(null);
 
 const { t } = useI18n();
 const slots = useSlots();
 const uploadId = useId();
 const rootId = computed(() => props.id || `base-upload-${uploadId}`);
-const inputId = computed(() => `${rootId.value}-input`);
 const titleId = computed(() => `${rootId.value}-title`);
 const descriptionId = `base-upload-description-${uploadId}`;
 const helperId = `base-upload-helper-${uploadId}`;
@@ -137,15 +135,39 @@ const describedBy = computed(() =>
 const rootLabel = computed(() => (props.ariaLabelledby ? "" : props.ariaLabel));
 const rootLabelledby = computed(() => props.ariaLabelledby || (rootLabel.value ? "" : titleId.value));
 const inputAccept = computed(() => getNativeAcceptValue(props.accept));
+const uploadName = computed(() => props.name || "file");
 const iconSize = computed(() => {
   if (props.compact || props.size === "sm") return 24;
   if (props.size === "lg") return 36;
   return 32;
 });
 
-const triggerSelect = () => {
-  if (isLocked.value) return;
-  fileInputRef.value?.click();
+let pendingFiles: File[] = [];
+let pendingFlushTimer: number | null = null;
+
+const setOptionalAttribute = (element: HTMLElement, name: string, value?: string | null) => {
+  if (value) {
+    element.setAttribute(name, value);
+    return;
+  }
+  element.removeAttribute(name);
+};
+
+const getUploadElement = () => {
+  const root = uploadRef.value?.$el;
+  return root instanceof HTMLElement ? root.querySelector<HTMLElement>(".el-upload") : null;
+};
+
+const syncUploadAria = async () => {
+  await nextTick();
+  const uploadElement = getUploadElement();
+  if (!uploadElement) return;
+
+  setOptionalAttribute(uploadElement, "aria-label", rootLabel.value);
+  setOptionalAttribute(uploadElement, "aria-labelledby", rootLabelledby.value);
+  setOptionalAttribute(uploadElement, "aria-describedby", describedBy.value);
+  setOptionalAttribute(uploadElement, "aria-invalid", props.error ? "true" : undefined);
+  setOptionalAttribute(uploadElement, "aria-busy", props.loading ? "true" : undefined);
 };
 
 const rejectFiles = (reason: FileValidationRejectReason, files: File[]) => {
@@ -175,12 +197,46 @@ const handleFiles = (files: FileList) => {
   emit("select", files);
 };
 
-const onFileChanged = (e: Event) => {
-  const files = getEventTargetFiles(e);
+const createFileList = (files: File[]) => {
+  if (typeof DataTransfer === "undefined") {
+    return files as unknown as FileList;
+  }
+
+  const transfer = new DataTransfer();
+  files.forEach((file) => transfer.items.add(file));
+  return transfer.files;
+};
+
+const flushPendingFiles = () => {
+  pendingFlushTimer = null;
+  const files = createFileList(pendingFiles);
+  pendingFiles = [];
+  isDragActive.value = false;
+
   if (hasFiles(files)) {
     handleFiles(files);
-    setEventTargetValue(e, "");
   }
+
+  uploadRef.value?.clearFiles();
+};
+
+const scheduleFileFlush = (files: File[]) => {
+  pendingFiles = files;
+  if (pendingFlushTimer !== null) {
+    window.clearTimeout(pendingFlushTimer);
+  }
+  pendingFlushTimer = window.setTimeout(flushPendingFiles, 0);
+};
+
+const getRawFiles = (uploadFiles: UploadFiles) => uploadFiles.flatMap((file) => (file.raw ? [file.raw] : []));
+
+const onUploadChange = (_file: UploadFile, uploadFiles: UploadFiles) => {
+  if (isLocked.value) {
+    uploadRef.value?.clearFiles();
+    return;
+  }
+
+  scheduleFileFlush(getRawFiles(uploadFiles));
 };
 
 const onDragOver = (e: DragEvent) => {
@@ -224,21 +280,29 @@ const onDragEnd = () => {
 const onDrop = (e: DragEvent) => {
   e.preventDefault();
   isDragActive.value = false;
-  if (isLocked.value) return;
-  const files = getDragEventFiles(e);
-  if (hasFiles(files)) {
-    handleFiles(files);
-  }
 };
 
-const onKeydown = (e: KeyboardEvent) => {
-  handleActivationKeydown(e, triggerSelect);
-};
+watchEffect(() => {
+  void rootLabel.value;
+  void rootLabelledby.value;
+  void describedBy.value;
+  void props.error;
+  void props.loading;
+  void syncUploadAria();
+});
+
+onBeforeUnmount(() => {
+  if (pendingFlushTimer !== null) {
+    window.clearTimeout(pendingFlushTimer);
+    pendingFlushTimer = null;
+  }
+});
 </script>
 
 <template>
-  <div
+  <el-upload
     :id="rootId"
+    ref="uploadRef"
     class="base-upload"
     :class="{
       'base-upload--active': isActive,
@@ -249,78 +313,87 @@ const onKeydown = (e: KeyboardEvent) => {
       'base-upload--compact': compact,
       [`base-upload--${size}`]: true,
     }"
-    role="button"
-    :tabindex="isLocked ? -1 : 0"
+    action="#"
+    :auto-upload="false"
+    :show-file-list="false"
+    :drag="true"
+    :accept="inputAccept"
+    :multiple="multiple"
+    :name="uploadName"
+    :disabled="isLocked"
     :aria-disabled="isLocked ? 'true' : undefined"
     :aria-busy="loading ? 'true' : undefined"
     :aria-invalid="error ? 'true' : undefined"
     :aria-label="rootLabel || undefined"
     :aria-labelledby="rootLabelledby || undefined"
     :aria-describedby="describedBy || undefined"
-    @click="triggerSelect"
-    @keydown="onKeydown"
+    :on-change="onUploadChange"
     @dragenter="onDragEnter"
     @dragover="onDragOver"
     @dragleave="onDragLeave"
     @dragend="onDragEnd"
     @drop="onDrop"
   >
-    <input
-      :id="inputId"
-      ref="fileInputRef"
-      :name="name || undefined"
-      type="file"
-      class="hidden"
-      :accept="inputAccept"
-      :multiple="multiple"
-      :disabled="isLocked"
-      @change="onFileChanged"
-    />
-    <div class="base-upload__icon">
-      <slot name="icon" :loading="loading">
-        <BaseIcon :name="loading ? 'LoaderCircle' : icon" :size="iconSize" aria-hidden="true" />
-      </slot>
+    <div class="base-upload__surface">
+      <div class="base-upload__icon">
+        <slot name="icon" :loading="loading">
+          <BaseIcon :name="loading ? 'LoaderCircle' : icon" :size="iconSize" aria-hidden="true" />
+        </slot>
+      </div>
+      <span :id="titleId" class="base-upload__title">
+        <slot name="title">
+          {{ titleText }}
+        </slot>
+      </span>
+      <span v-if="hasDescriptionContent" :id="descriptionId" class="base-upload__description">
+        <slot name="description">
+          {{ descriptionText }}
+        </slot>
+      </span>
+      <span v-if="hasHelperContent" :id="helperId" class="base-upload__helper">
+        <slot name="helper" :helper="helperText">
+          {{ helperText }}
+        </slot>
+      </span>
+      <span
+        v-if="hasStatusContent"
+        :id="statusId"
+        class="base-upload__status"
+        :class="{
+          'base-upload__status--error': error,
+          'base-upload__status--success': success && !error,
+          'base-upload__status--loading': loading,
+        }"
+        role="status"
+        aria-live="polite"
+      >
+        <slot name="status" :status="statusText">
+          {{ statusText }}
+        </slot>
+      </span>
     </div>
-    <span :id="titleId" class="base-upload__title">
-      <slot name="title">
-        {{ titleText }}
-      </slot>
-    </span>
-    <span v-if="hasDescriptionContent" :id="descriptionId" class="base-upload__description">
-      <slot name="description">
-        {{ descriptionText }}
-      </slot>
-    </span>
-    <span v-if="hasHelperContent" :id="helperId" class="base-upload__helper">
-      <slot name="helper" :helper="helperText">
-        {{ helperText }}
-      </slot>
-    </span>
-    <span
-      v-if="hasStatusContent"
-      :id="statusId"
-      class="base-upload__status"
-      :class="{
-        'base-upload__status--error': error,
-        'base-upload__status--success': success && !error,
-        'base-upload__status--loading': loading,
-      }"
-      role="status"
-      aria-live="polite"
-    >
-      <slot name="status" :status="statusText">
-        {{ statusText }}
-      </slot>
-    </span>
-  </div>
+  </el-upload>
 </template>
 
 <style scoped>
 .base-upload {
-  @apply flex w-full select-none flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50 px-6 py-6 text-center shadow-sm transition duration-200 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-opacity-20 dark:border-slate-800 dark:bg-slate-900;
+  @apply block w-full min-w-0;
 }
 
-.base-upload:not(.base-upload--disabled):not(.base-upload--loading):not(.base-upload--error):not(.base-upload--success):hover {
+.base-upload :deep(.el-upload) {
+  @apply block w-full min-w-0 rounded-2xl focus:outline-none focus:ring-2 focus:ring-primary focus:ring-opacity-20;
+}
+
+.base-upload :deep(.el-upload-dragger) {
+  @apply w-full rounded-2xl border-0 bg-transparent p-0;
+}
+
+.base-upload__surface {
+  @apply flex w-full select-none flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50 px-6 py-6 text-center shadow-sm transition duration-200 dark:border-slate-800 dark:bg-slate-900;
+}
+
+.base-upload:not(.base-upload--disabled):not(.base-upload--loading):not(.base-upload--error):not(.base-upload--success):hover .base-upload__surface,
+.base-upload :deep(.el-upload-dragger.is-dragover) .base-upload__surface {
   border-color: rgb(var(--color-primary) / 0.45);
   background-color: rgb(var(--color-primary) / 0.04);
   @apply shadow-md;
@@ -331,18 +404,28 @@ const onKeydown = (e: KeyboardEvent) => {
 }
 
 .base-upload--compact {
+  @apply rounded-xl;
+}
+
+.base-upload--compact .base-upload__surface {
   @apply px-4 py-4;
 }
 
-.base-upload--sm {
+.base-upload--sm :deep(.el-upload),
+.base-upload--sm :deep(.el-upload-dragger) {
+  @apply rounded-xl;
+}
+
+.base-upload--sm .base-upload__surface {
   @apply rounded-xl px-4 py-4;
 }
 
-.base-upload--lg {
+.base-upload--lg .base-upload__surface {
   @apply px-7 py-8;
 }
 
-.base-upload--active {
+.base-upload--active .base-upload__surface,
+.base-upload :deep(.el-upload-dragger.is-dragover) .base-upload__surface {
   @apply scale-[0.99] border-primary bg-white text-primary dark:bg-slate-950;
 }
 
@@ -351,21 +434,21 @@ const onKeydown = (e: KeyboardEvent) => {
   @apply cursor-not-allowed opacity-60;
 }
 
-.base-upload--error {
+.base-upload--error .base-upload__surface {
   @apply border-red-300 bg-red-50 dark:border-red-800 dark:bg-red-950;
 }
 
-.base-upload--error:focus,
-.base-upload--error:focus-visible {
+.base-upload--error :deep(.el-upload:focus),
+.base-upload--error :deep(.el-upload:focus-visible) {
   @apply ring-red-200 dark:ring-red-900;
 }
 
-.base-upload--success {
+.base-upload--success .base-upload__surface {
   @apply border-emerald-300 bg-emerald-50 dark:border-emerald-800 dark:bg-emerald-950;
 }
 
-.base-upload--success:focus,
-.base-upload--success:focus-visible {
+.base-upload--success :deep(.el-upload:focus),
+.base-upload--success :deep(.el-upload:focus-visible) {
   @apply ring-emerald-200 dark:ring-emerald-900;
 }
 
@@ -439,7 +522,7 @@ const onKeydown = (e: KeyboardEvent) => {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .base-upload,
+  .base-upload__surface,
   .base-upload__icon :deep(svg) {
     transition: none !important;
     animation: none !important;

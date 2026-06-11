@@ -5,6 +5,7 @@ import { getValueIdentity, isSameValueIdentity, joinAriaIds, joinNonEmptyStrings
 
 type SelectValue = string | number | boolean | Record<string, unknown> | null | undefined;
 type SelectClearValue = SelectValue | SelectValue[] | (() => SelectValue | SelectValue[]);
+type ElementSelectClearValue = string | number | boolean | (() => SelectValue | SelectValue[]) | undefined;
 
 interface Option {
   label: string;
@@ -101,10 +102,41 @@ const describedBy = computed(() => joinAriaIds([props.ariaDescribedby, resolvedE
 
 const resolvedPopperClass = computed(() => joinNonEmptyStrings(["base-select-popper", props.popperClass]));
 
-const resolvedValueOnClear = computed(() => {
-  if (props.multiple) return [];
+const getResolvedClearValue = () => {
   if (props.valueOnClear !== undefined) return props.valueOnClear;
-  return "";
+  return props.multiple ? [] : "";
+};
+
+const resolveClearValue = () => {
+  const clearValue = getResolvedClearValue();
+  return typeof clearValue === "function" ? clearValue() : clearValue;
+};
+
+const isObjectClearValue = (value: SelectValue | SelectValue[]): value is Record<string, unknown> => {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+};
+
+const resolvedValueOnClear = computed<ElementSelectClearValue>(() => {
+  const clearValue = resolveClearValue();
+
+  if (Array.isArray(clearValue)) {
+    return clearValue.every((item) => !item) ? () => clearValue : "";
+  }
+
+  if (clearValue === null || clearValue === undefined) {
+    return () => clearValue;
+  }
+
+  if (isObjectClearValue(clearValue)) {
+    return "";
+  }
+
+  return clearValue;
+});
+
+const shouldOverrideClearValue = computed(() => {
+  const clearValue = resolveClearValue();
+  return Array.isArray(clearValue) ? clearValue.some(Boolean) : isObjectClearValue(clearValue);
 });
 
 const elSize = computed(() => {
@@ -146,6 +178,15 @@ const getOptionFilterLabel = (option: Option) => {
 const getSelectedLabel = (label: string | number | undefined, value: unknown) => {
   const selectedOption = props.options.find((option) => isSameValue(option.value, value));
   return selectedOption?.selectedLabel || selectedOption?.label || String(label ?? "");
+};
+
+const handleClear = () => {
+  if (shouldOverrideClearValue.value) {
+    const clearValue = resolveClearValue();
+    emit("update:modelValue", clearValue);
+    emit("change", clearValue);
+  }
+  emit("clear");
 };
 
 const syncComboboxAria = async () => {
@@ -219,6 +260,7 @@ watchEffect(() => {
       :value-on-clear="resolvedValueOnClear"
       :empty-values="emptyValues"
       :persistent="persistent"
+      :validate-event="false"
       :size="elSize"
       :aria-label="resolvedAriaLabel"
       :aria-describedby="describedBy"
@@ -228,7 +270,7 @@ watchEffect(() => {
       :aria-busy="loading ? 'true' : undefined"
       class="base-select"
       :class="[`base-select--${size}`, { 'is-disabled': disabled, 'is-error': error }]"
-      @clear="emit('clear')"
+      @clear="handleClear"
       @visible-change="emit('visible-change', $event); syncComboboxAria()"
       @remove-tag="emit('remove-tag', $event)"
       @focus="emit('focus', $event); syncComboboxAria()"

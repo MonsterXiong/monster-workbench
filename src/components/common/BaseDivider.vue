@@ -40,16 +40,26 @@ const props = withDefaults(defineProps<Props>(), {
 const slots = useSlots();
 const hasLabel = computed(() => Boolean(props.label || slots.default));
 const resolvedSpacing = computed(() => (props.compact ? "sm" : props.spacing));
-const resolvedRole = computed(() => (props.decorative ? undefined : "separator"));
+const resolvedRole = computed(() => (props.decorative ? "presentation" : "separator"));
 const resolvedAriaOrientation = computed(() => (props.decorative ? undefined : props.direction));
 const resolvedAriaLabel = computed(() => {
   if (props.decorative) return undefined;
   return props.ariaLabel || props.label || undefined;
 });
+const contentPosition = computed(() => {
+  if (props.align === "start") return "left";
+  if (props.align === "end") return "right";
+  return "center";
+});
+const borderStyle = computed(() => {
+  if (props.dotted) return "dotted";
+  if (props.dashed) return "dashed";
+  return "solid";
+});
 </script>
 
 <template>
-  <div
+  <el-divider
     class="base-divider"
     :class="[
       `base-divider--${direction}`,
@@ -64,28 +74,33 @@ const resolvedAriaLabel = computed(() => {
         'base-divider--with-label': hasLabel,
       },
     ]"
+    :direction="direction"
+    :content-position="contentPosition"
+    :border-style="borderStyle"
     :role="resolvedRole"
     :aria-orientation="resolvedAriaOrientation"
     :aria-label="resolvedAriaLabel"
     :aria-hidden="decorative ? 'true' : undefined"
   >
-    <span v-if="hasLabel" class="base-divider__label">
+    <span v-if="hasLabel && direction === 'horizontal'" class="base-divider__label">
       <BaseIcon v-if="icon" :name="icon" size="12" aria-hidden="true" />
       <slot>{{ label }}</slot>
     </span>
-  </div>
+  </el-divider>
 </template>
 
 <style scoped>
 .base-divider {
   --divider-color: rgb(226 232 240);
   --divider-label-color: rgb(148 163 184);
+  --el-border-color: var(--divider-color);
   border-color: var(--divider-color);
   color: var(--divider-label-color);
 }
 
 .base-divider--horizontal {
   @apply flex w-full items-center border-t;
+  height: auto;
 }
 
 .base-divider--horizontal.base-divider--spacing-none {
@@ -106,6 +121,7 @@ const resolvedAriaLabel = computed(() => {
 
 .base-divider--vertical {
   @apply h-full min-h-6 border-l self-stretch;
+  width: auto;
 }
 
 .base-divider--vertical.base-divider--spacing-none {
@@ -150,6 +166,16 @@ const resolvedAriaLabel = computed(() => {
 
 .base-divider--horizontal.base-divider--with-label {
   @apply border-t-0;
+}
+
+.base-divider--with-label :deep(.el-divider__text) {
+  position: static;
+  right: auto;
+  left: auto;
+  max-width: 70%;
+  transform: none;
+  background: transparent;
+  padding: 0;
 }
 
 .base-divider--horizontal.base-divider--with-label::before,

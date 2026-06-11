@@ -72,6 +72,7 @@ const accessibleLabel = computed(() => props.ariaLabel || props.title || "");
 <template>
   <el-button
     v-bind="filteredAttrs"
+    class="base-button"
     :type="elType"
     :native-type="nativeType"
     :size="elSize"
@@ -129,34 +130,40 @@ const accessibleLabel = computed(() => props.ariaLabel || props.title || "");
 }
 
 .el-button.is-icon-only {
+  display: inline-grid !important;
+  place-items: center !important;
   width: var(--el-button-size, 32px) !important;
   min-width: var(--el-button-size, 32px) !important;
   height: var(--el-button-size, 32px) !important;
   padding: 0 !important;
   aspect-ratio: 1 / 1;
+  line-height: 1 !important;
 }
 
-.el-button.is-icon-only :deep(span),
+.el-button.is-icon-only :deep(> span),
 .el-button.is-icon-only :deep(.el-icon) {
-  display: inline-flex !important;
-  align-items: center !important;
-  justify-content: center !important;
+  display: inline-grid !important;
+  place-items: center !important;
   width: 100%;
   height: 100%;
-  line-height: 1;
+  line-height: 0;
 }
 
-.el-button.is-icon-only :deep(span:empty) {
+.el-button.is-icon-only :deep(> span:empty) {
   display: none !important;
   width: 0 !important;
   height: 0 !important;
   margin-left: 0 !important;
 }
 
+.el-button.is-icon-only :deep(.el-icon) {
+  margin: 0 !important;
+}
+
 .el-button.is-icon-only :deep(svg) {
   display: block;
   flex-shrink: 0;
-  margin: auto;
+  margin: 0;
 }
 
 .el-button :deep(.el-icon + span),

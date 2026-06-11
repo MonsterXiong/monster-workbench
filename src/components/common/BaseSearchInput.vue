@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, useAttrs, useId } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, useAttrs, useId, watchEffect } from "vue";
 import { Search, X, LoaderCircle } from "lucide-vue-next";
 import { useI18n } from "../../composables/useI18n";
-import { createDebouncedFunction, getEventTargetValue, isEscapeKey, isKeyboardKey, joinAriaIds, omit, toIntegerAtLeast } from "../../utils";
+import { createDebouncedFunction, isEscapeKey, isKeyboardKey, joinAriaIds, omit, toIntegerAtLeast } from "../../utils";
+import { syncElementPlusClearButtonLabel } from "./elementPlusDom";
 
 defineOptions({
   inheritAttrs: false,
@@ -85,21 +86,18 @@ const emit = defineEmits<{
 
 const attrs = useAttrs();
 const { t } = useI18n();
-const inputRef = ref<HTMLInputElement | null>(null);
+type SearchInputRef = HTMLElement | { focus?: () => void; $el?: Element | null } | null;
+const inputRef = ref<SearchInputRef>(null);
 const searchInputId = useId();
 const labelId = `${searchInputId}-label`;
 const descriptionId = `${searchInputId}-description`;
 const errorId = `${searchInputId}-error`;
 
-const inheritedInputAttrs = computed(() => omit(attrs, ["class", "style"]));
+const inheritedInputAttrs = computed(() => omit(attrs, ["class", "style", "size", "type"]));
 
-const value = computed({
-  get: () => props.modelValue,
-  set: (nextValue) => emit("update:modelValue", nextValue),
-});
 const isClearDisabled = computed(() => props.disabled || props.readonly || props.loading);
 const isSearchDisabled = computed(() => props.disabled || props.readonly || props.loading);
-const showClearButton = computed(() => props.clearable && Boolean(props.modelValue) && !isClearDisabled.value);
+const canClear = computed(() => props.clearable && !isClearDisabled.value);
 const resolvedClearText = computed(() => props.clearText || t("common.clear"));
 const resolvedLoadingText = computed(() => props.loadingText || t("common.loading"));
 const searchValue = computed(() => (props.trimOnSearch ? props.modelValue.trim() : props.modelValue));
@@ -119,6 +117,11 @@ const describedBy = computed(() =>
   ])
 );
 const hasFieldText = computed(() => props.label || props.description || props.errorMessage);
+const elementSize = computed(() => {
+  if (props.size === "sm") return "small";
+  if (props.size === "lg") return "large";
+  return "default";
+});
 
 const shouldEmitSearch = (nextValue: string) => {
   if (!nextValue) return true;
@@ -152,7 +155,11 @@ const handleClear = () => {
   if (props.searchOnClear) {
     emit("search", "");
   }
-  void nextTick(() => inputRef.value?.focus());
+  void nextTick(() => {
+    if (inputRef.value && "focus" in inputRef.value && typeof inputRef.value.focus === "function") {
+      inputRef.value.focus();
+    }
+  });
 };
 
 const handleKeydown = (event: KeyboardEvent) => {
@@ -173,14 +180,25 @@ const handleKeydown = (event: KeyboardEvent) => {
   }
 };
 
-const handleInput = (nextValue: string) => {
+const handleInput = (nextValue: string | number) => {
   if (props.disabled || isInputReadonly.value) return;
-  emit("update:modelValue", nextValue);
+  const normalizedValue = String(nextValue);
+  emit("update:modelValue", normalizedValue);
   if (props.searchOnInput && !props.loading) {
-    const resolvedValue = props.trimOnInputSearch ? nextValue.trim() : nextValue;
+    const resolvedValue = props.trimOnInputSearch ? normalizedValue.trim() : normalizedValue;
     emitInputSearch(resolvedValue);
   }
 };
+
+const syncClearButtonLabel = () =>
+  syncElementPlusClearButtonLabel(inputRef.value, ".el-input__clear", resolvedClearText.value);
+
+watchEffect(() => {
+  void props.modelValue;
+  void canClear.value;
+  void resolvedClearText.value;
+  void syncClearButtonLabel();
+});
 
 onBeforeUnmount(() => {
   debouncedSearch.cancel();
@@ -207,55 +225,53 @@ onBeforeUnmount(() => {
   >
     <span v-if="label" :id="labelId" class="base-search-input__label">{{ label }}</span>
     <span v-if="description" :id="descriptionId" class="base-search-input__description">{{ description }}</span>
-    <div class="base-search-input__field" :class="{ 'base-search-input__field--with-text': hasFieldText }">
-      <slot name="prefix">
-        <Search class="base-search-input__icon" aria-hidden="true" />
-      </slot>
-      <input
-        v-bind="inheritedInputAttrs"
-        :id="id || undefined"
-        ref="inputRef"
-        :name="name || undefined"
-        :value="value"
-        class="base-search-input__control"
-        type="text"
-        :placeholder="placeholder || t('common.search')"
-        :aria-label="resolvedAriaLabel"
-        :aria-labelledby="labelledBy"
-        :aria-describedby="describedBy || undefined"
-        :aria-invalid="hasError ? 'true' : undefined"
-        :aria-busy="loading ? 'true' : undefined"
-        :aria-readonly="isInputReadonly ? 'true' : undefined"
-        :aria-controls="ariaControls || undefined"
-        :autocomplete="autocomplete"
-        :inputmode="inputmode"
-        :disabled="disabled"
-        :readonly="isInputReadonly"
-        @input="handleInput(getEventTargetValue($event))"
-        @keydown="handleKeydown"
-        @keyup="emit('keyup', $event)"
-        @focus="emit('focus', $event)"
-        @blur="emit('blur', $event)"
-      />
-      <span v-if="$slots.suffix && !loading" class="base-search-input__suffix">
-        <slot name="suffix"></slot>
-      </span>
-      <span v-if="loading" class="base-search-input__loading" role="status" :aria-label="resolvedLoadingText">
-        <LoaderCircle class="base-search-input__action animate-spin" aria-hidden="true" />
-        <span class="sr-only">{{ resolvedLoadingText }}</span>
-      </span>
-      <button
-        v-if="showClearButton"
-        type="button"
-        class="base-search-input__clear"
-        :disabled="isClearDisabled"
-        :aria-label="resolvedClearText"
-        :title="resolvedClearText"
-        @click="handleClear"
-      >
-        <X class="h-3.5 w-3.5" aria-hidden="true" />
-      </button>
-    </div>
+    <el-input
+      v-bind="inheritedInputAttrs"
+      :id="id || undefined"
+      ref="inputRef"
+      :name="name || undefined"
+      :model-value="modelValue"
+      class="base-search-input__field"
+      :class="{ 'base-search-input__field--with-text': hasFieldText }"
+      type="text"
+      :placeholder="placeholder || t('common.search')"
+      :disabled="disabled"
+      :readonly="isInputReadonly"
+      :clearable="canClear"
+      :clear-icon="X"
+      :size="elementSize"
+      :autocomplete="autocomplete"
+      :inputmode="inputmode"
+      :aria-label="resolvedAriaLabel"
+      :aria-labelledby="labelledBy"
+      :aria-describedby="describedBy || undefined"
+      :aria-invalid="hasError ? 'true' : undefined"
+      :aria-busy="loading ? 'true' : undefined"
+      :aria-readonly="isInputReadonly ? 'true' : undefined"
+      :aria-controls="ariaControls || undefined"
+      :validate-event="false"
+      @update:model-value="handleInput"
+      @clear="handleClear"
+      @keydown="handleKeydown"
+      @keyup="emit('keyup', $event)"
+      @focus="emit('focus', $event)"
+      @blur="emit('blur', $event)"
+    >
+      <template #prefix>
+        <slot name="prefix">
+          <Search class="base-search-input__icon" aria-hidden="true" />
+        </slot>
+      </template>
+      <template v-if="$slots.suffix || loading" #suffix>
+        <span v-if="$slots.suffix && !loading" class="base-search-input__suffix">
+          <slot name="suffix"></slot>
+        </span>
+        <span v-if="loading" class="base-search-input__loading" role="status" :aria-label="resolvedLoadingText">
+          <LoaderCircle class="base-search-input__action animate-spin" aria-hidden="true" />
+          <span class="sr-only">{{ resolvedLoadingText }}</span>
+        </span>
+      </template>
+    </el-input>
     <span v-if="errorMessage" :id="errorId" class="base-search-input__error">{{ errorMessage }}</span>
   </div>
 </template>
@@ -266,7 +282,11 @@ onBeforeUnmount(() => {
 }
 
 .base-search-input__field {
-  @apply flex w-full min-w-0 items-center gap-2 rounded-xl border border-slate-300 bg-white text-slate-700 shadow-sm transition-all dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100;
+  @apply w-full min-w-0 transition-all;
+}
+
+.base-search-input__field :deep(.el-input__wrapper) {
+  @apply rounded-xl border border-slate-300 bg-white text-slate-700 shadow-sm transition-all dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100;
   box-shadow:
     0 1px 2px rgba(15, 23, 42, 0.04),
     inset 0 1px 0 rgba(255, 255, 255, 0.72);
@@ -276,15 +296,15 @@ onBeforeUnmount(() => {
   @apply mt-1.5;
 }
 
-.base-search-input--muted .base-search-input__field {
+.base-search-input--muted .base-search-input__field :deep(.el-input__wrapper) {
   @apply bg-slate-100 dark:bg-slate-900;
 }
 
-.base-search-input--plain .base-search-input__field {
+.base-search-input--plain .base-search-input__field :deep(.el-input__wrapper) {
   @apply rounded-none border-0 bg-transparent px-0 shadow-none dark:bg-transparent;
 }
 
-.base-search-input:focus-within .base-search-input__field {
+.base-search-input:focus-within .base-search-input__field :deep(.el-input__wrapper) {
   border-color: rgb(var(--color-primary));
   box-shadow:
     0 0 0 3px rgb(var(--color-primary) / 0.15),
@@ -292,31 +312,31 @@ onBeforeUnmount(() => {
   @apply bg-white dark:bg-slate-900;
 }
 
-.base-search-input--plain:focus-within .base-search-input__field {
+.base-search-input--plain:focus-within .base-search-input__field :deep(.el-input__wrapper) {
   box-shadow: none;
   @apply bg-transparent dark:bg-transparent;
 }
 
-.base-search-input.is-error .base-search-input__field,
-.base-search-input:has(.base-search-input__error) .base-search-input__field {
+.base-search-input.is-error .base-search-input__field :deep(.el-input__wrapper),
+.base-search-input:has(.base-search-input__error) .base-search-input__field :deep(.el-input__wrapper) {
   @apply border-red-300 bg-red-50 dark:border-red-700 dark:bg-red-950;
 }
 
-.base-search-input.is-error:focus-within .base-search-input__field,
-.base-search-input:has(.base-search-input__error):focus-within .base-search-input__field {
+.base-search-input.is-error:focus-within .base-search-input__field :deep(.el-input__wrapper),
+.base-search-input:has(.base-search-input__error):focus-within .base-search-input__field :deep(.el-input__wrapper) {
   box-shadow: 0 0 0 3px rgb(239 68 68 / 0.14);
   @apply border-red-400;
 }
 
-.base-search-input--sm .base-search-input__field {
+.base-search-input--sm .base-search-input__field :deep(.el-input__wrapper) {
   @apply h-8 px-2.5;
 }
 
-.base-search-input--md .base-search-input__field {
+.base-search-input--md .base-search-input__field :deep(.el-input__wrapper) {
   @apply h-9 px-3;
 }
 
-.base-search-input--lg .base-search-input__field {
+.base-search-input--lg .base-search-input__field :deep(.el-input__wrapper) {
   @apply h-10 px-3.5;
 }
 
@@ -324,11 +344,11 @@ onBeforeUnmount(() => {
   @apply opacity-60;
 }
 
-.base-search-input.is-disabled .base-search-input__field {
+.base-search-input.is-disabled .base-search-input__field :deep(.el-input__wrapper) {
   @apply cursor-not-allowed;
 }
 
-.base-search-input.is-readonly .base-search-input__field {
+.base-search-input.is-readonly .base-search-input__field :deep(.el-input__wrapper) {
   @apply bg-slate-100 dark:bg-slate-900;
 }
 
@@ -348,14 +368,23 @@ onBeforeUnmount(() => {
   @apply h-4 w-4 shrink-0 text-slate-400;
 }
 
-.base-search-input__control {
+.base-search-input__field :deep(.el-input__inner) {
   @apply min-w-0 flex-1 bg-transparent text-xs font-bold outline-none placeholder:text-slate-400 disabled:cursor-not-allowed read-only:cursor-text;
 }
 
-.base-search-input__control::-webkit-search-cancel-button,
-.base-search-input__control::-webkit-search-decoration {
+.base-search-input__field :deep(.el-input__inner::-webkit-search-cancel-button),
+.base-search-input__field :deep(.el-input__inner::-webkit-search-decoration) {
   -webkit-appearance: none;
   appearance: none;
+}
+
+.base-search-input__field :deep(.el-input__prefix),
+.base-search-input__field :deep(.el-input__suffix) {
+  @apply text-slate-400 dark:text-slate-500;
+}
+
+.base-search-input__field :deep(.el-input__clear) {
+  @apply h-5 w-5 rounded-md text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-100;
 }
 
 .base-search-input__action {
@@ -370,10 +399,6 @@ onBeforeUnmount(() => {
   @apply inline-flex h-5 w-5 shrink-0 items-center justify-center text-slate-400;
 }
 
-.base-search-input__clear {
-  @apply flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-opacity-30 disabled:cursor-not-allowed dark:hover:bg-slate-800 dark:hover:text-slate-100;
-}
-
 .base-search-input__error {
   @apply mt-1 block text-[10px] font-bold leading-4 text-red-500 dark:text-red-300;
 }
@@ -381,7 +406,8 @@ onBeforeUnmount(() => {
 @media (prefers-reduced-motion: reduce) {
   .base-search-input,
   .base-search-input__field,
-  .base-search-input__clear,
+  .base-search-input__field :deep(.el-input__wrapper),
+  .base-search-input__field :deep(.el-input__clear),
   .base-search-input__action {
     transition: none !important;
     animation: none !important;

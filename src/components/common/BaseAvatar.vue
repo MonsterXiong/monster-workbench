@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed } from "vue";
 import { useI18n } from "../../composables/useI18n";
 import { getInitials, joinNonEmptyStrings } from "../../utils";
 
@@ -40,11 +40,17 @@ const emit = defineEmits<{
 }>();
 
 const { t } = useI18n();
-const imageFailed = ref(false);
 const initials = computed(() => getInitials(props.name, props.fallback));
-const canShowImage = computed(() => Boolean(props.src && !imageFailed.value && !props.loading));
-const canShowIcon = computed(() => Boolean(props.icon && !canShowImage.value && !props.loading));
 const isInteractive = computed(() => props.clickable && !props.disabled && !props.loading);
+const avatarSrc = computed(() => (props.loading ? "" : props.src));
+const avatarSize = computed(() => {
+  if (props.size === "xs") return 24;
+  if (props.size === "sm") return 28;
+  if (props.size === "lg") return 48;
+  if (props.size === "xl") return 64;
+  return 36;
+});
+const avatarShape = computed(() => (props.shape === "rounded" ? "square" : "circle"));
 
 const ariaLabel = computed(() => {
   if (props.ariaLabel) return props.ariaLabel;
@@ -54,27 +60,16 @@ const ariaLabel = computed(() => {
   return joinNonEmptyStrings([displayName, statusLabel, loadingLabel], ", ");
 });
 
-const handleImageError = () => {
-  imageFailed.value = true;
-};
-
 const handleClick = (event: MouseEvent) => {
   if (!isInteractive.value) return;
   emit("click", event);
 };
-
-watch(
-  () => props.src,
-  () => {
-    imageFailed.value = false;
-  }
-);
 </script>
 
 <template>
-  <button
-    v-if="clickable"
-    type="button"
+  <component
+    :is="clickable ? 'button' : 'span'"
+    :type="clickable ? 'button' : undefined"
     class="base-avatar"
     :class="[
       `base-avatar--${size}`,
@@ -86,62 +81,56 @@ watch(
         'is-clickable': isInteractive,
       },
     ]"
-    :disabled="disabled || loading"
+    :role="clickable ? undefined : 'img'"
+    :disabled="clickable ? disabled || loading : undefined"
     :aria-label="ariaLabel"
     :aria-busy="loading ? 'true' : undefined"
     :aria-disabled="disabled || loading ? 'true' : undefined"
     @click="handleClick"
   >
-    <span v-if="loading" class="base-avatar__spinner" aria-hidden="true">
-      <BaseIcon name="LoaderCircle" size="14" />
-    </span>
-    <img v-else-if="canShowImage" :src="src" :alt="alt" :aria-hidden="alt ? undefined : 'true'" @error="handleImageError" />
-    <BaseIcon v-else-if="canShowIcon" :name="icon" size="16" aria-hidden="true" />
-    <span v-else class="base-avatar__initials" aria-hidden="true">{{ initials }}</span>
+    <el-avatar
+      class="base-avatar__core"
+      :src="avatarSrc"
+      :alt="alt"
+      :size="avatarSize"
+      :shape="avatarShape"
+      fit="cover"
+      aria-hidden="true"
+    >
+      <span v-if="loading" class="base-avatar__spinner" aria-hidden="true">
+        <BaseIcon name="LoaderCircle" size="14" />
+      </span>
+      <BaseIcon v-else-if="icon" :name="icon" size="16" aria-hidden="true" />
+      <span v-else class="base-avatar__initials" aria-hidden="true">{{ initials }}</span>
+    </el-avatar>
     <i v-if="status !== 'none'" class="base-avatar__status" aria-hidden="true"></i>
-  </button>
-
-  <span
-    v-else
-    class="base-avatar"
-    :class="[
-      `base-avatar--${size}`,
-      `base-avatar--${status}`,
-      `base-avatar--${shape}`,
-      {
-        'is-disabled': disabled,
-        'is-loading': loading,
-      },
-    ]"
-    role="img"
-    :aria-label="ariaLabel"
-    :aria-busy="loading ? 'true' : undefined"
-    :aria-disabled="disabled || loading ? 'true' : undefined"
-  >
-    <span v-if="loading" class="base-avatar__spinner" aria-hidden="true">
-      <BaseIcon name="LoaderCircle" size="14" />
-    </span>
-    <img v-else-if="canShowImage" :src="src" :alt="alt" :aria-hidden="alt ? undefined : 'true'" @error="handleImageError" />
-    <BaseIcon v-else-if="canShowIcon" :name="icon" size="16" aria-hidden="true" />
-    <span v-else class="base-avatar__initials" aria-hidden="true">{{ initials }}</span>
-    <i v-if="status !== 'none'" class="base-avatar__status" aria-hidden="true"></i>
-  </span>
+  </component>
 </template>
 
 <style scoped>
 .base-avatar {
-  @apply relative inline-flex shrink-0 items-center justify-center overflow-hidden border border-slate-200 bg-slate-100 p-0 font-black text-slate-600 shadow-sm outline-none transition dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200;
+  @apply relative inline-flex shrink-0 items-center justify-center border-0 bg-transparent p-0 font-black outline-none transition;
 }
 
 button.base-avatar {
-  @apply cursor-pointer hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 focus:ring-2 focus:ring-primary focus:ring-opacity-20 disabled:cursor-not-allowed dark:hover:border-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-100;
+  @apply cursor-pointer focus:ring-2 focus:ring-primary focus:ring-opacity-20 disabled:cursor-not-allowed;
+  appearance: none;
 }
 
-.base-avatar--circle {
+.base-avatar__core {
+  @apply h-full w-full border border-slate-200 bg-slate-100 font-black text-slate-600 shadow-sm transition dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200;
+  font-size: inherit;
+}
+
+button.base-avatar:hover .base-avatar__core {
+  @apply border-slate-300 bg-slate-50 text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100;
+}
+
+.base-avatar--circle .base-avatar__core {
   @apply rounded-full;
 }
 
-.base-avatar--rounded {
+.base-avatar--rounded .base-avatar__core {
   @apply rounded-xl;
 }
 
@@ -165,7 +154,7 @@ button.base-avatar {
   @apply h-16 w-16 text-base;
 }
 
-.base-avatar img {
+.base-avatar__core :deep(img) {
   @apply h-full w-full object-cover;
 }
 

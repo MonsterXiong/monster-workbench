@@ -153,6 +153,7 @@ const handleFocusOut = (event: FocusEvent) => {
         :aria-disabled="(readonly || loading) ? 'true' : undefined"
         :aria-busy="loading ? 'true' : undefined"
         :aria-invalid="error ? 'true' : undefined"
+        :validate-event="false"
       />
       <span v-if="loading" class="base-checkbox__loading" aria-hidden="true">
         <LoaderCircle class="h-3.5 w-3.5" aria-hidden="true" />

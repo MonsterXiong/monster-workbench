@@ -102,8 +102,10 @@ const resolvedPopperClass = computed(() =>
 const popperStyle = computed(() => ({
   minWidth: `${normalizedMinWidth.value}px`,
   maxWidth: `${normalizedMaxWidth.value}px`,
+  "--base-action-menu-max-height": `${normalizedMaxHeight.value}px`,
 }));
 const popperOptions = computed(() => ({
+  strategy: "fixed",
   modifiers: [
     { name: "offset", options: { offset: [0, 8] } },
     { name: "preventOverflow", options: { padding: viewportPadding.value } },
@@ -124,16 +126,23 @@ const closeMenu = () => {
   open.value = false;
 };
 
+const closeOtherMenus = () => {
+  if (props.disabled) return;
+  dispatchWindowCustomEvent("base-action-menu:close-all", menuId);
+};
+
+const handleTriggerPointerdown = () => {
+  closeOtherMenus();
+};
+
 const handleVisibleChange = (visible: boolean) => {
   if (props.disabled) {
     closeMenu();
     return;
   }
 
+  if (visible) closeOtherMenus();
   open.value = visible;
-  if (visible) {
-    dispatchWindowCustomEvent("base-action-menu:close-all", menuId);
-  }
 };
 
 const handleCommand = (command: unknown) => {
@@ -185,6 +194,7 @@ onBeforeUnmount(() => {
       aria-haspopup="menu"
       :aria-expanded="open"
       :aria-label="resolvedMenuLabel"
+      @pointerdown="handleTriggerPointerdown"
     >
       <BaseIcon :name="icon" size="15" aria-hidden="true" />
       <span v-if="label">{{ label }}</span>
@@ -265,19 +275,52 @@ onBeforeUnmount(() => {
   --el-color-primary: rgb(var(--color-primary));
 }
 
+:global(.base-action-menu-popper.el-zoom-in-bottom-enter-active),
+:global(.base-action-menu-popper.el-zoom-in-bottom-leave-active),
+:global(.base-action-menu-popper.el-zoom-in-top-enter-active),
+:global(.base-action-menu-popper.el-zoom-in-top-leave-active) {
+  transition-duration: 0.08s !important;
+}
+
+:global(.base-action-menu-popper.el-zoom-in-bottom-leave-active),
+:global(.base-action-menu-popper.el-zoom-in-top-leave-active) {
+  pointer-events: none;
+}
+
 :global(.base-action-menu-popper .el-popper__arrow) {
   display: none;
 }
 
 :global(.base-action-menu-popper .el-dropdown-menu) {
-  overflow: hidden;
+  box-sizing: border-box;
+  max-height: var(--base-action-menu-max-height, 320px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   border: 1px solid #e2e8f0;
   border-radius: 10px;
   background: #ffffff;
   padding: 6px;
+  scrollbar-color: #cbd5e1 transparent;
+  scrollbar-width: thin;
   box-shadow:
     0 18px 42px rgba(15, 23, 42, 0.14),
     inset 0 1px 0 rgba(255, 255, 255, 0.82);
+}
+
+:global(.base-action-menu-popper .el-dropdown-menu::-webkit-scrollbar) {
+  width: 8px;
+}
+
+:global(.base-action-menu-popper .el-dropdown-menu::-webkit-scrollbar-thumb) {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: #cbd5e1;
+  background-clip: padding-box;
+}
+
+:global(.base-action-menu-popper .el-dropdown-menu::-webkit-scrollbar-track) {
+  background: transparent;
 }
 
 :global(.base-action-menu-popper .base-action-menu__item.el-dropdown-menu__item) {
@@ -429,9 +472,14 @@ onBeforeUnmount(() => {
 :global(.dark .base-action-menu-popper .el-dropdown-menu) {
   border-color: #1e293b;
   background: #0f172a;
+  scrollbar-color: #475569 transparent;
   box-shadow:
     0 18px 42px rgba(0, 0, 0, 0.34),
     inset 0 1px 0 rgba(148, 163, 184, 0.08);
+}
+
+:global(.dark .base-action-menu-popper .el-dropdown-menu::-webkit-scrollbar-thumb) {
+  background: #475569;
 }
 
 :global(.dark .base-action-menu-popper .base-action-menu__item.el-dropdown-menu__item) {

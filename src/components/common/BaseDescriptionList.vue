@@ -62,6 +62,7 @@ const props = withDefaults(defineProps<Props>(), {
 const { t } = useI18n();
 const resolvedSize = computed(() => (props.compact ? "sm" : props.size));
 const resolvedColumns = computed(() => clampNumber(props.columns, 1, 3, 2, 0) as 1 | 2 | 3);
+const elementSize = computed(() => (resolvedSize.value === "sm" ? "small" : resolvedSize.value === "lg" ? "large" : "default"));
 const isEmpty = computed(() => !props.loading && isEmptyArray(props.items));
 const skeletonCount = computed(() => toIntegerAtLeast(props.skeletonRows, 1, 4));
 const resolvedLoadingText = computed(() => props.loadingText || t("common.loading"));
@@ -81,6 +82,8 @@ const normalizedItems = computed<ResolvedDescriptionListItem[]>(() =>
 const descriptionStyle = computed(() => (props.wrapDescription ? undefined : createLineClampStyle(props.maxDescriptionLines)));
 const getItemSpanClass = (item: ResolvedDescriptionListItem) =>
   item.resolvedSpan > 1 ? `base-description-list__item--span-${item.resolvedSpan}` : "";
+const getItemContentClass = (item: ResolvedDescriptionListItem) =>
+  ["base-description-list__content-cell", getItemSpanClass(item)].filter(Boolean).join(" ");
 const getItemStatusLabel = (item: DescriptionListItem) => {
   if (!item.status) return "";
   return `${item.label}状态：${item.statusLabel || statusLabels[item.status]}`;
@@ -88,7 +91,7 @@ const getItemStatusLabel = (item: DescriptionListItem) => {
 </script>
 
 <template>
-  <dl
+  <div
     class="base-description-list"
     :class="[
       `base-description-list--cols-${resolvedColumns}`,
@@ -110,10 +113,12 @@ const getItemStatusLabel = (item: DescriptionListItem) => {
   >
     <template v-if="loading">
       <div class="sr-only" role="status" aria-live="polite">{{ resolvedLoadingText }}</div>
-      <div v-for="index in skeletonCount" :key="index" class="base-description-list__item base-description-list__item--skeleton" aria-hidden="true">
-        <span></span>
-        <strong></strong>
-        <em></em>
+      <div class="base-description-list__fallback-grid">
+        <div v-for="index in skeletonCount" :key="index" class="base-description-list__item base-description-list__item--skeleton" aria-hidden="true">
+          <span></span>
+          <strong></strong>
+          <em></em>
+        </div>
       </div>
     </template>
 
@@ -122,26 +127,34 @@ const getItemStatusLabel = (item: DescriptionListItem) => {
       <span>{{ emptyText || t("common.noData") }}</span>
     </div>
 
-    <div
+    <el-descriptions
       v-else
-      v-for="item in normalizedItems"
-      :key="item.key"
-      class="base-description-list__item"
-      :class="getItemSpanClass(item)"
+      class="base-description-list__descriptions"
+      :column="resolvedColumns"
+      :border="bordered"
+      :size="elementSize"
     >
-      <dt>
-        <span>{{ item.label }}</span>
-        <BaseStatusDot v-if="item.status" :type="item.status" size="sm" :pulse="item.statusPulse" :aria-label="getItemStatusLabel(item)" />
-      </dt>
-      <dd :title="String(item.value)">{{ item.value }}</dd>
-      <p v-if="item.description" :title="item.description" :style="descriptionStyle">{{ item.description }}</p>
-    </div>
-  </dl>
+      <el-descriptions-item
+        v-for="item in normalizedItems"
+        :key="item.key"
+        :span="item.resolvedSpan"
+        label-class-name="base-description-list__label-cell"
+        :class-name="getItemContentClass(item)"
+      >
+        <template #label>
+          <span class="base-description-list__label-text">{{ item.label }}</span>
+          <BaseStatusDot v-if="item.status" :type="item.status" size="sm" :pulse="item.statusPulse" :aria-label="getItemStatusLabel(item)" />
+        </template>
+        <div class="base-description-list__value" :title="String(item.value)">{{ item.value }}</div>
+        <p v-if="item.description" class="base-description-list__description" :title="item.description" :style="descriptionStyle">{{ item.description }}</p>
+      </el-descriptions-item>
+    </el-descriptions>
+  </div>
 </template>
 
 <style scoped>
 .base-description-list {
-  @apply grid min-w-0 max-w-full overflow-hidden rounded-2xl bg-white transition dark:bg-slate-900;
+  @apply min-w-0 max-w-full overflow-hidden rounded-2xl bg-white transition dark:bg-slate-900;
 }
 
 .base-description-list--bordered {
@@ -168,27 +181,77 @@ const getItemStatusLabel = (item: DescriptionListItem) => {
   @apply pointer-events-none;
 }
 
-.base-description-list--cols-1 {
+.base-description-list__fallback-grid {
+  @apply grid min-w-0 max-w-full;
+}
+
+.base-description-list--cols-1 .base-description-list__fallback-grid {
   @apply grid-cols-1;
 }
 
-.base-description-list--cols-2 {
+.base-description-list--cols-2 .base-description-list__fallback-grid {
   @apply grid-cols-1 md:grid-cols-2;
 }
 
-.base-description-list--cols-3 {
+.base-description-list--cols-3 .base-description-list__fallback-grid {
   @apply grid-cols-1 md:grid-cols-3;
+}
+
+.base-description-list__descriptions {
+  @apply min-w-0 max-w-full;
+}
+
+.base-description-list :deep(.el-descriptions__body) {
+  @apply bg-transparent text-slate-800 dark:bg-transparent dark:text-slate-100;
+}
+
+.base-description-list :deep(.el-descriptions__table) {
+  @apply m-0 w-full table-fixed;
+}
+
+.base-description-list :deep(.el-descriptions__label),
+.base-description-list :deep(.el-descriptions__content) {
+  @apply border-slate-200 bg-transparent align-top dark:border-slate-800;
+}
+
+.base-description-list :deep(.el-descriptions__label) {
+  @apply w-32 text-slate-400 dark:text-slate-500;
+}
+
+.base-description-list :deep(.el-descriptions__content) {
+  @apply min-w-0 text-slate-800 dark:text-slate-100;
+}
+
+.base-description-list--plain :deep(.el-descriptions__table),
+.base-description-list--plain :deep(.el-descriptions__label),
+.base-description-list--plain :deep(.el-descriptions__content) {
+  @apply border-0;
 }
 
 .base-description-list__item {
   @apply min-w-0 border-slate-200 p-4 dark:border-slate-800;
 }
 
+.base-description-list :deep(.base-description-list__label-cell),
+.base-description-list :deep(.base-description-list__content-cell) {
+  @apply p-4;
+}
+
 .base-description-list--sm .base-description-list__item {
   @apply p-3;
 }
 
+.base-description-list--sm :deep(.base-description-list__label-cell),
+.base-description-list--sm :deep(.base-description-list__content-cell) {
+  @apply p-3;
+}
+
 .base-description-list--lg .base-description-list__item {
+  @apply p-5;
+}
+
+.base-description-list--lg :deep(.base-description-list__label-cell),
+.base-description-list--lg :deep(.base-description-list__content-cell) {
   @apply p-5;
 }
 
@@ -204,47 +267,47 @@ const getItemStatusLabel = (item: DescriptionListItem) => {
   @apply md:col-span-3;
 }
 
-.base-description-list dt {
+.base-description-list :deep(.base-description-list__label-cell) {
   @apply flex min-w-0 items-center gap-2 text-[10px] font-black uppercase tracking-wide text-slate-400 dark:text-slate-500;
 }
 
-.base-description-list--lg dt {
+.base-description-list--lg :deep(.base-description-list__label-cell) {
   @apply text-xs;
 }
 
-.base-description-list dt span {
+.base-description-list__label-text {
   @apply truncate;
 }
 
-.base-description-list--wrap-label dt span {
+.base-description-list--wrap-label .base-description-list__label-text {
   @apply whitespace-normal;
   overflow: visible;
   overflow-wrap: anywhere;
   text-overflow: clip;
 }
 
-.base-description-list dd {
+.base-description-list__value {
   @apply mt-1 truncate text-sm font-black text-slate-800 dark:text-slate-100;
 }
 
-.base-description-list--wrap-value dd {
+.base-description-list--wrap-value .base-description-list__value {
   @apply whitespace-normal;
   overflow: visible;
   overflow-wrap: anywhere;
   text-overflow: clip;
 }
 
-.base-description-list--lg dd {
+.base-description-list--lg .base-description-list__value {
   @apply text-base;
 }
 
-.base-description-list p {
+.base-description-list__description {
   @apply mt-0.5 overflow-hidden text-[10px] font-bold text-slate-400 dark:text-slate-500;
   display: -webkit-box;
   -webkit-box-orient: vertical;
 }
 
-.base-description-list--wrap-description p {
+.base-description-list--wrap-description .base-description-list__description {
   @apply whitespace-normal;
   display: block;
   overflow: visible;
@@ -252,7 +315,7 @@ const getItemStatusLabel = (item: DescriptionListItem) => {
   text-overflow: clip;
 }
 
-.base-description-list--lg p {
+.base-description-list--lg .base-description-list__description {
   @apply text-xs;
 }
 

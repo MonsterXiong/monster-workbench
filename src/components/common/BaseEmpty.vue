@@ -51,12 +51,17 @@ const iconSize = computed(() => {
   if (resolvedSize.value === "lg") return 40;
   return 30;
 });
+const imageSize = computed(() => {
+  if (resolvedSize.value === "sm") return 44;
+  if (resolvedSize.value === "lg") return 80;
+  return 56;
+});
 const labelledBy = computed(() => (!props.ariaLabel && props.title ? titleId.value : undefined));
 const resolvedActionsLabel = computed(() => props.actionsLabel || `${props.title || props.ariaLabel || "空态"} 操作`);
 </script>
 
 <template>
-  <div
+  <el-empty
     class="base-empty"
     :class="[
       `base-empty--${resolvedSize}`,
@@ -69,6 +74,8 @@ const resolvedActionsLabel = computed(() => props.actionsLabel || `${props.title
         'is-disabled': disabled,
       },
     ]"
+    :description="resolvedDescription"
+    :image-size="imageSize"
     :style="{ minHeight: minHeight || undefined }"
     role="status"
     aria-live="polite"
@@ -77,22 +84,46 @@ const resolvedActionsLabel = computed(() => props.actionsLabel || `${props.title
     :aria-describedby="descriptionId"
     :aria-disabled="disabled ? 'true' : undefined"
   >
-    <div class="base-empty__icon" aria-hidden="true">
-      <BaseIcon :name="icon" :size="iconSize" aria-hidden="true" />
-    </div>
-    <strong v-if="title" :id="titleId" class="base-empty__title">{{ title }}</strong>
-    <p :id="descriptionId" class="base-empty__description">
-      {{ resolvedDescription }}
-    </p>
+    <template #image>
+      <div class="base-empty__icon" aria-hidden="true">
+        <BaseIcon :name="icon" :size="iconSize" aria-hidden="true" />
+      </div>
+    </template>
+
+    <template #description>
+      <strong v-if="title" :id="titleId" class="base-empty__title">{{ title }}</strong>
+      <p :id="descriptionId" class="base-empty__description">
+        {{ resolvedDescription }}
+      </p>
+    </template>
+
     <div v-if="$slots.default" class="base-empty__actions" role="group" :aria-label="resolvedActionsLabel">
       <slot></slot>
     </div>
-  </div>
+  </el-empty>
 </template>
 
 <style scoped>
 .base-empty {
   @apply flex w-full min-w-0 select-none flex-col justify-center rounded-2xl px-4 py-12 text-center transition;
+  box-sizing: border-box;
+  --el-empty-padding: 0;
+  --el-empty-description-margin-top: 0.75rem;
+  --el-empty-bottom-margin-top: 1rem;
+  --el-empty-image-width: 3.5rem;
+}
+
+.base-empty :deep(.el-empty__image) {
+  display: flex;
+  justify-content: center;
+}
+
+.base-empty :deep(.el-empty__description) {
+  @apply min-w-0 max-w-full;
+}
+
+.base-empty :deep(.el-empty__bottom) {
+  @apply flex max-w-full justify-center;
 }
 
 .base-empty--center {
@@ -101,6 +132,11 @@ const resolvedActionsLabel = computed(() => props.actionsLabel || `${props.title
 
 .base-empty--start {
   @apply items-start text-left;
+}
+
+.base-empty--start :deep(.el-empty__image),
+.base-empty--start :deep(.el-empty__bottom) {
+  @apply justify-start;
 }
 
 .base-empty--card {
@@ -156,12 +192,24 @@ const resolvedActionsLabel = computed(() => props.actionsLabel || `${props.title
   @apply h-11 w-11 rounded-xl;
 }
 
+.base-empty--sm {
+  --el-empty-image-width: 2.75rem;
+}
+
 .base-empty--md .base-empty__icon {
   @apply h-14 w-14;
 }
 
+.base-empty--md {
+  --el-empty-image-width: 3.5rem;
+}
+
 .base-empty--lg .base-empty__icon {
   @apply h-20 w-20;
+}
+
+.base-empty--lg {
+  --el-empty-image-width: 5rem;
 }
 
 .base-empty__title {
@@ -184,6 +232,10 @@ const resolvedActionsLabel = computed(() => props.actionsLabel || `${props.title
 
 .base-empty__actions {
   @apply mt-4 flex max-w-full flex-wrap items-center justify-center gap-2;
+}
+
+.base-empty :deep(.el-empty__bottom) .base-empty__actions {
+  @apply mt-0;
 }
 
 .base-empty--start .base-empty__actions {

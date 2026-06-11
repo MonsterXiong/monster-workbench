@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from "vue";
-import { filterTreeNodeKeys, findIndexByValue, focusElementPreventScroll, getFirstTruthyRecordValue, getKeyboardBoundaryPosition, getKeyboardNavigationDirection, getLastIndex, getNextClampedIndex, hasItem, isHTMLElement, isKeyboardKey, queryVisibleElements, setSelectionKey, uniqueArray } from "../../utils";
+import { computed, ref, watch } from "vue";
+import { filterTreeNodeKeys, getFirstTruthyRecordValue, hasItem, setSelectionKey, uniqueArray } from "../../utils";
 
 type TreeSize = "sm" | "md" | "lg";
 type TreeSurface = "card" | "muted" | "plain";
@@ -74,7 +74,6 @@ defineSlots<{
   actions?: (props: { node: TreeNode; level: number; active: boolean; expanded: boolean }) => any;
 }>();
 
-const isRoot = () => props.level === 1;
 const getNodeKey = (node: TreeNode) => String(getFirstTruthyRecordValue(node, [props.nodeKey, "path", "name"], ""));
 const collectExpandedKeys = (nodes: TreeNode[]): string[] => {
   return filterTreeNodeKeys(nodes, (node) => Boolean(node.expanded), (node) => node.children, getNodeKey);
@@ -84,8 +83,28 @@ const initialExpandedKeys = () => uniqueArray([...collectExpandedKeys(props.data
 const internalExpandedKeys = ref<string[]>(initialExpandedKeys());
 const expandedKeysSource = computed(() => props.expandedKeys ?? internalExpandedKeys.value);
 
+const rootClasses = computed(() => [
+  `base-tree--${props.size}`,
+  `base-tree--${props.surface}`,
+  {
+    "base-tree--bordered": props.bordered,
+    "base-tree--lines": props.showLines,
+    "is-disabled": props.disabled,
+  },
+]);
+
+const treeProps = computed(() => ({
+  children: "children",
+  label: "name",
+  disabled: (node: TreeNode) => isNodeDisabled(node),
+  isLeaf: (node: TreeNode) => !node.isDir,
+}));
+
+const treeStyle = computed(() => ({
+  "--base-tree-indent": `${props.indent}px`,
+}));
+
 const isActive = (node: TreeNode) => Boolean(props.activeKey && getNodeKey(node) === props.activeKey);
-const hasChildren = (node: TreeNode) => Boolean(node.isDir && node.children?.length);
 const isNodeDisabled = (node: TreeNode) => Boolean(props.disabled || node.disabled);
 const isNodeExpanded = (node: TreeNode) => hasItem(expandedKeysSource.value, getNodeKey(node));
 const resolvedIcon = (node: TreeNode) => {
@@ -104,27 +123,16 @@ watch(
 );
 
 const commitExpandedKeys = (keys: string[]) => {
+  const nextKeys = uniqueArray(keys);
   if (props.expandedKeys === undefined) {
-    internalExpandedKeys.value = keys;
+    internalExpandedKeys.value = nextKeys;
   }
 
-  emit("update:expandedKeys", keys);
-};
-
-const setNodeExpanded = (node: TreeNode, expanded: boolean) => {
-  const key = getNodeKey(node);
-  const nextKeys = setSelectionKey(expandedKeysSource.value, key, expanded);
-
-  commitExpandedKeys(nextKeys);
-  emit("node-toggle", { node, expanded });
+  emit("update:expandedKeys", nextKeys);
 };
 
 const handleNodeClick = (node: TreeNode) => {
   if (isNodeDisabled(node)) return;
-
-  if (node.isDir && props.expandOnClick) {
-    setNodeExpanded(node, !isNodeExpanded(node));
-  }
 
   emit("node-click", node);
 
@@ -133,129 +141,50 @@ const handleNodeClick = (node: TreeNode) => {
   }
 };
 
-const getTreeRoot = (target: EventTarget | null) => {
-  return isHTMLElement(target) ? target.closest<HTMLElement>('[role="tree"]') : null;
-};
-
-const getVisibleTreeItems = (target: EventTarget | null) => {
-  const root = getTreeRoot(target);
-  return queryVisibleElements<HTMLButtonElement>(root, ".base-tree__node:not(:disabled)");
-};
-
-const focusTreeItem = (items: HTMLButtonElement[], index: number) => {
-  const target = items[index];
-  if (!target) return;
-
-  void nextTick(() => {
-    focusElementPreventScroll(target);
-  });
-};
-
-const focusSibling = (event: KeyboardEvent, offset: 1 | -1) => {
-  const items = getVisibleTreeItems(event.currentTarget);
-  const currentTarget = event.currentTarget;
-  if (!isHTMLElement(currentTarget)) return;
-
-  const currentIndex = findIndexByValue(items, (item) => item, currentTarget);
-  if (currentIndex === -1) return;
-
-  const nextIndex = getNextClampedIndex(items.length, currentIndex, offset);
-  focusTreeItem(items, nextIndex);
-};
-
-const handleNodeKeydown = (event: KeyboardEvent, node: TreeNode) => {
+const handleNodeExpand = (node: TreeNode) => {
   if (isNodeDisabled(node)) return;
 
-  const verticalDirection = getKeyboardNavigationDirection(event, {
-    forwardKeys: ["ArrowDown"],
-    backwardKeys: ["ArrowUp"],
-  });
-  if (verticalDirection) {
-    event.preventDefault();
-    focusSibling(event, verticalDirection);
-    return;
-  }
+  commitExpandedKeys(setSelectionKey(expandedKeysSource.value, getNodeKey(node), true));
+  emit("node-toggle", { node, expanded: true });
+};
 
-  const boundaryPosition = getKeyboardBoundaryPosition(event);
-  if (boundaryPosition === "first") {
-    event.preventDefault();
-    focusTreeItem(getVisibleTreeItems(event.currentTarget), 0);
-    return;
-  }
+const handleNodeCollapse = (node: TreeNode) => {
+  if (isNodeDisabled(node)) return;
 
-  if (boundaryPosition === "last") {
-    event.preventDefault();
-    const items = getVisibleTreeItems(event.currentTarget);
-    focusTreeItem(items, getLastIndex(items));
-    return;
-  }
-
-  if (isKeyboardKey(event, "ArrowRight") && hasChildren(node)) {
-    event.preventDefault();
-    if (!isNodeExpanded(node)) {
-      setNodeExpanded(node, true);
-      return;
-    }
-
-    focusSibling(event, 1);
-  }
-
-  if (isKeyboardKey(event, "ArrowLeft") && hasChildren(node) && isNodeExpanded(node)) {
-    event.preventDefault();
-    setNodeExpanded(node, false);
-  }
+  commitExpandedKeys(setSelectionKey(expandedKeysSource.value, getNodeKey(node), false));
+  emit("node-toggle", { node, expanded: false });
 };
 </script>
 
 <template>
-  <ul
+  <el-tree
     class="base-tree"
-    :class="[
-      `base-tree--${size}`,
-      {
-        [`base-tree--${surface}`]: isRoot(),
-        'base-tree--bordered': isRoot() && bordered,
-        'base-tree--nested': !isRoot(),
-        'base-tree--lines': showLines,
-        'is-disabled': isRoot() && disabled,
-      },
-    ]"
-    :role="isRoot() ? 'tree' : 'group'"
-    :aria-label="isRoot() ? ariaLabel || undefined : undefined"
-    :aria-disabled="isRoot() && disabled ? 'true' : undefined"
+    :class="rootClasses"
+    :style="treeStyle"
+    :data="data"
+    :props="treeProps"
+    :node-key="nodeKey"
+    :default-expanded-keys="expandedKeysSource"
+    :current-node-key="activeKey || undefined"
+    :indent="indentStep"
+    :expand-on-click-node="!disabled && expandOnClick"
+    :highlight-current="Boolean(activeKey)"
+    :render-after-expand="false"
+    :aria-label="ariaLabel || undefined"
+    :aria-disabled="disabled ? 'true' : undefined"
+    @node-click="handleNodeClick"
+    @node-expand="handleNodeExpand"
+    @node-collapse="handleNodeCollapse"
   >
-    <li
-      v-for="(node, idx) in data"
-      :key="node.path || node.name || idx"
-      class="base-tree__item"
-      :class="{ 'is-expanded': isNodeExpanded(node), 'is-disabled': isNodeDisabled(node) }"
-      role="none"
-    >
-      <button
-        type="button"
+    <template #default="{ data: node }">
+      <span
         class="base-tree__node"
-        :class="{ 'is-active': isActive(node), 'is-disabled': isNodeDisabled(node) }"
-        :style="{ paddingLeft: `${indent}px` }"
-        role="treeitem"
-        :disabled="isNodeDisabled(node)"
-        :aria-expanded="node.isDir ? isNodeExpanded(node) : undefined"
-        :aria-level="level"
-        :aria-selected="selectable && isActive(node) ? 'true' : undefined"
-        :aria-disabled="isNodeDisabled(node) ? 'true' : undefined"
-        @click="handleNodeClick(node)"
-        @keydown="handleNodeKeydown($event, node)"
+        :class="{
+          'is-active': isActive(node),
+          'is-disabled': isNodeDisabled(node),
+          'is-expanded': isNodeExpanded(node),
+        }"
       >
-        <span class="base-tree__toggle" aria-hidden="true">
-          <BaseIcon
-            v-if="node.isDir"
-            name="ChevronRight"
-            size="14"
-            class="base-tree__chevron"
-            :class="{ 'is-expanded': isNodeExpanded(node) }"
-            aria-hidden="true"
-          />
-        </span>
-
         <BaseIcon
           :name="resolvedIcon(node)"
           size="16"
@@ -276,51 +205,30 @@ const handleNodeKeydown = (event: KeyboardEvent, node: TreeNode) => {
           <BaseBadge v-if="node.badge" :type="node.badgeType || 'neutral'" size="xs">{{ node.badge }}</BaseBadge>
           <slot name="actions" :node="node" :level="level" :active="isActive(node)" :expanded="isNodeExpanded(node)"></slot>
         </span>
-      </button>
-
-      <BaseTree
-        v-if="hasChildren(node) && isNodeExpanded(node)"
-        :data="node.children || []"
-        :expanded-keys="expandedKeysSource"
-        :default-expanded-keys="defaultExpandedKeys"
-        :indent="indent + indentStep"
-        :indent-step="indentStep"
-        :level="level + 1"
-        :size="size"
-        surface="plain"
-        :bordered="false"
-        :active-key="activeKey"
-        :node-key="nodeKey"
-        :expand-on-click="expandOnClick"
-        :show-lines="showLines"
-        :leaf-icon="leafIcon"
-        :folder-icon="folderIcon"
-        :folder-open-icon="folderOpenIcon"
-        :disabled="disabled"
-        :selectable="selectable"
-        @update:expanded-keys="commitExpandedKeys"
-        @node-click="emit('node-click', $event)"
-        @node-toggle="emit('node-toggle', $event)"
-        @select="emit('select', $event)"
-      >
-        <template v-if="$slots.default" #default="slotProps">
-          <slot name="default" v-bind="slotProps"></slot>
-        </template>
-        <template v-if="$slots.actions" #actions="slotProps">
-          <slot name="actions" v-bind="slotProps"></slot>
-        </template>
-      </BaseTree>
-    </li>
-  </ul>
+      </span>
+    </template>
+  </el-tree>
 </template>
 
 <style scoped>
 .base-tree {
-  @apply m-0 w-full min-w-0 list-none select-none p-0;
+  @apply w-full min-w-0 select-none text-slate-700 dark:text-slate-300;
+  --el-tree-node-content-height: 34px;
+  --el-tree-node-hover-bg-color: rgb(241 245 249);
+  --el-tree-text-color: rgb(51 65 85);
+  --el-tree-expand-icon-color: rgb(148 163 184);
+  background: transparent;
+}
+
+.dark .base-tree {
+  --el-tree-node-hover-bg-color: rgb(30 41 59);
+  --el-tree-text-color: rgb(203 213 225);
+  --el-tree-expand-icon-color: rgb(100 116 139);
 }
 
 .base-tree.is-disabled {
   @apply opacity-75;
+  pointer-events: none;
 }
 
 .base-tree--card {
@@ -339,56 +247,80 @@ const handleNodeKeydown = (event: KeyboardEvent, node: TreeNode) => {
   @apply border border-slate-200 dark:border-slate-800;
 }
 
-.base-tree--nested {
-  @apply mt-1;
+.base-tree :deep(.el-tree-node) {
+  @apply min-w-0;
+  white-space: normal;
 }
 
-.base-tree__item {
-  @apply relative min-w-0;
+.base-tree :deep(.el-tree-node__content) {
+  @apply relative min-w-0 gap-2 rounded-xl px-3 text-left text-sm font-bold transition focus:outline-none;
+  height: auto;
+  min-height: var(--el-tree-node-content-height);
+  padding-left: max(var(--base-tree-indent), 0px);
 }
 
-.base-tree--lines .base-tree__item::before {
+.base-tree--card :deep(.el-tree > .el-tree-node > .el-tree-node__content),
+.base-tree--muted :deep(.el-tree > .el-tree-node > .el-tree-node__content),
+.base-tree--card :deep(> .el-tree-node > .el-tree-node__content),
+.base-tree--muted :deep(> .el-tree-node > .el-tree-node__content) {
+  @apply rounded-none;
+}
+
+.base-tree :deep(.el-tree-node__content:hover) {
+  @apply bg-slate-100 dark:bg-slate-800;
+}
+
+.base-tree :deep(.el-tree-node:focus > .el-tree-node__content) {
+  @apply bg-slate-100 outline-none ring-2 ring-primary ring-opacity-20 dark:bg-slate-800;
+}
+
+.base-tree :deep(.el-tree-node.is-current > .el-tree-node__content),
+.base-tree :deep(.el-tree-node__content:has(.base-tree__node.is-active)) {
+  color: rgb(var(--color-primary));
+  background-color: rgba(var(--color-primary), 0.09);
+}
+
+.base-tree :deep(.el-tree-node.is-expanded > .el-tree-node__content) {
+  @apply bg-slate-50 dark:bg-slate-900;
+}
+
+.base-tree :deep(.el-tree-node.is-expanded.is-current > .el-tree-node__content),
+.base-tree :deep(.el-tree-node.is-expanded > .el-tree-node__content:has(.base-tree__node.is-active)) {
+  background-color: rgba(var(--color-primary), 0.1);
+}
+
+.base-tree :deep(.el-tree-node[aria-disabled="true"] > .el-tree-node__content) {
+  @apply cursor-not-allowed opacity-55;
+}
+
+.base-tree :deep(.el-tree-node__expand-icon) {
+  @apply shrink-0 rounded-md p-1 text-slate-400 transition hover:bg-white/70 hover:text-primary dark:text-slate-500 dark:hover:bg-slate-900;
+}
+
+.base-tree :deep(.el-tree-node__expand-icon.expanded) {
+  @apply text-primary;
+}
+
+.base-tree :deep(.el-tree-node__expand-icon.is-leaf) {
+  @apply opacity-0;
+}
+
+.base-tree--lines :deep(.el-tree-node) {
+  @apply relative;
+}
+
+.base-tree--lines :deep(.el-tree-node::before) {
   @apply absolute bottom-0 top-0 w-px bg-slate-200 dark:bg-slate-800;
   content: "";
   left: 18px;
 }
 
 .base-tree__node {
-  @apply relative flex w-full min-w-0 items-center gap-2 rounded-xl px-3 py-1.5 text-left text-sm font-bold text-slate-700 transition hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-opacity-20 disabled:cursor-not-allowed disabled:opacity-55 disabled:hover:bg-transparent dark:text-slate-300 dark:hover:bg-slate-800;
-}
-
-.base-tree--card > .base-tree__item > .base-tree__node,
-.base-tree--muted > .base-tree__item > .base-tree__node {
-  @apply rounded-none;
-}
-
-.base-tree__node.is-active {
-  color: rgb(var(--color-primary));
-  background-color: rgba(var(--color-primary), 0.09);
-}
-
-.base-tree__item.is-expanded > .base-tree__node {
-  @apply bg-slate-50 dark:bg-slate-900;
-}
-
-.base-tree__item.is-expanded > .base-tree__node.is-active {
-  background-color: rgba(var(--color-primary), 0.1);
+  @apply flex min-w-0 flex-1 items-center gap-2;
 }
 
 .base-tree__node.is-disabled {
-  @apply opacity-55;
-}
-
-.base-tree__toggle {
-  @apply flex h-4 w-4 shrink-0 items-center justify-center text-slate-400 dark:text-slate-500;
-}
-
-.base-tree__chevron {
-  @apply transition-transform duration-150;
-}
-
-.base-tree__chevron.is-expanded {
-  @apply rotate-90 text-primary;
+  @apply opacity-70;
 }
 
 .base-tree__icon {
@@ -419,8 +351,12 @@ const handleNodeKeydown = (event: KeyboardEvent, node: TreeNode) => {
   @apply hidden text-[10px] font-black text-slate-400 dark:text-slate-500 sm:inline;
 }
 
-.base-tree--sm .base-tree__node {
-  @apply py-1 text-xs;
+.base-tree--sm {
+  --el-tree-node-content-height: 30px;
+}
+
+.base-tree--sm :deep(.el-tree-node__content) {
+  @apply text-xs;
 }
 
 .base-tree--sm .base-tree__description,
@@ -428,8 +364,12 @@ const handleNodeKeydown = (event: KeyboardEvent, node: TreeNode) => {
   @apply text-[9px];
 }
 
-.base-tree--lg .base-tree__node {
-  @apply py-2 text-sm;
+.base-tree--lg {
+  --el-tree-node-content-height: 38px;
+}
+
+.base-tree--lg :deep(.el-tree-node__content) {
+  @apply text-sm;
 }
 
 .base-tree--lg .base-tree__description {
@@ -437,8 +377,8 @@ const handleNodeKeydown = (event: KeyboardEvent, node: TreeNode) => {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .base-tree__node,
-  .base-tree__chevron {
+  .base-tree :deep(.el-tree-node__content),
+  .base-tree :deep(.el-tree-node__expand-icon) {
     transition: none !important;
   }
 }

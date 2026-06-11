@@ -68,6 +68,15 @@ const loadingId = `${statId}-loading`;
 const trendId = `${statId}-trend`;
 const hasTrend = computed(() => Boolean(props.trend));
 const hasDescription = computed(() => Boolean(props.description));
+const cardBodyStyle = { padding: "0" };
+const statisticPrefix = computed(() => props.prefix || undefined);
+const statisticSuffix = computed(() => `${props.unit}${props.suffix}` || undefined);
+const trendTagType = computed(() => {
+  if (props.trendDirection === "up") return "success";
+  if (props.trendDirection === "down") return "danger";
+  if (props.type === "neutral") return "info";
+  return props.type;
+});
 const labelledBy = computed(() => {
   if (props.ariaLabel) return undefined;
   return `${labelId} ${valueId}`;
@@ -102,8 +111,10 @@ const handleKeydown = (event: KeyboardEvent) => {
 </script>
 
 <template>
-  <section
+  <el-card
     class="base-stat-card"
+    shadow="never"
+    :body-style="cardBodyStyle"
     :class="[
       `base-stat-card--${type}`,
       `base-stat-card--${size}`,
@@ -134,7 +145,15 @@ const handleKeydown = (event: KeyboardEvent) => {
       <div v-if="icon" class="base-stat-card__icon" aria-hidden="true">
         <BaseIcon :name="icon" size="16" aria-hidden="true" />
       </div>
-      <span v-if="hasTrend" :id="trendId" class="base-stat-card__trend" :aria-label="trendLabel || undefined">
+      <el-tag
+        v-if="hasTrend"
+        :id="trendId"
+        class="base-stat-card__trend"
+        :type="trendTagType"
+        effect="light"
+        round
+        :aria-label="trendLabel || undefined"
+      >
         <BaseIcon
           v-if="trendDirection !== 'flat'"
           :name="trendDirection === 'up' ? 'TrendingUp' : 'TrendingDown'"
@@ -142,24 +161,42 @@ const handleKeydown = (event: KeyboardEvent) => {
           aria-hidden="true"
         />
         {{ trend }}
-      </span>
+      </el-tag>
     </div>
     <div class="base-stat-card__body">
       <span :id="labelId" class="base-stat-card__label">{{ label }}</span>
-      <strong :id="valueId" class="base-stat-card__value" aria-live="polite">{{ displayValue }}</strong>
+      <el-statistic
+        :id="valueId"
+        class="base-stat-card__value"
+        :value="value"
+        :prefix="statisticPrefix"
+        :suffix="statisticSuffix"
+        :aria-label="displayValue"
+        aria-live="polite"
+      />
       <span v-if="description" :id="descriptionId" class="base-stat-card__description" :style="descriptionStyle">{{ description }}</span>
       <span v-if="loading && loadingText" :id="loadingId" class="sr-only">{{ loadingText }}</span>
     </div>
-  </section>
+  </el-card>
 </template>
 
 <style scoped>
 .base-stat-card {
+  --el-card-border-color: rgb(226 232 240);
+  --el-card-border-radius: 1rem;
+  --el-card-bg-color: #fff;
+  --el-card-padding: 0;
   @apply min-w-0 max-w-full rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition dark:border-slate-800 dark:bg-slate-900;
+}
+
+:global(.dark) .base-stat-card {
+  --el-card-border-color: rgb(30 41 59);
+  --el-card-bg-color: rgb(15 23 42);
 }
 
 .base-stat-card--compact,
 .base-stat-card--sm {
+  --el-card-border-radius: 0.75rem;
   @apply rounded-xl p-3;
 }
 
@@ -173,6 +210,10 @@ const handleKeydown = (event: KeyboardEvent) => {
 
 .base-stat-card--plain {
   @apply rounded-none border-0 bg-transparent p-0 shadow-none dark:bg-transparent;
+}
+
+.base-stat-card--plain :deep(.el-card__body) {
+  @apply bg-transparent;
 }
 
 .base-stat-card.is-loading,
@@ -212,13 +253,18 @@ const handleKeydown = (event: KeyboardEvent) => {
 }
 
 .base-stat-card__trend {
-  @apply inline-flex min-w-0 shrink-0 items-center gap-1 overflow-hidden whitespace-nowrap rounded-full px-2 py-1 text-[10px] font-black;
+  --el-tag-border-radius: 999px;
+  @apply inline-flex h-auto min-w-0 shrink-0 items-center gap-1 overflow-hidden whitespace-nowrap rounded-full border-0 px-2 py-1 text-[10px] font-black;
   background-color: var(--stat-soft-bg);
   color: var(--stat-color);
 }
 
 .base-stat-card__trend {
   max-width: 100%;
+}
+
+.base-stat-card__trend :deep(.el-tag__content) {
+  @apply flex min-w-0 items-center gap-1 overflow-hidden;
 }
 
 .base-stat-card--trend-up .base-stat-card__trend {
@@ -244,19 +290,39 @@ const handleKeydown = (event: KeyboardEvent) => {
 }
 
 .base-stat-card__value {
-  @apply mt-1 block truncate text-xl font-black text-slate-800 dark:text-slate-100;
+  @apply mt-1 block min-w-0 truncate;
+}
+
+.base-stat-card__value :deep(.el-statistic__content) {
+  @apply min-w-0 overflow-hidden text-xl font-black leading-tight text-slate-800 dark:text-slate-100;
+}
+
+.base-stat-card__value :deep(.el-statistic__number),
+.base-stat-card__value :deep(.el-statistic__prefix),
+.base-stat-card__value :deep(.el-statistic__suffix) {
+  @apply min-w-0 truncate text-current;
+  font-size: inherit;
+  font-weight: inherit;
+  line-height: inherit;
 }
 
 .base-stat-card--wrap-value .base-stat-card__value {
   @apply whitespace-normal break-words;
 }
 
-.base-stat-card--sm .base-stat-card__value,
-.base-stat-card--compact .base-stat-card__value {
+.base-stat-card--wrap-value .base-stat-card__value :deep(.el-statistic__content),
+.base-stat-card--wrap-value .base-stat-card__value :deep(.el-statistic__number),
+.base-stat-card--wrap-value .base-stat-card__value :deep(.el-statistic__prefix),
+.base-stat-card--wrap-value .base-stat-card__value :deep(.el-statistic__suffix) {
+  @apply whitespace-normal break-words;
+}
+
+.base-stat-card--sm .base-stat-card__value :deep(.el-statistic__content),
+.base-stat-card--compact .base-stat-card__value :deep(.el-statistic__content) {
   @apply text-lg;
 }
 
-.base-stat-card--lg .base-stat-card__value {
+.base-stat-card--lg .base-stat-card__value :deep(.el-statistic__content) {
   @apply text-2xl;
 }
 

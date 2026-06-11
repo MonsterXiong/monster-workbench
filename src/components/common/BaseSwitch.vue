@@ -76,6 +76,8 @@ const elSize = computed(() => {
   if (props.size === "lg") return "large";
   return "default";
 });
+
+const handleBeforeChange = () => !isReadonly.value;
 </script>
 
 <template>
@@ -114,6 +116,8 @@ const elSize = computed(() => {
         :aria-disabled="isReadonly ? 'true' : undefined"
         :aria-readonly="readonly ? 'true' : undefined"
         :aria-busy="loading || undefined"
+        :before-change="handleBeforeChange"
+        :validate-event="false"
         style="--el-switch-on-color: rgb(var(--color-primary))"
         @focus="emit('focus', $event as FocusEvent)"
         @blur="emit('blur', $event as FocusEvent)"

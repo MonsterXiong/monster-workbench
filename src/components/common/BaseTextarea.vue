@@ -123,6 +123,7 @@ const elSize = computed(() => {
       :placeholder="placeholder || t('common.inputPlaceholder')"
       :disabled="disabled"
       :autocomplete="autocomplete"
+      :validate-event="false"
       :aria-label="resolvedAriaLabel"
       :aria-invalid="error ? 'true' : undefined"
       :aria-describedby="describedBy"

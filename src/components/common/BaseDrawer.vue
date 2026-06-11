@@ -1,22 +1,13 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, useSlots, watch } from "vue";
-import BaseIcon from "./BaseIcon.vue";
+import { computed, useId, useSlots } from "vue";
 import { useI18n } from "../../composables/useI18n";
-import {
-  addDomEventListener,
-  focusElement,
-  getActiveHTMLElement,
-  isEscapeKey,
-  joinAriaIds,
-  resolveCssSizeAlias,
-  setBodyOverflow,
-  type DomEventCleanup,
-} from "../../utils";
+import { joinAriaIds, resolveCssSizeAlias } from "../../utils";
 
 type DrawerSize = "sm" | "md" | "lg" | "xl";
 type DrawerLevel = 2 | 3 | 4 | 5 | 6;
 type DrawerFooterAlign = "start" | "end" | "between";
 type DrawerRole = "dialog" | "alertdialog";
+type DrawerDirection = "ltr" | "rtl";
 
 interface Props {
   modelValue: boolean;
@@ -86,15 +77,18 @@ const emit = defineEmits<{
 
 const { t } = useI18n();
 const slots = useSlots();
-const panelRef = ref<HTMLElement | null>(null);
 const instanceId = useId();
 const titleId = `${instanceId}-title`;
 const descriptionId = `${instanceId}-description`;
 const bodyId = `${instanceId}-body`;
 const footerId = `${instanceId}-footer`;
-let previousBodyOverflow = "";
-let previousActiveElement: HTMLElement | null = null;
-let stopKeydownListener: DomEventCleanup | null = null;
+
+const computedValue = computed({
+  get: () => props.modelValue,
+  set: (val) => {
+    emit("update:modelValue", val);
+  },
+});
 
 const resolvedWidth = computed(() => {
   if (props.width) {
@@ -110,6 +104,7 @@ const resolvedWidth = computed(() => {
   return sizeMap[props.size];
 });
 
+const drawerDirection = computed<DrawerDirection>(() => (props.placement === "left" ? "ltr" : "rtl"));
 const hasCustomHeader = computed(() => Boolean(slots.header));
 const fallbackLabel = computed(() => props.ariaLabel || props.title || t("common.dialog"));
 const headingTag = computed(() => `h${props.level}`);
@@ -128,171 +123,138 @@ const describedBy = computed(() =>
 );
 const resolvedActionsLabel = computed(() => props.actionsLabel || `${props.title || props.ariaLabel || t("common.dialog")} 操作`);
 
-const closeDrawer = () => {
+const requestClose = () => {
   if (isCloseDisabled.value) return;
-  emit("update:modelValue", false);
+  computedValue.value = false;
+};
+
+const handleBeforeClose = (done: () => void) => {
+  if (isCloseDisabled.value) return;
+  done();
+};
+
+const handleClosed = () => {
   emit("close");
 };
-
-const handleOverlayClick = () => {
-  if (props.closeOnOverlay && !isCloseDisabled.value) closeDrawer();
-};
-
-const handleKeydown = (event: KeyboardEvent) => {
-  if (isEscapeKey(event) && props.modelValue && props.closeOnEsc && !isCloseDisabled.value) {
-    closeDrawer();
-  }
-};
-
-watch(
-  () => props.modelValue,
-  (val) => {
-    if (val) {
-      previousActiveElement = getActiveHTMLElement();
-      previousBodyOverflow = setBodyOverflow("hidden");
-      nextTick(() => {
-        focusElement(panelRef.value);
-      });
-    } else {
-      setBodyOverflow(previousBodyOverflow);
-      nextTick(() => {
-        focusElement(previousActiveElement);
-        previousActiveElement = null;
-      });
-    }
-  }
-);
-
-onMounted(() => {
-  stopKeydownListener = addDomEventListener(document, "keydown", handleKeydown);
-});
-
-onBeforeUnmount(() => {
-  stopKeydownListener?.();
-  stopKeydownListener = null;
-  setBodyOverflow(previousBodyOverflow);
-});
 </script>
 
 <template>
-  <teleport to="body">
-    <transition name="drawer-fade">
-      <div
-        v-if="modelValue"
-        class="base-drawer__overlay"
-        :class="{ 'is-open': modelValue }"
-        @click.self="handleOverlayClick"
-      >
-        <transition
-          :name="placement === 'left' ? 'drawer-slide-left' : 'drawer-slide-right'"
-          appear
-        >
-          <div
-            ref="panelRef"
-            class="base-drawer__panel"
-            :class="[
-              placement === 'left' ? 'base-drawer__panel--left left-0' : 'base-drawer__panel--right right-0',
-              `base-drawer__panel--${size}`,
-              {
-                'base-drawer__panel--loading': loading,
-                'base-drawer__panel--confirm-loading': confirmLoading,
-                'base-drawer__panel--wrap-title': wrapTitle,
-                'base-drawer__panel--wrap-description': wrapDescription,
-                'is-open': modelValue,
-              },
-            ]"
-            :style="{ width: resolvedWidth }"
-            :role="role"
-            aria-modal="true"
-            tabindex="-1"
-            :aria-busy="loading || confirmLoading ? 'true' : undefined"
-            :aria-label="resolvedPanelLabel || undefined"
-            :aria-labelledby="labelledBy"
-            :aria-describedby="describedBy"
+  <el-drawer
+    v-model="computedValue"
+    class="base-drawer"
+    :class="[
+      `base-drawer--${size}`,
+      `base-drawer--${placement}`,
+      {
+        'base-drawer--loading': loading,
+        'base-drawer--confirm-loading': confirmLoading,
+        'base-drawer--wrap-title': wrapTitle,
+        'base-drawer--wrap-description': wrapDescription,
+      },
+    ]"
+    :size="resolvedWidth"
+    :direction="drawerDirection"
+    :close-on-click-modal="closeOnOverlay"
+    :close-on-press-escape="closeOnEsc"
+    :show-close="false"
+    :before-close="handleBeforeClose"
+    :destroy-on-close="true"
+    :lock-scroll="true"
+    :modal="true"
+    :append-to-body="true"
+    :role="role"
+    aria-modal="true"
+    :aria-busy="loading || confirmLoading ? 'true' : undefined"
+    :aria-label="resolvedPanelLabel || undefined"
+    :aria-labelledby="labelledBy"
+    :aria-describedby="describedBy"
+    @closed="handleClosed"
+  >
+    <template #header>
+      <header class="base-drawer__header">
+        <div class="base-drawer__heading">
+          <slot name="header">
+            <div v-if="showIcon || icon || $slots.icon" class="base-drawer__icon" aria-hidden="true">
+              <slot name="icon">
+                <BaseIcon :name="icon || 'PanelRightOpen'" size="17" aria-hidden="true" />
+              </slot>
+            </div>
+            <div class="base-drawer__title-wrap">
+              <component :is="headingTag" v-if="title" :id="titleId">{{ title }}</component>
+              <p v-if="description" :id="descriptionId">{{ description }}</p>
+            </div>
+          </slot>
+        </div>
+        <div v-if="$slots.actions || showClose" class="base-drawer__header-actions" role="group" :aria-label="resolvedActionsLabel">
+          <slot name="actions"></slot>
+          <button
+            v-if="showClose"
+            type="button"
+            class="base-drawer__close"
+            :disabled="isCloseDisabled"
+            :aria-label="resolvedCloseLabel"
+            :title="resolvedCloseLabel"
+            data-ignore-container-click
+            @click.stop="requestClose"
           >
-            <div class="base-drawer__header">
-              <div class="base-drawer__heading">
-                <slot name="header">
-                  <div v-if="showIcon || icon || $slots.icon" class="base-drawer__icon" aria-hidden="true">
-                    <slot name="icon">
-                      <BaseIcon :name="icon || 'PanelRightOpen'" size="17" aria-hidden="true" />
-                    </slot>
-                  </div>
-                  <div class="base-drawer__title-wrap">
-                    <component :is="headingTag" v-if="title" :id="titleId">{{ title }}</component>
-                    <p v-if="description" :id="descriptionId">{{ description }}</p>
-                  </div>
-                </slot>
-              </div>
-              <div v-if="$slots.actions || showClose" class="base-drawer__header-actions" role="group" :aria-label="resolvedActionsLabel">
-                <slot name="actions"></slot>
-                <button
-                  v-if="showClose"
-                  type="button"
-                  class="base-drawer__close"
-                  :disabled="isCloseDisabled"
-                  :aria-label="resolvedCloseLabel"
-                  :title="resolvedCloseLabel"
-                  data-ignore-container-click
-                  @click.stop="closeDrawer"
-                >
-                  <BaseIcon name="X" size="16" aria-hidden="true" />
-                </button>
-              </div>
-            </div>
+            <BaseIcon name="X" size="16" aria-hidden="true" />
+          </button>
+        </div>
+      </header>
+    </template>
 
-            <div
-              :id="bodyId"
-              class="base-drawer__body"
-              :role="bodyLabel ? 'region' : undefined"
-              :aria-label="bodyLabel || undefined"
-            >
-              <BaseLoading v-if="loading" type="skeleton" :text="resolvedLoadingText" :skeleton-lines="4" surface="muted" bordered />
-              <slot></slot>
-            </div>
+    <div
+      :id="bodyId"
+      class="base-drawer__body"
+      :role="bodyLabel ? 'region' : undefined"
+      :aria-label="bodyLabel || undefined"
+    >
+      <BaseLoading v-if="loading" type="skeleton" :text="resolvedLoadingText" :skeleton-lines="4" surface="muted" bordered />
+      <slot></slot>
+    </div>
 
-            <div
-              v-if="$slots.footer"
-              :id="footerId"
-              class="base-drawer__footer"
-              :class="`base-drawer__footer--${footerAlign}`"
-              :role="footerLabel ? 'group' : undefined"
-              :aria-label="footerLabel || undefined"
-            >
-              <BaseLoading v-if="confirmLoading" type="spinner" size="sm" :text="resolvedConfirmLoadingText" direction="horizontal" compact />
-              <slot name="footer"></slot>
-            </div>
-          </div>
-        </transition>
+    <template #footer v-if="$slots.footer">
+      <div
+        :id="footerId"
+        class="base-drawer__footer"
+        :class="`base-drawer__footer--${footerAlign}`"
+        :role="footerLabel ? 'group' : undefined"
+        :aria-label="footerLabel || undefined"
+      >
+        <BaseLoading v-if="confirmLoading" type="spinner" size="sm" :text="resolvedConfirmLoadingText" direction="horizontal" compact />
+        <slot name="footer"></slot>
       </div>
-    </transition>
-  </teleport>
+    </template>
+  </el-drawer>
 </template>
 
 <style scoped>
-.base-drawer__overlay {
-  @apply fixed inset-0 z-[1000] backdrop-blur-sm;
-  background-color: rgba(15, 23, 42, 0.3);
+:deep(.base-drawer.el-drawer) {
+  @apply max-w-[calc(100vw-1rem)] bg-white shadow-2xl dark:bg-slate-900;
 }
 
-:global(.dark) .base-drawer__overlay {
-  background-color: rgba(2, 6, 23, 0.55);
-}
-
-.base-drawer__panel {
-  @apply absolute bottom-0 top-0 flex max-w-[calc(100vw-1rem)] flex-col bg-white shadow-2xl dark:bg-slate-900;
-}
-
-.base-drawer__panel--right {
+:deep(.base-drawer.base-drawer--right.el-drawer) {
   @apply border-l border-slate-200 dark:border-slate-800;
 }
 
-.base-drawer__panel--left {
+:deep(.base-drawer.base-drawer--left.el-drawer) {
   @apply border-r border-slate-200 dark:border-slate-800;
 }
 
+:deep(.base-drawer .el-drawer__header) {
+  @apply mb-0 border-b border-slate-100 px-6 py-4 dark:border-slate-800;
+}
+
+:deep(.base-drawer .el-drawer__body) {
+  @apply min-h-0 overflow-hidden p-0 text-slate-700 dark:text-slate-200;
+}
+
+:deep(.base-drawer .el-drawer__footer) {
+  @apply border-t border-slate-100 bg-slate-50 px-6 py-4 dark:border-slate-800 dark:bg-slate-950;
+}
+
 .base-drawer__header {
-  @apply flex items-start justify-between gap-4 border-b border-slate-100 px-6 py-4 dark:border-slate-800;
+  @apply flex min-w-0 items-start justify-between gap-4;
 }
 
 .base-drawer__heading {
@@ -313,7 +275,8 @@ onBeforeUnmount(() => {
   @apply truncate text-base font-black text-slate-900 dark:text-slate-100;
 }
 
-.base-drawer__panel--wrap-title .base-drawer__title-wrap :is(h2, h3, h4, h5, h6) {
+.base-drawer--wrap-title :deep(.base-drawer__title-wrap :is(h2, h3, h4, h5, h6)),
+.base-drawer--wrap-title .base-drawer__title-wrap :is(h2, h3, h4, h5, h6) {
   @apply whitespace-normal break-words;
 }
 
@@ -322,7 +285,7 @@ onBeforeUnmount(() => {
   overflow-wrap: anywhere;
 }
 
-.base-drawer__panel--wrap-description .base-drawer__title-wrap p {
+.base-drawer--wrap-description .base-drawer__title-wrap p {
   @apply break-words;
 }
 
@@ -345,11 +308,11 @@ onBeforeUnmount(() => {
 }
 
 .base-drawer__body {
-  @apply min-h-0 flex-1 overflow-y-auto px-6 py-4;
+  @apply min-h-0 overflow-y-auto px-6 py-4;
 }
 
 .base-drawer__footer {
-  @apply flex min-w-0 flex-wrap items-center justify-end gap-2 border-t border-slate-100 bg-slate-50 px-6 py-4 dark:border-slate-800 dark:bg-slate-950;
+  @apply flex min-w-0 flex-wrap items-center justify-end gap-2;
 }
 
 .base-drawer__header-actions :deep(.el-button),
@@ -375,8 +338,16 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 640px) {
+  :deep(.base-drawer .el-drawer__header) {
+    @apply px-4;
+  }
+
+  :deep(.base-drawer .el-drawer__footer) {
+    @apply px-4;
+  }
+
   .base-drawer__header {
-    @apply gap-2 px-4;
+    @apply gap-2;
   }
 
   .base-drawer__body {
@@ -385,64 +356,13 @@ onBeforeUnmount(() => {
 
   .base-drawer__footer,
   .base-drawer__footer--between {
-    @apply justify-start px-4;
+    @apply justify-start;
   }
-}
-
-.drawer-fade-enter-active,
-.drawer-fade-leave-active {
-  transition: opacity 0.25s ease;
-}
-.drawer-fade-enter-from,
-.drawer-fade-leave-to {
-  opacity: 0;
-}
-
-.base-drawer__overlay.is-open.drawer-fade-enter-from {
-  opacity: 1;
-}
-
-.drawer-slide-right-enter-active,
-.drawer-slide-right-leave-active {
-  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-}
-.drawer-slide-right-enter-from,
-.drawer-slide-right-leave-to {
-  transform: translateX(100%);
-}
-
-.base-drawer__panel.is-open.drawer-slide-right-enter-from {
-  transform: translateX(0);
-}
-
-.drawer-slide-left-enter-active,
-.drawer-slide-left-leave-active {
-  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-}
-.drawer-slide-left-enter-from,
-.drawer-slide-left-leave-to {
-  transform: translateX(-100%);
-}
-
-.base-drawer__panel.is-open.drawer-slide-left-enter-from {
-  transform: translateX(0);
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .drawer-fade-enter-active,
-  .drawer-fade-leave-active,
-  .drawer-slide-right-enter-active,
-  .drawer-slide-right-leave-active,
-  .drawer-slide-left-enter-active,
-  .drawer-slide-left-leave-active {
+  .base-drawer__close {
     transition: none !important;
-  }
-
-  .drawer-slide-right-enter-from,
-  .drawer-slide-right-leave-to,
-  .drawer-slide-left-enter-from,
-  .drawer-slide-left-leave-to {
-    transform: none !important;
   }
 }
 </style>

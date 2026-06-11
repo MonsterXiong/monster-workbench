@@ -1,7 +1,11 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, useId, watch, watchEffect } from "vue";
-import en from "element-plus/es/locale/lang/en";
-import zhCn from "element-plus/es/locale/lang/zh-cn";
+import dayjs from "dayjs";
+import dayjsEnLocale from "dayjs/locale/en";
+import dayjsZhCnLocale from "dayjs/locale/zh-cn";
+import elementPlusEnLocale from "element-plus/es/locale/lang/en";
+import elementPlusZhCnLocale from "element-plus/es/locale/lang/zh-cn";
+import type { Language } from "element-plus/es/locale";
 import { useI18n } from "../../composables/useI18n";
 import {
   applyObjectPatch,
@@ -106,7 +110,29 @@ const startLabel = computed(() => `${props.label ? `${props.label} ` : ""}${prop
 const endLabel = computed(() => `${props.label ? `${props.label} ` : ""}${props.endPlaceholder || t("common.endDate")}`);
 const clearLabel = computed(() => `${t("common.clear")} ${props.label || t("common.dateRange")}`);
 const panelLabelText = computed(() => props.panelLabel || props.label || t("common.dateRange"));
-const elementLocale = computed(() => (locale.value === "en-US" ? en : zhCn));
+const baseElementLocale = computed<Language>(() => (locale.value.startsWith("en") ? elementPlusEnLocale : elementPlusZhCnLocale));
+const baseDayjsLocale = computed(() => (locale.value.startsWith("en") ? dayjsEnLocale : dayjsZhCnLocale));
+const resolvedCalendarLocaleName = computed(() => {
+  const baseWeekStart = typeof baseDayjsLocale.value.weekStart === "number" ? baseDayjsLocale.value.weekStart : 7;
+  if (baseWeekStart === props.firstDayOfWeek) return baseDayjsLocale.value.name;
+  return `${baseDayjsLocale.value.name}-fdw-${props.firstDayOfWeek}`;
+});
+const resolvedDayjsLocale = computed(() => {
+  const baseWeekStart = typeof baseDayjsLocale.value.weekStart === "number" ? baseDayjsLocale.value.weekStart : 7;
+  if (baseWeekStart === props.firstDayOfWeek) return baseDayjsLocale.value;
+  return {
+    ...baseDayjsLocale.value,
+    name: resolvedCalendarLocaleName.value,
+    weekStart: props.firstDayOfWeek,
+  };
+});
+const elementLocale = computed<Language>(() => {
+  if (resolvedCalendarLocaleName.value === baseElementLocale.value.name) return baseElementLocale.value;
+  return {
+    ...baseElementLocale.value,
+    name: resolvedCalendarLocaleName.value,
+  };
+});
 const elementSize = computed(() => {
   if (props.size === "sm") return "small";
   if (props.size === "lg") return "large";
@@ -282,6 +308,16 @@ const isPresetAllowed = (preset: DateRangePreset) => {
     isDateValueInRange(value, boundaryMin.value || null, boundaryMax.value || null)
   );
 };
+
+watchEffect(() => {
+  void locale.value;
+  void props.firstDayOfWeek;
+  void resolvedCalendarLocaleName.value;
+
+  if (resolvedCalendarLocaleName.value !== baseDayjsLocale.value.name) {
+    dayjs.locale(resolvedDayjsLocale.value, undefined, true);
+  }
+});
 
 watch(
   () => [props.modelValue.start, props.modelValue.end] as const,

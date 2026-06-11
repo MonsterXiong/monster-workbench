@@ -4,6 +4,7 @@ import { useI18n } from "../../composables/useI18n";
 import { joinAriaIds } from "../../utils";
 
 type FormItemSpan = 1 | 2 | 3 | 4;
+type FormItemStatus = "" | "error" | "validating" | "success";
 
 interface Props {
   label?: string;
@@ -58,35 +59,54 @@ const fieldId = useId();
 const labelId = `${fieldId}-label`;
 const descriptionId = `${fieldId}-description`;
 const messageId = `${fieldId}-message`;
+
 const hasMessage = computed(() => Boolean(props.error || props.success || props.help || props.loading));
 const resolvedLoadingText = computed(() => props.loadingText || t("common.loading"));
-const describedBy = computed(() => {
-  return joinAriaIds([props.description ? descriptionId : undefined, hasMessage.value ? messageId : undefined]);
-});
+const describedBy = computed(() => joinAriaIds([props.description ? descriptionId : undefined, hasMessage.value ? messageId : undefined]));
 const rootStyle = computed(() => ({
   "--base-form-item-label-width": props.labelWidth,
 }));
+const resolvedLabelPosition = computed(() => (props.horizontal ? "left" : "top"));
+const resolvedValidateStatus = computed<FormItemStatus>(() => {
+  if (props.error) return "error";
+  if (props.loading) return "validating";
+  if (props.success) return "success";
+  return "";
+});
 </script>
 
 <template>
-  <div
+  <el-form-item
     class="base-form-item"
+    :class="[
+      {
+        'base-form-item--compact': compact,
+        'base-form-item--horizontal': horizontal,
+        'base-form-item--span-2': span === 2,
+        'base-form-item--span-3': span === 3,
+        'base-form-item--span-4': span === 4,
+        'base-form-item--label-center': labelAlign === 'center',
+        'base-form-item--truncate-label': truncateLabel,
+        'base-form-item--wrap-description': wrapDescription,
+        'base-form-item--hidden-label': hideLabel,
+        'is-error': Boolean(error),
+        'is-success': Boolean(success) && !error,
+        'is-disabled': disabled,
+        'is-readonly': readonly,
+        'is-loading': loading,
+      },
+    ]"
     :style="rootStyle"
-    :class="{
-      'base-form-item--compact': compact,
-      'base-form-item--horizontal': horizontal,
-      'base-form-item--span-2': span === 2,
-      'base-form-item--span-3': span === 3,
-      'base-form-item--span-4': span === 4,
-      'base-form-item--label-center': labelAlign === 'center',
-      'base-form-item--truncate-label': truncateLabel,
-      'base-form-item--wrap-description': wrapDescription,
-      'is-error': Boolean(error),
-      'is-success': Boolean(success) && !error,
-      'is-disabled': disabled,
-      'is-readonly': readonly,
-      'is-loading': loading,
-    }"
+    :label="label || undefined"
+    :label-width="horizontal ? labelWidth : undefined"
+    :label-position="resolvedLabelPosition"
+    :required="required"
+    :error="error || undefined"
+    :validate-status="resolvedValidateStatus || undefined"
+    :for="forId || undefined"
+    :show-message="false"
+    :inline-message="false"
+    :size="compact ? 'small' : undefined"
     role="group"
     :aria-label="ariaLabel || undefined"
     :aria-labelledby="(label || $slots.label) ? labelId : undefined"
@@ -96,23 +116,21 @@ const rootStyle = computed(() => ({
     :aria-disabled="disabled ? 'true' : undefined"
     :aria-readonly="readonly ? 'true' : undefined"
   >
-    <div
-      v-if="label || description || $slots.label || $slots.meta"
-      class="base-form-item__label-wrap"
-      :class="{ 'base-form-item__label-wrap--hidden': hideLabel }"
-    >
-      <label v-if="label || $slots.label" :id="labelId" class="base-form-item__label" :for="forId || undefined">
-        <span class="base-form-item__label-text" :class="{ 'is-required': required }">
-          <slot name="label">{{ label }}</slot>
-          <span v-if="required" class="base-form-item__required" aria-hidden="true">*</span>
-          <span v-else-if="optionalText" class="base-form-item__optional">{{ optionalText }}</span>
+    <template #label="{ label: resolvedLabel }">
+      <span class="base-form-item__label-stack">
+        <span :id="labelId" class="base-form-item__label-row" :class="{ 'base-form-item__label-stack--hidden': hideLabel }">
+          <span class="base-form-item__label-text" :class="{ 'is-required': required }">
+            <slot name="label">{{ resolvedLabel }}</slot>
+            <span v-if="required" class="base-form-item__required" aria-hidden="true">*</span>
+            <span v-else-if="optionalText" class="base-form-item__optional">{{ optionalText }}</span>
+          </span>
+          <span v-if="$slots.meta" class="base-form-item__meta">
+            <slot name="meta"></slot>
+          </span>
         </span>
-        <span v-if="$slots.meta" class="base-form-item__meta">
-          <slot name="meta"></slot>
-        </span>
-      </label>
-      <p v-if="description" :id="descriptionId" class="base-form-item__description">{{ description }}</p>
-    </div>
+        <p v-if="description" :id="descriptionId" class="base-form-item__description">{{ description }}</p>
+      </span>
+    </template>
 
     <div class="base-form-item__field">
       <slot></slot>
@@ -137,12 +155,12 @@ const rootStyle = computed(() => ({
         <slot name="extra"></slot>
       </div>
     </div>
-  </div>
+  </el-form-item>
 </template>
 
 <style scoped>
 .base-form-item {
-  @apply flex w-full min-w-0 flex-col gap-1.5;
+  @apply m-0 w-full min-w-0;
 }
 
 .base-form-item--span-2 {
@@ -173,25 +191,48 @@ const rootStyle = computed(() => ({
   @apply opacity-90;
 }
 
-.base-form-item--horizontal {
-  @apply grid gap-2 md:items-start;
-  grid-template-columns: var(--base-form-item-label-width) minmax(0, 1fr);
+.base-form-item :deep(.el-form-item__label) {
+  @apply min-w-0 p-0 text-left;
+  align-items: flex-start;
+  height: auto;
+  line-height: normal;
 }
 
-.base-form-item--label-center {
+.base-form-item--horizontal :deep(.el-form-item__label) {
+  @apply pr-4;
+}
+
+.base-form-item--label-center :deep(.el-form-item__label) {
   @apply md:items-center;
 }
 
-.base-form-item__label-wrap {
+.base-form-item :deep(.el-form-item__content) {
+  @apply min-w-0 flex-1 items-start;
+  line-height: normal;
+}
+
+.base-form-item :deep(.el-form-item__label-wrap) {
   @apply min-w-0;
 }
 
-.base-form-item__label-wrap--hidden {
+.base-form-item :deep(.el-form-item__label) {
+  @apply text-slate-700 dark:text-slate-300;
+}
+
+.base-form-item--hidden-label :deep(.el-form-item__label) {
   @apply sr-only;
 }
 
-.base-form-item__label {
+.base-form-item__label-stack {
+  @apply flex min-w-0 flex-col gap-0.5;
+}
+
+.base-form-item__label-row {
   @apply flex min-w-0 items-center justify-between gap-2;
+}
+
+.base-form-item__label-stack--hidden {
+  @apply sr-only;
 }
 
 .base-form-item__label-text {
@@ -259,6 +300,29 @@ const rootStyle = computed(() => ({
   @apply mt-2 min-w-0;
 }
 
+.base-form-item--compact :deep(.el-form-item__label) {
+  @apply text-xs;
+}
+
+.base-form-item--compact .base-form-item__description,
+.base-form-item--compact .base-form-item__message {
+  @apply text-[11px];
+}
+
+.base-form-item--horizontal {
+  @apply md:items-start;
+}
+
+@media (max-width: 767px) {
+  .base-form-item--horizontal :deep(.el-form-item__label) {
+    @apply pr-0;
+  }
+
+  .base-form-item--horizontal {
+    display: block;
+  }
+}
+
 .form-message-fade-enter-active,
 .form-message-fade-leave-active {
   transition: all 0.18s ease;
@@ -276,12 +340,6 @@ const rootStyle = computed(() => ({
   .base-form-item__message--loading :deep(svg) {
     transition: none !important;
     animation: none !important;
-  }
-}
-
-@media (max-width: 767px) {
-  .base-form-item--horizontal {
-    grid-template-columns: minmax(0, 1fr);
   }
 }
 

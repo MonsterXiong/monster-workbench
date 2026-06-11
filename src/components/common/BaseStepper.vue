@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { AlertCircle, CheckCircle2, Circle } from "lucide-vue-next";
 import { useI18n } from "../../composables/useI18n";
 import {
   clampNumber,
@@ -9,6 +8,7 @@ import {
   findNextCircularItem,
   getKeyboardNavigationDirection,
   getLastIndex,
+  isActivationKey,
   isEmptyArray,
   isNonEmptyArray,
 } from "../../utils";
@@ -17,6 +17,7 @@ import BaseIcon from "./BaseIcon.vue";
 type StepperState = "done" | "current" | "pending" | "error" | "disabled";
 type StepperSize = "sm" | "md" | "lg";
 type StepperSurface = "card" | "muted" | "plain";
+type ElementStepStatus = "wait" | "process" | "finish" | "error" | "success";
 
 export interface StepperItem {
   key: string;
@@ -75,24 +76,40 @@ const hasSteps = computed(() => isNonEmptyArray(props.steps));
 const normalizedCurrent = computed(() => (hasSteps.value ? clampNumber(props.current, 0, getLastIndex(props.steps), 0, 0) : 0));
 const resolvedLoadingText = computed(() => props.loadingText || t("common.loading"));
 const resolvedEmptyText = computed(() => props.emptyText || t("common.noData"));
-const gridColumns = computed(() => {
-  if (props.vertical) return undefined;
-  const count = props.columns || props.steps.length || 1;
-  return `repeat(${clampNumber(count, 1, 6, 1, 0)}, minmax(0, 1fr))`;
+const elementDirection = computed(() => (props.vertical ? "vertical" : "horizontal"));
+const stepSpace = computed(() => {
+  if (props.vertical || !props.columns) return "";
+  return `${100 / clampNumber(props.columns, 1, 6, 1, 0)}%`;
 });
 const descriptionStyle = computed(() => {
   if (props.wrapDescription) return undefined;
-
   return createLineClampStyle(props.maxDescriptionLines);
 });
 
-const stepState = (step: StepperItem, index: number) => {
+const stepState = (step: StepperItem, index: number): StepperState => {
   if (step.disabled || step.state === "disabled") return "disabled";
   if (step.state) return step.state;
   if (step.error) return "error";
   if (index < normalizedCurrent.value) return "done";
   if (index === normalizedCurrent.value) return "current";
   return "pending";
+};
+
+const stepStatus = (step: StepperItem, index: number): ElementStepStatus => {
+  const state = stepState(step, index);
+  if (state === "done") return "success";
+  if (state === "current") return "process";
+  if (state === "error") return "error";
+  return "wait";
+};
+
+const stepIconName = (step: StepperItem, index: number) => {
+  const state = stepState(step, index);
+  if (step.icon) return step.icon;
+  if (state === "done") return "CheckCircle2";
+  if (state === "error") return "AlertCircle";
+  if (state === "current") return "CircleDot";
+  return "Circle";
 };
 
 const isCurrentStep = (step: StepperItem, index: number) => stepState(step, index) !== "disabled" && index === normalizedCurrent.value;
@@ -116,17 +133,23 @@ const moveStep = (direction: 1 | -1) => {
   if (nextStep) emit("select", nextStep);
 };
 
-const handleKeydown = (event: KeyboardEvent) => {
+const handleStepKeydown = (event: KeyboardEvent, step: StepperItem, index: number) => {
   const direction = getKeyboardNavigationDirection(event);
   if (direction) {
     event.preventDefault();
     moveStep(direction);
+    return;
+  }
+
+  if (isActivationKey(event)) {
+    event.preventDefault();
+    handleSelect(step, index);
   }
 };
 </script>
 
 <template>
-  <ol
+  <div
     class="base-stepper"
     :class="[
       `base-stepper--${size}`,
@@ -136,170 +159,140 @@ const handleKeydown = (event: KeyboardEvent) => {
         'base-stepper--bordered': bordered,
         'base-stepper--linear': linear,
         'base-stepper--with-connector': showConnector && !loading,
+        'base-stepper--hide-connector': !showConnector,
         'base-stepper--wrap-title': wrapTitle,
         'base-stepper--wrap-description': wrapDescription,
         'is-loading': loading,
       },
     ]"
-    :style="{ gridTemplateColumns: gridColumns }"
     :aria-label="ariaLabel || undefined"
     :aria-busy="loading ? 'true' : undefined"
-    @keydown="handleKeydown"
   >
-    <li v-if="loading" class="base-stepper__item base-stepper__item--state" aria-live="polite">
-      <div class="base-stepper__button">
-        <span class="base-stepper__mark" aria-hidden="true">
-          <BaseIcon name="LoaderCircle" size="16" />
-        </span>
-        <span class="base-stepper__text">
-          <span class="base-stepper__title">{{ resolvedLoadingText }}</span>
-        </span>
-      </div>
-    </li>
-    <li v-else-if="!hasSteps" class="base-stepper__item base-stepper__item--state">
-      <div class="base-stepper__button">
-        <span class="base-stepper__mark" aria-hidden="true">
-          <BaseIcon name="Inbox" size="16" />
-        </span>
-        <span class="base-stepper__text">
-          <span class="base-stepper__title">{{ resolvedEmptyText }}</span>
-        </span>
-      </div>
-    </li>
-    <template v-else>
-      <li
+    <div v-if="loading || !hasSteps" class="base-stepper__state" aria-live="polite">
+      <span class="base-stepper__state-icon" aria-hidden="true">
+        <BaseIcon :name="loading ? 'LoaderCircle' : 'Inbox'" size="16" />
+      </span>
+      <span class="base-stepper__state-title">{{ loading ? resolvedLoadingText : resolvedEmptyText }}</span>
+    </div>
+
+    <el-steps
+      v-else
+      class="base-stepper__steps"
+      :active="normalizedCurrent"
+      :direction="elementDirection"
+      :space="stepSpace"
+      finish-status="success"
+      process-status="process"
+      role="list"
+    >
+      <el-step
         v-for="(step, index) in steps"
         :key="step.key"
         class="base-stepper__item"
         :class="[
           `is-${stepState(step, index)}`,
-          { 'is-clickable': canSelect(step, index), 'is-disabled': stepState(step, index) === 'disabled' }
+          { 'is-clickable': canSelect(step, index), 'is-disabled': stepState(step, index) === 'disabled' },
         ]"
+        :status="stepStatus(step, index)"
         :aria-current="isCurrentStep(step, index) ? 'step' : undefined"
+        :aria-disabled="clickable && !canSelect(step, index) ? 'true' : undefined"
+        :aria-invalid="stepState(step, index) === 'error' ? 'true' : undefined"
+        :role="clickable ? 'button' : 'listitem'"
+        :tabindex="canSelect(step, index) ? 0 : undefined"
+        @click="handleSelect(step, index)"
+        @keydown="handleStepKeydown($event, step, index)"
       >
-        <component
-          :is="canSelect(step, index) ? 'button' : 'div'"
-          :type="canSelect(step, index) ? 'button' : undefined"
-          class="base-stepper__button"
-          :role="clickable && !canSelect(step, index) ? 'button' : undefined"
-          :tabindex="canSelect(step, index) ? 0 : -1"
-          :aria-disabled="clickable && !canSelect(step, index) ? 'true' : undefined"
-          :aria-invalid="stepState(step, index) === 'error' ? true : undefined"
-          @click="handleSelect(step, index)"
-        >
-          <span class="base-stepper__mark" aria-hidden="true">
-            <BaseIcon v-if="step.icon" :name="step.icon" size="16" />
-            <CheckCircle2 v-else-if="stepState(step, index) === 'done'" class="h-4 w-4" />
-            <AlertCircle v-else-if="stepState(step, index) === 'error'" class="h-4 w-4" />
-            <Circle v-else class="h-4 w-4" />
-          </span>
-          <span class="base-stepper__text">
-            <span class="base-stepper__title">{{ step.title }}</span>
-            <span v-if="step.description" class="base-stepper__description" :style="descriptionStyle">{{ step.description }}</span>
-          </span>
-        </component>
-      </li>
-    </template>
-  </ol>
+        <template #icon>
+          <BaseIcon :name="stepIconName(step, index)" size="16" aria-hidden="true" />
+        </template>
+        <template #title>
+          <span class="base-stepper__title">{{ step.title }}</span>
+        </template>
+        <template #description>
+          <span v-if="step.description" class="base-stepper__description" :style="descriptionStyle">{{ step.description }}</span>
+        </template>
+      </el-step>
+    </el-steps>
+  </div>
 </template>
 
 <style scoped>
 .base-stepper {
-  @apply grid min-w-0 gap-3;
+  @apply min-w-0;
 }
 
-.base-stepper--vertical {
-  @apply flex flex-col gap-2;
+.base-stepper__steps {
+  @apply min-w-0;
 }
 
-.base-stepper__item {
-  @apply relative min-w-0;
+.base-stepper__state {
+  @apply flex min-w-0 items-center gap-3 rounded-2xl p-3 text-left;
 }
 
-.base-stepper__button {
-  @apply relative z-10 flex h-full w-full min-w-0 items-start gap-3 rounded-2xl text-left transition;
-}
-
-.base-stepper--bordered .base-stepper__button {
+.base-stepper--bordered .base-stepper__state {
   @apply border border-slate-200 dark:border-slate-800;
 }
 
-.base-stepper--card .base-stepper__button {
+.base-stepper--card .base-stepper__state {
   @apply bg-white shadow-sm dark:bg-slate-900;
 }
 
-.base-stepper--muted .base-stepper__button {
+.base-stepper--muted .base-stepper__state {
   @apply bg-slate-50 dark:bg-slate-950;
 }
 
-.base-stepper--plain .base-stepper__button {
+.base-stepper--plain .base-stepper__state {
   @apply bg-transparent shadow-none;
 }
 
-.base-stepper--plain.base-stepper--bordered .base-stepper__button {
-  @apply border-0;
-}
-
-.base-stepper--sm .base-stepper__button {
-  @apply rounded-xl p-2.5;
-}
-
-.base-stepper--md .base-stepper__button {
-  @apply p-3;
-}
-
-.base-stepper--lg .base-stepper__button {
-  @apply p-4;
-}
-
-.base-stepper__item.is-clickable .base-stepper__button:hover {
-  @apply border-slate-300 bg-slate-50 dark:border-slate-700 dark:bg-slate-950;
-}
-
-.base-stepper__item.is-current.is-clickable .base-stepper__button:hover {
-  border-color: rgba(var(--color-primary), 0.34);
-  background-color: rgba(var(--color-primary), 0.08);
-}
-
-.base-stepper__mark {
-  @apply mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-slate-300 dark:text-slate-600;
-}
-
-.base-stepper__item.is-done .base-stepper__mark {
-  @apply text-emerald-500;
-}
-
-.base-stepper__item.is-current .base-stepper__button {
-  border-color: rgba(var(--color-primary), 0.34);
-  background-color: rgba(var(--color-primary), 0.06);
-}
-
-.base-stepper__item.is-current .base-stepper__mark {
-  @apply text-primary;
-}
-
-.base-stepper__item.is-error .base-stepper__mark {
-  @apply text-red-500;
-}
-
-.base-stepper__item.is-disabled .base-stepper__mark {
-  @apply text-slate-300 dark:text-slate-700;
-}
-
-.base-stepper__item.is-disabled .base-stepper__button {
-  @apply cursor-not-allowed opacity-60;
-}
-
-.base-stepper__item--state .base-stepper__mark {
+.base-stepper__state-icon {
   color: rgb(var(--color-primary));
+  @apply flex h-5 w-5 shrink-0 items-center justify-center rounded-full;
 }
 
-.base-stepper.is-loading .base-stepper__item--state .base-stepper__mark :deep(svg) {
+.base-stepper.is-loading .base-stepper__state-icon :deep(svg) {
   animation: base-stepper-spin 0.9s linear infinite;
 }
 
-.base-stepper__text {
+.base-stepper__state-title {
+  @apply min-w-0 truncate text-xs font-black text-slate-800 dark:text-slate-100;
+}
+
+.base-stepper :deep(.el-step) {
   @apply min-w-0;
+}
+
+.base-stepper :deep(.el-step__head) {
+  @apply shrink-0;
+}
+
+.base-stepper :deep(.el-step__icon) {
+  @apply h-8 w-8 border border-slate-200 bg-white text-slate-400 shadow-sm dark:border-slate-800 dark:bg-slate-950 dark:text-slate-500;
+}
+
+.base-stepper--sm :deep(.el-step__icon) {
+  @apply h-7 w-7;
+}
+
+.base-stepper--lg :deep(.el-step__icon) {
+  @apply h-9 w-9;
+}
+
+.base-stepper :deep(.el-step__icon.is-icon) {
+  @apply flex items-center justify-center;
+}
+
+.base-stepper :deep(.el-step__icon-inner) {
+  @apply flex items-center justify-center font-black;
+}
+
+.base-stepper :deep(.el-step__main) {
+  @apply min-w-0;
+}
+
+.base-stepper :deep(.el-step__title),
+.base-stepper :deep(.el-step__description) {
+  @apply min-w-0 p-0 leading-normal;
 }
 
 .base-stepper__title {
@@ -311,7 +304,7 @@ const handleKeydown = (event: KeyboardEvent) => {
 }
 
 .base-stepper__description {
-  @apply mt-0.5 block text-[10px] font-bold text-slate-400 dark:text-slate-500;
+  @apply mt-1 block text-[10px] font-bold leading-4 text-slate-400 dark:text-slate-500;
   display: -webkit-box;
   -webkit-box-orient: vertical;
   overflow: hidden;
@@ -331,35 +324,98 @@ const handleKeydown = (event: KeyboardEvent) => {
   @apply text-xs;
 }
 
-.base-stepper--with-connector:not(.base-stepper--vertical) .base-stepper__item:not(:last-child)::after {
-  @apply absolute left-[calc(50%+1rem)] right-[calc(-50%+1rem)] top-6 h-px bg-slate-200 dark:bg-slate-800;
-  content: "";
+.base-stepper :deep(.el-step__line) {
+  @apply bg-slate-200 dark:bg-slate-800;
 }
 
-.base-stepper--with-connector.base-stepper--sm:not(.base-stepper--vertical) .base-stepper__item:not(:last-child)::after {
-  @apply top-5;
+.base-stepper :deep(.el-step__line-inner) {
+  border-color: rgb(var(--color-primary));
 }
 
-.base-stepper--with-connector.base-stepper--lg:not(.base-stepper--vertical) .base-stepper__item:not(:last-child)::after {
-  @apply top-7;
+.base-stepper--hide-connector :deep(.el-step__line) {
+  @apply hidden;
 }
 
-.base-stepper--with-connector.base-stepper--vertical .base-stepper__item:not(:last-child)::after {
-  @apply absolute bottom-[-0.75rem] left-5 top-10 w-px bg-slate-200 dark:bg-slate-800;
-  content: "";
+.base-stepper__item :deep(.el-step__head.is-success),
+.base-stepper__item.is-done :deep(.el-step__icon) {
+  @apply border-emerald-200 text-emerald-500 dark:border-emerald-900 dark:text-emerald-300;
 }
 
-.base-stepper--with-connector.base-stepper--sm.base-stepper--vertical .base-stepper__item:not(:last-child)::after {
-  @apply left-4 top-8;
+.base-stepper__item :deep(.el-step__head.is-process),
+.base-stepper__item.is-current :deep(.el-step__icon) {
+  border-color: rgb(var(--color-primary));
+  color: rgb(var(--color-primary));
+  box-shadow: 0 0 0 3px rgb(var(--color-primary) / 0.12);
 }
 
-.base-stepper--with-connector.base-stepper--lg.base-stepper--vertical .base-stepper__item:not(:last-child)::after {
-  @apply left-6 top-12;
+.base-stepper__item :deep(.el-step__head.is-error),
+.base-stepper__item.is-error :deep(.el-step__icon) {
+  @apply border-red-200 text-red-500 dark:border-red-900 dark:text-red-300;
+}
+
+.base-stepper__item.is-disabled {
+  @apply cursor-not-allowed opacity-60;
+}
+
+.base-stepper__item.is-clickable {
+  @apply cursor-pointer rounded-2xl outline-none transition;
+}
+
+.base-stepper__item.is-clickable:hover :deep(.el-step__icon),
+.base-stepper__item.is-clickable:focus-visible :deep(.el-step__icon) {
+  @apply border-slate-300 bg-slate-50 dark:border-slate-700 dark:bg-slate-900;
+}
+
+.base-stepper__item.is-current.is-clickable:hover :deep(.el-step__icon),
+.base-stepper__item.is-current.is-clickable:focus-visible :deep(.el-step__icon) {
+  border-color: rgb(var(--color-primary));
+  background-color: rgb(var(--color-primary) / 0.08);
+}
+
+.base-stepper--bordered :deep(.el-step__main) {
+  @apply rounded-2xl border border-slate-200 dark:border-slate-800;
+}
+
+.base-stepper--card :deep(.el-step__main) {
+  @apply bg-white shadow-sm dark:bg-slate-900;
+}
+
+.base-stepper--muted :deep(.el-step__main) {
+  @apply bg-slate-50 dark:bg-slate-950;
+}
+
+.base-stepper--plain :deep(.el-step__main) {
+  @apply bg-transparent shadow-none;
+}
+
+.base-stepper--plain.base-stepper--bordered :deep(.el-step__main) {
+  @apply border-0;
+}
+
+.base-stepper--sm :deep(.el-step__main) {
+  @apply rounded-xl p-2.5;
+}
+
+.base-stepper--md :deep(.el-step__main) {
+  @apply p-3;
+}
+
+.base-stepper--lg :deep(.el-step__main) {
+  @apply p-4;
+}
+
+.base-stepper--vertical :deep(.el-step) {
+  @apply min-h-0;
+}
+
+.base-stepper--vertical :deep(.el-step__main) {
+  @apply mb-2;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .base-stepper__button,
-  .base-stepper__item--state .base-stepper__mark :deep(svg) {
+  .base-stepper__item,
+  .base-stepper :deep(.el-step__icon),
+  .base-stepper__state-icon :deep(svg) {
     transition: none !important;
     animation: none !important;
   }

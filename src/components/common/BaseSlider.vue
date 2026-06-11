@@ -307,21 +307,18 @@ onUpdated(() => {
 .base-slider {
   @apply min-w-0 max-w-full;
   --base-slider-control-height: 38px;
-  --base-slider-thumb-size: 20px;
-  --base-slider-track-height: 8px;
+  --base-slider-thumb-size: 18px;
+  --base-slider-track-height: 6px;
   --base-slider-track-bg: #e2e8f0;
   --base-slider-track-hover-bg: #cbd5e1;
   --base-slider-thumb-bg: #ffffff;
-  --base-slider-thumb-inner-size: 7px;
   --base-slider-thumb-border: rgb(var(--color-primary));
-  --base-slider-thumb-inner: rgb(var(--color-primary));
-  --base-slider-thumb-inner-ring: rgb(var(--color-primary) / 0.16);
   --base-slider-thumb-ring: rgb(var(--color-primary) / 0.14);
-  --base-slider-thumb-shadow: 0 2px 8px rgba(15, 23, 42, 0.16);
+  --base-slider-thumb-shadow: 0 2px 8px rgba(15, 23, 42, 0.12);
   --base-slider-thumb-active-shadow:
-    0 0 0 4px #ffffff,
-    0 0 0 8px var(--base-slider-thumb-ring),
-    0 4px 12px rgba(15, 23, 42, 0.18);
+    0 0 0 3px #ffffff,
+    0 0 0 7px var(--base-slider-thumb-ring),
+    0 4px 12px rgba(15, 23, 42, 0.16);
   --base-slider-wrapper-size: 38px;
 }
 
@@ -382,16 +379,15 @@ onUpdated(() => {
 
 .base-slider--sm {
   --base-slider-control-height: 32px;
-  --base-slider-thumb-size: 18px;
-  --base-slider-thumb-inner-size: 6px;
-  --base-slider-track-height: 6px;
+  --base-slider-thumb-size: 16px;
+  --base-slider-track-height: 5px;
   --base-slider-wrapper-size: 36px;
 }
 
 .base-slider--md {
   --base-slider-control-height: 38px;
-  --base-slider-thumb-size: 20px;
-  --base-slider-track-height: 8px;
+  --base-slider-thumb-size: 18px;
+  --base-slider-track-height: 6px;
   --base-slider-wrapper-size: 40px;
 }
 
@@ -411,16 +407,20 @@ onUpdated(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  top: 50% !important;
+  cursor: pointer;
   line-height: normal;
   outline: none;
+  transform: translate(-50%, -50%);
 }
 
 .base-slider__control :deep(.el-slider__runway) {
   margin: calc((var(--base-slider-control-height) - var(--base-slider-track-height)) / 2) 0;
   @apply transition-colors;
+  cursor: pointer;
   box-shadow:
-    inset 0 1px 2px rgba(15, 23, 42, 0.08),
-    0 0 0 1px rgba(148, 163, 184, 0.32);
+    inset 0 1px 2px rgba(15, 23, 42, 0.06),
+    0 0 0 1px rgba(148, 163, 184, 0.22);
 }
 
 .base-slider:not(.is-disabled):not(.is-readonly):hover .base-slider__control :deep(.el-slider__runway) {
@@ -429,9 +429,9 @@ onUpdated(() => {
 
 .base-slider__control :deep(.el-slider__bar) {
   background:
-    linear-gradient(90deg, rgb(var(--color-primary) / 0.86), rgb(var(--color-primary)));
+    linear-gradient(90deg, rgb(var(--color-primary) / 0.8), rgb(var(--color-primary) / 0.96));
   border-radius: 999px;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22);
 }
 
 .base-slider__control :deep(.el-slider__button) {
@@ -446,7 +446,7 @@ onUpdated(() => {
   border: 2px solid var(--base-slider-thumb-border);
   border-radius: 999px;
   box-shadow:
-    0 0 0 3px #ffffff,
+    0 0 0 2px #ffffff,
     var(--base-slider-thumb-shadow);
   transform: none;
   transform-origin: center;
@@ -458,11 +458,15 @@ onUpdated(() => {
 
 .base-slider__control :deep(.el-slider__button::before) {
   content: "";
-  width: var(--base-slider-thumb-inner-size);
-  height: var(--base-slider-thumb-inner-size);
+  width: 6px;
+  height: 6px;
   border-radius: inherit;
-  background-color: var(--base-slider-thumb-inner);
-  box-shadow: 0 0 0 3px var(--base-slider-thumb-inner-ring);
+  background-color: rgb(var(--color-primary) / 0.86);
+  opacity: 0.62;
+  transform: scale(0.86);
+  transition:
+    opacity 0.15s ease,
+    transform 0.15s ease;
 }
 
 .base-slider:not(.is-disabled):not(.is-readonly) .base-slider__control :deep(.el-slider__button-wrapper:hover .el-slider__button),
@@ -475,8 +479,23 @@ onUpdated(() => {
   box-shadow: var(--base-slider-thumb-active-shadow);
 }
 
+.base-slider:not(.is-disabled):not(.is-readonly) .base-slider__control :deep(.el-slider__button-wrapper:hover .el-slider__button::before),
+.base-slider:not(.is-disabled):not(.is-readonly) .base-slider__control :deep(.el-slider__button-wrapper.hover .el-slider__button::before),
+.base-slider:not(.is-disabled):not(.is-readonly) .base-slider__control :deep(.el-slider__button-wrapper.dragging .el-slider__button::before),
+.base-slider:not(.is-disabled):not(.is-readonly) .base-slider__control :deep(.el-slider__button:hover::before),
+.base-slider:not(.is-disabled):not(.is-readonly) .base-slider__control :deep(.el-slider__button.hover::before),
+.base-slider:not(.is-disabled):not(.is-readonly) .base-slider__control :deep(.el-slider__button.dragging::before) {
+  opacity: 1;
+  transform: scale(1);
+}
+
 .base-slider__control :deep(.el-slider__button-wrapper:focus-visible .el-slider__button) {
   box-shadow: var(--base-slider-thumb-active-shadow);
+}
+
+.base-slider__control :deep(.el-slider__button-wrapper:focus-visible .el-slider__button::before) {
+  opacity: 1;
+  transform: scale(1);
 }
 
 .base-slider.is-error .base-slider__control :deep(.el-slider__runway) {
@@ -491,14 +510,30 @@ onUpdated(() => {
 }
 
 .base-slider.is-error .base-slider__control :deep(.el-slider__button) {
-  --base-slider-thumb-inner: rgb(239 68 68);
   border-color: rgb(239 68 68);
+}
+
+.base-slider.is-error .base-slider__control :deep(.el-slider__button::before) {
+  background-color: rgb(239 68 68 / 0.86);
 }
 
 .base-slider.is-disabled .base-slider__control :deep(.el-slider__button),
 .base-slider.is-readonly .base-slider__control :deep(.el-slider__button) {
-  --base-slider-thumb-inner: #94a3b8;
   @apply border-slate-400 bg-white dark:bg-slate-900;
+}
+
+.base-slider.is-disabled .base-slider__control :deep(.el-slider__runway),
+.base-slider.is-disabled .base-slider__control :deep(.el-slider__button-wrapper),
+.base-slider.is-readonly .base-slider__control :deep(.el-slider__runway),
+.base-slider.is-readonly .base-slider__control :deep(.el-slider__button-wrapper) {
+  cursor: default;
+}
+
+.base-slider.is-disabled .base-slider__control :deep(.el-slider__button::before),
+.base-slider.is-readonly .base-slider__control :deep(.el-slider__button::before) {
+  background-color: #94a3b8;
+  opacity: 1;
+  transform: scale(1);
 }
 
 .base-slider.is-disabled .base-slider__control :deep(.el-slider__bar),
@@ -522,7 +557,7 @@ onUpdated(() => {
 }
 
 .base-slider__marks {
-  @apply pointer-events-none relative z-[1] mt-1 h-8;
+  @apply pointer-events-none relative z-[1] mt-1 h-8 overflow-hidden;
 }
 
 .base-slider__mark {
@@ -530,12 +565,13 @@ onUpdated(() => {
 }
 
 .base-slider__mark i {
-  @apply h-1.5 w-1.5 rounded-full bg-slate-300 ring-2 ring-white dark:bg-slate-600 dark:ring-slate-900;
+  @apply h-2.5 w-px rounded-full bg-slate-300 dark:bg-slate-600;
 }
 
 .base-slider__mark.is-active i {
+  @apply w-0.5;
   background-color: rgb(var(--color-primary));
-  box-shadow: 0 0 0 3px rgb(var(--color-primary) / 0.08);
+  box-shadow: 0 0 0 2px rgb(var(--color-primary) / 0.08);
 }
 
 .base-slider__mark.is-active b {
@@ -561,7 +597,8 @@ onUpdated(() => {
 @media (prefers-reduced-motion: reduce) {
   .base-slider__control :deep(.el-slider__runway),
   .base-slider__control :deep(.el-slider__bar),
-  .base-slider__control :deep(.el-slider__button) {
+  .base-slider__control :deep(.el-slider__button),
+  .base-slider__control :deep(.el-slider__button::before) {
     transition: none !important;
   }
 }

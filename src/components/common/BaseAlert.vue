@@ -86,6 +86,8 @@ const liveMode = computed(() => {
 const headingTag = computed(() => `h${props.level}`);
 const isActionsBottom = computed(() => props.actionsPlacement === "bottom");
 const resolvedActionsLabel = computed(() => props.actionsLabel || `${props.title || props.ariaLabel || "提示"} 操作`);
+const elementAlertType = computed(() => (props.type === "danger" ? "error" : props.type));
+const elementEffect = computed(() => (props.variant === "solid" ? "dark" : "light"));
 const descriptionStyle = computed(() => {
   if (!props.wrapDescription || props.maxDescriptionLines <= 0) return undefined;
   return createLineClampStyle(props.maxDescriptionLines);
@@ -116,7 +118,7 @@ const close = () => {
 
 <template>
   <Transition name="base-alert">
-    <section
+    <el-alert
       v-if="visible"
       class="base-alert"
       :class="[
@@ -134,6 +136,10 @@ const close = () => {
           'is-disabled': disabled,
         },
       ]"
+      :type="elementAlertType"
+      :effect="elementEffect"
+      :show-icon="showIcon || Boolean($slots.icon)"
+      :closable="false"
       :role="resolvedRole"
       :aria-label="ariaLabel || undefined"
       :aria-labelledby="labelledBy"
@@ -142,50 +148,62 @@ const close = () => {
       :aria-atomic="liveMode ? 'true' : undefined"
       :aria-disabled="disabled ? 'true' : undefined"
     >
-      <div v-if="showIcon || $slots.icon" class="base-alert__icon" aria-hidden="true">
+      <template v-if="showIcon || $slots.icon" #icon>
         <slot name="icon">
           <BaseIcon :name="iconName" aria-hidden="true" />
         </slot>
-      </div>
-      <div class="base-alert__body">
-        <component :is="headingTag" v-if="title" :id="titleId" class="base-alert__title">{{ title }}</component>
-        <p v-if="description" :id="descriptionId" class="base-alert__description" :style="descriptionStyle">{{ description }}</p>
-        <div v-if="$slots.default" class="base-alert__content">
-          <slot></slot>
-        </div>
-        <div
-          v-if="$slots.actions && isActionsBottom"
-          class="base-alert__actions base-alert__actions--bottom"
+      </template>
+
+      <span class="base-alert__layout">
+        <span class="base-alert__body">
+          <span
+            v-if="title"
+            :id="titleId"
+            class="base-alert__title"
+            role="heading"
+            :aria-level="level"
+            :data-heading-tag="headingTag"
+          >
+            {{ title }}
+          </span>
+          <span v-if="description" :id="descriptionId" class="base-alert__description" :style="descriptionStyle">{{ description }}</span>
+          <span v-if="$slots.default" class="base-alert__content">
+            <slot></slot>
+          </span>
+          <span
+            v-if="$slots.actions && isActionsBottom"
+            class="base-alert__actions base-alert__actions--bottom"
+            role="group"
+            :aria-label="resolvedActionsLabel"
+            data-ignore-container-click
+          >
+            <slot name="actions"></slot>
+          </span>
+        </span>
+        <span
+          v-if="$slots.actions && !isActionsBottom"
+          class="base-alert__actions"
           role="group"
           :aria-label="resolvedActionsLabel"
           data-ignore-container-click
         >
           <slot name="actions"></slot>
-        </div>
-      </div>
-      <div
-        v-if="$slots.actions && !isActionsBottom"
-        class="base-alert__actions"
-        role="group"
-        :aria-label="resolvedActionsLabel"
-        data-ignore-container-click
-      >
-        <slot name="actions"></slot>
-      </div>
-      <button
-        v-if="closable"
-        type="button"
-        class="base-alert__close"
-        :aria-label="resolvedCloseLabel"
-        :title="resolvedCloseLabel"
-        :disabled="disabled"
-        data-ignore-container-click
-        @click.stop="close"
-        @keydown.stop
-      >
-        <BaseIcon name="X" size="14" aria-hidden="true" />
-      </button>
-    </section>
+        </span>
+        <button
+          v-if="closable"
+          type="button"
+          class="base-alert__close"
+          :aria-label="resolvedCloseLabel"
+          :title="resolvedCloseLabel"
+          :disabled="disabled"
+          data-ignore-container-click
+          @click.stop="close"
+          @keydown.stop
+        >
+          <BaseIcon name="X" size="14" aria-hidden="true" />
+        </button>
+      </span>
+    </el-alert>
   </Transition>
 </template>
 
@@ -195,13 +213,30 @@ const close = () => {
   background-color: var(--alert-bg);
   border-color: var(--alert-border);
   color: var(--alert-fg);
+  width: 100%;
+  box-sizing: border-box;
 }
 
-.base-alert__icon {
+.base-alert :deep(.el-alert__content) {
+  display: block;
+  min-width: 0;
+  flex: 1 1 auto;
+  width: 100%;
+}
+
+.base-alert :deep(.el-alert__description) {
+  display: block;
+  min-width: 0;
+  width: 100%;
+  margin: 0;
+}
+
+.base-alert :deep(.el-alert__icon) {
   @apply mt-0.5 flex shrink-0 items-center justify-center;
+  margin-right: 0;
 }
 
-.base-alert__icon :deep(svg) {
+.base-alert :deep(.el-alert__icon svg) {
   @apply h-4 w-4;
 }
 
@@ -209,8 +244,16 @@ const close = () => {
   @apply items-center;
 }
 
-.base-alert--align-center .base-alert__icon {
+.base-alert--align-center :deep(.el-alert__icon) {
   @apply mt-0;
+}
+
+.base-alert__layout {
+  @apply flex min-w-0 max-w-full items-start gap-3;
+}
+
+.base-alert--align-center .base-alert__layout {
+  @apply items-center;
 }
 
 .base-alert--compact {
@@ -229,22 +272,22 @@ const close = () => {
   @apply rounded-2xl p-4;
 }
 
-.base-alert--sm .base-alert__icon,
-.base-alert--md .base-alert__icon {
+.base-alert--sm :deep(.el-alert__icon),
+.base-alert--md :deep(.el-alert__icon) {
   @apply h-4 w-4;
 }
 
-.base-alert--lg .base-alert__icon,
-.base-alert--lg .base-alert__icon :deep(svg) {
+.base-alert--lg :deep(.el-alert__icon),
+.base-alert--lg :deep(.el-alert__icon svg) {
   @apply h-5 w-5;
 }
 
 .base-alert__body {
-  @apply min-w-0 flex-1;
+  @apply block min-w-0 flex-1;
 }
 
 .base-alert__title {
-  @apply text-xs font-black;
+  @apply block text-xs font-black;
   overflow-wrap: anywhere;
 }
 
@@ -254,7 +297,7 @@ const close = () => {
 
 .base-alert__description,
 .base-alert__content {
-  @apply mt-0.5 text-[11px] font-bold leading-5;
+  @apply mt-0.5 block text-[11px] font-bold leading-5;
   color: var(--alert-muted);
   overflow-wrap: anywhere;
 }

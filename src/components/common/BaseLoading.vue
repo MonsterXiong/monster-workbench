@@ -108,9 +108,24 @@ onBeforeUnmount(() => {
     :aria-label="resolvedLabel"
   >
     <template v-if="type === 'skeleton'">
-      <div v-if="showIndicator" class="base-loading__skeleton" aria-hidden="true">
-        <div v-for="line in resolvedSkeletonLines" :key="line" :class="`is-line-${line}`"></div>
-      </div>
+      <el-skeleton
+        v-if="showIndicator"
+        class="base-loading__skeleton"
+        :animated="animated"
+        :loading="true"
+        :rows="0"
+        aria-hidden="true"
+      >
+        <template #template>
+          <el-skeleton-item
+            v-for="line in resolvedSkeletonLines"
+            :key="line"
+            variant="p"
+            class="base-loading__skeleton-line"
+            :class="`is-line-${line}`"
+          />
+        </template>
+      </el-skeleton>
       <span v-if="showText && text" class="base-loading__text">
         {{ text }}
       </span>
@@ -268,31 +283,34 @@ onBeforeUnmount(() => {
 }
 
 .base-loading__skeleton {
-  @apply w-full space-y-3 p-4;
+  --el-skeleton-color: #e2e8f0;
+  --el-skeleton-to-color: #cbd5e1;
+  @apply grid w-full gap-3 p-4;
 }
 
-.base-loading__skeleton div {
+.base-loading__skeleton-line {
   @apply h-4 rounded bg-slate-100 dark:bg-slate-800;
 }
 
-.base-loading:not(.base-loading--static) .base-loading__skeleton div {
-  @apply animate-pulse;
+:global(.dark) .base-loading__skeleton {
+  --el-skeleton-color: #1e293b;
+  --el-skeleton-to-color: #334155;
 }
 
-.base-loading__skeleton div.is-line-1 {
+.base-loading__skeleton-line.is-line-1 {
   @apply w-1/3;
 }
 
-.base-loading__skeleton div.is-line-2,
-.base-loading__skeleton div.is-line-4,
-.base-loading__skeleton div.is-line-6,
-.base-loading__skeleton div.is-line-8 {
+.base-loading__skeleton-line.is-line-2,
+.base-loading__skeleton-line.is-line-4,
+.base-loading__skeleton-line.is-line-6,
+.base-loading__skeleton-line.is-line-8 {
   @apply w-full;
 }
 
-.base-loading__skeleton div.is-line-3,
-.base-loading__skeleton div.is-line-5,
-.base-loading__skeleton div.is-line-7 {
+.base-loading__skeleton-line.is-line-3,
+.base-loading__skeleton-line.is-line-5,
+.base-loading__skeleton-line.is-line-7 {
   @apply w-5/6;
 }
 
@@ -301,8 +319,8 @@ onBeforeUnmount(() => {
   @apply space-y-2 p-3;
 }
 
-.base-loading--xs .base-loading__skeleton div,
-.base-loading--sm .base-loading__skeleton div {
+.base-loading--xs .base-loading__skeleton-line,
+.base-loading--sm .base-loading__skeleton-line {
   @apply h-3;
 }
 
@@ -323,7 +341,7 @@ onBeforeUnmount(() => {
   .base-loading__spinner,
   .base-loading__ring,
   .base-loading__dots i,
-  .base-loading__skeleton div {
+  .base-loading__skeleton-line {
     animation: none;
   }
 }
@@ -331,7 +349,7 @@ onBeforeUnmount(() => {
 .base-loading--static .base-loading__spinner,
 .base-loading--static .base-loading__ring,
 .base-loading--static .base-loading__dots i,
-.base-loading--static .base-loading__skeleton div {
+.base-loading--static .base-loading__skeleton-line {
   animation: none;
 }
 

@@ -35,6 +35,17 @@ const emit = defineEmits<{
 
 const isInteractive = computed(() => props.clickable && !props.disabled);
 const accessibleLabel = computed(() => props.ariaLabel || props.title || "");
+const elementTagType = computed(() => (props.type === "neutral" ? "info" : props.type));
+const elementTagEffect = computed(() => {
+  if (props.variant === "solid") return "dark";
+  if (props.variant === "outline") return "plain";
+  return "light";
+});
+const elementTagSize = computed(() => {
+  if (props.size === "lg") return "large";
+  if (props.size === "md") return "default";
+  return "small";
+});
 
 const handleClick = (event: MouseEvent | KeyboardEvent) => {
   if (!isInteractive.value) return;
@@ -54,7 +65,7 @@ const handleClose = (event: MouseEvent) => {
 </script>
 
 <template>
-  <span
+  <el-tag
     class="base-badge"
     :class="[
       `base-badge--${type}`,
@@ -66,6 +77,12 @@ const handleClose = (event: MouseEvent) => {
         'is-disabled': disabled,
       }
     ]"
+    :type="elementTagType"
+    :effect="elementTagEffect"
+    :size="elementTagSize"
+    :round="true"
+    :closable="false"
+    :disable-transitions="false"
     :role="clickable ? 'button' : undefined"
     :tabindex="clickable && !disabled ? 0 : undefined"
     :aria-label="accessibleLabel || undefined"
@@ -87,12 +104,19 @@ const handleClose = (event: MouseEvent) => {
     >
       <BaseIcon name="X" size="10" aria-hidden="true" />
     </button>
-  </span>
+  </el-tag>
 </template>
 
 <style scoped>
 .base-badge {
   @apply inline-flex w-fit shrink-0 items-center gap-1 rounded-full border font-black leading-none transition-colors;
+  height: auto;
+  max-width: 100%;
+  white-space: normal;
+}
+
+.base-badge :deep(.el-tag__content) {
+  @apply inline-flex min-w-0 max-w-full items-center gap-1;
 }
 
 .base-badge--xs {

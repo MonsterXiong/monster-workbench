@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, useAttrs } from "vue";
+import { computed, ref, useAttrs, watchEffect } from "vue";
 import { useI18n } from "../../composables/useI18n";
 import BaseIcon from "./BaseIcon.vue";
 import { omit } from "../../utils";
+import { syncElementPlusClearButtonLabel } from "./elementPlusDom";
 
 defineOptions({
   inheritAttrs: false,
@@ -23,8 +24,10 @@ interface Props {
   prefixIcon?: string;
   suffixIcon?: string;
   loading?: boolean;
+  loadingText?: string;
   showPassword?: boolean;
   block?: boolean;
+  clearText?: string;
   ariaLabel?: string;
 }
 
@@ -42,8 +45,10 @@ const props = withDefaults(defineProps<Props>(), {
   prefixIcon: "",
   suffixIcon: "",
   loading: false,
+  loadingText: "",
   showPassword: false,
   block: false,
+  clearText: "",
   ariaLabel: "",
 });
 
@@ -61,6 +66,8 @@ const emit = defineEmits<{
 
 const attrs = useAttrs();
 const { t } = useI18n();
+type InputRef = HTMLElement | { $el?: Element | null } | null;
+const inputRef = ref<InputRef>(null);
 
 const filteredAttrs = computed(() => {
   return omit(attrs, ["size", "type"]);
@@ -74,6 +81,8 @@ const elSize = computed(() => {
 });
 
 const resolvedAriaLabel = computed(() => props.ariaLabel || props.placeholder || t("common.inputPlaceholder"));
+const resolvedClearText = computed(() => props.clearText || t("common.clear"));
+const resolvedLoadingText = computed(() => props.loadingText || t("common.loading"));
 
 const computedValue = computed({
   get: () => props.modelValue,
@@ -83,11 +92,22 @@ const computedValue = computed({
 });
 
 const canClear = computed(() => props.clearable && !props.loading && !props.disabled && !props.readonly);
+
+const syncClearButtonLabel = () =>
+  syncElementPlusClearButtonLabel(inputRef.value, ".el-input__clear", resolvedClearText.value);
+
+watchEffect(() => {
+  void props.modelValue;
+  void canClear.value;
+  void resolvedClearText.value;
+  void syncClearButtonLabel();
+});
 </script>
 
 <template>
   <el-input
     v-bind="filteredAttrs"
+    ref="inputRef"
     v-model="computedValue"
     :type="type"
     :placeholder="placeholder || t('common.inputPlaceholder')"
@@ -102,6 +122,7 @@ const canClear = computed(() => props.clearable && !props.loading && !props.disa
     :show-word-limit="showWordLimit"
     :show-password="showPassword"
     :autocomplete="autocomplete"
+    :validate-event="false"
     :class="[
       'base-input',
       `base-input--${size}`,
@@ -128,14 +149,21 @@ const canClear = computed(() => props.clearable && !props.loading && !props.disa
     </template>
     <template v-if="$slots.suffix || suffixIcon || loading" #suffix>
       <slot name="suffix">
+        <span v-if="loading" class="base-input__loading-status" role="status" :aria-label="resolvedLoadingText">
+          <BaseIcon
+            name="LoaderCircle"
+            size="14"
+            class="base-input__loading"
+            aria-hidden="true"
+          />
+          <span class="sr-only">{{ resolvedLoadingText }}</span>
+        </span>
         <BaseIcon
-          v-if="loading"
-          name="LoaderCircle"
+          v-else-if="suffixIcon"
+          :name="suffixIcon"
           size="14"
-          class="base-input__loading"
           aria-hidden="true"
         />
-        <BaseIcon v-else-if="suffixIcon" :name="suffixIcon" size="14" aria-hidden="true" />
       </slot>
     </template>
     <template v-if="$slots.prepend" #prepend>
@@ -177,6 +205,10 @@ const canClear = computed(() => props.clearable && !props.loading && !props.disa
   @apply text-slate-400 dark:text-slate-500;
 }
 
+:deep(.el-input__clear) {
+  @apply rounded-md transition hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-100;
+}
+
 :deep(.el-input__count) {
   @apply bg-transparent text-[10px] font-bold text-slate-400 dark:text-slate-500;
 }
@@ -203,6 +235,10 @@ const canClear = computed(() => props.clearable && !props.loading && !props.disa
   box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.14);
 }
 
+.base-input__loading-status {
+  @apply inline-flex h-4 w-4 items-center justify-center;
+}
+
 .base-input__loading {
   animation: base-input-spin 0.9s linear infinite;
 }
@@ -214,7 +250,10 @@ const canClear = computed(() => props.clearable && !props.loading && !props.disa
 }
 
 @media (prefers-reduced-motion: reduce) {
+  :deep(.el-input__wrapper),
+  :deep(.el-input__clear),
   .base-input__loading {
+    transition: none !important;
     animation: none !important;
   }
 }

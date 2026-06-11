@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, ref, useId, watch } from "vue";
+import { computed, ref, useId, watch, watchEffect } from "vue";
 import { LoaderCircle, Plus } from "lucide-vue-next";
 import { useI18n } from "../../composables/useI18n";
-import { escapeRegExp, mergeLimitedUniqueItems, splitBySeparators } from "../../utils";
+import { escapeRegExp, mergeLimitedUniqueItems } from "../../utils";
+import { syncElementPlusClearButtonLabel } from "./elementPlusDom";
 
 type TagInputSize = "sm" | "md" | "lg";
 
@@ -72,6 +73,7 @@ const emit = defineEmits<{
 const { t } = useI18n();
 const inputId = useId();
 const countId = `${inputId}-count`;
+const tagInputRef = ref<HTMLElement | null>(null);
 const internalValue = ref<string[]>(normalizeTags(props.modelValue));
 
 watch(
@@ -89,6 +91,7 @@ const rootLabel = computed(() => props.ariaLabel || tagInputLabel.value);
 const countText = computed(() => `${internalValue.value.length}/${props.max}`);
 const countLabel = computed(() => `${t("common.tagCount")}: ${countText.value}`);
 const resolvedLoadingText = computed(() => props.loadingText || t("common.loading"));
+const resolvedClearLabel = computed(() => props.clearLabel || t("common.clear"));
 const describedBy = computed(() => (props.showCount ? countId : undefined));
 const elementSize = computed(() => {
   if (props.compact || props.size === "sm") return "small";
@@ -100,6 +103,17 @@ const delimiter = computed(() => {
   return new RegExp(props.separators.map(escapeRegExp).join("|"));
 });
 const hasReachedLimit = computed(() => internalValue.value.length >= props.max);
+
+function syncClearButtonLabel() {
+  return syncElementPlusClearButtonLabel(tagInputRef.value, ".el-input-tag__clear", resolvedClearLabel.value);
+}
+
+watchEffect(() => {
+  void internalValue.value.length;
+  void canClear.value;
+  void resolvedClearLabel.value;
+  void syncClearButtonLabel();
+});
 
 function normalizeTags(value: readonly string[] = []) {
   const { items } = mergeLimitedUniqueItems([], value.map((item) => String(item ?? "").trim()).filter(Boolean), {
@@ -152,16 +166,6 @@ function handleValueUpdate(value?: string[]) {
   getRemovedTags(previousValue, normalizedValue).forEach((tag) => emit("remove", tag));
 }
 
-function handleAddTag(value: string | string[]) {
-  const tags = Array.isArray(value) ? value : splitBySeparators(value, props.separators);
-  const normalizedTags = normalizeTags([...internalValue.value, ...tags]);
-  getAddedTags(internalValue.value, normalizedTags).forEach((tag) => emit("add", tag));
-}
-
-function handleRemoveTag(value: string) {
-  emit("remove", value);
-}
-
 function handleClear() {
   emit("clear");
 }
@@ -169,6 +173,7 @@ function handleClear() {
 
 <template>
   <div
+    ref="tagInputRef"
     class="base-tag-input"
     :class="{
       'is-disabled': disabled,
@@ -187,6 +192,8 @@ function handleClear() {
     :aria-readonly="readonly ? 'true' : undefined"
     :aria-invalid="error ? 'true' : undefined"
     :aria-busy="loading ? 'true' : undefined"
+    @mouseenter="syncClearButtonLabel"
+    @focusin="syncClearButtonLabel"
   >
     <el-input-tag
       :id="inputId"
@@ -210,8 +217,6 @@ function handleClear() {
       tag-type="info"
       tag-effect="light"
       @update:model-value="handleValueUpdate"
-      @add-tag="handleAddTag"
-      @remove-tag="handleRemoveTag"
       @clear="handleClear"
       @focus="emit('focus', $event)"
       @blur="emit('blur', $event)"

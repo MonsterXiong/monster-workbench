@@ -1,12 +1,17 @@
 <script setup lang="ts">
+import type { FormRules } from "element-plus";
 import { computed, useId } from "vue";
 import { useI18n } from "../../composables/useI18n";
 
 type FormSize = "sm" | "md" | "lg";
 type FormBodyGap = "sm" | "md" | "lg";
 type FormSurface = "card" | "muted" | "plain";
+type ElementFormLabelPosition = "left" | "right" | "top";
+type ElementFormAsteriskPosition = "left" | "right";
 
 interface Props {
+  model?: Record<string, unknown>;
+  rules?: FormRules;
   title?: string;
   description?: string;
   columns?: 1 | 2 | 3 | 4;
@@ -24,6 +29,11 @@ interface Props {
   wrapDescription?: boolean;
   noValidate?: boolean;
   autocomplete?: "on" | "off";
+  labelPosition?: ElementFormLabelPosition;
+  labelWidth?: string | number;
+  requireAsteriskPosition?: ElementFormAsteriskPosition;
+  statusIcon?: boolean;
+  scrollToError?: boolean;
   ariaLabel?: string;
   actionsLabel?: string;
   bodyLabel?: string;
@@ -31,6 +41,8 @@ interface Props {
 }
 
 const props = withDefaults(defineProps<Props>(), {
+  model: undefined,
+  rules: undefined,
   title: "",
   description: "",
   columns: 1,
@@ -48,6 +60,11 @@ const props = withDefaults(defineProps<Props>(), {
   wrapDescription: false,
   noValidate: false,
   autocomplete: undefined,
+  labelPosition: "top",
+  labelWidth: "",
+  requireAsteriskPosition: "left",
+  statusIcon: false,
+  scrollToError: false,
   ariaLabel: "",
   actionsLabel: "",
   bodyLabel: "",
@@ -66,10 +83,16 @@ const resolvedLoadingText = computed(() => props.loadingText || t("common.loadin
 const resolvedActionsLabel = computed(() => props.actionsLabel || `${props.title || props.ariaLabel || "表单"} 操作`);
 const resolvedBodyLabel = computed(() => props.bodyLabel || `${props.title || props.ariaLabel || "表单"} 内容`);
 const resolvedFooterLabel = computed(() => props.footerLabel || `${props.title || props.ariaLabel || "表单"} 动作`);
+const elementSize = computed(() => {
+  if (props.compact || props.size === "sm") return "small";
+  if (props.size === "lg") return "large";
+  return "default";
+});
 
 const emit = defineEmits<{
   (e: "submit", event: SubmitEvent): void;
   (e: "reset", event: Event): void;
+  (e: "validate", prop: string | string[], isValid: boolean, message: string): void;
 }>();
 
 const handleSubmit = (event: SubmitEvent) => {
@@ -84,10 +107,14 @@ const handleReset = (event: Event) => {
   }
   emit("reset", event);
 };
+
+const handleValidate = (prop: string | string[], isValid: boolean, message: string) => {
+  emit("validate", prop, isValid, message);
+};
 </script>
 
 <template>
-  <form
+  <el-form
     class="base-form"
     :class="[
       `base-form--cols-${columns}`,
@@ -109,10 +136,22 @@ const handleReset = (event: Event) => {
     :aria-describedby="describedBy"
     :aria-busy="loading ? 'true' : undefined"
     :aria-disabled="isDisabled ? 'true' : undefined"
+    :model="model"
+    :rules="rules"
+    :size="elementSize"
+    :disabled="isContentLocked"
+    :label-position="labelPosition"
+    :label-width="labelWidth"
+    :require-asterisk-position="requireAsteriskPosition"
+    :status-icon="statusIcon"
+    :scroll-to-error="scrollToError"
+    :show-message="false"
+    :validate-on-rule-change="false"
     :novalidate="noValidate"
     :autocomplete="autocomplete"
     @submit.prevent="handleSubmit"
     @reset="handleReset"
+    @validate="handleValidate"
   >
     <header v-if="title || description || $slots.actions || (loading && showLoadingIndicator)" class="base-form__header">
       <div v-if="title || description" class="base-form__title-wrap">
@@ -154,7 +193,7 @@ const handleReset = (event: Event) => {
         <slot name="footer"></slot>
       </footer>
     </fieldset>
-  </form>
+  </el-form>
 </template>
 
 <style scoped>
