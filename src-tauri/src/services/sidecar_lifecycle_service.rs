@@ -1,5 +1,6 @@
 use crate::infra::{AppError, AppResult};
 use serde_json::{json, Value};
+use std::collections::{HashSet, VecDeque};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
@@ -29,6 +30,7 @@ const SIDECAR_RECOVERY_BACKOFF_MS: u128 = 5_000;
 const SIDECAR_SHUTDOWN_TIMEOUT_MS: u64 = 1_000;
 const SIDECAR_STATUS_EVENT_THROTTLE_MS: u128 = 1_000;
 const SIDECAR_STATUS_EVENT_NAME: &str = "creative-sidecar-status-changed";
+const SIDECAR_RUNTIME_EVENT_DEDUPE_LIMIT: usize = 2_000;
 
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -231,6 +233,8 @@ pub struct SidecarLifecycleService<R: Runtime = Wry> {
     recovery_backoff_until: Option<u128>,
     last_status_event_status: Option<String>,
     last_status_event_at: Option<u128>,
+    observed_runtime_event_keys: HashSet<String>,
+    observed_runtime_event_order: VecDeque<String>,
     snapshot: SidecarStatusSnapshot,
 }
 
@@ -249,6 +253,8 @@ impl<R: Runtime> SidecarLifecycleService<R> {
             recovery_backoff_until: None,
             last_status_event_status: None,
             last_status_event_at: None,
+            observed_runtime_event_keys: HashSet::new(),
+            observed_runtime_event_order: VecDeque::new(),
             snapshot: SidecarStatusSnapshot {
                 status: "stopped".to_string(),
                 port: None,
@@ -753,6 +759,34 @@ impl<R: Runtime> SidecarLifecycleService<R> {
         })
     }
 
+    pub fn take_new_runtime_events_for_diagnostics(
+        &mut self,
+        response: &SidecarRuntimeEventsResponse,
+    ) -> Vec<SidecarRuntimeEvent> {
+        let mut events = Vec::new();
+        for event in &response.events {
+            let Some(key) = runtime_event_source_key(response, event) else {
+                continue;
+            };
+            if self.observed_runtime_event_keys.contains(&key) {
+                continue;
+            }
+            self.remember_runtime_event_key(key);
+            events.push(event.clone());
+        }
+        events
+    }
+
+    fn remember_runtime_event_key(&mut self, key: String) {
+        self.observed_runtime_event_keys.insert(key.clone());
+        self.observed_runtime_event_order.push_back(key);
+        while self.observed_runtime_event_order.len() > SIDECAR_RUNTIME_EVENT_DEDUPE_LIMIT {
+            if let Some(oldest) = self.observed_runtime_event_order.pop_front() {
+                self.observed_runtime_event_keys.remove(&oldest);
+            }
+        }
+    }
+
     fn refresh_exit_status(&mut self) {
         let Some(child) = self.child.as_mut() else {
             return;
@@ -988,6 +1022,24 @@ fn get_json(port: u16, token: &str, path: &str, read_timeout: Duration) -> AppRe
         .ok_or_else(|| AppError::Process("sidecar response body is missing".to_string()))
 }
 
+fn runtime_event_source_key(
+    response: &SidecarRuntimeEventsResponse,
+    event: &SidecarRuntimeEvent,
+) -> Option<String> {
+    let runtime_instance_id = event
+        .runtime_instance_id
+        .as_deref()
+        .or(response.runtime_instance_id.as_deref())?;
+    let runtime_started_at = event
+        .runtime_started_at
+        .as_deref()
+        .or(response.runtime_started_at.as_deref())?;
+    Some(format!(
+        "{}|{}|{}",
+        runtime_instance_id, runtime_started_at, event.id
+    ))
+}
+
 fn encode_budget(budget: Option<SidecarWorkflowBudget>) -> AppResult<Value> {
     budget
         .map(serde_json::to_value)
@@ -1189,7 +1241,10 @@ mod tests {
         assert!(request.starts_with("GET /events?after=12&limit=2 "));
         assert!(request.contains(&format!("X-Monster-Token: {token}")));
         assert!(events.ok);
-        assert_eq!(events.runtime_instance_id.as_deref(), Some("runtime-test-1"));
+        assert_eq!(
+            events.runtime_instance_id.as_deref(),
+            Some("runtime-test-1")
+        );
         assert_eq!(
             events.runtime_started_at.as_deref(),
             Some("2026-06-12T07:59:00Z")
@@ -1218,6 +1273,42 @@ mod tests {
                 .and_then(|value| value["workflowType"].as_str()),
             Some("image_prompt")
         );
+    }
+
+    #[test]
+    fn runtime_event_diagnostics_dedupes_by_runtime_source_key() {
+        let app = tauri::test::mock_app();
+        let mut service = SidecarLifecycleService::new(app.handle().clone());
+        let response = SidecarRuntimeEventsResponse {
+            ok: true,
+            runtime_instance_id: Some("runtime-a".to_string()),
+            runtime_started_at: Some("2026-06-12T08:00:00Z".to_string()),
+            next_cursor: 1,
+            events: vec![SidecarRuntimeEvent {
+                id: 1,
+                runtime_instance_id: None,
+                runtime_started_at: None,
+                task_id: Some(77),
+                workflow_type: Some("image_prompt".to_string()),
+                event_type: "workflow_step_completed".to_string(),
+                message: Some("prompt built".to_string()),
+                payload: None,
+                created_at: "2026-06-12T08:00:01Z".to_string(),
+            }],
+        };
+
+        let first = service.take_new_runtime_events_for_diagnostics(&response);
+        let duplicate = service.take_new_runtime_events_for_diagnostics(&response);
+        let restarted_response = SidecarRuntimeEventsResponse {
+            runtime_instance_id: Some("runtime-b".to_string()),
+            runtime_started_at: Some("2026-06-12T08:01:00Z".to_string()),
+            ..response.clone()
+        };
+        let after_restart = service.take_new_runtime_events_for_diagnostics(&restarted_response);
+
+        assert_eq!(first.len(), 1);
+        assert!(duplicate.is_empty());
+        assert_eq!(after_restart.len(), 1);
     }
 
     #[test]
