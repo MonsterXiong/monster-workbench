@@ -1795,3 +1795,29 @@ Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `
 - `python -m py_compile src-tauri\\sidecars\\python\\creative_health_server.py`
 - `cargo test --manifest-path .\\src-tauri\\Cargo.toml services::sidecar_lifecycle_service::tests:: -- --nocapture --test-threads=1`
 - `cargo test --manifest-path .\\src-tauri\\Cargo.toml services::batch_job_service::tests::submit_with_batch_sidecar_uses_managed_lifecycle_and_releases_lock -- --nocapture --test-threads=1`
+
+## 2026-06-11 补充：sidecar 恢复可观测性
+
+本轮继续在 `SidecarLifecycleService` 上补可观测性，不改变 Rust 控制面归属，也不把事件流或 worker pool 下放给 Python。
+
+代码事实：
+
+- `SidecarStatusSnapshot` 新增 `recoveryFailureCount`、`lastRecoveryFailureAt` 和 `recoveryBackoffRemainingMs`，前端 `src/services/sidecar.service.ts` 与 browser mock 已同步结构。
+- `get_sidecar_status`、`check_sidecar_health`、`stop_sidecar_dev_health_server` 返回的状态现在能直接反映恢复失败次数和剩余冷却时间。
+- `mark_recovery_failure` 会累计失败次数并记录最近一次恢复失败时间；`stop_dev_health_server()` 与健康成功会清掉 backoff 但不会抹掉历史计数。
+- browser mock 继续保持 0 次恢复失败，但字段结构已对齐，避免联调时前后端 DTO 脱节。
+
+边界判定：
+
+| 区域 | 当前状态 | 下一步 |
+|---|---|---|
+| sidecar recovery | 已有短冷却 circuit / backoff + 恢复失败计数 | 补恢复/关闭事件记录与 event polling/throttling |
+| sidecar shutdown | 已有 graceful `/shutdown` + kill fallback | 后续可补 shutdown 原因和耗时字段 |
+| sidecar DTO | 前后端字段已对齐 | 保持不变，继续从事件和 settle 抽象推进 |
+
+本轮验证通过：
+
+- `cargo test --manifest-path .\\src-tauri\\Cargo.toml services::sidecar_lifecycle_service::tests:: -- --nocapture --test-threads=1`
+- `cargo check --manifest-path .\\src-tauri\\Cargo.toml`
+- `npm run typecheck`
+- `npm run check:architecture`
