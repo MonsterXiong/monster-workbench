@@ -1,9 +1,13 @@
 use crate::infra::creative_db::{
     CreateCreativeAssetInput, CreateCreativeBatchJobInput, CreateCreativeTaskInput,
     CreateModelRunInput, CreateTaskEventInput, CreativeBatchJob, CreativeBatchJobSnapshot,
-    CreativeDbInfra, CreativeTask, ListCreativeBatchJobsFilter, ListCreativeTasksFilter,
-    UpdateCreativeBatchJobInput, UpdateCreativeTaskStatusInput,
+    CreativeTask, ListCreativeBatchJobsFilter, ListCreativeTasksFilter, UpdateCreativeBatchJobInput,
+    UpdateCreativeTaskStatusInput,
 };
+use crate::infra::creative_asset_repo;
+use crate::infra::creative_batch_repo;
+use crate::infra::creative_model_run_repo;
+use crate::infra::creative_task_repo;
 use crate::infra::path::PathProvider;
 use crate::infra::{AppError, AppResult};
 use crate::services::ai_service::{AiProviderConfig, AiProviderService};
@@ -100,7 +104,7 @@ impl<R: Runtime> BatchJobService<R> {
         let concurrency = input.concurrency.unwrap_or(5).clamp(1, 10);
         let max_retries = input.max_retries.unwrap_or(0).clamp(0, 5);
 
-        let job = CreativeDbInfra::create_batch_job(
+        let job = creative_batch_repo::create_batch_job(
             &db_path,
             CreateCreativeBatchJobInput {
                 project_id: input.project_id.clone(),
@@ -127,7 +131,7 @@ impl<R: Runtime> BatchJobService<R> {
                 "providerConfig": input.provider_config,
             })
             .to_string();
-            let task = CreativeDbInfra::create_task(
+            let task = creative_task_repo::create_task(
                 &db_path,
                 CreateCreativeTaskInput {
                     project_id: job.project_id.clone(),
@@ -143,7 +147,7 @@ impl<R: Runtime> BatchJobService<R> {
                     sequence_no: Some(sequence_no),
                 },
             )?;
-            let _ = CreativeDbInfra::append_task_event(
+            let _ = creative_task_repo::append_task_event(
                 &db_path,
                 CreateTaskEventInput {
                     task_id: task.id,
@@ -161,7 +165,7 @@ impl<R: Runtime> BatchJobService<R> {
         }
 
         let snapshot =
-            CreativeDbInfra::get_batch_job_snapshot(&db_path, job.id)?.ok_or_else(|| {
+            creative_batch_repo::get_batch_job_snapshot(&db_path, job.id)?.ok_or_else(|| {
                 AppError::Database("batch job snapshot missing after creation".to_string())
             })?;
         self.emit_batch_snapshot(
@@ -176,7 +180,7 @@ impl<R: Runtime> BatchJobService<R> {
         &self,
         filter: ListCreativeBatchJobsFilter,
     ) -> AppResult<Vec<CreativeBatchJob>> {
-        CreativeDbInfra::list_batch_jobs(&self.db_path()?, filter)
+        creative_batch_repo::list_batch_jobs(&self.db_path()?, filter)
     }
 
     pub fn get_batch_job(&self, batch_job_id: i64) -> AppResult<CreativeBatchJobSnapshot> {
@@ -185,7 +189,7 @@ impl<R: Runtime> BatchJobService<R> {
                 "batch_job_id must be positive".to_string(),
             ));
         }
-        CreativeDbInfra::get_batch_job_snapshot(&self.db_path()?, batch_job_id)?
+        creative_batch_repo::get_batch_job_snapshot(&self.db_path()?, batch_job_id)?
             .ok_or_else(|| AppError::Database("batch job not found".to_string()))
     }
 
@@ -200,7 +204,7 @@ impl<R: Runtime> BatchJobService<R> {
                 "batch_job_id must be positive".to_string(),
             ));
         }
-        CreativeDbInfra::list_tasks(
+        creative_task_repo::list_tasks(
             &self.db_path()?,
             ListCreativeTasksFilter {
                 batch_job_id: Some(batch_job_id),
@@ -235,7 +239,7 @@ impl<R: Runtime> BatchJobService<R> {
         }
 
         let db_path = self.db_path()?;
-        CreativeDbInfra::update_batch_job(
+        creative_batch_repo::update_batch_job(
             &db_path,
             UpdateCreativeBatchJobInput {
                 id: batch_job_id,
@@ -252,11 +256,10 @@ impl<R: Runtime> BatchJobService<R> {
             },
         )?;
 
-        let cancelled_task_ids =
-            CreativeDbInfra::cancel_queued_batch_tasks(&db_path, batch_job_id)?;
+        let cancelled_task_ids = creative_task_repo::cancel_queued_batch_tasks(&db_path, batch_job_id)?;
         for task_id in cancelled_task_ids {
-            if let Some(task) = CreativeDbInfra::get_task(&db_path, task_id)? {
-                let _ = CreativeDbInfra::append_task_event(
+            if let Some(task) = creative_task_repo::get_task(&db_path, task_id)? {
+                let _ = creative_task_repo::append_task_event(
                     &db_path,
                     CreateTaskEventInput {
                         task_id,
@@ -276,10 +279,10 @@ impl<R: Runtime> BatchJobService<R> {
         }
 
         let cancelling_task_ids =
-            CreativeDbInfra::mark_running_batch_tasks_cancelling(&db_path, batch_job_id)?;
+            creative_task_repo::mark_running_batch_tasks_cancelling(&db_path, batch_job_id)?;
         for task_id in cancelling_task_ids {
-            if let Some(task) = CreativeDbInfra::get_task(&db_path, task_id)? {
-                let _ = CreativeDbInfra::append_task_event(
+            if let Some(task) = creative_task_repo::get_task(&db_path, task_id)? {
+                let _ = creative_task_repo::append_task_event(
                     &db_path,
                     CreateTaskEventInput {
                         task_id,
@@ -324,7 +327,7 @@ impl<R: Runtime> BatchJobService<R> {
             ));
         }
         let db_path = self.db_path()?;
-        CreativeDbInfra::update_batch_job(
+        creative_batch_repo::update_batch_job(
             &db_path,
             UpdateCreativeBatchJobInput {
                 id: batch_job_id,
@@ -340,7 +343,7 @@ impl<R: Runtime> BatchJobService<R> {
                 finished_at: None,
             },
         )?;
-        let snapshot = CreativeDbInfra::get_batch_job_snapshot(&db_path, batch_job_id)?
+        let snapshot = creative_batch_repo::get_batch_job_snapshot(&db_path, batch_job_id)?
             .ok_or_else(|| AppError::Database("batch job not found".to_string()))?;
         self.emit_batch_snapshot(
             "batch-job-status-changed",
@@ -462,7 +465,7 @@ fn run_batch_supervisor_inner<R: Runtime>(
 ) -> AppResult<()> {
     loop {
         let snapshot =
-            CreativeDbInfra::get_batch_job_snapshot(db_path, batch_job_id)?.ok_or_else(|| {
+            creative_batch_repo::get_batch_job_snapshot(db_path, batch_job_id)?.ok_or_else(|| {
                 AppError::Database("batch job not found while supervising".to_string())
             })?;
 
@@ -479,7 +482,7 @@ fn run_batch_supervisor_inner<R: Runtime>(
                 let available_slots =
                     (snapshot.job.concurrency - snapshot.stats.running_tasks).max(0);
                 for _ in 0..available_slots {
-                    let Some(task) = CreativeDbInfra::claim_next_queued_task(
+                    let Some(task) = creative_task_repo::claim_next_queued_task(
                         db_path,
                         ListCreativeTasksFilter {
                             batch_job_id: Some(batch_job_id),
@@ -500,7 +503,7 @@ fn run_batch_supervisor_inner<R: Runtime>(
                     )?;
                     let (started_event_type, started_message) =
                         batch_worker_started_labels(&snapshot.job.batch_type);
-                    let _ = CreativeDbInfra::append_task_event(
+                    let _ = creative_task_repo::append_task_event(
                         db_path,
                         CreateTaskEventInput {
                             task_id: task.id,
@@ -546,7 +549,7 @@ fn run_batch_supervisor_inner<R: Runtime>(
                     });
                 }
 
-                let refreshed = CreativeDbInfra::get_batch_job_snapshot(db_path, batch_job_id)?
+                let refreshed = creative_batch_repo::get_batch_job_snapshot(db_path, batch_job_id)?
                     .ok_or_else(|| {
                         AppError::Database("batch job not found during refresh".to_string())
                     })?;
@@ -554,7 +557,7 @@ fn run_batch_supervisor_inner<R: Runtime>(
                     && refreshed.stats.running_tasks == 0
                     && refreshed.stats.cancelling_tasks == 0
                 {
-                    CreativeDbInfra::update_batch_job(
+                    creative_batch_repo::update_batch_job(
                         db_path,
                         UpdateCreativeBatchJobInput {
                             id: batch_job_id,
@@ -570,7 +573,8 @@ fn run_batch_supervisor_inner<R: Runtime>(
                             finished_at: None,
                         },
                     )?;
-                    let completed = CreativeDbInfra::get_batch_job_snapshot(db_path, batch_job_id)?
+                    let completed =
+                        creative_batch_repo::get_batch_job_snapshot(db_path, batch_job_id)?
                         .ok_or_else(|| {
                             AppError::Database("batch job missing after completion".to_string())
                         })?;
@@ -616,7 +620,7 @@ fn should_auto_pause_after_failure(
         return Ok(false);
     }
 
-    let tasks = CreativeDbInfra::list_tasks(
+    let tasks = creative_task_repo::list_tasks(
         db_path,
         ListCreativeTasksFilter {
             batch_job_id: Some(batch_job_id),
@@ -650,7 +654,7 @@ fn maybe_auto_pause_batch_after_failure<R: Runtime>(
     batch_job_id: i64,
     failure_message: &str,
 ) -> AppResult<bool> {
-    let Some(batch) = CreativeDbInfra::get_batch_job(db_path, batch_job_id)? else {
+    let Some(batch) = creative_batch_repo::get_batch_job(db_path, batch_job_id)? else {
         return Ok(false);
     };
     if batch.status != "running" {
@@ -662,7 +666,7 @@ fn maybe_auto_pause_batch_after_failure<R: Runtime>(
         return Ok(false);
     }
 
-    CreativeDbInfra::update_batch_job(
+    creative_batch_repo::update_batch_job(
         db_path,
         UpdateCreativeBatchJobInput {
             id: batch_job_id,
@@ -680,7 +684,7 @@ fn maybe_auto_pause_batch_after_failure<R: Runtime>(
     )?;
 
     let snapshot =
-        CreativeDbInfra::get_batch_job_snapshot(db_path, batch_job_id)?.ok_or_else(|| {
+        creative_batch_repo::get_batch_job_snapshot(db_path, batch_job_id)?.ok_or_else(|| {
             AppError::Database("batch job snapshot missing after auto pause".to_string())
         })?;
     let message = format!(
@@ -706,16 +710,16 @@ fn run_mock_task_worker<R: Runtime>(
         thread::sleep(Duration::from_millis(200));
         elapsed_ms = (elapsed_ms + 200).min(duration_ms);
 
-        let batch = CreativeDbInfra::get_batch_job(db_path, batch_job_id)?.ok_or_else(|| {
+        let batch = creative_batch_repo::get_batch_job(db_path, batch_job_id)?.ok_or_else(|| {
             AppError::Database("batch job not found while running task".to_string())
         })?;
-        let current_task = CreativeDbInfra::get_task(db_path, task.id)?.ok_or_else(|| {
+        let current_task = creative_task_repo::get_task(db_path, task.id)?.ok_or_else(|| {
             AppError::Database("task not found while running mock worker".to_string())
         })?;
         if batch.status == "cancelled"
             || matches!(current_task.status.as_str(), "cancelling" | "cancelled")
         {
-            let cancelled_task = CreativeDbInfra::update_task_status(
+            let cancelled_task = creative_task_repo::update_task_status(
                 db_path,
                 UpdateCreativeTaskStatusInput {
                     id: task.id,
@@ -726,7 +730,7 @@ fn run_mock_task_worker<R: Runtime>(
                     retry_count_increment: None,
                 },
             )?;
-            let _ = CreativeDbInfra::append_task_event(
+            let _ = creative_task_repo::append_task_event(
                 db_path,
                 CreateTaskEventInput {
                     task_id: task.id,
@@ -758,7 +762,7 @@ fn run_mock_task_worker<R: Runtime>(
     }
 
     let should_fail = mock_should_fail(task.sequence_no.unwrap_or(task.id));
-    let updated_task = CreativeDbInfra::update_task_status(
+    let updated_task = creative_task_repo::update_task_status(
         db_path,
         UpdateCreativeTaskStatusInput {
             id: task.id,
@@ -799,7 +803,7 @@ fn run_mock_task_worker<R: Runtime>(
     } else {
         "mock_succeeded"
     };
-    let _ = CreativeDbInfra::append_task_event(
+    let _ = creative_task_repo::append_task_event(
         db_path,
         CreateTaskEventInput {
             task_id: task.id,
@@ -836,16 +840,16 @@ fn run_prompt_task_worker<R: Runtime>(
     batch_job_id: i64,
     task: CreativeTask,
 ) -> AppResult<()> {
-    let batch = CreativeDbInfra::get_batch_job(db_path, batch_job_id)?.ok_or_else(|| {
+    let batch = creative_batch_repo::get_batch_job(db_path, batch_job_id)?.ok_or_else(|| {
         AppError::Database("batch job not found while running prompt task".to_string())
     })?;
-    let current_task = CreativeDbInfra::get_task(db_path, task.id)?.ok_or_else(|| {
+    let current_task = creative_task_repo::get_task(db_path, task.id)?.ok_or_else(|| {
         AppError::Database("task not found while running prompt worker".to_string())
     })?;
     if batch.status == "cancelled"
         || matches!(current_task.status.as_str(), "cancelling" | "cancelled")
     {
-        let cancelled_task = CreativeDbInfra::update_task_status(
+        let cancelled_task = creative_task_repo::update_task_status(
             db_path,
             UpdateCreativeTaskStatusInput {
                 id: task.id,
@@ -856,7 +860,7 @@ fn run_prompt_task_worker<R: Runtime>(
                 retry_count_increment: None,
             },
         )?;
-        let _ = CreativeDbInfra::append_task_event(
+        let _ = creative_task_repo::append_task_event(
             db_path,
             CreateTaskEventInput {
                 task_id: task.id,
@@ -902,7 +906,7 @@ fn run_prompt_task_worker<R: Runtime>(
                     AppError::Process("provider returned empty prompt text".to_string())
                 })?;
 
-            let asset = CreativeDbInfra::create_asset(
+            let asset = creative_asset_repo::create_asset(
                 db_path,
                 CreateCreativeAssetInput {
                     project_id: task.project_id.clone(),
@@ -931,7 +935,7 @@ fn run_prompt_task_worker<R: Runtime>(
                 },
             )?;
 
-            let model_run = CreativeDbInfra::create_model_run(
+            let model_run = creative_model_run_repo::create_model_run(
                 db_path,
                 CreateModelRunInput {
                     project_id: task.project_id.clone(),
@@ -967,7 +971,7 @@ fn run_prompt_task_worker<R: Runtime>(
                 },
             )?;
 
-            let updated_task = CreativeDbInfra::update_task_status(
+            let updated_task = creative_task_repo::update_task_status(
                 db_path,
                 UpdateCreativeTaskStatusInput {
                     id: task.id,
@@ -986,7 +990,7 @@ fn run_prompt_task_worker<R: Runtime>(
                     retry_count_increment: None,
                 },
             )?;
-            let _ = CreativeDbInfra::append_task_event(
+            let _ = creative_task_repo::append_task_event(
                 db_path,
                 CreateTaskEventInput {
                     task_id: task.id,
@@ -1017,7 +1021,7 @@ fn run_prompt_task_worker<R: Runtime>(
         }
         Err(error) => {
             if current_task.retry_count < current_task.max_retries {
-                let retry_task = CreativeDbInfra::update_task_status(
+                let retry_task = creative_task_repo::update_task_status(
                     db_path,
                     UpdateCreativeTaskStatusInput {
                         id: task.id,
@@ -1028,7 +1032,7 @@ fn run_prompt_task_worker<R: Runtime>(
                         retry_count_increment: Some(1),
                     },
                 )?;
-                let _ = CreativeDbInfra::create_model_run(
+                let _ = creative_model_run_repo::create_model_run(
                     db_path,
                     CreateModelRunInput {
                         project_id: task.project_id.clone(),
@@ -1051,7 +1055,7 @@ fn run_prompt_task_worker<R: Runtime>(
                         finished_at: None,
                     },
                 );
-                let _ = CreativeDbInfra::append_task_event(
+                let _ = creative_task_repo::append_task_event(
                     db_path,
                     CreateTaskEventInput {
                         task_id: task.id,
@@ -1080,7 +1084,7 @@ fn run_prompt_task_worker<R: Runtime>(
                     "prompt worker scheduled retry",
                 )?;
             } else {
-                let failed_task = CreativeDbInfra::update_task_status(
+                let failed_task = creative_task_repo::update_task_status(
                     db_path,
                     UpdateCreativeTaskStatusInput {
                         id: task.id,
@@ -1091,7 +1095,7 @@ fn run_prompt_task_worker<R: Runtime>(
                         retry_count_increment: None,
                     },
                 )?;
-                let _ = CreativeDbInfra::create_model_run(
+                let _ = creative_model_run_repo::create_model_run(
                     db_path,
                     CreateModelRunInput {
                         project_id: task.project_id.clone(),
@@ -1114,7 +1118,7 @@ fn run_prompt_task_worker<R: Runtime>(
                         finished_at: None,
                     },
                 );
-                let _ = CreativeDbInfra::append_task_event(
+                let _ = creative_task_repo::append_task_event(
                     db_path,
                     CreateTaskEventInput {
                         task_id: task.id,
@@ -1154,16 +1158,16 @@ fn run_generate_task_worker<R: Runtime>(
     batch_job_id: i64,
     task: CreativeTask,
 ) -> AppResult<()> {
-    let batch = CreativeDbInfra::get_batch_job(db_path, batch_job_id)?.ok_or_else(|| {
+    let batch = creative_batch_repo::get_batch_job(db_path, batch_job_id)?.ok_or_else(|| {
         AppError::Database("batch job not found while running generate task".to_string())
     })?;
-    let current_task = CreativeDbInfra::get_task(db_path, task.id)?.ok_or_else(|| {
+    let current_task = creative_task_repo::get_task(db_path, task.id)?.ok_or_else(|| {
         AppError::Database("task not found while running generate worker".to_string())
     })?;
     if batch.status == "cancelled"
         || matches!(current_task.status.as_str(), "cancelling" | "cancelled")
     {
-        let cancelled_task = CreativeDbInfra::update_task_status(
+        let cancelled_task = creative_task_repo::update_task_status(
             db_path,
             UpdateCreativeTaskStatusInput {
                 id: task.id,
@@ -1174,7 +1178,7 @@ fn run_generate_task_worker<R: Runtime>(
                 retry_count_increment: None,
             },
         )?;
-        let _ = CreativeDbInfra::append_task_event(
+        let _ = creative_task_repo::append_task_event(
             db_path,
             CreateTaskEventInput {
                 task_id: task.id,
@@ -1215,7 +1219,7 @@ fn run_generate_task_worker<R: Runtime>(
         Ok(result) if result.ok => {
             let (file_path, thumbnail_path, saved_files) =
                 resolve_generate_image_paths(db_path, batch_job_id, task.id, &result)?;
-            let image_asset = CreativeDbInfra::create_asset(
+            let image_asset = creative_asset_repo::create_asset(
                 db_path,
                 CreateCreativeAssetInput {
                     project_id: task.project_id.clone(),
@@ -1244,7 +1248,7 @@ fn run_generate_task_worker<R: Runtime>(
                 },
             )?;
 
-            let model_run = CreativeDbInfra::create_model_run(
+            let model_run = creative_model_run_repo::create_model_run(
                 db_path,
                 CreateModelRunInput {
                     project_id: task.project_id.clone(),
@@ -1281,7 +1285,7 @@ fn run_generate_task_worker<R: Runtime>(
                 },
             )?;
 
-            let updated_task = CreativeDbInfra::update_task_status(
+            let updated_task = creative_task_repo::update_task_status(
                 db_path,
                 UpdateCreativeTaskStatusInput {
                     id: task.id,
@@ -1302,7 +1306,7 @@ fn run_generate_task_worker<R: Runtime>(
                     retry_count_increment: None,
                 },
             )?;
-            let _ = CreativeDbInfra::append_task_event(
+            let _ = creative_task_repo::append_task_event(
                 db_path,
                 CreateTaskEventInput {
                     task_id: task.id,
@@ -1597,7 +1601,7 @@ fn handle_generate_failure<R: Runtime>(
     error_message: String,
 ) -> AppResult<()> {
     if current_retry_count(&task) < task.max_retries {
-        let retry_task = CreativeDbInfra::update_task_status(
+        let retry_task = creative_task_repo::update_task_status(
             db_path,
             UpdateCreativeTaskStatusInput {
                 id: task.id,
@@ -1608,7 +1612,7 @@ fn handle_generate_failure<R: Runtime>(
                 retry_count_increment: Some(1),
             },
         )?;
-        let _ = CreativeDbInfra::create_model_run(
+        let _ = creative_model_run_repo::create_model_run(
             db_path,
             CreateModelRunInput {
                 project_id: task.project_id.clone(),
@@ -1631,7 +1635,7 @@ fn handle_generate_failure<R: Runtime>(
                 finished_at: None,
             },
         );
-        let _ = CreativeDbInfra::append_task_event(
+        let _ = creative_task_repo::append_task_event(
             db_path,
             CreateTaskEventInput {
                 task_id: task.id,
@@ -1660,7 +1664,7 @@ fn handle_generate_failure<R: Runtime>(
             "image worker scheduled retry",
         )?;
     } else {
-        let failed_task = CreativeDbInfra::update_task_status(
+        let failed_task = creative_task_repo::update_task_status(
             db_path,
             UpdateCreativeTaskStatusInput {
                 id: task.id,
@@ -1671,7 +1675,7 @@ fn handle_generate_failure<R: Runtime>(
                 retry_count_increment: None,
             },
         )?;
-        let _ = CreativeDbInfra::create_model_run(
+        let _ = creative_model_run_repo::create_model_run(
             db_path,
             CreateModelRunInput {
                 project_id: task.project_id.clone(),
@@ -1694,7 +1698,7 @@ fn handle_generate_failure<R: Runtime>(
                 finished_at: None,
             },
         );
-        let _ = CreativeDbInfra::append_task_event(
+        let _ = creative_task_repo::append_task_event(
             db_path,
             CreateTaskEventInput {
                 task_id: task.id,
@@ -1786,6 +1790,10 @@ mod tests {
     use super::*;
     use crate::infra::creative_db::{
         CreativeAsset, ListCreativeAssetsFilter, ListModelRunsFilter, UpdateCreativeBatchJobInput,
+    };
+    use crate::infra::creative_db_schema::init_schema;
+    use crate::infra::{
+        creative_asset_repo, creative_batch_repo, creative_model_run_repo, creative_task_repo,
     };
     use std::io::{Read, Write};
     use std::net::TcpListener;
@@ -2094,7 +2102,7 @@ mod tests {
         let generated_root = root.join("generated");
         let path_provider = PathProvider::new_for_test(root.clone(), db_path.clone());
         let service = BatchJobService::new(app.handle().clone(), path_provider.clone());
-        CreativeDbInfra::init_schema(&db_path).expect("schema should init");
+        init_schema(&db_path).expect("schema should init");
         std::env::set_var("MONSTER_TOOLS_TEST_OUTPUT_DIR", &generated_root);
 
         let (base_url, server) = start_failing_image_provider_server("gpt-image-1");
@@ -2115,7 +2123,7 @@ mod tests {
             })
             .expect("batch job should create");
 
-        CreativeDbInfra::update_batch_job(
+        creative_batch_repo::update_batch_job(
             &db_path,
             UpdateCreativeBatchJobInput {
                 id: snapshot.job.id,
@@ -2139,7 +2147,7 @@ mod tests {
         assert_eq!(tasks.len(), 2);
 
         for task in tasks {
-            let running_task = CreativeDbInfra::update_task_status(
+            let running_task = creative_task_repo::update_task_status(
                 &db_path,
                 UpdateCreativeTaskStatusInput {
                     id: task.id,
@@ -2160,7 +2168,7 @@ mod tests {
             .join()
             .expect("failing image test server should join");
 
-        let refreshed = CreativeDbInfra::get_batch_job_snapshot(&db_path, snapshot.job.id)
+        let refreshed = creative_batch_repo::get_batch_job_snapshot(&db_path, snapshot.job.id)
             .expect("snapshot should load")
             .expect("batch job should exist");
         assert_eq!(refreshed.job.status, "paused");
@@ -2187,7 +2195,7 @@ mod tests {
         let db_path = root.join("monster_workbench.db");
         let path_provider = PathProvider::new_for_test(root.clone(), db_path.clone());
         let service = BatchJobService::new(app.handle().clone(), path_provider.clone());
-        CreativeDbInfra::init_schema(&db_path).expect("schema should init");
+        init_schema(&db_path).expect("schema should init");
 
         let (base_url, server) = start_prompt_provider_server(
             "A polished cinematic prompt about a quiet neon street scene.",
@@ -2209,7 +2217,7 @@ mod tests {
             })
             .expect("batch job should create");
 
-        CreativeDbInfra::update_batch_job(
+        creative_batch_repo::update_batch_job(
             &db_path,
             UpdateCreativeBatchJobInput {
                 id: snapshot.job.id,
@@ -2233,7 +2241,7 @@ mod tests {
             .into_iter()
             .next()
             .expect("task should exist");
-        let running_task = CreativeDbInfra::update_task_status(
+        let running_task = creative_task_repo::update_task_status(
             &db_path,
             UpdateCreativeTaskStatusInput {
                 id: task.id,
@@ -2250,7 +2258,7 @@ mod tests {
             .expect("prompt worker should succeed");
         server.join().expect("prompt test server should join");
 
-        let persisted_task = CreativeDbInfra::get_task(&db_path, task.id)
+        let persisted_task = creative_task_repo::get_task(&db_path, task.id)
             .expect("task lookup should succeed")
             .expect("task should exist");
         assert_eq!(persisted_task.status, "succeeded");
@@ -2258,7 +2266,7 @@ mod tests {
             .asset_id
             .expect("task should reference an asset");
 
-        let assets = CreativeDbInfra::list_assets(
+        let assets = creative_asset_repo::list_assets(
             &db_path,
             ListCreativeAssetsFilter {
                 asset_type: Some("demo_image_prompt".to_string()),
@@ -2274,7 +2282,7 @@ mod tests {
             .unwrap_or_default()
             .contains("quiet neon street scene"));
 
-        let model_runs = CreativeDbInfra::list_model_runs(
+        let model_runs = creative_model_run_repo::list_model_runs(
             &db_path,
             ListModelRunsFilter {
                 task_id: Some(task.id),
@@ -2286,8 +2294,8 @@ mod tests {
         assert_eq!(model_runs[0].request_type, "chat");
         assert_eq!(model_runs[0].status, "succeeded");
 
-        let events =
-            CreativeDbInfra::list_task_events(&db_path, task.id).expect("events should list");
+        let events = creative_task_repo::list_task_events(&db_path, task.id)
+            .expect("events should list");
         assert!(
             events
                 .iter()
@@ -2311,7 +2319,7 @@ mod tests {
         let generated_root = root.join("generated");
         let path_provider = PathProvider::new_for_test(root.clone(), db_path.clone());
         let service = BatchJobService::new(app.handle().clone(), path_provider.clone());
-        CreativeDbInfra::init_schema(&db_path).expect("schema should init");
+        init_schema(&db_path).expect("schema should init");
         std::env::set_var("MONSTER_TOOLS_TEST_OUTPUT_DIR", &generated_root);
 
         let (base_url, server) = start_image_provider_server("gpt-image-1");
@@ -2332,7 +2340,7 @@ mod tests {
             })
             .expect("batch job should create");
 
-        CreativeDbInfra::update_batch_job(
+        creative_batch_repo::update_batch_job(
             &db_path,
             UpdateCreativeBatchJobInput {
                 id: snapshot.job.id,
@@ -2356,7 +2364,7 @@ mod tests {
             .into_iter()
             .next()
             .expect("task should exist");
-        let running_task = CreativeDbInfra::update_task_status(
+        let running_task = creative_task_repo::update_task_status(
             &db_path,
             UpdateCreativeTaskStatusInput {
                 id: task.id,
@@ -2373,7 +2381,7 @@ mod tests {
             .expect("image worker should succeed");
         server.join().expect("image test server should join");
 
-        let persisted_task = CreativeDbInfra::get_task(&db_path, task.id)
+        let persisted_task = creative_task_repo::get_task(&db_path, task.id)
             .expect("task lookup should succeed")
             .expect("task should exist");
         assert_eq!(persisted_task.status, "succeeded");
@@ -2381,7 +2389,7 @@ mod tests {
             .asset_id
             .expect("task should reference an asset");
 
-        let assets = CreativeDbInfra::list_assets(
+        let assets = creative_asset_repo::list_assets(
             &db_path,
             ListCreativeAssetsFilter {
                 asset_type: Some("demo_image".to_string()),
@@ -2402,7 +2410,7 @@ mod tests {
             .map(std::path::Path::new)
             .is_some_and(|path| path.exists()));
 
-        let model_runs = CreativeDbInfra::list_model_runs(
+        let model_runs = creative_model_run_repo::list_model_runs(
             &db_path,
             ListModelRunsFilter {
                 task_id: Some(task.id),
@@ -2414,8 +2422,8 @@ mod tests {
         assert_eq!(model_runs[0].request_type, "image");
         assert_eq!(model_runs[0].status, "succeeded");
 
-        let events =
-            CreativeDbInfra::list_task_events(&db_path, task.id).expect("events should list");
+        let events = creative_task_repo::list_task_events(&db_path, task.id)
+            .expect("events should list");
         assert!(
             events
                 .iter()

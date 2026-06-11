@@ -1,10 +1,11 @@
+use crate::infra::creative_asset_repo;
+use crate::infra::creative_batch_repo;
 use crate::infra::creative_db_schema;
-use crate::infra::creative_db_support::{
-    connect, map_asset_link, map_creative_asset, map_creative_batch_job, map_creative_goal,
-    map_creative_goal_role, map_creative_task, map_model_run, map_task_event,
-};
-use crate::infra::{AppError, AppResult};
-use rusqlite::{params, params_from_iter, types::Value, Connection, OptionalExtension};
+use crate::infra::creative_goal_repo;
+use crate::infra::creative_model_run_repo;
+use crate::infra::creative_project_repo;
+use crate::infra::creative_task_repo;
+use crate::infra::AppResult;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
@@ -254,6 +255,40 @@ pub struct CreativeAsset {
     pub updated_at: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreativeProject {
+    pub id: String,
+    pub title: String,
+    pub description: Option<String>,
+    pub status: String,
+    pub settings_json: Option<String>,
+    pub budget_json: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+    pub archived_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpsertCreativeProjectInput {
+    pub id: String,
+    pub title: String,
+    pub description: Option<String>,
+    pub status: Option<String>,
+    pub settings_json: Option<String>,
+    pub budget_json: Option<String>,
+    pub archived_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListCreativeProjectsFilter {
+    pub status: Option<String>,
+    pub limit: Option<i64>,
+    pub offset: Option<i64>,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateCreativeAssetInput {
@@ -391,1005 +426,200 @@ impl CreativeDbInfra {
     }
 
     pub fn create_task(db_path: &Path, input: CreateCreativeTaskInput) -> AppResult<CreativeTask> {
-        Self::init_schema(db_path)?;
-        let conn = connect(db_path)?;
-        let status = input.status.unwrap_or_else(|| "draft".to_string());
-        conn.execute(
-            "INSERT INTO creative_tasks (
-                project_id, goal_id, batch_job_id, task_type, status, priority, payload_json,
-                max_retries, parent_task_id, asset_id, sequence_no
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            params![
-                input.project_id,
-                input.goal_id,
-                input.batch_job_id,
-                input.task_type,
-                status,
-                input.priority.unwrap_or(0),
-                input.payload_json,
-                input.max_retries.unwrap_or(0),
-                input.parent_task_id,
-                input.asset_id,
-                input.sequence_no
-            ],
-        )?;
-        let id = conn.last_insert_rowid();
-        Self::get_task_with_conn(&conn, id)?
-            .ok_or_else(|| AppError::Database("创作任务已写入但无法立即读取".to_string()))
+        creative_task_repo::create_task(db_path, input)
     }
 
     pub fn get_task(db_path: &Path, id: i64) -> AppResult<Option<CreativeTask>> {
-        Self::init_schema(db_path)?;
-        let conn = connect(db_path)?;
-        Self::get_task_with_conn(&conn, id)
+        creative_task_repo::get_task(db_path, id)
     }
 
     pub fn list_tasks(
         db_path: &Path,
         filter: ListCreativeTasksFilter,
     ) -> AppResult<Vec<CreativeTask>> {
-        Self::init_schema(db_path)?;
-        let conn = connect(db_path)?;
-        let mut sql = String::from(
-            "SELECT id, project_id, goal_id, batch_job_id, task_type, status, priority,
-                payload_json, result_json, error_message, retry_count, max_retries,
-                parent_task_id, asset_id, sequence_no, created_at, updated_at, started_at,
-                finished_at
-             FROM creative_tasks
-             WHERE 1 = 1",
-        );
-        let mut params = Vec::<Value>::new();
-
-        if let Some(project_id) = non_empty_filter(filter.project_id) {
-            sql.push_str(" AND project_id = ?");
-            params.push(Value::Text(project_id));
-        }
-        if let Some(status) = non_empty_filter(filter.status) {
-            sql.push_str(" AND status = ?");
-            params.push(Value::Text(status));
-        }
-        if let Some(task_type) = non_empty_filter(filter.task_type) {
-            sql.push_str(" AND task_type = ?");
-            params.push(Value::Text(task_type));
-        }
-        if let Some(goal_id) = filter.goal_id {
-            sql.push_str(" AND goal_id = ?");
-            params.push(Value::Integer(goal_id));
-        }
-        if let Some(batch_job_id) = filter.batch_job_id {
-            sql.push_str(" AND batch_job_id = ?");
-            params.push(Value::Integer(batch_job_id));
-        }
-
-        sql.push_str(" ORDER BY COALESCE(sequence_no, id) ASC, id ASC LIMIT ? OFFSET ?");
-        params.push(Value::Integer(filter.limit.unwrap_or(50).clamp(1, 200)));
-        params.push(Value::Integer(filter.offset.unwrap_or(0).max(0)));
-
-        let mut stmt = conn.prepare(&sql)?;
-        let rows = stmt.query_map(params_from_iter(params.iter()), map_creative_task)?;
-        let mut tasks = Vec::new();
-        for row in rows {
-            tasks.push(row?);
-        }
-        Ok(tasks)
+        creative_task_repo::list_tasks(db_path, filter)
     }
 
     pub fn update_task_status(
         db_path: &Path,
         input: UpdateCreativeTaskStatusInput,
     ) -> AppResult<CreativeTask> {
-        Self::init_schema(db_path)?;
-        let conn = connect(db_path)?;
-        let status = input.status;
-        let result_json = input.result_json;
-        let error_message = input.error_message;
-        let asset_id = input.asset_id;
-        let retry_count_increment = input.retry_count_increment.unwrap_or(0);
-        let id = input.id;
-        conn.execute(
-            "UPDATE creative_tasks
-             SET status = ?,
-                 result_json = ?,
-                 error_message = ?,
-                 asset_id = COALESCE(?, asset_id),
-                 retry_count = retry_count + ?,
-                 updated_at = CURRENT_TIMESTAMP,
-                 started_at = CASE
-                     WHEN ? = 'running' AND started_at IS NULL THEN CURRENT_TIMESTAMP
-                     ELSE started_at
-                 END,
-                 finished_at = CASE
-                     WHEN ? IN ('succeeded', 'failed', 'cancelled', 'completed', 'done')
-                          AND finished_at IS NULL THEN CURRENT_TIMESTAMP
-                     WHEN ? NOT IN ('succeeded', 'failed', 'cancelled', 'completed', 'done')
-                          THEN NULL
-                     ELSE finished_at
-                 END
-             WHERE id = ?",
-            params![
-                status.clone(),
-                result_json,
-                error_message,
-                asset_id,
-                retry_count_increment,
-                status.clone(),
-                status.clone(),
-                status,
-                id
-            ],
-        )?;
-        Self::get_task_with_conn(&conn, id)?.ok_or_else(|| {
-            AppError::Database("creative task updated but could not be reloaded".to_string())
-        })
+        creative_task_repo::update_task_status(db_path, input)
     }
 
     pub fn claim_next_queued_task(
         db_path: &Path,
         filter: ListCreativeTasksFilter,
     ) -> AppResult<Option<CreativeTask>> {
-        Self::init_schema(db_path)?;
-        let mut conn = connect(db_path)?;
-        let tx = conn.transaction()?;
-
-        let mut sql = String::from(
-            "SELECT id
-             FROM creative_tasks
-             WHERE status = 'queued'",
-        );
-        let mut params = Vec::<Value>::new();
-
-        if let Some(project_id) = non_empty_filter(filter.project_id) {
-            sql.push_str(" AND project_id = ?");
-            params.push(Value::Text(project_id));
-        }
-        if let Some(task_type) = non_empty_filter(filter.task_type) {
-            sql.push_str(" AND task_type = ?");
-            params.push(Value::Text(task_type));
-        }
-        if let Some(batch_job_id) = filter.batch_job_id {
-            sql.push_str(" AND batch_job_id = ?");
-            params.push(Value::Integer(batch_job_id));
-        }
-
-        sql.push_str(" ORDER BY priority DESC, COALESCE(sequence_no, id) ASC, id ASC LIMIT 1");
-
-        let claimed_id = {
-            let mut stmt = tx.prepare(&sql)?;
-            stmt.query_row(params_from_iter(params.iter()), |row| row.get::<_, i64>(0))
-                .optional()?
-        };
-
-        let Some(task_id) = claimed_id else {
-            tx.commit()?;
-            return Ok(None);
-        };
-
-        let affected = tx.execute(
-            "UPDATE creative_tasks
-             SET status = 'running',
-                 updated_at = CURRENT_TIMESTAMP,
-                 started_at = CASE
-                     WHEN started_at IS NULL THEN CURRENT_TIMESTAMP
-                     ELSE started_at
-                 END,
-                 finished_at = NULL
-             WHERE id = ? AND status = 'queued'",
-            params![task_id],
-        )?;
-
-        if affected == 0 {
-            tx.commit()?;
-            return Ok(None);
-        }
-
-        let task = Self::get_task_with_conn(&tx, task_id)?;
-        tx.commit()?;
-        Ok(task)
+        creative_task_repo::claim_next_queued_task(db_path, filter)
     }
 
     pub fn append_task_event(db_path: &Path, input: CreateTaskEventInput) -> AppResult<TaskEvent> {
-        Self::init_schema(db_path)?;
-        let conn = connect(db_path)?;
-        conn.execute(
-            "INSERT INTO task_events (task_id, event_type, message, payload_json)
-             VALUES (?, ?, ?, ?)",
-            params![
-                input.task_id,
-                input.event_type,
-                input.message,
-                input.payload_json
-            ],
-        )?;
-        let id = conn.last_insert_rowid();
-        Self::get_task_event_with_conn(&conn, id)?
-            .ok_or_else(|| AppError::Database("任务事件已写入但无法立即读取".to_string()))
+        creative_task_repo::append_task_event(db_path, input)
     }
 
     pub fn list_task_events(db_path: &Path, task_id: i64) -> AppResult<Vec<TaskEvent>> {
-        Self::init_schema(db_path)?;
-        let conn = connect(db_path)?;
-        let mut stmt = conn.prepare(
-            "SELECT id, task_id, event_type, message, payload_json, created_at
-             FROM task_events
-             WHERE task_id = ?
-             ORDER BY id ASC",
-        )?;
-        let rows = stmt.query_map(params![task_id], map_task_event)?;
-        let mut events = Vec::new();
-        for row in rows {
-            events.push(row?);
-        }
-        Ok(events)
+        creative_task_repo::list_task_events(db_path, task_id)
     }
 
     pub fn create_model_run(db_path: &Path, input: CreateModelRunInput) -> AppResult<ModelRun> {
-        Self::init_schema(db_path)?;
-        let conn = connect(db_path)?;
-        conn.execute(
-            "INSERT INTO model_runs (
-                project_id, task_id, asset_id, provider_id, provider_type, model,
-                request_type, status, duration_ms, prompt_hash, prompt_version_id,
-                input_token_count, output_token_count, cost_estimate, error_code,
-                error_message, metadata_json, finished_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            params![
-                input.project_id,
-                input.task_id,
-                input.asset_id,
-                input.provider_id,
-                input.provider_type,
-                input.model,
-                input.request_type,
-                input.status,
-                input.duration_ms,
-                input.prompt_hash,
-                input.prompt_version_id,
-                input.input_token_count,
-                input.output_token_count,
-                input.cost_estimate,
-                input.error_code,
-                input.error_message,
-                input.metadata_json,
-                input.finished_at,
-            ],
-        )?;
-        let id = conn.last_insert_rowid();
-        Self::get_model_run_with_conn(&conn, id)?.ok_or_else(|| {
-            AppError::Database("model run created but could not be reloaded".to_string())
-        })
+        creative_model_run_repo::create_model_run(db_path, input)
     }
 
     pub fn list_model_runs(
         db_path: &Path,
         filter: ListModelRunsFilter,
     ) -> AppResult<Vec<ModelRun>> {
-        Self::init_schema(db_path)?;
-        let conn = connect(db_path)?;
-        let mut sql = String::from(
-            "SELECT id, project_id, task_id, asset_id, provider_id, provider_type, model,
-                request_type, status, duration_ms, prompt_hash, prompt_version_id,
-                input_token_count, output_token_count, cost_estimate, error_code,
-                error_message, metadata_json, created_at, finished_at
-             FROM model_runs
-             WHERE 1 = 1",
-        );
-        let mut params = Vec::<Value>::new();
-
-        if let Some(project_id) = non_empty_filter(filter.project_id) {
-            sql.push_str(" AND project_id = ?");
-            params.push(Value::Text(project_id));
-        }
-        if let Some(task_id) = filter.task_id {
-            sql.push_str(" AND task_id = ?");
-            params.push(Value::Integer(task_id));
-        }
-        if let Some(asset_id) = filter.asset_id {
-            sql.push_str(" AND asset_id = ?");
-            params.push(Value::Integer(asset_id));
-        }
-        if let Some(request_type) = non_empty_filter(filter.request_type) {
-            sql.push_str(" AND request_type = ?");
-            params.push(Value::Text(request_type));
-        }
-        if let Some(status) = non_empty_filter(filter.status) {
-            sql.push_str(" AND status = ?");
-            params.push(Value::Text(status));
-        }
-
-        sql.push_str(" ORDER BY id DESC LIMIT ? OFFSET ?");
-        params.push(Value::Integer(filter.limit.unwrap_or(50).clamp(1, 200)));
-        params.push(Value::Integer(filter.offset.unwrap_or(0).max(0)));
-
-        let mut stmt = conn.prepare(&sql)?;
-        let rows = stmt.query_map(params_from_iter(params.iter()), map_model_run)?;
-        let mut runs = Vec::new();
-        for row in rows {
-            runs.push(row?);
-        }
-        Ok(runs)
+        creative_model_run_repo::list_model_runs(db_path, filter)
     }
 
     pub fn create_batch_job(
         db_path: &Path,
         input: CreateCreativeBatchJobInput,
     ) -> AppResult<CreativeBatchJob> {
-        Self::init_schema(db_path)?;
-        let conn = connect(db_path)?;
-        let status = input.status.unwrap_or_else(|| "draft".to_string());
-        conn.execute(
-            "INSERT INTO batch_jobs (
-                project_id, name, batch_type, status, total_count, concurrency,
-                max_retries, prompt_template, provider_id, model, image_size, budget_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            params![
-                input.project_id,
-                input.name,
-                input.batch_type,
-                status,
-                input.total_count.unwrap_or(0).max(0),
-                input.concurrency.unwrap_or(1).max(1),
-                input.max_retries.unwrap_or(0).max(0),
-                input.prompt_template,
-                input.provider_id,
-                input.model,
-                input.image_size,
-                input.budget_json,
-            ],
-        )?;
-        let id = conn.last_insert_rowid();
-        Self::get_batch_job_with_conn(&conn, id)?.ok_or_else(|| {
-            AppError::Database("batch job created but could not be reloaded".to_string())
-        })
+        creative_batch_repo::create_batch_job(db_path, input)
     }
 
     pub fn get_batch_job(db_path: &Path, id: i64) -> AppResult<Option<CreativeBatchJob>> {
-        Self::init_schema(db_path)?;
-        let conn = connect(db_path)?;
-        Self::get_batch_job_with_conn(&conn, id)
+        creative_batch_repo::get_batch_job(db_path, id)
     }
 
     pub fn list_batch_jobs(
         db_path: &Path,
         filter: ListCreativeBatchJobsFilter,
     ) -> AppResult<Vec<CreativeBatchJob>> {
-        Self::init_schema(db_path)?;
-        let conn = connect(db_path)?;
-        let mut sql = String::from(
-            "SELECT id, project_id, name, batch_type, status, total_count, concurrency,
-                max_retries, prompt_template, provider_id, model, image_size, budget_json,
-                created_at, updated_at, started_at, finished_at
-             FROM batch_jobs
-             WHERE 1 = 1",
-        );
-        let mut params = Vec::<Value>::new();
-
-        if let Some(project_id) = non_empty_filter(filter.project_id) {
-            sql.push_str(" AND project_id = ?");
-            params.push(Value::Text(project_id));
-        }
-        if let Some(status) = non_empty_filter(filter.status) {
-            sql.push_str(" AND status = ?");
-            params.push(Value::Text(status));
-        }
-        if let Some(batch_type) = non_empty_filter(filter.batch_type) {
-            sql.push_str(" AND batch_type = ?");
-            params.push(Value::Text(batch_type));
-        }
-
-        sql.push_str(" ORDER BY id DESC LIMIT ? OFFSET ?");
-        params.push(Value::Integer(filter.limit.unwrap_or(50).clamp(1, 200)));
-        params.push(Value::Integer(filter.offset.unwrap_or(0).max(0)));
-
-        let mut stmt = conn.prepare(&sql)?;
-        let rows = stmt.query_map(params_from_iter(params.iter()), map_creative_batch_job)?;
-        let mut jobs = Vec::new();
-        for row in rows {
-            jobs.push(row?);
-        }
-        Ok(jobs)
+        creative_batch_repo::list_batch_jobs(db_path, filter)
     }
 
     pub fn update_batch_job(
         db_path: &Path,
         input: UpdateCreativeBatchJobInput,
     ) -> AppResult<CreativeBatchJob> {
-        Self::init_schema(db_path)?;
-        let conn = connect(db_path)?;
-        conn.execute(
-            "UPDATE batch_jobs
-             SET status = COALESCE(?, status),
-                 concurrency = COALESCE(?, concurrency),
-                 max_retries = COALESCE(?, max_retries),
-                 prompt_template = COALESCE(?, prompt_template),
-                 provider_id = COALESCE(?, provider_id),
-                 model = COALESCE(?, model),
-                 image_size = COALESCE(?, image_size),
-                 budget_json = COALESCE(?, budget_json),
-                 started_at = CASE
-                     WHEN ? IS NOT NULL THEN ?
-                     WHEN COALESCE(?, status) = 'running' AND started_at IS NULL THEN CURRENT_TIMESTAMP
-                     ELSE started_at
-                 END,
-                 finished_at = CASE
-                     WHEN ? IS NOT NULL THEN ?
-                     WHEN COALESCE(?, status) IN ('completed', 'cancelled', 'failed', 'blocked')
-                          AND finished_at IS NULL THEN CURRENT_TIMESTAMP
-                     ELSE finished_at
-                 END,
-                 updated_at = CURRENT_TIMESTAMP
-             WHERE id = ?",
-            params![
-                input.status,
-                input.concurrency,
-                input.max_retries,
-                input.prompt_template,
-                input.provider_id,
-                input.model,
-                input.image_size,
-                input.budget_json,
-                input.started_at,
-                input.started_at,
-                input.status,
-                input.finished_at,
-                input.finished_at,
-                input.status,
-                input.id,
-            ],
-        )?;
-        Self::get_batch_job_with_conn(&conn, input.id)?.ok_or_else(|| {
-            AppError::Database("batch job updated but could not be reloaded".to_string())
-        })
+        creative_batch_repo::update_batch_job(db_path, input)
     }
 
     pub fn list_batch_job_tasks(db_path: &Path, batch_job_id: i64) -> AppResult<Vec<CreativeTask>> {
-        Self::list_tasks(
-            db_path,
-            ListCreativeTasksFilter {
-                batch_job_id: Some(batch_job_id),
-                limit: Some(200),
-                offset: Some(0),
-                ..Default::default()
-            },
-        )
+        creative_batch_repo::list_batch_job_tasks(db_path, batch_job_id)
     }
 
     pub fn count_batch_job_tasks_by_status(
         db_path: &Path,
         batch_job_id: i64,
     ) -> AppResult<CreativeBatchJobStats> {
-        Self::init_schema(db_path)?;
-        let conn = connect(db_path)?;
-        let mut stmt = conn.prepare(
-            "SELECT status, COUNT(*)
-             FROM creative_tasks
-             WHERE batch_job_id = ?
-             GROUP BY status",
-        )?;
-        let rows = stmt.query_map(params![batch_job_id], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-        })?;
-
-        let mut stats = CreativeBatchJobStats {
-            total_tasks: 0,
-            draft_tasks: 0,
-            queued_tasks: 0,
-            running_tasks: 0,
-            succeeded_tasks: 0,
-            failed_tasks: 0,
-            cancelled_tasks: 0,
-            cancelling_tasks: 0,
-            paused: false,
-            completion_ratio: 0.0,
-        };
-
-        for row in rows {
-            let (status, count) = row?;
-            stats.total_tasks += count;
-            match status.as_str() {
-                "draft" => stats.draft_tasks += count,
-                "queued" | "retrying" => stats.queued_tasks += count,
-                "running" => stats.running_tasks += count,
-                "succeeded" | "completed" | "done" => stats.succeeded_tasks += count,
-                "failed" => stats.failed_tasks += count,
-                "cancelled" => stats.cancelled_tasks += count,
-                "cancelling" => stats.cancelling_tasks += count,
-                _ => {}
-            }
-        }
-
-        if stats.total_tasks > 0 {
-            stats.completion_ratio =
-                (stats.succeeded_tasks + stats.failed_tasks + stats.cancelled_tasks) as f64
-                    / stats.total_tasks as f64;
-        }
-        Ok(stats)
+        creative_batch_repo::count_batch_job_tasks_by_status(db_path, batch_job_id)
     }
 
     pub fn get_batch_job_snapshot(
         db_path: &Path,
         batch_job_id: i64,
     ) -> AppResult<Option<CreativeBatchJobSnapshot>> {
-        let Some(job) = Self::get_batch_job(db_path, batch_job_id)? else {
-            return Ok(None);
-        };
-        let mut stats = Self::count_batch_job_tasks_by_status(db_path, batch_job_id)?;
-        stats.paused = job.status == "paused";
-        Ok(Some(CreativeBatchJobSnapshot { job, stats }))
+        creative_batch_repo::get_batch_job_snapshot(db_path, batch_job_id)
     }
 
     pub fn cancel_queued_batch_tasks(db_path: &Path, batch_job_id: i64) -> AppResult<Vec<i64>> {
-        let queued_tasks = Self::list_tasks(
-            db_path,
-            ListCreativeTasksFilter {
-                batch_job_id: Some(batch_job_id),
-                status: Some("queued".to_string()),
-                limit: Some(2000),
-                offset: Some(0),
-                ..Default::default()
-            },
-        )?;
-        let mut cancelled_ids = Vec::new();
-        for task in queued_tasks {
-            Self::update_task_status(
-                db_path,
-                UpdateCreativeTaskStatusInput {
-                    id: task.id,
-                    status: "cancelled".to_string(),
-                    result_json: None,
-                    error_message: Some("batch cancelled".to_string()),
-                    asset_id: task.asset_id,
-                    retry_count_increment: None,
-                },
-            )?;
-            cancelled_ids.push(task.id);
-        }
-        Ok(cancelled_ids)
+        creative_batch_repo::cancel_queued_batch_tasks(db_path, batch_job_id)
     }
 
     pub fn mark_running_batch_tasks_cancelling(
         db_path: &Path,
         batch_job_id: i64,
     ) -> AppResult<Vec<i64>> {
-        let running_tasks = Self::list_tasks(
-            db_path,
-            ListCreativeTasksFilter {
-                batch_job_id: Some(batch_job_id),
-                status: Some("running".to_string()),
-                limit: Some(2000),
-                offset: Some(0),
-                ..Default::default()
-            },
-        )?;
-        let mut cancelling_ids = Vec::new();
-        for task in running_tasks {
-            Self::update_task_status(
-                db_path,
-                UpdateCreativeTaskStatusInput {
-                    id: task.id,
-                    status: "cancelling".to_string(),
-                    result_json: None,
-                    error_message: Some("batch cancelling".to_string()),
-                    asset_id: task.asset_id,
-                    retry_count_increment: None,
-                },
-            )?;
-            cancelling_ids.push(task.id);
-        }
-        Ok(cancelling_ids)
+        creative_batch_repo::mark_running_batch_tasks_cancelling(db_path, batch_job_id)
     }
 
     pub fn create_asset(
         db_path: &Path,
         input: CreateCreativeAssetInput,
     ) -> AppResult<CreativeAsset> {
-        Self::init_schema(db_path)?;
-        let conn = connect(db_path)?;
-        let status = input.status.unwrap_or_else(|| "draft".to_string());
-        conn.execute(
-            "INSERT INTO assets (
-                project_id, asset_type, title, content, file_path,
-                thumbnail_path, metadata_json, status
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            params![
-                input.project_id,
-                input.asset_type,
-                input.title,
-                input.content,
-                input.file_path,
-                input.thumbnail_path,
-                input.metadata_json,
-                status
-            ],
-        )?;
-        let id = conn.last_insert_rowid();
-        Self::get_asset_with_conn(&conn, id)?
-            .ok_or_else(|| AppError::Database("资产已写入但无法立即读取".to_string()))
+        creative_asset_repo::create_asset(db_path, input)
     }
 
     pub fn get_asset(db_path: &Path, id: i64) -> AppResult<Option<CreativeAsset>> {
-        Self::init_schema(db_path)?;
-        let conn = connect(db_path)?;
-        Self::get_asset_with_conn(&conn, id)
+        creative_asset_repo::get_asset(db_path, id)
     }
 
     pub fn list_assets(
         db_path: &Path,
         filter: ListCreativeAssetsFilter,
     ) -> AppResult<Vec<CreativeAsset>> {
-        Self::init_schema(db_path)?;
-        let conn = connect(db_path)?;
-        let mut sql = String::from(
-            "SELECT id, project_id, asset_type, title, content, file_path,
-                thumbnail_path, metadata_json, status, created_at, updated_at
-             FROM assets
-             WHERE 1 = 1",
-        );
-        let mut params = Vec::<Value>::new();
-
-        if let Some(project_id) = non_empty_filter(filter.project_id) {
-            sql.push_str(" AND project_id = ?");
-            params.push(Value::Text(project_id));
-        }
-        if let Some(asset_type) = non_empty_filter(filter.asset_type) {
-            sql.push_str(" AND asset_type = ?");
-            params.push(Value::Text(asset_type));
-        }
-        if let Some(status) = non_empty_filter(filter.status) {
-            sql.push_str(" AND status = ?");
-            params.push(Value::Text(status));
-        }
-
-        sql.push_str(" ORDER BY id DESC LIMIT ? OFFSET ?");
-        params.push(Value::Integer(filter.limit.unwrap_or(50).clamp(1, 200)));
-        params.push(Value::Integer(filter.offset.unwrap_or(0).max(0)));
-
-        let mut stmt = conn.prepare(&sql)?;
-        let rows = stmt.query_map(params_from_iter(params.iter()), map_creative_asset)?;
-        let mut assets = Vec::new();
-        for row in rows {
-            assets.push(row?);
-        }
-        Ok(assets)
+        creative_asset_repo::list_assets(db_path, filter)
     }
 
     pub fn create_asset_link(db_path: &Path, input: CreateAssetLinkInput) -> AppResult<AssetLink> {
-        Self::init_schema(db_path)?;
-        let conn = connect(db_path)?;
-        conn.execute(
-            "INSERT INTO asset_links (source_asset_id, target_asset_id, link_type)
-             VALUES (?, ?, ?)",
-            params![
-                input.source_asset_id,
-                input.target_asset_id,
-                input.link_type
-            ],
-        )?;
-        let id = conn.last_insert_rowid();
-        Self::get_asset_link_with_conn(&conn, id)?
-            .ok_or_else(|| AppError::Database("资产关系已写入但无法立即读取".to_string()))
+        creative_asset_repo::create_asset_link(db_path, input)
+    }
+
+    pub fn upsert_project(
+        db_path: &Path,
+        input: UpsertCreativeProjectInput,
+    ) -> AppResult<CreativeProject> {
+        creative_project_repo::upsert_project(db_path, input)
+    }
+
+    pub fn get_project(db_path: &Path, id: &str) -> AppResult<Option<CreativeProject>> {
+        creative_project_repo::get_project(db_path, id)
+    }
+
+    pub fn list_projects(
+        db_path: &Path,
+        filter: ListCreativeProjectsFilter,
+    ) -> AppResult<Vec<CreativeProject>> {
+        creative_project_repo::list_projects(db_path, filter)
     }
 
     pub fn create_goal(db_path: &Path, input: CreateCreativeGoalInput) -> AppResult<CreativeGoal> {
-        Self::init_schema(db_path)?;
-        let conn = connect(db_path)?;
-        let status = input.status.unwrap_or_else(|| "draft".to_string());
-        conn.execute(
-            "INSERT INTO creative_goals (project_id, title, description, status, budget_json)
-             VALUES (?, ?, ?, ?, ?)",
-            params![
-                input.project_id,
-                input.title,
-                input.description,
-                status,
-                input.budget_json,
-            ],
-        )?;
-        let id = conn.last_insert_rowid();
-        Self::get_goal_with_conn(&conn, id)?
-            .ok_or_else(|| AppError::Database("goal created but could not be reloaded".to_string()))
+        creative_goal_repo::create_goal(db_path, input)
     }
 
     pub fn get_goal(db_path: &Path, id: i64) -> AppResult<Option<CreativeGoal>> {
-        Self::init_schema(db_path)?;
-        let conn = connect(db_path)?;
-        Self::get_goal_with_conn(&conn, id)
+        creative_goal_repo::get_goal(db_path, id)
     }
 
     pub fn list_goals(
         db_path: &Path,
         filter: ListCreativeGoalsFilter,
     ) -> AppResult<Vec<CreativeGoal>> {
-        Self::init_schema(db_path)?;
-        let conn = connect(db_path)?;
-        let mut sql = String::from(
-            "SELECT id, project_id, title, description, status, budget_json,
-                created_at, updated_at, started_at, finished_at, stopped_at
-             FROM creative_goals
-             WHERE 1 = 1",
-        );
-        let mut params = Vec::<Value>::new();
-        if let Some(project_id) = non_empty_filter(filter.project_id) {
-            sql.push_str(" AND project_id = ?");
-            params.push(Value::Text(project_id));
-        }
-        if let Some(status) = non_empty_filter(filter.status) {
-            sql.push_str(" AND status = ?");
-            params.push(Value::Text(status));
-        }
-        sql.push_str(" ORDER BY id DESC LIMIT ? OFFSET ?");
-        params.push(Value::Integer(filter.limit.unwrap_or(50).clamp(1, 200)));
-        params.push(Value::Integer(filter.offset.unwrap_or(0).max(0)));
-        let mut stmt = conn.prepare(&sql)?;
-        let rows = stmt.query_map(params_from_iter(params.iter()), map_creative_goal)?;
-        let mut goals = Vec::new();
-        for row in rows {
-            goals.push(row?);
-        }
-        Ok(goals)
+        creative_goal_repo::list_goals(db_path, filter)
     }
 
     pub fn update_goal_status(
         db_path: &Path,
         input: UpdateCreativeGoalStatusInput,
     ) -> AppResult<CreativeGoal> {
-        Self::init_schema(db_path)?;
-        let conn = connect(db_path)?;
-        conn.execute(
-            "UPDATE creative_goals
-             SET status = ?,
-                 updated_at = CURRENT_TIMESTAMP,
-                 started_at = CASE
-                    WHEN ? = 'running' AND started_at IS NULL THEN CURRENT_TIMESTAMP
-                    ELSE started_at
-                 END,
-                 finished_at = CASE
-                    WHEN ? IN ('succeeded', 'failed', 'cancelled', 'completed')
-                         AND finished_at IS NULL THEN CURRENT_TIMESTAMP
-                    ELSE finished_at
-                 END,
-                 stopped_at = COALESCE(?, stopped_at)
-             WHERE id = ?",
-            params![
-                input.status.clone(),
-                input.status.clone(),
-                input.status.clone(),
-                input.stopped_at,
-                input.id
-            ],
-        )?;
-        Self::get_goal_with_conn(&conn, input.id)?
-            .ok_or_else(|| AppError::Database("goal updated but could not be reloaded".to_string()))
+        creative_goal_repo::update_goal_status(db_path, input)
     }
 
     pub fn create_goal_role(
         db_path: &Path,
         input: CreateCreativeGoalRoleInput,
     ) -> AppResult<CreativeGoalRole> {
-        Self::init_schema(db_path)?;
-        let conn = connect(db_path)?;
-        if input.role_key.trim().is_empty() {
-            return Err(AppError::Config("role_key is required".to_string()));
-        }
-        if input.task_type.trim().is_empty() {
-            return Err(AppError::Config("task_type is required".to_string()));
-        }
-        conn.execute(
-            "INSERT INTO creative_goal_roles (goal_id, role_key, task_type, description, task_count, budget_json)
-             VALUES (?, ?, ?, ?, ?, ?)",
-            params![
-                input.goal_id,
-                input.role_key,
-                input.task_type,
-                input.description,
-                input.task_count.unwrap_or(1).max(1),
-                input.budget_json,
-            ],
-        )?;
-        let id = conn.last_insert_rowid();
-        Self::get_goal_role_with_conn(&conn, id)?.ok_or_else(|| {
-            AppError::Database("goal role created but could not be reloaded".to_string())
-        })
+        creative_goal_repo::create_goal_role(db_path, input)
     }
 
     pub fn list_goal_roles(
         db_path: &Path,
         filter: ListCreativeGoalRolesFilter,
     ) -> AppResult<Vec<CreativeGoalRole>> {
-        Self::init_schema(db_path)?;
-        let conn = connect(db_path)?;
-        let mut sql = String::from(
-            "SELECT id, goal_id, role_key, task_type, description, task_count, budget_json, created_at, updated_at
-             FROM creative_goal_roles
-             WHERE 1 = 1",
-        );
-        let mut params = Vec::<Value>::new();
-        if let Some(goal_id) = filter.goal_id {
-            sql.push_str(" AND goal_id = ?");
-            params.push(Value::Integer(goal_id));
-        }
-        if let Some(role_key) = non_empty_filter(filter.role_key) {
-            sql.push_str(" AND role_key = ?");
-            params.push(Value::Text(role_key));
-        }
-        if let Some(task_type) = non_empty_filter(filter.task_type) {
-            sql.push_str(" AND task_type = ?");
-            params.push(Value::Text(task_type));
-        }
-        sql.push_str(" ORDER BY id ASC LIMIT ? OFFSET ?");
-        params.push(Value::Integer(filter.limit.unwrap_or(50).clamp(1, 200)));
-        params.push(Value::Integer(filter.offset.unwrap_or(0).max(0)));
-        let mut stmt = conn.prepare(&sql)?;
-        let rows = stmt.query_map(params_from_iter(params.iter()), map_creative_goal_role)?;
-        let mut roles = Vec::new();
-        for row in rows {
-            roles.push(row?);
-        }
-        Ok(roles)
+        creative_goal_repo::list_goal_roles(db_path, filter)
     }
 
     pub fn list_goal_tasks(db_path: &Path, goal_id: i64) -> AppResult<Vec<CreativeTask>> {
-        Self::list_tasks(
-            db_path,
-            ListCreativeTasksFilter {
-                goal_id: Some(goal_id),
-                ..Default::default()
-            },
-        )
+        creative_goal_repo::list_goal_tasks(db_path, goal_id)
     }
 
     pub fn get_asset_link(db_path: &Path, id: i64) -> AppResult<Option<AssetLink>> {
-        Self::init_schema(db_path)?;
-        let conn = connect(db_path)?;
-        Self::get_asset_link_with_conn(&conn, id)
+        creative_asset_repo::get_asset_link(db_path, id)
     }
 
     pub fn list_asset_links(
         db_path: &Path,
         filter: ListAssetLinksFilter,
     ) -> AppResult<Vec<AssetLink>> {
-        Self::init_schema(db_path)?;
-        let conn = connect(db_path)?;
-        let mut sql = String::from(
-            "SELECT id, source_asset_id, target_asset_id, link_type, created_at
-             FROM asset_links
-             WHERE 1 = 1",
-        );
-        let mut params = Vec::<Value>::new();
-
-        if let Some(source_asset_id) = filter.source_asset_id {
-            sql.push_str(" AND source_asset_id = ?");
-            params.push(Value::Integer(source_asset_id));
-        }
-        if let Some(target_asset_id) = filter.target_asset_id {
-            sql.push_str(" AND target_asset_id = ?");
-            params.push(Value::Integer(target_asset_id));
-        }
-        if let Some(link_type) = non_empty_filter(filter.link_type) {
-            sql.push_str(" AND link_type = ?");
-            params.push(Value::Text(link_type));
-        }
-
-        sql.push_str(" ORDER BY id DESC LIMIT ? OFFSET ?");
-        params.push(Value::Integer(filter.limit.unwrap_or(50).clamp(1, 200)));
-        params.push(Value::Integer(filter.offset.unwrap_or(0).max(0)));
-
-        let mut stmt = conn.prepare(&sql)?;
-        let rows = stmt.query_map(params_from_iter(params.iter()), map_asset_link)?;
-        let mut links = Vec::new();
-        for row in rows {
-            links.push(row?);
-        }
-        Ok(links)
-    }
-
-    fn get_task_with_conn(conn: &Connection, id: i64) -> AppResult<Option<CreativeTask>> {
-        conn.query_row(
-            "SELECT id, project_id, goal_id, batch_job_id, task_type, status, priority,
-                payload_json, result_json, error_message, retry_count, max_retries,
-                parent_task_id, asset_id, sequence_no, created_at, updated_at, started_at,
-                finished_at
-             FROM creative_tasks
-             WHERE id = ?",
-            params![id],
-            map_creative_task,
-        )
-        .optional()
-        .map_err(Into::into)
-    }
-
-    fn get_task_event_with_conn(conn: &Connection, id: i64) -> AppResult<Option<TaskEvent>> {
-        conn.query_row(
-            "SELECT id, task_id, event_type, message, payload_json, created_at
-             FROM task_events
-             WHERE id = ?",
-            params![id],
-            map_task_event,
-        )
-        .optional()
-        .map_err(Into::into)
-    }
-
-    fn get_asset_with_conn(conn: &Connection, id: i64) -> AppResult<Option<CreativeAsset>> {
-        conn.query_row(
-            "SELECT id, project_id, asset_type, title, content, file_path,
-                thumbnail_path, metadata_json, status, created_at, updated_at
-             FROM assets
-             WHERE id = ?",
-            params![id],
-            map_creative_asset,
-        )
-        .optional()
-        .map_err(Into::into)
-    }
-
-    fn get_asset_link_with_conn(conn: &Connection, id: i64) -> AppResult<Option<AssetLink>> {
-        conn.query_row(
-            "SELECT id, source_asset_id, target_asset_id, link_type, created_at
-             FROM asset_links
-             WHERE id = ?",
-            params![id],
-            map_asset_link,
-        )
-        .optional()
-        .map_err(Into::into)
-    }
-
-    fn get_batch_job_with_conn(conn: &Connection, id: i64) -> AppResult<Option<CreativeBatchJob>> {
-        conn.query_row(
-            "SELECT id, project_id, name, batch_type, status, total_count, concurrency,
-                max_retries, prompt_template, provider_id, model, image_size, budget_json,
-                created_at, updated_at, started_at, finished_at
-             FROM batch_jobs
-             WHERE id = ?",
-            params![id],
-            map_creative_batch_job,
-        )
-        .optional()
-        .map_err(Into::into)
-    }
-
-    fn get_goal_with_conn(conn: &Connection, id: i64) -> AppResult<Option<CreativeGoal>> {
-        conn.query_row(
-            "SELECT id, project_id, title, description, status, budget_json,
-                created_at, updated_at, started_at, finished_at, stopped_at
-             FROM creative_goals
-             WHERE id = ?",
-            params![id],
-            map_creative_goal,
-        )
-        .optional()
-        .map_err(Into::into)
-    }
-
-    fn get_goal_role_with_conn(conn: &Connection, id: i64) -> AppResult<Option<CreativeGoalRole>> {
-        conn.query_row(
-            "SELECT id, goal_id, role_key, task_type, description, task_count, budget_json, created_at, updated_at
-             FROM creative_goal_roles
-             WHERE id = ?",
-            params![id],
-            map_creative_goal_role,
-        )
-        .optional()
-        .map_err(Into::into)
-    }
-
-    fn get_model_run_with_conn(conn: &Connection, id: i64) -> AppResult<Option<ModelRun>> {
-        conn.query_row(
-            "SELECT id, project_id, task_id, asset_id, provider_id, provider_type, model,
-                request_type, status, duration_ms, prompt_hash, prompt_version_id,
-                input_token_count, output_token_count, cost_estimate, error_code,
-                error_message, metadata_json, created_at, finished_at
-             FROM model_runs
-             WHERE id = ?",
-            params![id],
-            map_model_run,
-        )
-        .optional()
-        .map_err(Into::into)
+        creative_asset_repo::list_asset_links(db_path, filter)
     }
 }
 
-fn non_empty_filter(value: Option<String>) -> Option<String> {
+pub(crate) fn non_empty_filter(value: Option<String>) -> Option<String> {
     value.and_then(|item| {
         let trimmed = item.trim();
         if trimmed.is_empty() {
@@ -1403,6 +633,7 @@ fn non_empty_filter(value: Option<String>) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::infra::creative_db_support::connect;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn temp_db_path(name: &str) -> std::path::PathBuf {
@@ -1430,13 +661,20 @@ mod tests {
             .query_row(
                 "SELECT COUNT(*)
                  FROM sqlite_master
-                 WHERE type = 'table'
-                   AND name IN ('creative_tasks', 'task_events', 'model_runs', 'assets', 'asset_links', 'batch_jobs')",
+                WHERE type = 'table'
+                   AND name IN ('creative_tasks', 'task_events', 'model_runs', 'assets', 'asset_links', 'batch_jobs', 'creative_projects')",
                 [],
                 |row| row.get(0),
             )
             .expect("table count should be queryable");
-        assert_eq!(table_count, 6);
+        assert_eq!(table_count, 7);
+
+        let migration_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM schema_migrations", [], |row| {
+                row.get(0)
+            })
+            .expect("migration count should be queryable");
+        assert_eq!(migration_count, 3);
 
         let _ = std::fs::remove_file(db_path);
     }
@@ -1480,6 +718,175 @@ mod tests {
             )
             .expect("column count should be queryable");
         assert_eq!(column_count, 3);
+
+        let applied_versions: Vec<i64> = {
+            let mut stmt = conn
+                .prepare("SELECT version FROM schema_migrations ORDER BY version ASC")
+                .expect("migration query should prepare");
+            stmt.query_map([], |row| row.get::<_, i64>(0))
+                .expect("migration versions should query")
+                .collect::<Result<Vec<_>, _>>()
+                .expect("migration versions should collect")
+        };
+        assert_eq!(applied_versions, vec![1, 2, 3]);
+
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn init_schema_backfills_migration_history_for_existing_current_schema() {
+        let db_path = temp_db_path("creative_schema_existing");
+        let conn = connect(&db_path).expect("db should connect");
+        conn.execute_batch(
+            "CREATE TABLE creative_tasks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id TEXT,
+                goal_id INTEGER,
+                batch_job_id INTEGER,
+                task_type TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'draft',
+                priority INTEGER NOT NULL DEFAULT 0,
+                payload_json TEXT,
+                result_json TEXT,
+                error_message TEXT,
+                retry_count INTEGER NOT NULL DEFAULT 0,
+                max_retries INTEGER NOT NULL DEFAULT 0,
+                parent_task_id INTEGER,
+                asset_id INTEGER,
+                sequence_no INTEGER,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                started_at TEXT,
+                finished_at TEXT
+            );
+            CREATE TABLE batch_jobs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id TEXT,
+                name TEXT NOT NULL,
+                batch_type TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'draft',
+                total_count INTEGER NOT NULL DEFAULT 0,
+                concurrency INTEGER NOT NULL DEFAULT 1,
+                max_retries INTEGER NOT NULL DEFAULT 0,
+                prompt_template TEXT,
+                provider_id TEXT,
+                model TEXT,
+                image_size TEXT,
+                budget_json TEXT,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                started_at TEXT,
+                finished_at TEXT
+            );
+            CREATE TABLE creative_goals (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id TEXT,
+                title TEXT NOT NULL,
+                description TEXT,
+                status TEXT NOT NULL DEFAULT 'draft',
+                budget_json TEXT,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                started_at TEXT,
+                finished_at TEXT,
+                stopped_at TEXT
+            );
+            CREATE TABLE creative_goal_roles (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                goal_id INTEGER NOT NULL,
+                role_key TEXT NOT NULL,
+                task_type TEXT NOT NULL,
+                description TEXT,
+                task_count INTEGER NOT NULL DEFAULT 1,
+                budget_json TEXT,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE task_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                task_id INTEGER NOT NULL,
+                event_type TEXT NOT NULL,
+                message TEXT,
+                payload_json TEXT,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE model_runs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id TEXT,
+                task_id INTEGER,
+                asset_id INTEGER,
+                provider_id TEXT,
+                provider_type TEXT,
+                model TEXT,
+                request_type TEXT NOT NULL,
+                status TEXT NOT NULL,
+                duration_ms INTEGER,
+                prompt_hash TEXT,
+                prompt_version_id TEXT,
+                input_token_count INTEGER,
+                output_token_count INTEGER,
+                cost_estimate REAL,
+                error_code TEXT,
+                error_message TEXT,
+                metadata_json TEXT,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                finished_at TEXT
+            );
+            CREATE TABLE assets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id TEXT,
+                asset_type TEXT NOT NULL,
+                title TEXT,
+                content TEXT,
+                file_path TEXT,
+                thumbnail_path TEXT,
+                metadata_json TEXT,
+                status TEXT NOT NULL DEFAULT 'draft',
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE asset_links (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_asset_id INTEGER NOT NULL,
+                target_asset_id INTEGER NOT NULL,
+                link_type TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE creative_projects (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                description TEXT,
+                status TEXT NOT NULL DEFAULT 'active',
+                settings_json TEXT,
+                budget_json TEXT,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                archived_at TEXT
+            );",
+        )
+        .expect("existing current schema should be created");
+
+        CreativeDbInfra::init_schema(&db_path)
+            .expect("existing current schema should backfill migrations");
+
+        let conn = connect(&db_path).expect("db should reconnect");
+        let migration_names: Vec<String> = {
+            let mut stmt = conn
+                .prepare("SELECT name FROM schema_migrations ORDER BY version ASC")
+                .expect("migration names query should prepare");
+            stmt.query_map([], |row| row.get::<_, String>(0))
+                .expect("migration names should query")
+                .collect::<Result<Vec<_>, _>>()
+                .expect("migration names should collect")
+        };
+        assert_eq!(
+            migration_names,
+            vec![
+                "bootstrap_creative_schema".to_string(),
+                "add_creative_task_goal_batch_columns".to_string(),
+                "add_creative_projects".to_string()
+            ]
+        );
 
         let _ = std::fs::remove_file(db_path);
     }
@@ -1576,6 +983,62 @@ mod tests {
             .expect("asset link query should pass")
             .expect("asset link should exist");
         assert_eq!(loaded_link.link_type, "derived_from");
+
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn can_upsert_and_list_creative_projects() {
+        let db_path = temp_db_path("creative_projects");
+        CreativeDbInfra::init_schema(&db_path).expect("schema should init");
+
+        let project = CreativeDbInfra::upsert_project(
+            &db_path,
+            UpsertCreativeProjectInput {
+                id: "creative-main-project".to_string(),
+                title: "默认创作项目".to_string(),
+                description: Some("承接日常提示词、审查和资产入库".to_string()),
+                status: Some("active".to_string()),
+                settings_json: Some(r#"{"theme":"dark"}"#.to_string()),
+                budget_json: None,
+                archived_at: None,
+            },
+        )
+        .expect("project should be created");
+        assert_eq!(project.id, "creative-main-project");
+
+        let updated = CreativeDbInfra::upsert_project(
+            &db_path,
+            UpsertCreativeProjectInput {
+                id: "creative-main-project".to_string(),
+                title: "默认创作项目".to_string(),
+                description: Some("更新后的描述".to_string()),
+                status: Some("running".to_string()),
+                settings_json: Some(r#"{"theme":"light"}"#.to_string()),
+                budget_json: Some(r#"{"maxTasks":12}"#.to_string()),
+                archived_at: None,
+            },
+        )
+        .expect("project should be upserted");
+        assert_eq!(updated.status, "running");
+        assert_eq!(updated.description.as_deref(), Some("更新后的描述"));
+
+        let loaded = CreativeDbInfra::get_project(&db_path, "creative-main-project")
+            .expect("project query should pass")
+            .expect("project should exist");
+        assert_eq!(loaded.title, "默认创作项目");
+
+        let projects = CreativeDbInfra::list_projects(
+            &db_path,
+            ListCreativeProjectsFilter {
+                status: Some("running".to_string()),
+                limit: Some(20),
+                offset: Some(0),
+            },
+        )
+        .expect("project list should pass");
+        assert_eq!(projects.len(), 1);
+        assert_eq!(projects[0].id, "creative-main-project");
 
         let _ = std::fs::remove_file(db_path);
     }

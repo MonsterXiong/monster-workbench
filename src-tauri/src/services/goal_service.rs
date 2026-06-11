@@ -1,9 +1,11 @@
 use crate::infra::creative_db::{
     CreateCreativeGoalInput, CreateCreativeGoalRoleInput, CreateCreativeTaskInput,
-    CreateTaskEventInput, CreativeDbInfra, CreativeGoal, CreativeGoalRole, CreativeTask,
+    CreateTaskEventInput, CreativeGoal, CreativeGoalRole, CreativeTask,
     ListCreativeGoalRolesFilter, ListCreativeGoalsFilter, UpdateCreativeGoalStatusInput,
     UpdateCreativeTaskStatusInput,
 };
+use crate::infra::creative_goal_repo;
+use crate::infra::creative_task_repo;
 use crate::infra::path::PathProvider;
 use crate::infra::{AppError, AppResult};
 use serde::{Deserialize, Serialize};
@@ -63,11 +65,11 @@ impl GoalService {
 
     pub fn create_goal(&self, input: CreateCreativeGoalInput) -> AppResult<CreativeGoal> {
         validate_goal_input(&input)?;
-        CreativeDbInfra::create_goal(&self.db_path()?, input)
+        creative_goal_repo::create_goal(&self.db_path()?, input)
     }
 
     pub fn list_goals(&self, filter: ListCreativeGoalsFilter) -> AppResult<Vec<CreativeGoal>> {
-        CreativeDbInfra::list_goals(&self.db_path()?, filter)
+        creative_goal_repo::list_goals(&self.db_path()?, filter)
     }
 
     pub fn create_goal_multi_agent_stub(
@@ -76,7 +78,7 @@ impl GoalService {
     ) -> AppResult<GoalMultiAgentStubResult> {
         validate_multi_agent_stub_input(&input)?;
         let db_path = self.db_path()?;
-        let goal = CreativeDbInfra::create_goal(
+        let goal = creative_goal_repo::create_goal(
             &db_path,
             CreateCreativeGoalInput {
                 project_id: input.project_id.clone(),
@@ -90,7 +92,7 @@ impl GoalService {
         let mut roles = Vec::new();
         let mut tasks = Vec::new();
         for spec in input.role_specs {
-            let role = CreativeDbInfra::create_goal_role(
+            let role = creative_goal_repo::create_goal_role(
                 &db_path,
                 CreateCreativeGoalRoleInput {
                     goal_id: goal.id,
@@ -111,7 +113,7 @@ impl GoalService {
                     "description": role.description,
                 })
                 .to_string();
-                let task = CreativeDbInfra::create_task(
+                let task = creative_task_repo::create_task(
                     &db_path,
                     CreateCreativeTaskInput {
                         project_id: goal.project_id.clone(),
@@ -127,7 +129,7 @@ impl GoalService {
                         sequence_no: None,
                     },
                 )?;
-                let _ = CreativeDbInfra::append_task_event(
+                let _ = creative_task_repo::append_task_event(
                     &db_path,
                     CreateTaskEventInput {
                         task_id: task.id,
@@ -148,7 +150,7 @@ impl GoalService {
             roles.push(role);
         }
 
-        let merge_task = Some(CreativeDbInfra::create_task(
+        let merge_task = Some(creative_task_repo::create_task(
             &db_path,
             CreateCreativeTaskInput {
                 project_id: goal.project_id.clone(),
@@ -186,16 +188,16 @@ impl GoalService {
             return Err(AppError::Config("goal id must be positive".to_string()));
         }
         let db_path = self.db_path()?;
-        let goal = CreativeDbInfra::get_goal(&db_path, goal_id)?
+        let goal = creative_goal_repo::get_goal(&db_path, goal_id)?
             .ok_or_else(|| AppError::Database("goal not found".to_string()))?;
-        let roles = CreativeDbInfra::list_goal_roles(
+        let roles = creative_goal_repo::list_goal_roles(
             &db_path,
             ListCreativeGoalRolesFilter {
                 goal_id: Some(goal_id),
                 ..Default::default()
             },
         )?;
-        let tasks = CreativeDbInfra::list_goal_tasks(&db_path, goal_id)?;
+        let tasks = creative_goal_repo::list_goal_tasks(&db_path, goal_id)?;
         Ok(CreativeGoalStatusSnapshot {
             total_tasks: tasks.len(),
             queued_tasks: tasks.iter().filter(|task| task.status == "queued").count(),
@@ -220,10 +222,10 @@ impl GoalService {
             return Err(AppError::Config("goal id must be positive".to_string()));
         }
         let db_path = self.db_path()?;
-        let tasks = CreativeDbInfra::list_goal_tasks(&db_path, goal_id)?;
+        let tasks = creative_goal_repo::list_goal_tasks(&db_path, goal_id)?;
         for task in tasks {
             if task.status == "queued" {
-                let _ = CreativeDbInfra::update_task_status(
+                let _ = creative_task_repo::update_task_status(
                     &db_path,
                     UpdateCreativeTaskStatusInput {
                         id: task.id,
@@ -235,7 +237,7 @@ impl GoalService {
                     },
                 );
             } else if task.status == "running" {
-                let _ = CreativeDbInfra::update_task_status(
+                let _ = creative_task_repo::update_task_status(
                     &db_path,
                     UpdateCreativeTaskStatusInput {
                         id: task.id,
@@ -248,7 +250,7 @@ impl GoalService {
                 );
             }
         }
-        let _ = CreativeDbInfra::update_goal_status(
+        let _ = creative_goal_repo::update_goal_status(
             &db_path,
             UpdateCreativeGoalStatusInput {
                 id: goal_id,

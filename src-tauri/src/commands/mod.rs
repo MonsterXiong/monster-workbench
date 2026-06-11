@@ -4,6 +4,7 @@ pub mod auth;
 pub mod config;
 pub mod creative_batch;
 pub mod creative_goal;
+pub mod creative_project;
 pub mod creative_sidecar;
 pub mod creative_task;
 pub mod database;

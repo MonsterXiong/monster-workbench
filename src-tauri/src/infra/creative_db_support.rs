@@ -1,6 +1,6 @@
 use crate::infra::creative_db::{
-    AssetLink, CreativeAsset, CreativeBatchJob, CreativeGoal, CreativeGoalRole, CreativeTask,
-    ModelRun, TaskEvent,
+    AssetLink, CreativeAsset, CreativeBatchJob, CreativeGoal, CreativeGoalRole, CreativeProject,
+    CreativeTask, ModelRun, TaskEvent,
 };
 use crate::infra::AppResult;
 use rusqlite::{params, Connection};
@@ -178,5 +178,19 @@ pub(crate) fn map_model_run(row: &rusqlite::Row<'_>) -> rusqlite::Result<ModelRu
         metadata_json: row.get(17)?,
         created_at: row.get(18)?,
         finished_at: row.get(19)?,
+    })
+}
+
+pub(crate) fn map_creative_project(row: &rusqlite::Row<'_>) -> rusqlite::Result<CreativeProject> {
+    Ok(CreativeProject {
+        id: row.get(0)?,
+        title: row.get(1)?,
+        description: row.get(2)?,
+        status: row.get(3)?,
+        settings_json: row.get(4)?,
+        budget_json: row.get(5)?,
+        created_at: row.get(6)?,
+        updated_at: row.get(7)?,
+        archived_at: row.get(8)?,
     })
 }

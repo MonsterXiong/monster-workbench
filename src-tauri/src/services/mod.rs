@@ -3,6 +3,7 @@ pub mod app_service;
 pub mod auth_service;
 pub mod batch_job_service;
 pub mod config_service;
+pub mod creative_project_service;
 pub mod database_service;
 pub mod file_service;
 pub mod goal_service;

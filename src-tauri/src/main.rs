@@ -15,6 +15,7 @@ use services::app_service::AppService;
 use services::auth_service::AuthService;
 use services::batch_job_service::BatchJobService;
 use services::config_service::ConfigService;
+use services::creative_project_service::CreativeProjectService;
 use services::database_service::DatabaseService;
 use services::file_service::FileService;
 use services::goal_service::GoalService;
@@ -57,6 +58,7 @@ fn main() {
 
             let app_service = AppService::new(handle.clone(), path_provider.clone());
             let config_service = ConfigService::new(path_provider.clone());
+            let creative_project_service = CreativeProjectService::new(path_provider.clone());
             let file_service = FileService::new(handle.clone(), path_provider.clone());
             let task_service = TaskService::new(handle.clone(), path_provider.clone());
             let auth_service = AuthService::new(path_provider.clone());
@@ -76,6 +78,7 @@ fn main() {
             // 2. 状态依赖管理注入
             app.manage(std::sync::Mutex::new(app_service));
             app.manage(std::sync::Mutex::new(config_service));
+            app.manage(std::sync::Mutex::new(creative_project_service));
             app.manage(std::sync::Mutex::new(file_service));
             app.manage(std::sync::Mutex::new(task_service));
             app.manage(std::sync::Mutex::new(auth_service));
@@ -159,6 +162,9 @@ fn main() {
             commands::file::read_directory_tree,
             commands::config::get_preference_config,
             commands::config::save_preference_config,
+            commands::creative_project::upsert_creative_project,
+            commands::creative_project::get_creative_project,
+            commands::creative_project::list_creative_projects,
             commands::database::export_database,
             commands::database::import_database,
             commands::database::reset_database,

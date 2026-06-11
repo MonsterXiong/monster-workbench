@@ -1,9 +1,11 @@
 use crate::infra::creative_db::{
     CreateAssetLinkInput, CreateCreativeAssetInput, CreateCreativeTaskInput, CreateTaskEventInput,
-    CreativeAsset, CreativeDbInfra, CreativeTask, ListAssetLinksFilter, ListCreativeAssetsFilter,
+    CreativeAsset, CreativeTask, ListAssetLinksFilter, ListCreativeAssetsFilter,
     ListCreativeTasksFilter, TaskEvent, UpdateCreativeTaskStatusInput,
 };
+use crate::infra::creative_asset_repo;
 use crate::infra::path::PathProvider;
+use crate::infra::creative_task_repo;
 use crate::infra::{AppError, AppResult};
 use crate::services::sidecar_lifecycle_service::{
     GenerateImagePromptSidecarRequest, SidecarLifecycleService,
@@ -140,7 +142,7 @@ impl<R: Runtime> TaskService<R> {
 
     pub fn create_creative_task(&self, input: CreateCreativeTaskInput) -> AppResult<CreativeTask> {
         validate_create_task_input(&input)?;
-        let task = CreativeDbInfra::create_task(&self.db_path()?, input)?;
+        let task = creative_task_repo::create_task(&self.db_path()?, input)?;
         self.emit_task_event(
             "creative-task-created",
             CreativeTaskEventPayload {
@@ -158,14 +160,14 @@ impl<R: Runtime> TaskService<R> {
         if id <= 0 {
             return Err(AppError::Config("task id must be positive".to_string()));
         }
-        CreativeDbInfra::get_task(&self.db_path()?, id)
+        creative_task_repo::get_task(&self.db_path()?, id)
     }
 
     pub fn list_creative_tasks(
         &self,
         filter: ListCreativeTasksFilter,
     ) -> AppResult<Vec<CreativeTask>> {
-        CreativeDbInfra::list_tasks(&self.db_path()?, filter)
+        creative_task_repo::list_tasks(&self.db_path()?, filter)
     }
 
     pub fn create_creative_asset(
@@ -173,7 +175,7 @@ impl<R: Runtime> TaskService<R> {
         input: CreateCreativeAssetServiceInput,
     ) -> AppResult<CreativeAsset> {
         validate_creative_asset_input(&input)?;
-        CreativeDbInfra::create_asset(
+        creative_asset_repo::create_asset(
             &self.db_path()?,
             CreateCreativeAssetInput {
                 project_id: input.project_id,
@@ -192,7 +194,7 @@ impl<R: Runtime> TaskService<R> {
         &self,
         filter: ListCreativeAssetsFilter,
     ) -> AppResult<Vec<CreativeAsset>> {
-        CreativeDbInfra::list_assets(&self.db_path()?, filter)
+        creative_asset_repo::list_assets(&self.db_path()?, filter)
     }
 
     pub fn create_asset_link(
@@ -200,14 +202,14 @@ impl<R: Runtime> TaskService<R> {
         input: CreateAssetLinkInput,
     ) -> AppResult<crate::infra::creative_db::AssetLink> {
         validate_asset_link_input(&input)?;
-        CreativeDbInfra::create_asset_link(&self.db_path()?, input)
+        creative_asset_repo::create_asset_link(&self.db_path()?, input)
     }
 
     pub fn list_asset_links(
         &self,
         filter: ListAssetLinksFilter,
     ) -> AppResult<Vec<crate::infra::creative_db::AssetLink>> {
-        CreativeDbInfra::list_asset_links(&self.db_path()?, filter)
+        creative_asset_repo::list_asset_links(&self.db_path()?, filter)
     }
 
     pub fn update_creative_task_status(
@@ -215,7 +217,7 @@ impl<R: Runtime> TaskService<R> {
         input: UpdateCreativeTaskStatusInput,
     ) -> AppResult<CreativeTask> {
         validate_status_input(&input)?;
-        let task = CreativeDbInfra::update_task_status(&self.db_path()?, input)?;
+        let task = creative_task_repo::update_task_status(&self.db_path()?, input)?;
         self.emit_task_event(
             "creative-task-status-changed",
             CreativeTaskEventPayload {
@@ -231,8 +233,8 @@ impl<R: Runtime> TaskService<R> {
 
     pub fn append_task_event(&self, input: CreateTaskEventInput) -> AppResult<TaskEvent> {
         validate_task_event_input(&input)?;
-        let event = CreativeDbInfra::append_task_event(&self.db_path()?, input)?;
-        let task = CreativeDbInfra::get_task(&self.db_path()?, event.task_id)?
+        let event = creative_task_repo::append_task_event(&self.db_path()?, input)?;
+        let task = creative_task_repo::get_task(&self.db_path()?, event.task_id)?
             .ok_or_else(|| AppError::Database("task not found for appended event".to_string()))?;
         self.emit_task_event(
             "creative-task-event",
@@ -257,7 +259,7 @@ impl<R: Runtime> TaskService<R> {
         let task_payload_json = serde_json::to_string(&input).map_err(|error| {
             AppError::Config(format!("failed to encode workflow input payload: {error}"))
         })?;
-        let task = CreativeDbInfra::create_task(
+        let task = creative_task_repo::create_task(
             &db_path,
             CreateCreativeTaskInput {
                 project_id: input.project_id.clone(),
@@ -284,7 +286,7 @@ impl<R: Runtime> TaskService<R> {
         match result {
             Ok(result) => Ok(result),
             Err(error) => {
-                let _ = CreativeDbInfra::append_task_event(
+                let _ = creative_task_repo::append_task_event(
                     &db_path,
                     CreateTaskEventInput {
                         task_id: task.id,
@@ -293,7 +295,7 @@ impl<R: Runtime> TaskService<R> {
                         payload_json: None,
                     },
                 );
-                let _ = CreativeDbInfra::update_task_status(
+                let _ = creative_task_repo::update_task_status(
                     &db_path,
                     UpdateCreativeTaskStatusInput {
                         id: task.id,
@@ -390,7 +392,7 @@ impl<R: Runtime> TaskService<R> {
             payload_json: None,
         })?);
 
-        let asset = CreativeDbInfra::create_asset(
+        let asset = creative_asset_repo::create_asset(
             db_path,
             CreateCreativeAssetInput {
                 project_id: input.project_id.clone(),
@@ -445,10 +447,10 @@ impl<R: Runtime> TaskService<R> {
     ) -> AppResult<ReviewAssetQualityStubResult> {
         validate_review_asset_quality_input(&input)?;
         let db_path = self.db_path()?;
-        let source_asset = CreativeDbInfra::get_asset(&db_path, input.source_asset_id)?
+        let source_asset = creative_asset_repo::get_asset(&db_path, input.source_asset_id)?
             .ok_or_else(|| AppError::Database("source asset not found".to_string()))?;
         let source_task = match input.source_task_id {
-            Some(task_id) => CreativeDbInfra::get_task(&db_path, task_id)?,
+            Some(task_id) => creative_task_repo::get_task(&db_path, task_id)?,
             None => None,
         };
         let review_kind = input
@@ -483,7 +485,7 @@ impl<R: Runtime> TaskService<R> {
         let review_result_json = serde_json::to_string(&review_result).map_err(|error| {
             AppError::Config(format!("failed to encode review result: {error}"))
         })?;
-        let review_asset = CreativeDbInfra::create_asset(
+        let review_asset = creative_asset_repo::create_asset(
             &db_path,
             CreateCreativeAssetInput {
                 project_id: input.project_id.clone().or(source_asset.project_id.clone()),
@@ -504,7 +506,7 @@ impl<R: Runtime> TaskService<R> {
                 status: Some("ready".to_string()),
             },
         )?;
-        let _ = CreativeDbInfra::create_asset_link(
+        let _ = creative_asset_repo::create_asset_link(
             &db_path,
             crate::infra::creative_db::CreateAssetLinkInput {
                 source_asset_id: review_asset.id,
@@ -739,8 +741,10 @@ fn build_review_result(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::infra::creative_db::CreativeDbInfra;
+    use crate::infra::creative_asset_repo;
+    use crate::infra::creative_db_schema::init_schema;
     use crate::infra::path::PathProvider;
+    use crate::infra::creative_task_repo;
     use crate::services::sidecar_lifecycle_service::SidecarLifecycleService;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -765,7 +769,7 @@ mod tests {
         let task_service = TaskService::new(app.handle().clone(), path_provider.clone());
         let mut sidecar_service = SidecarLifecycleService::new(app.handle().clone());
 
-        CreativeDbInfra::init_schema(&db_path).expect("schema should init");
+        init_schema(&db_path).expect("schema should init");
 
         let result = task_service
             .run_generate_image_prompt_workflow(
@@ -814,13 +818,13 @@ mod tests {
             "workflow should emit a completion event"
         );
 
-        let persisted_task = CreativeDbInfra::get_task(&db_path, result.task.id)
+        let persisted_task = creative_task_repo::get_task(&db_path, result.task.id)
             .expect("task query should succeed")
             .expect("task should exist");
         assert_eq!(persisted_task.status, "succeeded");
         assert_eq!(persisted_task.asset_id, Some(result.asset.id));
 
-        let persisted_events = CreativeDbInfra::list_task_events(&db_path, result.task.id)
+        let persisted_events = creative_task_repo::list_task_events(&db_path, result.task.id)
             .expect("event query should succeed");
         assert!(
             persisted_events
@@ -829,7 +833,7 @@ mod tests {
             "persisted events should include completion"
         );
 
-        let persisted_asset = CreativeDbInfra::get_asset(&db_path, result.asset.id)
+        let persisted_asset = creative_asset_repo::get_asset(&db_path, result.asset.id)
             .expect("asset query should succeed")
             .expect("asset should exist");
         assert_eq!(persisted_asset.asset_type, "image_prompt");

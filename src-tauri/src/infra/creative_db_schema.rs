@@ -1,9 +1,83 @@
 use crate::infra::creative_db_support::{connect, ensure_column};
 use crate::infra::AppResult;
+use rusqlite::{params, Connection, OptionalExtension};
 use std::path::Path;
 
 pub(crate) fn init_schema(db_path: &Path) -> AppResult<()> {
-    let conn = connect(db_path)?;
+    let mut conn = connect(db_path)?;
+    run_migrations(&mut conn)
+}
+
+struct Migration {
+    version: i64,
+    name: &'static str,
+    apply: fn(&Connection) -> AppResult<()>,
+}
+
+const MIGRATIONS: &[Migration] = &[
+    Migration {
+        version: 1,
+        name: "bootstrap_creative_schema",
+        apply: apply_bootstrap_creative_schema,
+    },
+    Migration {
+        version: 2,
+        name: "add_creative_task_goal_batch_columns",
+        apply: apply_creative_task_goal_batch_columns,
+    },
+    Migration {
+        version: 3,
+        name: "add_creative_projects",
+        apply: apply_creative_projects,
+    },
+];
+
+fn run_migrations(conn: &mut Connection) -> AppResult<()> {
+    ensure_schema_migrations_table(conn)?;
+
+    for migration in MIGRATIONS {
+        if is_migration_applied(conn, migration.version)? {
+            continue;
+        }
+
+        let tx = conn.transaction()?;
+        (migration.apply)(&tx)?;
+        tx.execute(
+            "INSERT INTO schema_migrations (version, name) VALUES (?, ?)",
+            params![migration.version, migration.name],
+        )?;
+        tx.commit()?;
+    }
+
+    Ok(())
+}
+
+fn ensure_schema_migrations_table(conn: &Connection) -> AppResult<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS schema_migrations (
+            version INTEGER PRIMARY KEY,
+            name TEXT NOT NULL UNIQUE,
+            applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_schema_migrations_name
+            ON schema_migrations(name);",
+    )?;
+    Ok(())
+}
+
+fn is_migration_applied(conn: &Connection, version: i64) -> AppResult<bool> {
+    let applied = conn
+        .query_row(
+            "SELECT version FROM schema_migrations WHERE version = ? LIMIT 1",
+            params![version],
+            |row| row.get::<_, i64>(0),
+        )
+        .optional()?;
+    Ok(applied.is_some())
+}
+
+fn apply_bootstrap_creative_schema(conn: &Connection) -> AppResult<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS creative_tasks (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -166,6 +240,10 @@ pub(crate) fn init_schema(db_path: &Path) -> AppResult<()> {
         CREATE INDEX IF NOT EXISTS idx_asset_links_target ON asset_links(target_asset_id);
         CREATE INDEX IF NOT EXISTS idx_asset_links_type ON asset_links(link_type);",
     )?;
+    Ok(())
+}
+
+fn apply_creative_task_goal_batch_columns(conn: &Connection) -> AppResult<()> {
     ensure_column(&conn, "creative_tasks", "goal_id", "INTEGER")?;
     ensure_column(&conn, "creative_tasks", "batch_job_id", "INTEGER")?;
     ensure_column(&conn, "creative_tasks", "sequence_no", "INTEGER")?;
@@ -173,6 +251,26 @@ pub(crate) fn init_schema(db_path: &Path) -> AppResult<()> {
         "CREATE INDEX IF NOT EXISTS idx_creative_tasks_goal_id ON creative_tasks(goal_id);
         CREATE INDEX IF NOT EXISTS idx_creative_tasks_batch_job_id ON creative_tasks(batch_job_id);
         CREATE INDEX IF NOT EXISTS idx_creative_tasks_sequence_no ON creative_tasks(sequence_no);",
+    )?;
+    Ok(())
+}
+
+fn apply_creative_projects(conn: &Connection) -> AppResult<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS creative_projects (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL,
+            description TEXT,
+            status TEXT NOT NULL DEFAULT 'active',
+            settings_json TEXT,
+            budget_json TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            archived_at TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_creative_projects_status ON creative_projects(status);
+        CREATE INDEX IF NOT EXISTS idx_creative_projects_updated_at ON creative_projects(updated_at);",
     )?;
     Ok(())
 }

@@ -1,7 +1,7 @@
 use crate::infra::creative_db::{
-    CreateTaskEventInput, CreativeDbInfra, CreativeTask, ListCreativeTasksFilter,
-    UpdateCreativeTaskStatusInput,
+    CreateTaskEventInput, CreativeTask, ListCreativeTasksFilter, UpdateCreativeTaskStatusInput,
 };
+use crate::infra::creative_task_repo;
 use crate::infra::path::PathProvider;
 use crate::infra::{AppError, AppResult};
 
@@ -35,7 +35,7 @@ impl WorkerQueueService {
         task_type: Option<String>,
         project_id: Option<String>,
     ) -> AppResult<Option<CreativeTask>> {
-        let task = CreativeDbInfra::claim_next_queued_task(
+        let task = creative_task_repo::claim_next_queued_task(
             &self.db_path()?,
             ListCreativeTasksFilter {
                 project_id,
@@ -57,7 +57,7 @@ impl WorkerQueueService {
         }
 
         let db_path = self.db_path()?;
-        let task = CreativeDbInfra::get_task(&db_path, task_id)?
+        let task = creative_task_repo::get_task(&db_path, task_id)?
             .ok_or_else(|| AppError::Database("task not found".to_string()))?;
         let was_running = task.status == "running";
         let status = if was_running {
@@ -65,7 +65,7 @@ impl WorkerQueueService {
         } else {
             "cancelled"
         };
-        let task = CreativeDbInfra::update_task_status(
+        let task = creative_task_repo::update_task_status(
             &db_path,
             UpdateCreativeTaskStatusInput {
                 id: task_id,
@@ -76,7 +76,7 @@ impl WorkerQueueService {
                 retry_count_increment: None,
             },
         )?;
-        let _ = CreativeDbInfra::append_task_event(
+        let _ = creative_task_repo::append_task_event(
             &db_path,
             CreateTaskEventInput {
                 task_id,
@@ -100,14 +100,14 @@ impl WorkerQueueService {
             return Err(AppError::Config("task id must be positive".to_string()));
         }
 
-        let task = CreativeDbInfra::get_task(&self.db_path()?, task_id)?
+        let task = creative_task_repo::get_task(&self.db_path()?, task_id)?
             .ok_or_else(|| AppError::Database("task not found".to_string()))?;
         Ok(matches!(task.status.as_str(), "cancelling" | "cancelled"))
     }
 
     pub fn recover_interrupted_tasks(&self) -> AppResult<WorkerQueueRecoverySummary> {
         let db_path = self.db_path()?;
-        let running_tasks = CreativeDbInfra::list_tasks(
+        let running_tasks = creative_task_repo::list_tasks(
             &db_path,
             ListCreativeTasksFilter {
                 status: Some("running".to_string()),
@@ -117,7 +117,7 @@ impl WorkerQueueService {
                 ..Default::default()
             },
         )?;
-        let cancelling_tasks = CreativeDbInfra::list_tasks(
+        let cancelling_tasks = creative_task_repo::list_tasks(
             &db_path,
             ListCreativeTasksFilter {
                 status: Some("cancelling".to_string()),
@@ -137,7 +137,7 @@ impl WorkerQueueService {
 
         for task in running_tasks {
             if task.retry_count < task.max_retries {
-                CreativeDbInfra::update_task_status(
+                creative_task_repo::update_task_status(
                     &db_path,
                     UpdateCreativeTaskStatusInput {
                         id: task.id,
@@ -148,7 +148,7 @@ impl WorkerQueueService {
                         retry_count_increment: Some(1),
                     },
                 )?;
-                let _ = CreativeDbInfra::append_task_event(
+                let _ = creative_task_repo::append_task_event(
                     &db_path,
                     CreateTaskEventInput {
                         task_id: task.id,
@@ -165,7 +165,7 @@ impl WorkerQueueService {
                 );
                 summary.moved_to_retrying.push(task.id);
             } else {
-                CreativeDbInfra::update_task_status(
+                creative_task_repo::update_task_status(
                     &db_path,
                     UpdateCreativeTaskStatusInput {
                         id: task.id,
@@ -176,7 +176,7 @@ impl WorkerQueueService {
                         retry_count_increment: None,
                     },
                 )?;
-                let _ = CreativeDbInfra::append_task_event(
+                let _ = creative_task_repo::append_task_event(
                     &db_path,
                     CreateTaskEventInput {
                         task_id: task.id,
@@ -196,7 +196,7 @@ impl WorkerQueueService {
         }
 
         for task in cancelling_tasks {
-            CreativeDbInfra::update_task_status(
+            creative_task_repo::update_task_status(
                 &db_path,
                 UpdateCreativeTaskStatusInput {
                     id: task.id,
@@ -207,7 +207,7 @@ impl WorkerQueueService {
                     retry_count_increment: None,
                 },
             )?;
-            let _ = CreativeDbInfra::append_task_event(
+            let _ = creative_task_repo::append_task_event(
                 &db_path,
                 CreateTaskEventInput {
                     task_id: task.id,
@@ -236,7 +236,8 @@ impl WorkerQueueService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::infra::creative_db::{CreateCreativeTaskInput, CreativeDbInfra};
+    use crate::infra::creative_db::CreateCreativeTaskInput;
+    use crate::infra::creative_db_schema::init_schema;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -264,7 +265,8 @@ mod tests {
         let service = service_for(app_dir.clone());
         let db_path = app_dir.join("monster_workbench.db");
 
-        CreativeDbInfra::create_task(
+        init_schema(&db_path).expect("schema should init");
+        creative_task_repo::create_task(
             &db_path,
             CreateCreativeTaskInput {
                 project_id: Some("project-a".to_string()),
@@ -299,7 +301,8 @@ mod tests {
         let service = service_for(app_dir.clone());
         let db_path = app_dir.join("monster_workbench.db");
 
-        let task = CreativeDbInfra::create_task(
+        init_schema(&db_path).expect("schema should init");
+        let task = creative_task_repo::create_task(
             &db_path,
             CreateCreativeTaskInput {
                 project_id: Some("project-a".to_string()),
@@ -334,7 +337,8 @@ mod tests {
         let service = service_for(app_dir.clone());
         let db_path = app_dir.join("monster_workbench.db");
 
-        let task = CreativeDbInfra::create_task(
+        init_schema(&db_path).expect("schema should init");
+        let task = creative_task_repo::create_task(
             &db_path,
             CreateCreativeTaskInput {
                 project_id: Some("project-a".to_string()),
@@ -358,7 +362,7 @@ mod tests {
         assert_eq!(summary.interrupted_running_tasks, vec![task.id]);
         assert_eq!(summary.moved_to_retrying, vec![task.id]);
 
-        let updated = CreativeDbInfra::get_task(&db_path, task.id)
+        let updated = creative_task_repo::get_task(&db_path, task.id)
             .expect("task should query")
             .expect("task should exist");
         assert_eq!(updated.status, "retrying");
