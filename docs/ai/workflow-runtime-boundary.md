@@ -62,8 +62,8 @@ Provider Gateway -> 管业务状态
 
 截至 2026-06-11，当前实现仍是过渡态，但 batch prompt / image 的 provider 执行已经从 Rust worker 迁到 Python sidecar workflow：
 
-- `src-tauri/src/services/sidecar_lifecycle_service.rs` 负责启动 `creative_health_server.py`、分配 localhost 端口、注入 runtime token、执行 `/health` 检查，并通过 `/tasks` 提交 `generate_image_prompt`、`demo.image.prompt` 与 `demo.image.generate` workflow。
-- `src-tauri/sidecars/python/creative_health_server.py` 当前仍是最小 HTTP runtime：`GET /health`、`GET /events`、`POST /tasks`。其中 `generate_image_prompt` 已按本协议返回 `outputs / modelRuns / events / retry` 标准结果，`demo.image.prompt` 已能在 Python 侧调用 OpenAI-compatible `/chat/completions`，`demo.image.generate` 已能在 Python 侧调用 OpenAI-compatible `/images/generations`，并把图片保存到 Rust 授权的输出目录。
+- `src-tauri/src/services/sidecar_lifecycle_service.rs` 负责启动 `creative_health_server.py`、分配 localhost 端口、注入 runtime token、执行 `/health` 检查，并通过 `/tasks` 提交 `generate_image_prompt`、`image.prompt.batch` 与 `image.generate.batch` workflow。
+- `src-tauri/sidecars/python/creative_health_server.py` 当前仍是最小 HTTP runtime：`GET /health`、`GET /events`、`POST /tasks`。其中 `generate_image_prompt` 已按本协议返回 `outputs / modelRuns / events / retry` 标准结果，`image.prompt.batch` 已能在 Python 侧调用 OpenAI-compatible `/chat/completions`，`image.generate.batch` 已能在 Python 侧调用 OpenAI-compatible `/images/generations`，并把图片保存到 Rust 授权的输出目录；Python 暂时仍接受旧 `demo.image.prompt/generate` taskType 作为兼容别名。
 - `src-tauri/src/services/worker_queue_service.rs` 已经有 SQLite-backed queue 的基础控制面：claim queued task、request cancel、cancel checkpoint、startup recovery。
 - `src-tauri/src/services/batch_job_service.rs` 当前仍在 Rust 内运行 batch supervisor 与 `demo.image.mock / demo.image.prompt / demo.image.generate` worker 壳层。其中 `demo.image.mock` 仍是本地 smoke worker；`demo.image.prompt` 与 `demo.image.generate` worker 已改为提交 sidecar workflow，Rust 负责结果校验、取消后的状态映射、输出文件路径校验、asset/model_runs/task_events 写入和事件广播。
 - Sidecar request 已不再使用空 `budget` 占位：Rust 会提交 `maxDurationMs / maxImages / maxTokens / maxCostEstimate` 形态的预算对象，sidecar HTTP read timeout 和 Python provider timeout 会按该预算收敛。
@@ -239,7 +239,7 @@ Python step boundary
   -> return status cancelled
 ```
 
-当前 `WorkerQueueService::check_cancel_checkpoint(task_id)` 已具备 Rust 侧查询能力；`generate_image_prompt`、`demo.image.prompt` 与 `demo.image.generate` 已通过 Rust 暴露的 localhost checkpoint 让 Python 在步骤边界查询取消状态，而不是让 Python 直接查询 SQLite。
+当前 `WorkerQueueService::check_cancel_checkpoint(task_id)` 已具备 Rust 侧查询能力；`generate_image_prompt`、`image.prompt.batch` 与 `image.generate.batch` 已通过 Rust 暴露的 localhost checkpoint 让 Python 在步骤边界查询取消状态，而不是让 Python 直接查询 SQLite。
 
 最低要求：
 
@@ -253,10 +253,10 @@ Python step boundary
 `BatchJobService` 的下一步不应继续增加新的生产 worker 分支。推荐迁移顺序：
 
 1. 保留 `demo.image.mock` 作为 Rust 本地 smoke worker。
-2. `demo.image.prompt` 的 provider 调用已从 Rust worker 迁到 Python workflow；Rust 仍负责 claim、running、结果落库和 batch progress event。
-3. `demo.image.generate` 的 provider 调用和图片处理已从 Rust worker 迁到 Python workflow；Rust 负责校验输出文件路径、创建 asset、复制 thumbnail、写 `model_runs`。
-4. 新增正式 batch 类型时不要继续使用 `demo.image.*` 命名；应使用业务语义，例如 `image.prompt.batch`、`image.generate.batch` 或后续领域命名。
-5. batch prompt / image sidecar workflow 已接入 cancel checkpoint，并已具备基础 budget/timeout 协议；batch worker 已优先复用 app-managed sidecar lifecycle，且 batch `/tasks` 提交不再长时间持有 lifecycle mutex。下一步优先补完整健康熔断、事件节流和正式 workflow 命名，只有这些协议稳定后，再讨论 supervisor 是否从 Rust 迁到 Python worker pool。
+2. `demo.image.prompt` batch job 的 provider 调用已从 Rust worker 迁到 Python `image.prompt.batch` workflow；Rust 仍负责 claim、running、结果落库和 batch progress event。
+3. `demo.image.generate` batch job 的 provider 调用和图片处理已从 Rust worker 迁到 Python `image.generate.batch` workflow；Rust 负责校验输出文件路径、创建 asset、复制 thumbnail、写 `model_runs`。
+4. 新增正式 batch 类型时不要继续扩展 `demo.image.*` 命名；sidecar 协议层已先使用 `image.prompt.batch` / `image.generate.batch`，后续 UI / batch job 类型再按业务域逐步退出 demo 命名。
+5. batch prompt / image sidecar workflow 已接入 cancel checkpoint，并已具备基础 budget/timeout 协议；batch worker 已优先复用 app-managed sidecar lifecycle，且 batch `/tasks` 提交不再长时间持有 lifecycle mutex。下一步优先补完整健康熔断、事件节流和 UI / batch job 类型命名，只有这些协议稳定后，再讨论 supervisor 是否从 Rust 迁到 Python worker pool。
 
 ## 12. 不变量
 

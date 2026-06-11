@@ -1492,7 +1492,7 @@ Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `
 | `BatchJobService` prompt/image worker shell | prompt/image 已提交 Python sidecar；Rust 仍构造 request、校验 protocol/taskId/status、落库 asset/model_runs/events | 方向正确，但仍是偏宽 orchestrator；新增生产 worker 不应继续在这里分支扩展 | 后续新增正式 workflow 走 sidecar runtime；Rust 只保留 claim、submit、settle、audit |
 | `BatchJobService` prompt 模板替换 | `build_prompt_request` 在 Rust 内处理 `{{sequenceNo}}` / `{{index}}` | 这是 demo-era prompt 构建残留，生产场景不应扩大 | 正式 batch prompt builder 放到 Python；Rust 只传 template/input/context |
 | `BatchJobService` sidecar lifecycle | batch prompt/image worker 已优先使用 app-managed `SidecarLifecycleService`；没有注入 state 的测试/孤立调用才回退临时 sidecar；batch `/tasks` 请求已移到 lifecycle mutex 锁外执行 | 已从 per-task dev sidecar 启停推进到首段生命周期复用和并发提交锁粒度收口，但仍缺少完整健康熔断与事件节流策略 | 下一步补熔断、事件节流和正式 workflow 命名，再讨论 supervisor 迁移 |
-| `demo.image.*` task type | `demo.image.mock/prompt/generate` 仍是唯一 batch 类型白名单 | 可保留为过渡验证命名，不能扩展成正式业务分类 | 新增正式类型前先定义 `workflowType` / `taskType` 命名规范 |
+| `demo.image.*` batch type | `demo.image.mock/prompt/generate` 仍是 batch job 类型白名单；sidecar 协议层已先使用 `image.prompt.batch` / `image.generate.batch` | batch job 类型仍可保留为过渡验证命名，但 sidecar runtime 已开始退出 demo 命名 | 后续 UI / batch job 类型再按业务域逐步退出 `demo.image.*` |
 
 本轮二次结论：
 
@@ -1653,3 +1653,18 @@ Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `
 - 下一步剩余重点：
   1. 为共享 sidecar 补完整健康熔断、事件节流和更明确的 shutdown 语义。
   2. 设计正式 `taskType` / `workflowType` 命名，避免继续扩展 `demo.image.*`。
+
+## 2026-06-11 补充：batch sidecar 协议命名首轮正式化
+
+- `src-tauri/src/services/sidecar_lifecycle_service.rs` 的 batch prompt / image sidecar request 已从旧 `demo.image.prompt/generate` taskType 改为正式协议名：
+  - `image.prompt.batch`
+  - `image.generate.batch`
+- 对应 `workflowType` 也同步改为 `image.prompt.batch` / `image.generate.batch`，避免继续把 demo-era batch job 类型扩散到 Python workflow runtime 协议。
+- `src-tauri/sidecars/python/creative_health_server.py` 暂时同时接受新旧 taskType：新协议用于 Rust 生产提交，旧 `demo.image.prompt/generate` 作为兼容别名保留，避免旧请求或测试夹具直接失效。
+- 这一步只正式化 sidecar 协议层命名；`batch_jobs.batch_type`、UI 模式和现有批量 demo 白名单仍保留 `demo.image.mock/prompt/generate`，后续再做业务域 batch 类型迁移。
+- 本轮验证通过：
+  - `cargo test --manifest-path .\\src-tauri\\Cargo.toml batch_sidecar_requests_use_formal_task_and_workflow_types -- --nocapture --test-threads=1`
+  - `python -m py_compile src-tauri\\sidecars\\python\\creative_health_server.py`
+- 下一步剩余重点：
+  1. 为共享 sidecar 补完整健康熔断、事件节流和更明确的 shutdown 语义。
+  2. 设计 UI / batch job 类型从 `demo.image.*` 退出的兼容迁移路径。

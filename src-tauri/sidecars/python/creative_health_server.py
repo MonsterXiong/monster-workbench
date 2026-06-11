@@ -11,6 +11,11 @@ import uuid
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+BATCH_IMAGE_PROMPT_TASK_TYPES = {"image.prompt.batch", "demo.image.prompt"}
+BATCH_IMAGE_PROMPT_WORKFLOW_TYPE = "image.prompt.batch"
+BATCH_IMAGE_GENERATE_TASK_TYPES = {"image.generate.batch", "demo.image.generate"}
+BATCH_IMAGE_GENERATE_WORKFLOW_TYPE = "image.generate.batch"
+
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -140,11 +145,12 @@ class CreativeHealthHandler(BaseHTTPRequestHandler):
             )
             return
 
-        if payload.get("taskType") == "demo.image.prompt":
+        task_type = payload.get("taskType")
+        if task_type in BATCH_IMAGE_PROMPT_TASK_TYPES:
             self._write_json(HTTPStatus.OK, run_batch_image_prompt(payload))
             return
 
-        if payload.get("taskType") == "demo.image.generate":
+        if task_type in BATCH_IMAGE_GENERATE_TASK_TYPES:
             self._write_json(HTTPStatus.OK, run_batch_image_generate(payload))
             return
 
@@ -469,7 +475,7 @@ def build_batch_image_result(
             "thumbnailPath": None,
             "metadata": {
                 "source": "python-sidecar",
-                "workflowType": payload.get("workflowType") or "batch_image_generate",
+                "workflowType": payload.get("workflowType") or BATCH_IMAGE_GENERATE_WORKFLOW_TYPE,
                 "batchJobId": batch_job_id,
                 "sourceTaskId": task_id,
                 "sequenceNo": sequence_no,
@@ -510,7 +516,7 @@ def build_batch_image_result(
             "payload": {
                 "batchJobId": batch_job_id,
                 "sequenceNo": sequence_no,
-                "workflowType": payload.get("workflowType") or "batch_image_generate",
+                "workflowType": payload.get("workflowType") or BATCH_IMAGE_GENERATE_WORKFLOW_TYPE,
             },
         }],
         "retry": retry,
@@ -633,7 +639,7 @@ def build_batch_prompt_result(
             "thumbnailPath": None,
             "metadata": {
                 "source": "python-sidecar",
-                "workflowType": payload.get("workflowType") or "batch_image_prompt",
+                "workflowType": payload.get("workflowType") or BATCH_IMAGE_PROMPT_WORKFLOW_TYPE,
                 "batchJobId": batch_job_id,
                 "sourceTaskId": task_id,
                 "sequenceNo": sequence_no,
@@ -677,7 +683,7 @@ def build_batch_prompt_result(
             "payload": {
                 "batchJobId": batch_job_id,
                 "sequenceNo": sequence_no,
-                "workflowType": payload.get("workflowType") or "batch_image_prompt",
+                "workflowType": payload.get("workflowType") or BATCH_IMAGE_PROMPT_WORKFLOW_TYPE,
             },
         }],
         "retry": retry,

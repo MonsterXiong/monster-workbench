@@ -21,6 +21,10 @@ const PYTHON_SIDECAR_ENV_ALLOWLIST: &[&str] = &[
     "LOCALAPPDATA",
     "HOME",
 ];
+const BATCH_IMAGE_PROMPT_TASK_TYPE: &str = "image.prompt.batch";
+const BATCH_IMAGE_PROMPT_WORKFLOW_TYPE: &str = "image.prompt.batch";
+const BATCH_IMAGE_GENERATE_TASK_TYPE: &str = "image.generate.batch";
+const BATCH_IMAGE_GENERATE_WORKFLOW_TYPE: &str = "image.generate.batch";
 
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -406,8 +410,8 @@ impl<R: Runtime> SidecarLifecycleService<R> {
             "protocolVersion": 1,
             "taskId": request.task_id,
             "projectId": request.project_id,
-            "taskType": "demo.image.prompt",
-            "workflowType": "batch_image_prompt",
+            "taskType": BATCH_IMAGE_PROMPT_TASK_TYPE,
+            "workflowType": BATCH_IMAGE_PROMPT_WORKFLOW_TYPE,
             "attempt": request.attempt,
             "maxRetries": request.max_retries,
             "cancelToken": format!("task-{}", request.task_id),
@@ -470,8 +474,8 @@ impl<R: Runtime> SidecarLifecycleService<R> {
             "protocolVersion": 1,
             "taskId": request.task_id,
             "projectId": request.project_id,
-            "taskType": "demo.image.generate",
-            "workflowType": "batch_image_generate",
+            "taskType": BATCH_IMAGE_GENERATE_TASK_TYPE,
+            "workflowType": BATCH_IMAGE_GENERATE_WORKFLOW_TYPE,
             "attempt": request.attempt,
             "maxRetries": request.max_retries,
             "cancelToken": format!("task-{}", request.task_id),
@@ -676,6 +680,7 @@ fn budget_read_timeout(budget: &Value) -> Duration {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::mpsc;
 
     #[test]
     fn sidecar_budget_encodes_contract_and_drives_read_timeout() {
@@ -700,6 +705,175 @@ mod tests {
 
         assert!(budget.is_null());
         assert_eq!(budget_read_timeout(&budget), Duration::from_millis(125_000));
+    }
+
+    #[test]
+    fn batch_sidecar_requests_use_formal_task_and_workflow_types() {
+        let prompt_payload = capture_sidecar_task_request(|endpoint| {
+            SidecarLifecycleService::<Wry>::submit_batch_image_prompt_to_endpoint(
+                endpoint,
+                BatchImagePromptSidecarRequest {
+                    task_id: 123,
+                    project_id: Some("project-a".to_string()),
+                    batch_job_id: 456,
+                    sequence_no: Some(1),
+                    prompt_request: "prompt request".to_string(),
+                    provider: test_provider("chat"),
+                    budget: None,
+                    attempt: 1,
+                    max_retries: 0,
+                    cancel_checkpoint_url: None,
+                    cancel_checkpoint_token: None,
+                },
+            )
+        });
+        assert_eq!(prompt_payload["taskType"], BATCH_IMAGE_PROMPT_TASK_TYPE);
+        assert_eq!(
+            prompt_payload["workflowType"],
+            BATCH_IMAGE_PROMPT_WORKFLOW_TYPE
+        );
+
+        let image_payload = capture_sidecar_task_request(|endpoint| {
+            SidecarLifecycleService::<Wry>::submit_batch_image_generate_to_endpoint(
+                endpoint,
+                BatchImageGenerateSidecarRequest {
+                    task_id: 124,
+                    project_id: Some("project-a".to_string()),
+                    batch_job_id: 456,
+                    sequence_no: Some(2),
+                    prompt_request: "image request".to_string(),
+                    image_size: "1024x1024".to_string(),
+                    output_dir: "C:\\temp\\monster".to_string(),
+                    provider: test_provider("image"),
+                    budget: None,
+                    attempt: 1,
+                    max_retries: 0,
+                    cancel_checkpoint_url: None,
+                    cancel_checkpoint_token: None,
+                },
+            )
+        });
+        assert_eq!(image_payload["taskType"], BATCH_IMAGE_GENERATE_TASK_TYPE);
+        assert_eq!(
+            image_payload["workflowType"],
+            BATCH_IMAGE_GENERATE_WORKFLOW_TYPE
+        );
+    }
+
+    fn test_provider(request_type: &str) -> SidecarProviderConfig {
+        SidecarProviderConfig {
+            provider_id: Some("local-test".to_string()),
+            provider_type: Some("openai-compatible".to_string()),
+            display_name: Some("Local Test".to_string()),
+            base_url: "http://127.0.0.1:9".to_string(),
+            api_key: "test-key".to_string(),
+            model: "test-model".to_string(),
+            request_type: request_type.to_string(),
+            timeout_ms: Some(15_000),
+        }
+    }
+
+    fn capture_sidecar_task_request(
+        submit: impl FnOnce(&SidecarRuntimeEndpoint) -> AppResult<SidecarWorkflowTaskResult>,
+    ) -> Value {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
+        let port = listener.local_addr().expect("addr should exist").port();
+        let token = "sidecar-task-contract-test";
+        let (payload_tx, payload_rx) = mpsc::channel();
+        let handle = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("request should arrive");
+            let request = read_test_http_request(&mut stream);
+            assert!(request.starts_with("POST /tasks "));
+            assert!(request.contains(&format!("X-Monster-Token: {token}")));
+            let body = request
+                .split("\r\n\r\n")
+                .nth(1)
+                .expect("request body should exist");
+            let payload = serde_json::from_str::<Value>(body).expect("payload should parse");
+            payload_tx.send(payload).expect("payload should send");
+            write_test_json_response(
+                &mut stream,
+                r#"{"protocolVersion":1,"taskId":123,"status":"succeeded","message":"ok","outputs":[],"modelRuns":[],"events":[],"retry":null}"#,
+            );
+        });
+
+        submit(&SidecarRuntimeEndpoint {
+            port,
+            token: token.to_string(),
+        })
+        .expect("sidecar submit should succeed");
+        handle.join().expect("server thread should join");
+        payload_rx.recv().expect("payload should be captured")
+    }
+
+    fn read_test_http_request(stream: &mut TcpStream) -> String {
+        stream
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .expect("read timeout should set");
+        let mut buffer = [0_u8; 8192];
+        let mut data = Vec::new();
+        let mut header_end = None;
+        let mut content_length = 0usize;
+
+        loop {
+            match stream.read(&mut buffer) {
+                Ok(0) => break,
+                Ok(size) => {
+                    data.extend_from_slice(&buffer[..size]);
+                    if header_end.is_none() {
+                        if let Some(position) =
+                            data.windows(4).position(|window| window == b"\r\n\r\n")
+                        {
+                            let end = position + 4;
+                            header_end = Some(end);
+                            let headers = String::from_utf8_lossy(&data[..end]).into_owned();
+                            content_length = headers
+                                .lines()
+                                .find_map(|line| {
+                                    let (name, value) = line.split_once(':')?;
+                                    if name.trim().eq_ignore_ascii_case("content-length") {
+                                        value.trim().parse::<usize>().ok()
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .unwrap_or(0);
+                        }
+                    }
+                    if let Some(end) = header_end {
+                        if data.len() >= end + content_length {
+                            break;
+                        }
+                    }
+                }
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                    ) =>
+                {
+                    if let Some(end) = header_end {
+                        if data.len() >= end + content_length {
+                            break;
+                        }
+                    }
+                }
+                Err(error) => panic!("request read failed: {error}"),
+            }
+        }
+        String::from_utf8_lossy(&data).into_owned()
+    }
+
+    fn write_test_json_response(stream: &mut TcpStream, body: &str) {
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        stream
+            .write_all(response.as_bytes())
+            .expect("response should write");
+        stream.flush().expect("response should flush");
     }
 }
 
