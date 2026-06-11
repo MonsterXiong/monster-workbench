@@ -1,16 +1,20 @@
-﻿use crate::infra::creative_types::{
-    CreateCreativeAssetInput, CreateCreativeBatchJobInput, CreateCreativeTaskInput,
-    CreateModelRunInput, CreateTaskEventInput, CreativeBatchJob, CreativeBatchJobSnapshot,
-    CreativeTask, ListCreativeBatchJobsFilter, ListCreativeTasksFilter, UpdateCreativeBatchJobInput,
-    UpdateCreativeTaskStatusInput,
-};
 use crate::infra::creative_asset_repo;
 use crate::infra::creative_batch_repo;
 use crate::infra::creative_model_run_repo;
 use crate::infra::creative_task_repo;
+use crate::infra::creative_types::{
+    CreateCreativeAssetInput, CreateCreativeBatchJobInput, CreateCreativeTaskInput,
+    CreateModelRunInput, CreateTaskEventInput, CreativeBatchJob, CreativeBatchJobSnapshot,
+    CreativeTask, ListCreativeBatchJobsFilter, ListCreativeTasksFilter,
+    UpdateCreativeBatchJobInput, UpdateCreativeTaskStatusInput,
+};
 use crate::infra::path::PathProvider;
 use crate::infra::{AppError, AppResult};
 use crate::services::ai_service::{AiProviderConfig, AiProviderService};
+use crate::services::sidecar_lifecycle_service::{
+    BatchImagePromptSidecarRequest, SidecarLifecycleService, SidecarProviderConfig,
+    SidecarWorkflowModelRun, SidecarWorkflowTaskResult,
+};
 use crate::services::task_service::CreativeTaskEventPayload;
 use serde_json::{json, Value};
 use std::collections::HashSet;
@@ -256,7 +260,8 @@ impl<R: Runtime> BatchJobService<R> {
             },
         )?;
 
-        let cancelled_task_ids = creative_task_repo::cancel_queued_batch_tasks(&db_path, batch_job_id)?;
+        let cancelled_task_ids =
+            creative_task_repo::cancel_queued_batch_tasks(&db_path, batch_job_id)?;
         for task_id in cancelled_task_ids {
             if let Some(task) = creative_task_repo::get_task(&db_path, task_id)? {
                 let _ = creative_task_repo::append_task_event(
@@ -464,8 +469,8 @@ fn run_batch_supervisor_inner<R: Runtime>(
     batch_job_id: i64,
 ) -> AppResult<()> {
     loop {
-        let snapshot =
-            creative_batch_repo::get_batch_job_snapshot(db_path, batch_job_id)?.ok_or_else(|| {
+        let snapshot = creative_batch_repo::get_batch_job_snapshot(db_path, batch_job_id)?
+            .ok_or_else(|| {
                 AppError::Database("batch job not found while supervising".to_string())
             })?;
 
@@ -575,9 +580,9 @@ fn run_batch_supervisor_inner<R: Runtime>(
                     )?;
                     let completed =
                         creative_batch_repo::get_batch_job_snapshot(db_path, batch_job_id)?
-                        .ok_or_else(|| {
-                            AppError::Database("batch job missing after completion".to_string())
-                        })?;
+                            .ok_or_else(|| {
+                                AppError::Database("batch job missing after completion".to_string())
+                            })?;
                     emit_batch_progress(app_handle, &completed, "batch completed")?;
                     emit_batch_status(app_handle, &completed, "batch completed")?;
                     break;
@@ -710,9 +715,10 @@ fn run_mock_task_worker<R: Runtime>(
         thread::sleep(Duration::from_millis(200));
         elapsed_ms = (elapsed_ms + 200).min(duration_ms);
 
-        let batch = creative_batch_repo::get_batch_job(db_path, batch_job_id)?.ok_or_else(|| {
-            AppError::Database("batch job not found while running task".to_string())
-        })?;
+        let batch =
+            creative_batch_repo::get_batch_job(db_path, batch_job_id)?.ok_or_else(|| {
+                AppError::Database("batch job not found while running task".to_string())
+            })?;
         let current_task = creative_task_repo::get_task(db_path, task.id)?.ok_or_else(|| {
             AppError::Database("task not found while running mock worker".to_string())
         })?;
@@ -886,270 +892,546 @@ fn run_prompt_task_worker<R: Runtime>(
 
     let prompt_request = build_prompt_request(&task)?;
     let provider_config = build_provider_config(&task, &prompt_request)?;
-    let model_started = Instant::now();
-    let ai_service = AiProviderService::new(app_handle.clone());
-    let provider_result = ai_service.test_provider(
-        provider_config.clone(),
-        "chat".to_string(),
-        Some(format!("batch-prompt-task-{}", task.id)),
-        None,
+    let workflow_started = Instant::now();
+    let sidecar_result = submit_batch_prompt_sidecar_workflow(
+        app_handle,
+        &task,
+        batch_job_id,
+        &prompt_request,
+        &provider_config,
     );
-    let duration_ms = model_started.elapsed().as_millis() as i64;
+    let duration_ms = workflow_started.elapsed().as_millis() as i64;
 
-    match provider_result {
-        Ok(result) => {
-            let prompt_text = result
-                .text
-                .clone()
-                .filter(|value| !value.trim().is_empty())
-                .ok_or_else(|| {
-                    AppError::Process("provider returned empty prompt text".to_string())
-                })?;
-
-            let asset = creative_asset_repo::create_asset(
-                db_path,
-                CreateCreativeAssetInput {
-                    project_id: task.project_id.clone(),
-                    asset_type: "demo_image_prompt".to_string(),
-                    title: Some(format!(
-                        "Batch prompt #{}",
-                        task.sequence_no.unwrap_or(task.id)
-                    )),
-                    content: Some(prompt_text.clone()),
-                    file_path: None,
-                    thumbnail_path: None,
-                    metadata_json: Some(
-                        json!({
-                            "batchJobId": batch_job_id,
-                            "sourceTaskId": task.id,
-                            "sequenceNo": task.sequence_no,
-                            "promptTemplate": prompt_request,
-                            "provenance": {
-                                "sourceTaskId": task.id,
-                                "batchJobId": batch_job_id
-                            }
-                        })
-                        .to_string(),
-                    ),
-                    status: Some("ready".to_string()),
-                },
-            )?;
-
-            let model_run = creative_model_run_repo::create_model_run(
-                db_path,
-                CreateModelRunInput {
-                    project_id: task.project_id.clone(),
-                    task_id: Some(task.id),
-                    asset_id: Some(asset.id),
-                    provider_id: Some(provider_config.display_name.clone()),
-                    provider_type: Some(provider_config.provider.clone()),
-                    model: Some(provider_config.model.clone()),
-                    request_type: "chat".to_string(),
-                    status: if result.ok {
-                        "succeeded".to_string()
-                    } else {
-                        "failed".to_string()
-                    },
-                    duration_ms: Some(duration_ms),
-                    prompt_hash: Some(simple_prompt_hash(&prompt_request)),
-                    prompt_version_id: Some(format!("batch:{}:{}", batch_job_id, task.id)),
-                    input_token_count: None,
-                    output_token_count: None,
-                    cost_estimate: None,
-                    error_code: None,
-                    error_message: None,
-                    metadata_json: Some(
-                        json!({
-                            "requestId": result.request_id,
-                            "baseUrl": result.base_url,
-                            "queueWaitMs": result.queue_wait_ms,
-                            "message": result.message,
-                        })
-                        .to_string(),
-                    ),
-                    finished_at: None,
-                },
-            )?;
-
-            let updated_task = creative_task_repo::update_task_status(
-                db_path,
-                UpdateCreativeTaskStatusInput {
-                    id: task.id,
-                    status: "succeeded".to_string(),
-                    result_json: Some(
-                        json!({
-                            "assetId": asset.id,
-                            "modelRunId": model_run.id,
-                            "promptExcerpt": summarize_prompt_text(&prompt_text),
-                            "durationMs": duration_ms,
-                        })
-                        .to_string(),
-                    ),
-                    error_message: None,
-                    asset_id: Some(asset.id),
-                    retry_count_increment: None,
-                },
-            )?;
-            let _ = creative_task_repo::append_task_event(
-                db_path,
-                CreateTaskEventInput {
-                    task_id: task.id,
-                    event_type: "prompt_asset_saved".to_string(),
-                    message: Some(format!("prompt asset created: {}", asset.id)),
-                    payload_json: Some(
-                        json!({
-                            "assetId": asset.id,
-                            "modelRunId": model_run.id,
-                            "durationMs": duration_ms,
-                        })
-                        .to_string(),
-                    ),
-                },
-            );
-            emit_task_status(
-                app_handle,
-                &updated_task,
-                "creative-task-status-changed",
-                "status changed to succeeded",
-            )?;
-            emit_task_status(
-                app_handle,
-                &updated_task,
-                "creative-task-event",
-                "prompt worker finished successfully",
-            )?;
-        }
-        Err(error) => {
-            if current_task.retry_count < current_task.max_retries {
-                let retry_task = creative_task_repo::update_task_status(
-                    db_path,
-                    UpdateCreativeTaskStatusInput {
-                        id: task.id,
-                        status: "queued".to_string(),
-                        result_json: None,
-                        error_message: Some(error.to_string()),
-                        asset_id: current_task.asset_id,
-                        retry_count_increment: Some(1),
-                    },
-                )?;
-                let _ = creative_model_run_repo::create_model_run(
-                    db_path,
-                    CreateModelRunInput {
-                        project_id: task.project_id.clone(),
-                        task_id: Some(task.id),
-                        asset_id: None,
-                        provider_id: Some(provider_config.display_name.clone()),
-                        provider_type: Some(provider_config.provider.clone()),
-                        model: Some(provider_config.model.clone()),
-                        request_type: "chat".to_string(),
-                        status: "failed".to_string(),
-                        duration_ms: Some(duration_ms),
-                        prompt_hash: Some(simple_prompt_hash(&prompt_request)),
-                        prompt_version_id: Some(format!("batch:{}:{}", batch_job_id, task.id)),
-                        input_token_count: None,
-                        output_token_count: None,
-                        cost_estimate: None,
-                        error_code: Some("provider_error".to_string()),
-                        error_message: Some(error.to_string()),
-                        metadata_json: Some(json!({ "retryScheduled": true }).to_string()),
-                        finished_at: None,
-                    },
-                );
-                let _ = creative_task_repo::append_task_event(
-                    db_path,
-                    CreateTaskEventInput {
-                        task_id: task.id,
-                        event_type: "prompt_retry_scheduled".to_string(),
-                        message: Some("prompt worker scheduled retry".to_string()),
-                        payload_json: Some(
-                            json!({
-                                "retryCount": retry_task.retry_count,
-                                "maxRetries": retry_task.max_retries,
-                                "error": error.to_string(),
-                            })
-                            .to_string(),
-                        ),
-                    },
-                );
-                emit_task_status(
-                    app_handle,
-                    &retry_task,
-                    "creative-task-status-changed",
-                    "status changed to queued",
-                )?;
-                emit_task_status(
-                    app_handle,
-                    &retry_task,
-                    "creative-task-event",
-                    "prompt worker scheduled retry",
-                )?;
-            } else {
-                let failed_task = creative_task_repo::update_task_status(
-                    db_path,
-                    UpdateCreativeTaskStatusInput {
-                        id: task.id,
-                        status: "failed".to_string(),
-                        result_json: None,
-                        error_message: Some(error.to_string()),
-                        asset_id: current_task.asset_id,
-                        retry_count_increment: None,
-                    },
-                )?;
-                let _ = creative_model_run_repo::create_model_run(
-                    db_path,
-                    CreateModelRunInput {
-                        project_id: task.project_id.clone(),
-                        task_id: Some(task.id),
-                        asset_id: None,
-                        provider_id: Some(provider_config.display_name.clone()),
-                        provider_type: Some(provider_config.provider.clone()),
-                        model: Some(provider_config.model.clone()),
-                        request_type: "chat".to_string(),
-                        status: "failed".to_string(),
-                        duration_ms: Some(duration_ms),
-                        prompt_hash: Some(simple_prompt_hash(&prompt_request)),
-                        prompt_version_id: Some(format!("batch:{}:{}", batch_job_id, task.id)),
-                        input_token_count: None,
-                        output_token_count: None,
-                        cost_estimate: None,
-                        error_code: Some("provider_error".to_string()),
-                        error_message: Some(error.to_string()),
-                        metadata_json: Some(json!({ "retryScheduled": false }).to_string()),
-                        finished_at: None,
-                    },
-                );
-                let _ = creative_task_repo::append_task_event(
-                    db_path,
-                    CreateTaskEventInput {
-                        task_id: task.id,
-                        event_type: "prompt_failed".to_string(),
-                        message: Some("prompt worker finished with failure".to_string()),
-                        payload_json: Some(json!({ "error": error.to_string() }).to_string()),
-                    },
-                );
-                emit_task_status(
-                    app_handle,
-                    &failed_task,
-                    "creative-task-status-changed",
-                    "status changed to failed",
-                )?;
-                emit_task_status(
-                    app_handle,
-                    &failed_task,
-                    "creative-task-event",
-                    "prompt worker finished with failure",
-                )?;
-                let _ = maybe_auto_pause_batch_after_failure(
-                    app_handle,
-                    db_path,
-                    batch_job_id,
-                    &error.to_string(),
-                );
-            }
-        }
+    match sidecar_result {
+        Ok(sidecar_response) => settle_batch_prompt_sidecar_response(
+            app_handle,
+            db_path,
+            batch_job_id,
+            &task,
+            &prompt_request,
+            &provider_config,
+            duration_ms,
+            sidecar_response,
+        )?,
+        Err(error) => handle_prompt_transport_failure(
+            app_handle,
+            db_path,
+            batch_job_id,
+            &current_task,
+            &prompt_request,
+            &provider_config,
+            duration_ms,
+            error.to_string(),
+        )?,
     }
 
     Ok(())
+}
+
+fn submit_batch_prompt_sidecar_workflow<R: Runtime>(
+    app_handle: &AppHandle<R>,
+    task: &CreativeTask,
+    batch_job_id: i64,
+    prompt_request: &str,
+    provider_config: &AiProviderConfig,
+) -> AppResult<SidecarWorkflowTaskResult> {
+    let mut sidecar_service = SidecarLifecycleService::new(app_handle.clone());
+    let result = sidecar_service.submit_batch_image_prompt(BatchImagePromptSidecarRequest {
+        task_id: task.id,
+        project_id: task.project_id.clone(),
+        batch_job_id,
+        sequence_no: task.sequence_no,
+        prompt_request: prompt_request.to_string(),
+        provider: SidecarProviderConfig {
+            provider_id: Some(provider_config.display_name.clone()),
+            provider_type: Some(provider_config.provider.clone()),
+            display_name: Some(provider_config.display_name.clone()),
+            base_url: provider_config.base_url.clone(),
+            api_key: provider_config.api_key.clone(),
+            model: provider_config.model.clone(),
+            request_type: "chat".to_string(),
+            timeout_ms: Some(provider_config.timeout_ms),
+        },
+        attempt: task.retry_count + 1,
+        max_retries: task.max_retries,
+        cancel_checkpoint_url: None,
+        cancel_checkpoint_token: None,
+    });
+    let _ = sidecar_service.stop_dev_health_server();
+    result
+}
+
+fn settle_batch_prompt_sidecar_response<R: Runtime>(
+    app_handle: &AppHandle<R>,
+    db_path: &std::path::Path,
+    batch_job_id: i64,
+    task: &CreativeTask,
+    prompt_request: &str,
+    provider_config: &AiProviderConfig,
+    duration_ms: i64,
+    sidecar_response: SidecarWorkflowTaskResult,
+) -> AppResult<()> {
+    if sidecar_response.protocol_version != 1 {
+        return Err(AppError::Process(format!(
+            "unsupported sidecar protocol version: {}",
+            sidecar_response.protocol_version
+        )));
+    }
+    if sidecar_response.task_id != task.id {
+        return Err(AppError::Process(format!(
+            "sidecar task id mismatch: expected {}, got {}",
+            task.id, sidecar_response.task_id
+        )));
+    }
+
+    append_sidecar_task_events(db_path, task.id, &sidecar_response)?;
+
+    if sidecar_response.status == "succeeded"
+        && batch_prompt_cancel_requested(db_path, batch_job_id, task.id)?
+    {
+        let model_run_ids = persist_batch_prompt_sidecar_model_runs(
+            db_path,
+            task,
+            None,
+            prompt_request,
+            &sidecar_response.model_runs,
+        )?;
+        return handle_prompt_cancelled(
+            app_handle,
+            db_path,
+            batch_job_id,
+            task,
+            "prompt task cancelled after sidecar provider call".to_string(),
+            model_run_ids,
+        );
+    }
+
+    if sidecar_response.status == "cancelled" {
+        let model_run_ids = persist_batch_prompt_sidecar_model_runs(
+            db_path,
+            task,
+            None,
+            prompt_request,
+            &sidecar_response.model_runs,
+        )?;
+        return handle_prompt_cancelled(
+            app_handle,
+            db_path,
+            batch_job_id,
+            task,
+            sidecar_response
+                .message
+                .clone()
+                .unwrap_or_else(|| "prompt worker cancelled".to_string()),
+            model_run_ids,
+        );
+    }
+
+    if sidecar_response.status != "succeeded" {
+        let model_run_ids = persist_batch_prompt_sidecar_model_runs(
+            db_path,
+            task,
+            None,
+            prompt_request,
+            &sidecar_response.model_runs,
+        )?;
+        return handle_prompt_failure_with_model_runs(
+            app_handle,
+            db_path,
+            batch_job_id,
+            task,
+            sidecar_response
+                .message
+                .clone()
+                .unwrap_or_else(|| "prompt sidecar workflow failed".to_string()),
+            model_run_ids,
+        );
+    }
+
+    let output =
+        sidecar_response.outputs.first().cloned().ok_or_else(|| {
+            AppError::Process("batch prompt sidecar returned no outputs".to_string())
+        })?;
+    let prompt_text = output
+        .content
+        .clone()
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| {
+            AppError::Process("batch prompt sidecar returned empty prompt".to_string())
+        })?;
+    if output.asset_type != "demo_image_prompt" {
+        return Err(AppError::Process(format!(
+            "unexpected batch prompt asset type: {}",
+            output.asset_type
+        )));
+    }
+
+    let asset = creative_asset_repo::create_asset(
+        db_path,
+        CreateCreativeAssetInput {
+            project_id: task.project_id.clone(),
+            asset_type: output.asset_type,
+            title: output.title,
+            content: Some(prompt_text.clone()),
+            file_path: output.file_path,
+            thumbnail_path: output.thumbnail_path,
+            metadata_json: output
+                .metadata
+                .as_ref()
+                .map(serde_json::to_string)
+                .transpose()
+                .map_err(|error| {
+                    AppError::Config(format!("failed to encode sidecar output metadata: {error}"))
+                })?,
+            status: Some("ready".to_string()),
+        },
+    )?;
+    let model_run_ids = persist_batch_prompt_sidecar_model_runs(
+        db_path,
+        task,
+        Some(asset.id),
+        prompt_request,
+        &sidecar_response.model_runs,
+    )?;
+
+    let updated_task = creative_task_repo::update_task_status(
+        db_path,
+        UpdateCreativeTaskStatusInput {
+            id: task.id,
+            status: "succeeded".to_string(),
+            result_json: Some(
+                json!({
+                    "assetId": asset.id,
+                    "modelRunIds": model_run_ids,
+                    "promptExcerpt": summarize_prompt_text(&prompt_text),
+                    "durationMs": duration_ms,
+                    "sidecarStatus": sidecar_response.status,
+                })
+                .to_string(),
+            ),
+            error_message: None,
+            asset_id: Some(asset.id),
+            retry_count_increment: None,
+        },
+    )?;
+    let _ = creative_task_repo::append_task_event(
+        db_path,
+        CreateTaskEventInput {
+            task_id: task.id,
+            event_type: "prompt_asset_saved".to_string(),
+            message: Some(format!("prompt asset created: {}", asset.id)),
+            payload_json: Some(
+                json!({
+                    "assetId": asset.id,
+                    "modelRunIds": model_run_ids,
+                    "durationMs": duration_ms,
+                    "provider": provider_config.display_name.clone(),
+                })
+                .to_string(),
+            ),
+        },
+    );
+    emit_task_status(
+        app_handle,
+        &updated_task,
+        "creative-task-status-changed",
+        "status changed to succeeded",
+    )?;
+    emit_task_status(
+        app_handle,
+        &updated_task,
+        "creative-task-event",
+        "prompt worker finished successfully",
+    )?;
+    Ok(())
+}
+
+fn append_sidecar_task_events(
+    db_path: &std::path::Path,
+    task_id: i64,
+    sidecar_response: &SidecarWorkflowTaskResult,
+) -> AppResult<()> {
+    for event in &sidecar_response.events {
+        creative_task_repo::append_task_event(
+            db_path,
+            CreateTaskEventInput {
+                task_id,
+                event_type: event.event_type.clone(),
+                message: event.message.clone(),
+                payload_json: event
+                    .payload
+                    .as_ref()
+                    .map(serde_json::to_string)
+                    .transpose()
+                    .map_err(|error| {
+                        AppError::Config(format!(
+                            "failed to encode batch prompt sidecar event payload: {error}"
+                        ))
+                    })?,
+            },
+        )?;
+    }
+    Ok(())
+}
+
+fn batch_prompt_cancel_requested(
+    db_path: &std::path::Path,
+    batch_job_id: i64,
+    task_id: i64,
+) -> AppResult<bool> {
+    let batch = creative_batch_repo::get_batch_job(db_path, batch_job_id)?.ok_or_else(|| {
+        AppError::Database("batch job not found while checking prompt cancellation".to_string())
+    })?;
+    let task = creative_task_repo::get_task(db_path, task_id)?.ok_or_else(|| {
+        AppError::Database("task not found while checking prompt cancellation".to_string())
+    })?;
+    Ok(batch.status == "cancelled" || matches!(task.status.as_str(), "cancelling" | "cancelled"))
+}
+
+fn persist_batch_prompt_sidecar_model_runs(
+    db_path: &std::path::Path,
+    task: &CreativeTask,
+    asset_id: Option<i64>,
+    prompt_request: &str,
+    model_runs: &[SidecarWorkflowModelRun],
+) -> AppResult<Vec<i64>> {
+    let mut model_run_ids = Vec::new();
+    for model_run in model_runs {
+        let persisted = creative_model_run_repo::create_model_run(
+            db_path,
+            CreateModelRunInput {
+                project_id: task.project_id.clone(),
+                task_id: Some(task.id),
+                asset_id,
+                provider_id: model_run.provider_id.clone(),
+                provider_type: model_run.provider_type.clone(),
+                model: model_run.model.clone(),
+                request_type: model_run.request_type.clone(),
+                status: model_run.status.clone(),
+                duration_ms: model_run.duration_ms,
+                prompt_hash: model_run
+                    .prompt_hash
+                    .clone()
+                    .or_else(|| Some(simple_prompt_hash(prompt_request))),
+                prompt_version_id: model_run.prompt_version_id.clone(),
+                input_token_count: model_run.input_token_count,
+                output_token_count: model_run.output_token_count,
+                cost_estimate: model_run.cost_estimate,
+                error_code: model_run.error_code.clone(),
+                error_message: model_run.error_message.clone(),
+                metadata_json: model_run
+                    .metadata
+                    .as_ref()
+                    .map(serde_json::to_string)
+                    .transpose()
+                    .map_err(|error| {
+                        AppError::Config(format!(
+                            "failed to encode batch prompt sidecar model run metadata: {error}"
+                        ))
+                    })?,
+                finished_at: None,
+            },
+        )?;
+        model_run_ids.push(persisted.id);
+    }
+    Ok(model_run_ids)
+}
+
+fn handle_prompt_transport_failure<R: Runtime>(
+    app_handle: &AppHandle<R>,
+    db_path: &std::path::Path,
+    batch_job_id: i64,
+    task: &CreativeTask,
+    prompt_request: &str,
+    provider_config: &AiProviderConfig,
+    duration_ms: i64,
+    error_message: String,
+) -> AppResult<()> {
+    let model_run = creative_model_run_repo::create_model_run(
+        db_path,
+        CreateModelRunInput {
+            project_id: task.project_id.clone(),
+            task_id: Some(task.id),
+            asset_id: None,
+            provider_id: Some(provider_config.display_name.clone()),
+            provider_type: Some(provider_config.provider.clone()),
+            model: Some(provider_config.model.clone()),
+            request_type: "chat".to_string(),
+            status: "failed".to_string(),
+            duration_ms: Some(duration_ms),
+            prompt_hash: Some(simple_prompt_hash(prompt_request)),
+            prompt_version_id: Some(format!("batch:{}:{}", batch_job_id, task.id)),
+            input_token_count: None,
+            output_token_count: None,
+            cost_estimate: None,
+            error_code: Some("sidecar_error".to_string()),
+            error_message: Some(error_message.clone()),
+            metadata_json: Some(json!({ "transportFailure": true }).to_string()),
+            finished_at: None,
+        },
+    )?;
+    handle_prompt_failure_with_model_runs(
+        app_handle,
+        db_path,
+        batch_job_id,
+        task,
+        error_message,
+        vec![model_run.id],
+    )
+}
+
+fn handle_prompt_failure_with_model_runs<R: Runtime>(
+    app_handle: &AppHandle<R>,
+    db_path: &std::path::Path,
+    batch_job_id: i64,
+    task: &CreativeTask,
+    error_message: String,
+    model_run_ids: Vec<i64>,
+) -> AppResult<()> {
+    if current_task_retry_allowed(task) {
+        let retry_task = creative_task_repo::update_task_status(
+            db_path,
+            UpdateCreativeTaskStatusInput {
+                id: task.id,
+                status: "queued".to_string(),
+                result_json: None,
+                error_message: Some(error_message.clone()),
+                asset_id: task.asset_id,
+                retry_count_increment: Some(1),
+            },
+        )?;
+        let _ = creative_task_repo::append_task_event(
+            db_path,
+            CreateTaskEventInput {
+                task_id: task.id,
+                event_type: "prompt_retry_scheduled".to_string(),
+                message: Some("prompt worker scheduled retry".to_string()),
+                payload_json: Some(
+                    json!({
+                        "retryCount": retry_task.retry_count,
+                        "maxRetries": retry_task.max_retries,
+                        "error": error_message,
+                        "modelRunIds": model_run_ids,
+                    })
+                    .to_string(),
+                ),
+            },
+        );
+        emit_task_status(
+            app_handle,
+            &retry_task,
+            "creative-task-status-changed",
+            "status changed to queued",
+        )?;
+        emit_task_status(
+            app_handle,
+            &retry_task,
+            "creative-task-event",
+            "prompt worker scheduled retry",
+        )?;
+        return Ok(());
+    }
+
+    let failed_task = creative_task_repo::update_task_status(
+        db_path,
+        UpdateCreativeTaskStatusInput {
+            id: task.id,
+            status: "failed".to_string(),
+            result_json: Some(
+                json!({
+                    "error": error_message,
+                    "modelRunIds": model_run_ids,
+                })
+                .to_string(),
+            ),
+            error_message: Some(error_message.clone()),
+            asset_id: task.asset_id,
+            retry_count_increment: None,
+        },
+    )?;
+    let _ = creative_task_repo::append_task_event(
+        db_path,
+        CreateTaskEventInput {
+            task_id: task.id,
+            event_type: "prompt_failed".to_string(),
+            message: Some("prompt worker finished with failure".to_string()),
+            payload_json: Some(
+                json!({
+                    "error": error_message,
+                    "modelRunIds": model_run_ids,
+                })
+                .to_string(),
+            ),
+        },
+    );
+    emit_task_status(
+        app_handle,
+        &failed_task,
+        "creative-task-status-changed",
+        "status changed to failed",
+    )?;
+    emit_task_status(
+        app_handle,
+        &failed_task,
+        "creative-task-event",
+        "prompt worker finished with failure",
+    )?;
+    let _ = maybe_auto_pause_batch_after_failure(app_handle, db_path, batch_job_id, &error_message);
+    Ok(())
+}
+
+fn handle_prompt_cancelled<R: Runtime>(
+    app_handle: &AppHandle<R>,
+    db_path: &std::path::Path,
+    batch_job_id: i64,
+    task: &CreativeTask,
+    message: String,
+    model_run_ids: Vec<i64>,
+) -> AppResult<()> {
+    let cancelled_task = creative_task_repo::update_task_status(
+        db_path,
+        UpdateCreativeTaskStatusInput {
+            id: task.id,
+            status: "cancelled".to_string(),
+            result_json: Some(
+                json!({
+                    "batchJobId": batch_job_id,
+                    "modelRunIds": model_run_ids,
+                })
+                .to_string(),
+            ),
+            error_message: Some(message.clone()),
+            asset_id: task.asset_id,
+            retry_count_increment: None,
+        },
+    )?;
+    let _ = creative_task_repo::append_task_event(
+        db_path,
+        CreateTaskEventInput {
+            task_id: task.id,
+            event_type: "prompt_cancelled".to_string(),
+            message: Some(message.clone()),
+            payload_json: Some(
+                json!({
+                    "batchJobId": batch_job_id,
+                    "modelRunIds": model_run_ids,
+                })
+                .to_string(),
+            ),
+        },
+    );
+    emit_task_status(
+        app_handle,
+        &cancelled_task,
+        "creative-task-status-changed",
+        "status changed to cancelled",
+    )?;
+    emit_task_status(app_handle, &cancelled_task, "creative-task-event", &message)?;
+    Ok(())
+}
+
+fn current_task_retry_allowed(task: &CreativeTask) -> bool {
+    task.retry_count < task.max_retries
 }
 
 fn run_generate_task_worker<R: Runtime>(
@@ -1788,10 +2070,10 @@ fn current_retry_count(task: &CreativeTask) -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::infra::creative_db_schema::init_schema;
     use crate::infra::creative_types::{
         CreativeAsset, ListCreativeAssetsFilter, ListModelRunsFilter, UpdateCreativeBatchJobInput,
     };
-    use crate::infra::creative_db_schema::init_schema;
     use crate::infra::{
         creative_asset_repo, creative_batch_repo, creative_model_run_repo, creative_task_repo,
     };
@@ -2294,8 +2576,8 @@ mod tests {
         assert_eq!(model_runs[0].request_type, "chat");
         assert_eq!(model_runs[0].status, "succeeded");
 
-        let events = creative_task_repo::list_task_events(&db_path, task.id)
-            .expect("events should list");
+        let events =
+            creative_task_repo::list_task_events(&db_path, task.id).expect("events should list");
         assert!(
             events
                 .iter()
@@ -2422,8 +2704,8 @@ mod tests {
         assert_eq!(model_runs[0].request_type, "image");
         assert_eq!(model_runs[0].status, "succeeded");
 
-        let events = creative_task_repo::list_task_events(&db_path, task.id)
-            .expect("events should list");
+        let events =
+            creative_task_repo::list_task_events(&db_path, task.id).expect("events should list");
         assert!(
             events
                 .iter()
@@ -2436,4 +2718,3 @@ mod tests {
         let _ = std::fs::remove_dir_all(root);
     }
 }
-

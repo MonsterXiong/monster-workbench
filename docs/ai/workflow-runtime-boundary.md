@@ -62,12 +62,12 @@ Provider Gateway -> 管业务状态
 
 截至 2026-06-11，当前实现仍是过渡态：
 
-- `src-tauri/src/services/sidecar_lifecycle_service.rs` 负责启动 `creative_health_server.py`、分配 localhost 端口、注入 runtime token、执行 `/health` 检查，并通过 `/tasks` 提交 `generate_image_prompt` stub。
-- `src-tauri/sidecars/python/creative_health_server.py` 当前只有最小 HTTP stub：`GET /health`、`GET /events`、`POST /tasks`。其中 `generate_image_prompt` 已按本协议返回 `outputs / modelRuns / events / retry` 标准结果，其他任务仍只返回 accepted stub。
+- `src-tauri/src/services/sidecar_lifecycle_service.rs` 负责启动 `creative_health_server.py`、分配 localhost 端口、注入 runtime token、执行 `/health` 检查，并通过 `/tasks` 提交 `generate_image_prompt` 与 `demo.image.prompt` workflow。
+- `src-tauri/sidecars/python/creative_health_server.py` 当前仍是最小 HTTP runtime：`GET /health`、`GET /events`、`POST /tasks`。其中 `generate_image_prompt` 已按本协议返回 `outputs / modelRuns / events / retry` 标准结果，`demo.image.prompt` 已能在 Python 侧调用 OpenAI-compatible `/chat/completions` 并返回标准 workflow result。
 - `src-tauri/src/services/worker_queue_service.rs` 已经有 SQLite-backed queue 的基础控制面：claim queued task、request cancel、cancel checkpoint、startup recovery。
-- `src-tauri/src/services/batch_job_service.rs` 当前仍在 Rust 内运行 `demo.image.mock / demo.image.prompt / demo.image.generate` worker，并且 prompt/image worker 仍直接调用 `AiProviderService::test_provider`。
+- `src-tauri/src/services/batch_job_service.rs` 当前仍在 Rust 内运行 `demo.image.mock / demo.image.prompt / demo.image.generate` worker。`demo.image.prompt` worker 已改为提交 sidecar workflow，Rust 负责结果校验、asset/model_runs/task_events 写入；`demo.image.generate` worker 仍直接调用 `AiProviderService::test_provider`。
 
-因此下一阶段不是直接让 Python 任意读写主库，而是在已落地的 `generate_image_prompt` 最小协议、非成功状态映射和 cancel checkpoint 基础上，继续推进 batch worker 迁移。
+因此下一阶段不是直接让 Python 任意读写主库，而是在已落地的 `generate_image_prompt` 最小协议、非成功状态映射、cancel checkpoint 与 batch prompt sidecar 迁移基础上，继续推进 batch image worker 迁移。
 
 ## 7. 推荐迁移模式：Rust 主动提交，Python 执行业务
 
@@ -238,8 +238,8 @@ Python step boundary
 `BatchJobService` 的下一步不应继续增加新的生产 worker 分支。推荐迁移顺序：
 
 1. 保留 `demo.image.mock` 作为 Rust 本地 smoke worker。
-2. 将 `demo.image.prompt` 的 provider 调用从 Rust worker 迁到 Python workflow；Rust 仍负责 claim、running、结果落库和 batch progress event。
-3. 将 `demo.image.generate` 的 provider 调用和图片处理迁到 Python workflow；Rust 负责校验输出文件路径、创建 asset、写 `model_runs`。
+2. `demo.image.prompt` 的 provider 调用已从 Rust worker 迁到 Python workflow；Rust 仍负责 claim、running、结果落库和 batch progress event。
+3. 下一步将 `demo.image.generate` 的 provider 调用和图片处理迁到 Python workflow；Rust 负责校验输出文件路径、创建 asset、写 `model_runs`。
 4. 新增正式 batch 类型时不要继续使用 `demo.image.*` 命名；应使用业务语义，例如 `image.prompt.batch`、`image.generate.batch` 或后续领域命名。
 5. 只有在上述协议稳定后，再讨论 supervisor 是否从 Rust 迁到 Python worker pool。
 

@@ -50,6 +50,34 @@ pub struct GenerateImagePromptSidecarRequest {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct SidecarProviderConfig {
+    pub provider_id: Option<String>,
+    pub provider_type: Option<String>,
+    pub display_name: Option<String>,
+    pub base_url: String,
+    pub api_key: String,
+    pub model: String,
+    pub request_type: String,
+    pub timeout_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchImagePromptSidecarRequest {
+    pub task_id: i64,
+    pub project_id: Option<String>,
+    pub batch_job_id: i64,
+    pub sequence_no: Option<i64>,
+    pub prompt_request: String,
+    pub provider: SidecarProviderConfig,
+    pub attempt: i64,
+    pub max_retries: i64,
+    pub cancel_checkpoint_url: Option<String>,
+    pub cancel_checkpoint_token: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SidecarWorkflowOutput {
     pub asset_type: String,
     pub title: Option<String>,
@@ -259,6 +287,62 @@ impl<R: Runtime> SidecarLifecycleService<R> {
                 "parentTaskId": Value::Null,
                 "batchJobId": Value::Null,
                 "goalId": Value::Null,
+            },
+        });
+        let response = post_json(port, &token, "/tasks", &payload)?;
+        serde_json::from_str::<SidecarWorkflowTaskResult>(&response).map_err(|error| {
+            AppError::Process(format!("failed to parse sidecar response: {error}"))
+        })
+    }
+
+    pub fn submit_batch_image_prompt(
+        &mut self,
+        request: BatchImagePromptSidecarRequest,
+    ) -> AppResult<SidecarWorkflowTaskResult> {
+        self.ensure_dev_server()?;
+        let port = self
+            .snapshot
+            .port
+            .ok_or_else(|| AppError::Process("sidecar port is missing".to_string()))?;
+        let token = self
+            .runtime_token
+            .clone()
+            .ok_or_else(|| AppError::Process("sidecar runtime token is missing".to_string()))?;
+
+        let payload = json!({
+            "protocolVersion": 1,
+            "taskId": request.task_id,
+            "projectId": request.project_id,
+            "taskType": "demo.image.prompt",
+            "workflowType": "batch_image_prompt",
+            "attempt": request.attempt,
+            "maxRetries": request.max_retries,
+            "cancelToken": format!("task-{}", request.task_id),
+            "budget": Value::Null,
+            "provider": {
+                "providerId": request.provider.provider_id,
+                "providerType": request.provider.provider_type,
+                "displayName": request.provider.display_name,
+                "baseUrl": request.provider.base_url,
+                "apiKey": request.provider.api_key,
+                "model": request.provider.model,
+                "requestType": request.provider.request_type,
+                "timeoutMs": request.provider.timeout_ms,
+            },
+            "cancelCheckpoint": request
+                .cancel_checkpoint_url
+                .zip(request.cancel_checkpoint_token)
+                .map(|(url, token)| json!({ "url": url, "token": token }))
+                .unwrap_or(Value::Null),
+            "input": {
+                "promptRequest": request.prompt_request,
+            },
+            "context": {
+                "sourceAssetIds": [],
+                "parentTaskId": Value::Null,
+                "batchJobId": request.batch_job_id,
+                "goalId": Value::Null,
+                "sequenceNo": request.sequence_no,
             },
         });
         let response = post_json(port, &token, "/tasks", &payload)?;

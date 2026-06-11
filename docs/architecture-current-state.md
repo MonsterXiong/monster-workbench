@@ -1523,3 +1523,15 @@ Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `
   - `cargo test --manifest-path .\\src-tauri\\Cargo.toml generate_image_prompt_workflow_persists_task_asset_and_events -- --nocapture`
   - `cargo check --manifest-path .\\src-tauri\\Cargo.toml`
 - 下一步剩余重点：将 batch prompt worker 的 provider 调用迁到 sidecar workflow，减少 `BatchJobService` 内的生产型 provider 编排。
+
+## 2026-06-11 补充：batch prompt worker 迁到 sidecar workflow
+
+- `src-tauri/src/services/batch_job_service.rs` 的 `demo.image.prompt` worker 已不再直接调用 `AiProviderService::test_provider`；Rust 仍负责 batch supervisor、claim、running、retry/cancel/failure 映射、asset/model_runs/task_events 可信落库与事件 emit。
+- `src-tauri/src/services/sidecar_lifecycle_service.rs` 新增 `submit_batch_image_prompt`，按 `protocolVersion / taskId / workflowType / provider / input / context` 把 batch prompt task 提交给 Python sidecar。
+- `src-tauri/sidecars/python/creative_health_server.py` 新增 `demo.image.prompt` workflow：Python 侧调用 OpenAI-compatible `/chat/completions`，返回标准 `outputs / modelRuns / events / retry` workflow result。
+- 这一步完成了“先让 Rust 从 prompt provider 执行中退出，再讨论 supervisor 是否迁走”的第一段迁移；`demo.image.mock` 仍是 Rust smoke worker，`demo.image.generate` 仍是下一步待迁移的 provider/image worker。
+- 本轮验证通过：
+  - `python -m py_compile src-tauri\\sidecars\\python\\creative_health_server.py`
+  - `cargo test --manifest-path .\\src-tauri\\Cargo.toml prompt_batch_worker_persists_prompt_asset_and_model_run -- --nocapture --test-threads=1`
+  - `cargo check --manifest-path .\\src-tauri\\Cargo.toml`
+- 下一步剩余重点：将 `demo.image.generate` 的 provider 调用与图片处理迁到 sidecar workflow，并继续保持 Rust 对文件路径、asset、model_runs 和 task_events 的可信写入。
