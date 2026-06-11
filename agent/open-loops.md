@@ -18,6 +18,7 @@
 - [ ] 沉淀 AI Provider 测试链路的最小回归步骤，形成可复用验收脚本或清单。
 - [ ] 确认图片落盘目录、asset URL 映射与 `creative_projects` 归档策略。
 - [ ] 在并行 worktree 改动持续存在的情况下，复盘新增 service / store / doc 的覆盖风险，避免后续提交互相踩踏。
+- [ ] 复核当前剩余未提交基础组件改动：`components.d.ts`、`BaseProgress.vue`、`BaseSearchInput.vue`、`BaseSelect.vue`、`BaseSkeletonCard.vue`、`BaseSlider.vue`，确认是否作为独立 UI 基础组件批次提交；`.playwright-cli/` 临时产物需清理或加入忽略策略后再继续。
 
 ## 文档维护待办
 
