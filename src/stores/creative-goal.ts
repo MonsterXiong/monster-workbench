@@ -8,7 +8,7 @@ import {
   type CreativeGoalRole,
   type CreativeGoalStatusSnapshot,
 } from "../services/creative-goal.service";
-import type { CreativeTask } from "../services/task.service";
+import type { CreativeTask } from "../services/creative-types";
 
 export type {
   CreativeGoal,

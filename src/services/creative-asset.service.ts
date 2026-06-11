@@ -6,7 +6,7 @@ import type {
   CreativeAssetLink,
   ListCreativeAssetLinksFilter,
   ListCreativeAssetsFilter,
-} from "./task.service";
+} from "./creative-types";
 
 export type {
   CreateCreativeAssetInput,
@@ -15,7 +15,7 @@ export type {
   CreativeAssetLink,
   ListCreativeAssetLinksFilter,
   ListCreativeAssetsFilter,
-} from "./task.service";
+} from "./creative-types";
 
 export const creativeAssetService = {
   createCreativeAsset: (input: CreateCreativeAssetInput) =>

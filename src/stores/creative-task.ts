@@ -10,10 +10,10 @@ import {
   type ReviewAssetQualityStubResult,
   type ReviewResultPayload,
   type TaskEvent,
-} from "../services/task.service";
+} from "../services/creative-types";
 import type { TauriUnlistenFn } from "../services/native-event.service";
 
-export type { CreativeTask } from "../services/task.service";
+export type { CreativeTask } from "../services/creative-types";
 
 export const useCreativeTaskStore = defineStore("creative-task", () => {
   let unlistenCreativeTaskCreated: TauriUnlistenFn | null = null;

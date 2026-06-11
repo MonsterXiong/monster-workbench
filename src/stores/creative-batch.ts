@@ -10,7 +10,7 @@ import {
   type CreativeTask,
 } from "../services/creative-batch.service";
 
-export type { CreativeBatchJob } from "../services/task.service";
+export type { CreativeBatchJob } from "../services/creative-types";
 
 export const useCreativeBatchStore = defineStore("creative-batch", () => {
   let unlistenBatchJobCreated: TauriUnlistenFn | null = null;

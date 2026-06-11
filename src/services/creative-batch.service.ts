@@ -11,7 +11,7 @@ import type {
   CreativeBatchJobSnapshot,
   CreativeTask,
   ListCreativeBatchJobsFilter,
-} from "./task.service";
+} from "./creative-types";
 
 export type {
   CreateBatchImageJobInput,
@@ -20,7 +20,7 @@ export type {
   CreativeBatchJobSnapshot,
   CreativeTask,
   ListCreativeBatchJobsFilter,
-} from "./task.service";
+} from "./creative-types";
 
 function listenBrowserEvent<T>(
   eventName: string,

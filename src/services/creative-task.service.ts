@@ -16,7 +16,7 @@ import type {
   ReviewAssetQualityStubResult,
   UpdateCreativeTaskStatusInput,
   TaskEvent,
-} from "./task.service";
+} from "./creative-types";
 
 export type {
   CreateCreativeTaskInput,
@@ -30,7 +30,7 @@ export type {
   ReviewAssetQualityStubResult,
   TaskEvent,
   UpdateCreativeTaskStatusInput,
-} from "./task.service";
+} from "./creative-types";
 
 function listenBrowserEvent<T>(
   eventName: string,

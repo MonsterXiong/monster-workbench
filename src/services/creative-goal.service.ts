@@ -6,7 +6,7 @@ import type {
   CreativeGoalStatusSnapshot,
   GoalMultiAgentStubResult,
   ListCreativeGoalsFilter,
-} from "./task.service";
+} from "./creative-types";
 
 export type {
   CreateCreativeGoalInput,
@@ -16,7 +16,7 @@ export type {
   CreativeGoalStatusSnapshot,
   GoalMultiAgentStubResult,
   ListCreativeGoalsFilter,
-} from "./task.service";
+} from "./creative-types";
 
 export const creativeGoalService = {
   createCreativeGoal: (input: CreateCreativeGoalInput) =>
