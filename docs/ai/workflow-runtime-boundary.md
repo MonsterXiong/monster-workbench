@@ -57,3 +57,198 @@ Python -> 任意改主库
 Rust -> 写 prompt 业务
 Provider Gateway -> 管业务状态
 ```
+
+## 6. 当前代码事实
+
+截至 2026-06-11，当前实现仍是过渡态：
+
+- `src-tauri/src/services/sidecar_lifecycle_service.rs` 负责启动 `creative_health_server.py`、分配 localhost 端口、注入 runtime token、执行 `/health` 检查，并通过 `/tasks` 提交 `generate_image_prompt` stub。
+- `src-tauri/sidecars/python/creative_health_server.py` 当前只有最小 HTTP stub：`GET /health`、`GET /events`、`POST /tasks`。其中 `generate_image_prompt` 会同步返回一个 prompt asset payload，其他任务只返回 accepted stub。
+- `src-tauri/src/services/worker_queue_service.rs` 已经有 SQLite-backed queue 的基础控制面：claim queued task、request cancel、cancel checkpoint、startup recovery。
+- `src-tauri/src/services/batch_job_service.rs` 当前仍在 Rust 内运行 `demo.image.mock / demo.image.prompt / demo.image.generate` worker，并且 prompt/image worker 仍直接调用 `AiProviderService::test_provider`。
+
+因此下一阶段不是直接让 Python 任意读写主库，而是先把 Python execution protocol 固化，再迁移 worker 执行业务。
+
+## 7. 推荐迁移模式：Rust 主动提交，Python 执行业务
+
+短期采用以下模式：
+
+```text
+Vue
+  -> creative-batch.service.ts / creative-task.service.ts
+  -> Rust Command
+  -> Rust Service creates or claims task
+  -> Rust updates task to running and emits event
+  -> Rust SidecarLifecycleService POST /tasks
+  -> Python executes workflow/provider/review/image logic
+  -> Python returns structured result
+  -> Rust validates result and writes task/assets/model_runs/events
+  -> Rust emits task/batch events
+```
+
+这个模式保留 Rust 控制面，同时让 Python 承担真实 workflow 执行。它比“Python 直接拉 SQLite 队列并写库”更适合当前阶段，因为现有权限、路径、event bridge、repo 写入和 audit 入口都在 Rust。
+
+中期才评估 Python 拉队列模式：
+
+```text
+Python worker -> Rust IPC/localhost control API -> claim/checkpoint/complete
+```
+
+不建议让 Python 直接任意写 `monster_workbench.db`。如果未来确实需要 Python 写库，也必须先定义受限仓储协议、迁移策略、锁策略和审计边界。
+
+## 8. Sidecar Task Request 草案
+
+Rust 提交给 Python 的请求建议统一为：
+
+```json
+{
+  "protocolVersion": 1,
+  "taskId": 123,
+  "projectId": "project-a",
+  "taskType": "generate_image_prompt",
+  "workflowType": "image_prompt",
+  "attempt": 1,
+  "maxRetries": 2,
+  "cancelToken": "task-123",
+  "budget": {
+    "maxDurationSeconds": 120,
+    "maxImages": 1,
+    "maxTokens": 4000,
+    "maxCostEstimate": 0.2
+  },
+  "provider": {
+    "providerId": "local-test",
+    "providerType": "openai-compatible",
+    "baseUrl": "http://127.0.0.1:3000/v1",
+    "model": "gpt-4.1-mini",
+    "requestType": "chat"
+  },
+  "input": {
+    "brief": "visual direction",
+    "style": "cinematic",
+    "mood": "focused"
+  },
+  "context": {
+    "sourceAssetIds": [1, 2],
+    "parentTaskId": null,
+    "batchJobId": null,
+    "goalId": null
+  }
+}
+```
+
+约束：
+
+- `taskId` 必须来自 Rust 已落库的 `creative_tasks`。
+- `provider.apiKey` 不应落入 task payload、task_events 或普通日志；密钥由 Rust 按需注入 Python 进程请求，并在日志脱敏。
+- `budget` 来自 Goal / Batch / Workflow 配置，由 Rust 负责最终熔断。
+- `context` 只传 ID 和必要摘要；大图、大文本、完整资产内容按需通过 Rust 授权路径或后续受限读取协议获取。
+
+## 9. Sidecar Task Result 草案
+
+Python 返回给 Rust 的结果建议统一为：
+
+```json
+{
+  "protocolVersion": 1,
+  "taskId": 123,
+  "status": "succeeded",
+  "message": "workflow completed",
+  "outputs": [
+    {
+      "assetType": "image_prompt",
+      "title": "Generated image prompt",
+      "content": "prompt text",
+      "filePath": null,
+      "thumbnailPath": null,
+      "metadata": {
+        "workflowType": "image_prompt",
+        "source": "python-workflow"
+      }
+    }
+  ],
+  "modelRuns": [
+    {
+      "providerId": "local-test",
+      "providerType": "openai-compatible",
+      "model": "gpt-4.1-mini",
+      "requestType": "chat",
+      "status": "succeeded",
+      "durationMs": 1200,
+      "promptHash": "hash",
+      "promptVersionId": "workflow:123:1",
+      "inputTokenCount": 100,
+      "outputTokenCount": 200,
+      "costEstimate": 0.01,
+      "errorCode": null,
+      "errorMessage": null,
+      "metadata": {}
+    }
+  ],
+  "events": [
+    {
+      "eventType": "workflow_step_completed",
+      "message": "prompt built",
+      "payload": {}
+    }
+  ],
+  "retry": {
+    "shouldRetry": false,
+    "reason": null
+  }
+}
+```
+
+Rust 收到结果后必须：
+
+- 校验 `taskId` 与当前 running task 一致。
+- 校验 `status` 只允许进入 `succeeded`、`failed`、`blocked`、`cancelled` 或 `retrying` 的受控分支。
+- 使用 repo 写入 `assets`、`model_runs`、`task_events` 和最终 `creative_tasks` 状态。
+- 事件 payload 只写摘要、ID、状态和小型 metadata；大对象只写 file path / thumbnail path / asset id。
+- 不信任 Python 返回的绝对路径；涉及文件路径时必须经过 Rust 授权目录或复制/校验流程。
+
+## 10. 取消与 Checkpoint
+
+取消入口仍由 Rust 暴露：
+
+```text
+Vue -> Rust request_cancel -> task status: running -> cancelling
+```
+
+Python 执行长任务时必须支持 checkpoint：
+
+```text
+Python step boundary
+  -> Rust cancel checkpoint API
+  -> if cancelling/cancelled: stop provider calls or stop next step
+  -> return status cancelled
+```
+
+当前 `WorkerQueueService::check_cancel_checkpoint(task_id)` 已具备 Rust 侧查询能力。正式协议需要把它暴露给 Python sidecar，而不是让 Python 直接查询 SQLite。
+
+最低要求：
+
+- 每次 provider 调用前检查取消。
+- 每个长循环或多图片生成步骤之间检查取消。
+- 已进入不可中断 provider 请求时，完成当前请求后必须再次检查取消，再决定是否落库。
+- 取消后的部分输出不得覆盖源资产；如需保留，必须作为 draft / partial asset 并标记来源。
+
+## 11. 批量任务迁移边界
+
+`BatchJobService` 的下一步不应继续增加新的生产 worker 分支。推荐迁移顺序：
+
+1. 保留 `demo.image.mock` 作为 Rust 本地 smoke worker。
+2. 将 `demo.image.prompt` 的 provider 调用从 Rust worker 迁到 Python workflow；Rust 仍负责 claim、running、结果落库和 batch progress event。
+3. 将 `demo.image.generate` 的 provider 调用和图片处理迁到 Python workflow；Rust 负责校验输出文件路径、创建 asset、写 `model_runs`。
+4. 新增正式 batch 类型时不要继续使用 `demo.image.*` 命名；应使用业务语义，例如 `image.prompt.batch`、`image.generate.batch` 或后续领域命名。
+5. 只有在上述协议稳定后，再讨论 supervisor 是否从 Rust 迁到 Python worker pool。
+
+## 12. 不变量
+
+- Vue 永远不知道 Python 端口和 token。
+- Python 不拥有 Tauri capability，也不绕过 Rust 访问用户文件。
+- Provider gateway 不保存业务状态。
+- 所有 AI 调用必须形成 `model_runs` 审计记录。
+- 资产生成不覆盖源资产，review / revision 通过关系或新资产表达。
+- task status 与 task_events 必须由 Rust 可信写入或通过 Rust 受控 API 写入。
+- 正式 workflow 不复用 `AiProviderService::test_provider` 作为生产执行语义；它可以继续作为 provider 测试链路存在。
