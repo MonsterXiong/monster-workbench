@@ -182,7 +182,7 @@ sequenceDiagram
 当前值得注意的页面：
 
 - `views/creative/CreativePage.vue` 当前已经是三栏工作台壳层，装配 `CreativeAssetSidebar`、`CreativeWorkspace`、`CreativeAgentMonitor`。
-- `CreativeWorkflowDemo.vue` 当前主要位于中间工作区内部，更准确的定位是“项目中心 orchestration shell”：承载 prompt workflow、review stub、domain assets、Goal fan-out、batch mock/prompt/real-image、项目历史等多个业务域；左右栏目前仍偏产品壳层/占位 UI，而不是完全接通的正式项目域与 Agent 监控域。
+- `CreativeWorkflowDemo.vue` 当前主要位于中间工作区内部，更准确的定位是“项目中心 orchestration shell”：承载 prompt workflow、review stub、domain assets、Goal fan-out、batch mock/prompt/real-image、项目历史等多个业务域；左右栏已首轮接入当前项目、资产分类计数、任务队列和执行活动，但仍属于轻量项目/监控壳层，不是完整资产库或正式 Agent 控制台。
 - `views/ai/AiPage.vue` 是 AI 工作台壳层，按 tab 组合 `AiProviderPanel`、`AiChatPanel`、`AiImagePanel`、`AiPromptPanel`、`AiFeaturePanel`。
 
 ### 3.3 组件层
@@ -211,7 +211,7 @@ Store 是当前前端业务编排层。核心 store 如下：
 | `tools` | 工具箱各工具状态与系统工具调用 | `tools.service` |
 | `ai` | AI façade，协调 provider/session/queue/image/prompt | `ai.service`、`config.service`、`system.service` |
 | `background-task` | 全局后台任务进度 | `background-task.service` |
-| `creative-project` | 创作项目索引、种子、历史聚合 | `creative-project.service` |
+| `creative-project` | 当前项目、项目索引、种子、历史聚合 | `creative-project.service` |
 | `creative-task` | prompt/review workflow 与任务事件 | `creative-task.service` |
 | `creative-asset` | domain asset 草稿、关系与运行态 | `creative-asset.service` |
 | `creative-goal` | goal 状态、fan-out、停止 | `creative-goal.service` |
@@ -1000,9 +1000,9 @@ background-task.store.ts
 
 当前更真实的剩余压力点不是 store 命名边界，而是：
 
-- `/creative` 页面编排壳仍然偏大。
+- `/creative` 页面编排壳仍负责三栏共享状态与工作区装配。
 - creative store 之间仍存在跨域编排。
-- workflow / batch / history 三条视图流还可以继续解耦。
+- 左右栏已从静态占位进入真实状态接线，但仍需继续决定正式资产库 / Agent 监控台的产品深度。
 
 ### 10.2 AI store 主拆分已完成，剩余压力在 façade 协调层
 
@@ -1148,7 +1148,7 @@ Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `
 
 建议：
 
-1. 继续收敛 `CreativeWorkflowDemo.vue`，明确三栏工作台中“正式业务核心”和“产品壳层/验证壳层”的边界。
+1. 继续收敛 `/creative` 三栏工作台：中间 `CreativeWorkflowDemo.vue` 已接近 orchestration shell，左右栏已接入真实项目/资产/任务活动，后续重点是确认正式资产库与 Agent 监控台的产品深度。
 2. 继续收敛 `src/stores/ai.ts` façade，避免新的 session / queue / image runtime 逻辑重新回流到单一入口。
 3. 继续收敛 `TaskService` 与 `BatchJobService` 的 orchestration 边界，尽量让 asset CRUD、goal CRUD、batch snapshot 等稳定职责停留在对应 repo/service。
 4. 在现有 `schema_migrations` 基础上继续补齐旧库兼容回归、备份策略与更细粒度 migration 约束。
@@ -1367,6 +1367,14 @@ pm run check:architecture 均通过。
 - 当前 goal 分区中的目标表单、goal 状态卡、role timeline 与 fan-out task timeline 都已通过 props / emits 与主页面解耦。
 - 叠加此前的 project list / history / prompt / assets / batch 拆分后，CreativeWorkflowDemo.vue 当前已基本收敛为“项目中心壳层 + workspace tab 装配 + 状态/动作编排”的 orchestration shell。
 - 本轮验证通过：npm run typecheck、npm run check:architecture。
+
+## 2026-06-11 补充：/creative 三栏壳层首轮接线
+
+- `src/stores/creative-project.ts` 已新增 `activeCreativeProjectId`，当前项目不再只存在于 `CreativeWorkflowDemo.vue` 的本地 ref。
+- `CreativeAssetSidebar.vue` 已接入真实 `creative-project` 索引状态：项目列表来自当前项目实体与任务/资产/Goal/Batch 聚合，资产分类和标签计数来自当前项目资产。
+- `CreativeAgentMonitor.vue` 已接入真实任务与事件状态：队列来自当前项目历史任务和 batch paged tasks，日志来自 prompt/review/batch activity。
+- `CreativeTaskForm.vue` 已改为使用当前 active project 创建 Goal 和 Batch，不再硬编码写入 `creative-main-project`。
+- 本轮验证通过：`npm run verify`。
 
 ## 2026-06-11 补充：creative project Rust 后端首轮去集中化
 

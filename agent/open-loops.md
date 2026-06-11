@@ -7,7 +7,7 @@
 - [ ] 基于 `docs/architecture-current-state.md` 和实际代码，确认 post-goal architecture hardening 的拆分顺序与验收边界。
 - [ ] 继续收口 AI 域：评估 `src/stores/ai.ts` 剩余 facade / orchestration 是否继续下沉到独立 store、runtime 或 service。
 - [ ] 继续收口 Creative 前端：评估 `src/views/creative/components/CreativeWorkflowDemo.vue` 是否进一步收敛为 orchestration shell，并继续拆分正式工作台。
-- [ ] 评估 `/creative` 当前三栏壳层的真实定位：`CreativeAssetSidebar.vue` 与 `CreativeAgentMonitor.vue` 目前仍偏静态占位，需决定是接成正式项目/队列视图，还是回收到验证壳层。
+- [ ] 继续复核 `/creative` 三栏壳层：左右栏已首轮接入真实项目/资产/任务活动，后续需在真实窗口确认信息密度，并决定是否扩展成正式资产库与 Agent 监控台。
 - [ ] 继续收口 Creative service / backend：评估 `src/services/task.service.ts` 与 Rust `TaskService` 是否继续按领域缩窄。
 - [ ] 评估前后端分域对齐：前端已拆出 `creative-task / creative-asset / creative-goal / creative-batch / creative-project` service/store，但 Rust 侧 asset CRUD 与 workflow 仍主要挂在 `TaskService + commands/creative_task.rs` 下。
 - [ ] 完成 `creative_db` 后续治理：补正式 migration、旧库兼容回归，以及 `creative_projects`、资产版本、来源建模。
@@ -21,7 +21,7 @@
 
 ## 文档维护待办
 
-- [ ] 以代码事实为准继续同步 `docs/architecture-current-state.md`，重点继续修正剩余的 `/creative` 页面壳层边界、AI façade 最新职责，以及 `creative_db_tests.rs` 下沉后的 repo/test 结构。
+- [ ] 以代码事实为准继续同步 `docs/architecture-current-state.md`，重点继续修正剩余的 AI façade 最新职责、`creative_db_tests.rs` 下沉后的 repo/test 结构，以及 `/creative` 三栏壳层的后续产品化边界。
 - [ ] 基于当前 `/creative` 三栏工作台的实际代码边界，继续评审“正式业务核心”和“原型/展示壳层”的分界，决定后续是否拆出正式工作台页面。
 - [ ] 基于本轮 batch repo 化进展，继续评估 Rust `src-tauri/src/services/batch_job_service.rs` 的剩余 orchestration 边界，明确哪些 supervisor / worker / provider 流程继续留在 Rust，哪些应为后续 Python runtime 正式化预留出口。
 - [ ] 评估 `src-tauri/src/infra/creative_db_tests.rs` 与各 creative repo 的下一轮边界：当前 `CreativeDbInfra` 已移除，shared types 已迁出到 `creative_types.rs`，测试入口也已直接化；下一步需要决定是继续把测试按领域拆散，还是保留当前集中回归入口。
@@ -32,4 +32,3 @@
 
 - [ ] 已完成 Goal 00-13 的历史收口不再回填到本文件。
 - [ ] 本文件只记录仍未闭环的问题；完成后及时删除，或迁入对应项目文档。
-
