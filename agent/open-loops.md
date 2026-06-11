@@ -8,10 +8,10 @@
 - [ ] 继续收口 AI 域：评估 `src/stores/ai.ts` 剩余 facade / orchestration 是否继续下沉到独立 store、runtime 或 service。
 - [ ] 继续收口 Creative 前端：评估 `src/views/creative/components/CreativeWorkflowDemo.vue` 是否进一步收敛为 orchestration shell，并继续拆分正式工作台。
 - [ ] 继续复核 `/creative` 三栏壳层：左右栏已首轮接入真实项目/资产/任务活动，后续需在真实窗口确认信息密度，并决定是否扩展成正式资产库与 Agent 监控台。
-- [ ] 继续收口 Creative service / backend：前端 `task.service.ts` 已只剩后台任务兼容入口，下一步重点评估 Rust `TaskService` 是否继续按领域缩窄。
-- [ ] 评估前后端分域对齐：前端已拆出 `creative-task / creative-asset / creative-goal / creative-batch / creative-project` service/store，但 Rust 侧 asset CRUD 与 workflow 仍主要挂在 `TaskService + commands/creative_task.rs` 下。
+- [ ] 继续收口 Creative service / backend：Rust `TaskService` 二次评估结论是短期可保留 task/asset/event 可信入口，先冻结 `run_review_asset_quality_stub` 的业务扩展，正式 review/revision 迁入 Python workflow runtime。
+- [ ] 评估前后端分域对齐：前端已拆出 `creative-task / creative-asset / creative-goal / creative-batch / creative-project` service/store；Rust 侧 asset CRUD 暂不为拆文件名而拆，后续等资产版本、来源建模稳定后再决定是否独立 `AssetService`。
 - [ ] 完成 `creative_db` 后续治理：补正式 migration、旧库兼容回归，以及 `creative_projects`、资产版本、来源建模。
-- [ ] 继续推进 Python workflow runtime：`generate_image_prompt`、`demo.image.prompt` 与 `demo.image.generate` 已落地 task request/result、model_runs 审计、失败/取消/重试映射、cancel checkpoint 与基础 budget/timeout 协议；下一步重点是 sidecar lifecycle 复用和正式 workflow 类型命名。
+- [ ] 继续推进 Python workflow runtime：`generate_image_prompt`、`demo.image.prompt` 与 `demo.image.generate` 已落地 task request/result、model_runs 审计、失败/取消/重试映射、cancel checkpoint 与基础 budget/timeout 协议；下一步按顺序做 sidecar lifecycle 复用、正式 workflow 类型命名，并避免在 `batch_job_service.rs` 新增生产 worker 分支。
 
 ## 回归与验收待办
 

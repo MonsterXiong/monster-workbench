@@ -1481,6 +1481,26 @@ Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `
 - 当前 worker 使用 `std::thread::spawn` 直接派发，适合本地 demo 和短任务验证；正式长任务需要更明确的 lifecycle、预算、kill switch、恢复和事件节流策略。
 - `TaskService` 下仍挂着 asset CRUD 与 workflow stub，Rust 侧命名还没有完全和前端 `creative-task / creative-asset / creative-batch` 对齐；但当前更高风险点仍是 batch worker 业务执行，而不是 asset CRUD 所在文件名。
 
+二次核对后的更精确边界如下：
+
+| 区域 | 当前代码事实 | 边界判定 | 后续动作 |
+|---|---|---|---|
+| `TaskService` task / asset / event 写读 | 通过 `creative_task_repo`、`creative_asset_repo`、`creative_model_run_repo` 做可信写入，并负责 Tauri event emit | 短期可保留在 Rust；这是控制面和可信状态入口，不是主要越界点 | 暂不为拆文件名而拆；等资产版本、来源建模稳定后再考虑独立 `AssetService` |
+| `TaskService::run_generate_image_prompt_workflow` | 创建 task、启动 cancel checkpoint、提交 sidecar、校验结果、写 asset/model_runs/events/status | 合理的过渡 workflow 入口；业务执行已经在 Python stub，Rust 保留协议校验与落库 | 后续应收敛成通用 workflow submit/settle 模式，避免每个 workflow 在 `TaskService` 手写一套 |
+| `TaskService::run_review_asset_quality_stub` | Rust 内部用长度阈值生成 review result，并创建 `revise_asset_quality` draft task | 只能视为 demo/stub；不应继续承载真实审查、返工或一致性规则 | 冻结为验证入口；正式 review/revision 迁入 Python workflow runtime |
+| `BatchJobService` supervisor | Rust 用 `active_supervisors`、`std::thread::spawn`、concurrency slot、queued claim 驱动 batch | 短期仍适合留在 Rust；它承担桌面控制面、暂停/恢复/取消和可信状态转移 | 在 sidecar lifecycle、恢复、熔断协议稳定前，不迁给 Python worker pool |
+| `BatchJobService` prompt/image worker shell | prompt/image 已提交 Python sidecar；Rust 仍构造 request、校验 protocol/taskId/status、落库 asset/model_runs/events | 方向正确，但仍是偏宽 orchestrator；新增生产 worker 不应继续在这里分支扩展 | 后续新增正式 workflow 走 sidecar runtime；Rust 只保留 claim、submit、settle、audit |
+| `BatchJobService` prompt 模板替换 | `build_prompt_request` 在 Rust 内处理 `{{sequenceNo}}` / `{{index}}` | 这是 demo-era prompt 构建残留，生产场景不应扩大 | 正式 batch prompt builder 放到 Python；Rust 只传 template/input/context |
+| `BatchJobService` sidecar lifecycle | 每个 batch worker 内部 `SidecarLifecycleService::new(...)`，提交后 `stop_dev_health_server()` | 不属于业务越界，但说明 runtime 生命周期仍是 per-task dev 策略 | 下一步优先改为受控复用/熔断/健康检查策略，再讨论 supervisor 迁移 |
+| `demo.image.*` task type | `demo.image.mock/prompt/generate` 仍是唯一 batch 类型白名单 | 可保留为过渡验证命名，不能扩展成正式业务分类 | 新增正式类型前先定义 `workflowType` / `taskType` 命名规范 |
+
+本轮二次结论：
+
+1. 当前不建议马上拆掉 Rust supervisor；风险更大的不是 supervisor 存在，而是继续把生产业务分支写进 `batch_job_service.rs`。
+2. `TaskService` 的 asset CRUD 命名不完全理想，但不是最先要切的点；真正需要冻结的是 review/revision stub。
+3. `BatchJobService` 里已经看不到重新使用 `AiProviderService::test_provider` 的生产调用，但仍复用了 `AiProviderConfig` 作为 DTO 适配，这是一种测试链路语义残留；正式 workflow provider DTO 应继续向 `SidecarProviderConfig` 和 runtime 协议靠拢。
+4. 下一刀优先级应是 sidecar lifecycle 复用和正式 workflow 命名，而不是大改 Rust/Python 队列归属。
+
 ## 2026-06-11 补充：generate_image_prompt sidecar 协议首轮落地
 
 - `src-tauri/src/services/sidecar_lifecycle_service.rs` 已为 `generate_image_prompt` 提交 `protocolVersion / taskId / workflowType / attempt / budget / provider / input / context` 形态的 sidecar task request。
