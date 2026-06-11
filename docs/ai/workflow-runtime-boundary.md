@@ -340,6 +340,40 @@ Python step boundary
 5. `settle_batch_image_sidecar_response` 的 success 分支暂不强抽：它仍包含授权输出目录校验、thumbnail 生成、image-specific metadata 和 asset 创建；后续最多抽小型 result/status helper，不能把路径信任交给 Python。
 6. `build_prompt_request` 已退出 Rust；batch sidecar request 现在传 `promptTemplate`，Python workflow 负责生成 `promptRequest` 并回传 `promptHash`。`build_provider_config` / `build_image_provider_config` 已收口为 `build_workflow_provider_config` / `BatchWorkflowProviderConfig`，不再依赖 `AiProviderConfig` 测试 DTO；`WorkerQueueService::complete_task` 已补齐 Rust IPC complete 首段，下一步优先设计 localhost sidecar control API 与租约/心跳。
 
+### 12.6 Worker-pool 控制协议前置条件
+
+`WorkerQueueService::claim_next_task`、`check_cancel_checkpoint`、`complete_task` 和 `recover_interrupted_tasks` 已形成 Rust IPC/service 的首段闭环，但这还不是 Python worker pool 可以直接接管 `BatchJobService` supervisor 的条件。
+
+当前缺口：
+
+| 缺口 | 当前代码事实 | 迁移前要求 |
+|---|---|---|
+| worker identity | `CreativeTask` / `creative_tasks` 没有 worker id 字段 | claim 后必须能识别任务当前归属的 runtime / worker |
+| lease / claim token | `claim_next_queued_task` 只把 queued 改 running | claim 必须产生 leaseId 或 claimToken，complete 时校验同一 token |
+| heartbeat | 当前没有续约字段或 API | Python worker 长任务必须定期续约，Rust 能回收过期 lease |
+| result settle | complete API 只能写 status/result/asset_id | 正式 workflow result 仍要经过 Rust 校验 outputs/modelRuns/events/授权文件路径 |
+| recovery | `recover_interrupted_tasks` 基于 running/cancelling 状态兜底 | worker-pool 模式需要区分过期 lease、进程退出、runtime 重启和主动取消 |
+
+推荐下一步仍是 Rust-owned localhost sidecar control API，而不是 Python 直接访问 SQLite：
+
+```text
+Python worker
+  -> localhost control API with runtime token
+  -> Rust WorkerQueueService / settle helpers
+  -> creative_task_repo / asset_repo / model_run_repo / task_events
+```
+
+该 control API 的最小集合应先设计为：
+
+| API | 目的 | Rust 可信职责 |
+|---|---|---|
+| `claim` | 获取可执行任务并生成 lease | 状态从 queued 到 running，写 worker identity / lease / started_at |
+| `checkpoint` | 查询取消或暂停 | 只暴露布尔或受控原因，不暴露 DB |
+| `heartbeat` | 续约 running task | 校验 worker identity 和 lease，刷新 lease deadline |
+| `complete` | 收敛终态 | 校验 lease 未过期，执行 result settle，写 task_events/model_runs/assets/status |
+
+在这些协议和必要 schema migration 稳定前，`BatchJobService::run_batch_supervisor_inner` 继续保留在 Rust；`run_prompt_task_worker` / `run_generate_task_worker` 也继续作为过渡 shell，只负责提交 Python workflow 与 Rust settle，不新增正式业务 worker 分支。
+
 ## 13. 不变量
 
 - Vue 永远不知道 Python 端口和 token。
