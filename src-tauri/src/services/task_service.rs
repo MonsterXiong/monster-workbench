@@ -13,6 +13,9 @@ use crate::services::sidecar_lifecycle_service::{
     GenerateImagePromptSidecarRequest, SidecarLifecycleService, SidecarWorkflowModelRun,
     SidecarWorkflowTaskResult,
 };
+use crate::services::workflow_settle_service::{
+    append_sidecar_result_events, validate_sidecar_task_result,
+};
 use serde_json::json;
 use tauri::{AppHandle, Emitter, Runtime, Wry};
 
@@ -412,43 +415,18 @@ impl<R: Runtime> TaskService<R> {
                 cancel_checkpoint_url: Some(checkpoint_server.url.clone()),
                 cancel_checkpoint_token: Some(checkpoint_server.token.clone()),
             })?;
-        if sidecar_response.protocol_version != 1 {
-            return Err(AppError::Process(format!(
-                "unsupported sidecar protocol version: {}",
-                sidecar_response.protocol_version
-            )));
-        }
-        if sidecar_response.task_id != task.id {
-            return Err(AppError::Process(format!(
-                "sidecar task id mismatch: expected {}, got {}",
-                task.id, sidecar_response.task_id
-            )));
-        }
+        validate_sidecar_task_result(task, &sidecar_response)?;
         events.push(self.append_task_event(CreateTaskEventInput {
             task_id: task.id,
             event_type: "sidecar_completed".to_string(),
             message: sidecar_response.message.clone(),
             payload_json: None,
         })?);
-        for event in &sidecar_response.events {
-            events.push(
-                self.append_task_event(CreateTaskEventInput {
-                    task_id: task.id,
-                    event_type: event.event_type.clone(),
-                    message: event.message.clone(),
-                    payload_json: event
-                        .payload
-                        .as_ref()
-                        .map(serde_json::to_string)
-                        .transpose()
-                        .map_err(|error| {
-                            AppError::Config(format!(
-                                "failed to encode sidecar event payload: {error}"
-                            ))
-                        })?,
-                })?,
-            );
-        }
+        events.extend(append_sidecar_result_events(
+            db_path,
+            task.id,
+            &sidecar_response,
+        )?);
         if sidecar_response.status != "succeeded" {
             self.settle_sidecar_non_success(db_path, task, &sidecar_response)?;
             return Err(AppError::Process(format!(

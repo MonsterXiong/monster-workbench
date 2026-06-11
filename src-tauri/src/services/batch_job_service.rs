@@ -18,6 +18,9 @@ use crate::services::sidecar_lifecycle_service::{
     SidecarWorkflowTaskResult,
 };
 use crate::services::task_service::CreativeTaskEventPayload;
+use crate::services::workflow_settle_service::{
+    append_sidecar_result_events, validate_sidecar_task_result,
+};
 use serde_json::{json, Value};
 use std::collections::HashSet;
 use std::fs;
@@ -1037,20 +1040,8 @@ fn settle_batch_prompt_sidecar_response<R: Runtime>(
     duration_ms: i64,
     sidecar_response: SidecarWorkflowTaskResult,
 ) -> AppResult<()> {
-    if sidecar_response.protocol_version != 1 {
-        return Err(AppError::Process(format!(
-            "unsupported sidecar protocol version: {}",
-            sidecar_response.protocol_version
-        )));
-    }
-    if sidecar_response.task_id != task.id {
-        return Err(AppError::Process(format!(
-            "sidecar task id mismatch: expected {}, got {}",
-            task.id, sidecar_response.task_id
-        )));
-    }
-
-    append_sidecar_task_events(db_path, task.id, &sidecar_response)?;
+    validate_sidecar_task_result(task, &sidecar_response)?;
+    append_sidecar_result_events(db_path, task.id, &sidecar_response)?;
 
     if sidecar_response.status == "succeeded"
         && batch_prompt_cancel_requested(db_path, batch_job_id, task.id)?
@@ -1209,34 +1200,6 @@ fn settle_batch_prompt_sidecar_response<R: Runtime>(
         "creative-task-event",
         "prompt worker finished successfully",
     )?;
-    Ok(())
-}
-
-fn append_sidecar_task_events(
-    db_path: &std::path::Path,
-    task_id: i64,
-    sidecar_response: &SidecarWorkflowTaskResult,
-) -> AppResult<()> {
-    for event in &sidecar_response.events {
-        creative_task_repo::append_task_event(
-            db_path,
-            CreateTaskEventInput {
-                task_id,
-                event_type: event.event_type.clone(),
-                message: event.message.clone(),
-                payload_json: event
-                    .payload
-                    .as_ref()
-                    .map(serde_json::to_string)
-                    .transpose()
-                    .map_err(|error| {
-                        AppError::Config(format!(
-                            "failed to encode batch prompt sidecar event payload: {error}"
-                        ))
-                    })?,
-            },
-        )?;
-    }
     Ok(())
 }
 
@@ -1656,20 +1619,8 @@ fn settle_batch_image_sidecar_response<R: Runtime>(
     output_dir: &std::path::Path,
     sidecar_response: SidecarWorkflowTaskResult,
 ) -> AppResult<()> {
-    if sidecar_response.protocol_version != 1 {
-        return Err(AppError::Process(format!(
-            "unsupported sidecar protocol version: {}",
-            sidecar_response.protocol_version
-        )));
-    }
-    if sidecar_response.task_id != task.id {
-        return Err(AppError::Process(format!(
-            "sidecar task id mismatch: expected {}, got {}",
-            task.id, sidecar_response.task_id
-        )));
-    }
-
-    append_sidecar_task_events(db_path, task.id, &sidecar_response)?;
+    validate_sidecar_task_result(task, &sidecar_response)?;
+    append_sidecar_result_events(db_path, task.id, &sidecar_response)?;
 
     if sidecar_response.status == "succeeded"
         && batch_prompt_cancel_requested(db_path, batch_job_id, task.id)?

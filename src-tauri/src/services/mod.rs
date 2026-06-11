@@ -14,3 +14,4 @@ pub mod sidecar_lifecycle_service;
 pub mod system_service;
 pub mod task_service;
 pub mod worker_queue_service;
+pub mod workflow_settle_service;
