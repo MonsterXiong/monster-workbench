@@ -299,7 +299,7 @@ Python step boundary
 | 函数 / 区域 | 当前职责 | 边界判定 | 后续约束 |
 |---|---|---|---|
 | `create_batch_image_job` / `start_batch_job` / `pause_batch_job` / `resume_batch_job` / `cancel_batch_job` | batch 生命周期、任务创建、暂停/恢复/取消、事件广播 | Rust 控制面，保留 | 保持为状态控制，不下沉 provider 或业务 workflow 逻辑 |
-| `run_batch_supervisor_inner` | 轮询 snapshot、按 concurrency claim queued task、spawn worker、判断 completed | 短期保留 | 首段 sidecar recovery circuit、graceful shutdown、恢复可观测字段与节流 Tauri 生命周期事件已有；但在 Python `/events` polling、持久化策略和受控 worker-pool API 稳定前，不迁给 Python worker pool |
+| `run_batch_supervisor_inner` | 轮询 snapshot、按 concurrency claim queued task、spawn worker、判断 completed | 短期保留 | sidecar recovery、runtime events polling 与诊断日志已有；但缺 worker identity、claim token、lease deadline、heartbeat 和 lease-aware complete，在这些稳定前不迁给 Python worker pool |
 | `run_mock_task_worker` | 本地 smoke worker、模拟耗时/失败/取消 | demo，本地验证可保留 | 只服务本地 smoke，不作为正式业务类型模板 |
 | `run_prompt_task_worker` / `run_generate_task_worker` | 检查取消、构造 sidecar request、提交 Python workflow、交给 settle 归档 | 过渡 worker shell | 不新增生产 worker 分支；新增正式 workflow 走 sidecar runtime |
 | `settle_batch_prompt_sidecar_response` / `settle_batch_image_sidecar_response` | 校验 protocol/taskId/status，写入 asset/model_runs/task_events/status | Rust 可信落库和审计面，保留 | protocol 校验、sidecar events、model_runs、普通 ready asset 与 batch failure/cancelled 状态映射已收口；image 文件 success settle 仍因路径授权和 thumbnail 生成保留在 batch 服务 |
@@ -316,7 +316,7 @@ Python step boundary
 1. UI / browser mock 的 prompt/generate batch type 提交值已切到 `image.prompt.batch` / `image.generate.batch`；旧 `demo.image.prompt/generate` 只作为历史兼容保留。
 2. 共享 `SidecarLifecycleService` 已具备首段 recovery circuit / backoff、graceful shutdown、恢复可观测字段、节流后的 Tauri 生命周期事件、`sidecar-lifecycle.log` 摘要持久化、Python `/events` polling 入口、runtime instance 字段、设置诊断页只读消费和 `sidecar-runtime.log` 摘要持久化；继续观察物理日志是否足够，必要时再设计正式 Rust-owned diagnostics 表/导出策略。
 3. 再抽象 Rust workflow submit/settle 公共路径，减少 `TaskService` 和 `BatchJobService` 内重复的 sidecar 状态映射；当前已先落地 sidecar 协议校验、事件落库、model_runs 持久化、普通 ready asset 创建和 batch failure/cancelled 状态映射 helper，下一步再评估 image success settle。
-4. 最后才评估 supervisor 是否迁给 Python worker pool；当前已有 Rust IPC 形态的 claim/checkpoint/complete 首段，迁移前还需要明确 localhost sidecar control API、鉴权、租约/心跳和结果入库协议，不允许 Python 任意写主库。
+4. 最后才评估 supervisor 是否迁给 Python worker pool；当前已有 Rust IPC 形态的 claim/checkpoint/complete/recover 首段，`complete_creative_task` 与 `recover_interrupted_creative_tasks` 也已注册为 Tauri command，但它们没有 runtime token、lease 校验和 sidecar HTTP 暴露，不能直接当作 Python worker-pool API。迁移前还需要明确 localhost sidecar control API、鉴权、租约/心跳和结果入库协议，不允许 Python 任意写主库。
 
 ### 12.4 当前边界结论
 
@@ -351,7 +351,7 @@ Python step boundary
 | worker identity | `CreativeTask` / `creative_tasks` 没有 worker id 字段 | claim 后必须能识别任务当前归属的 runtime / worker |
 | lease / claim token | `claim_next_queued_task` 只把 queued 改 running | claim 必须产生 leaseId 或 claimToken，complete 时校验同一 token |
 | heartbeat | 当前没有续约字段或 API | Python worker 长任务必须定期续约，Rust 能回收过期 lease |
-| result settle | complete API 只能写 status/result/asset_id | 正式 workflow result 仍要经过 Rust 校验 outputs/modelRuns/events/授权文件路径 |
+| result settle | `complete_creative_task` 只能写 status/result/asset_id；batch prompt/image settle 仍在 Rust 内校验 sidecar result | 正式 workflow result 仍要经过 Rust 校验 outputs/modelRuns/events/授权文件路径 |
 | recovery | `recover_interrupted_tasks` 基于 running/cancelling 状态兜底 | worker-pool 模式需要区分过期 lease、进程退出、runtime 重启和主动取消 |
 
 推荐下一步仍是 Rust-owned localhost sidecar control API，而不是 Python 直接访问 SQLite：
@@ -362,6 +362,8 @@ Python worker
   -> Rust WorkerQueueService / settle helpers
   -> creative_task_repo / asset_repo / model_run_repo / task_events
 ```
+
+注意：这里的 localhost control API 不是当前前端可调用的 Tauri command。Python sidecar 不应通过前端 IPC 路径补齐 worker-pool 能力，而应走 Rust 暴露、带 runtime token 和 lease 校验的本地控制面。
 
 该 control API 的最小集合应先设计为：
 

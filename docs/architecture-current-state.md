@@ -1373,6 +1373,7 @@ Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `
 - `settle_batch_image_sidecar_response` 的 success 分支仍留在 `BatchJobService`，因为它包含授权输出目录 canonical 校验、thumbnail 生成、image-specific metadata、asset 写入和 model_runs 绑定。
 - `SidecarLifecycleService` 已具备共享 endpoint、runtime token、recovery backoff、graceful shutdown、runtime `/events` polling、`sidecar-runtime.log` 与 `sidecar-lifecycle.log` 摘要日志；这些仍是诊断/控制面，不替代 Rust settle 写入的 `task_events`。
 - `WorkerQueueService` 已有 `claim_next_task`、`check_cancel_checkpoint`、`complete_task` 和 `recover_interrupted_tasks`，但 `creative_tasks` 仍没有 worker identity、lease owner、lease deadline、heartbeat 或 claim token；`claim_next_queued_task` 只把 queued 原子改为 running。
+- 当前 `claim_next_creative_task`、`complete_creative_task` 和 `recover_interrupted_creative_tasks` 已注册为 Tauri IPC command，但 `complete_creative_task` 只接收 `taskId/status/resultJson/errorMessage/assetId`，不校验 worker identity、lease 或 claim token；这只能证明 Rust 侧已有受控终态收敛入口，不能视为 Python worker-pool 控制协议已经成立。
 
 当前边界判定：
 
@@ -1386,7 +1387,7 @@ Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `
 | prompt builder / provider 调用 | 已迁入 Python workflow | 不回流到 `AiProviderService::test_provider` 或新的 Rust provider helper |
 | image success settle | 保留 Rust | 路径授权、thumbnail、asset/model_runs/task_events 可信写入不交给 Python |
 | Python `/events` | runtime 诊断流 | 不从诊断流全量回灌 `task_events`；可信审计继续来自 `/tasks` result settle |
-| WorkerQueue claim/checkpoint/complete | Rust IPC/service 首段闭环 | 还不是 localhost sidecar worker-pool 控制协议 |
+| WorkerQueue claim/checkpoint/complete/recover | Tauri IPC / Rust service 首段闭环 | complete/recover 未租约化，只能证明 Rust 可受控收敛终态；还不是 localhost sidecar worker-pool 控制协议 |
 
 已经完成的旧问题，不再作为下一步重复推进：
 
@@ -1402,7 +1403,8 @@ Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `
 2. control API 必须复用 sidecar runtime token 或等价鉴权，限制为 `127.0.0.1`，并且只暴露受控的 claim、checkpoint、heartbeat、complete 能力。
 3. claim 结果需要包含 `workerId`、`leaseId` 或 claim token、`leaseExpiresAt`、`runtimeInstanceId`；complete 时必须带回同一 lease / claim 信息，避免过期 worker 覆盖新 worker 的结果。
 4. heartbeat 需要能续约租期，并在 Rust 侧支持超时回收；没有心跳前，不能把 supervisor 的任务拥有权交给 Python worker pool。
-5. result settle contract 必须先定义：Python 只能返回 outputs、modelRuns、events 摘要和授权目录内文件引用；asset、model_runs、task_events、task status 仍由 Rust settle 写入。
-6. 若需要 schema 支撑，必须先按 `docs/ai/database-migration-policy.md` 设计 migration 与旧库兼容回归；不能在当前字段基础上假定已经有 worker 租约能力。
+5. 现有 `complete_creative_task` 不能直接复用为 sidecar `complete`：正式 sidecar control API 的 complete 必须校验 lease 未过期、worker identity 匹配，并走 Rust settle helper。
+6. result settle contract 必须先定义：Python 只能返回 outputs、modelRuns、events 摘要和授权目录内文件引用；asset、model_runs、task_events、task status 仍由 Rust settle 写入。
+7. 若需要 schema 支撑，必须先按 `docs/ai/database-migration-policy.md` 设计 migration 与旧库兼容回归；不能在当前字段基础上假定已经有 worker 租约能力。
 
 结论：`TaskService` 当前不是优先拆分对象；`BatchJobService` 的业务执行已经明显收窄，但 supervisor 仍不能迁移。下一刀应落在 worker-pool 控制协议与租约模型设计，而不是继续抽 image success settle 或新增 Python 拉队列实现。
