@@ -2002,3 +2002,70 @@ Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `
 - `python src-tauri\\sidecars\\python\\test_creative_health_server.py`
 - `npm run check:architecture`
 - `npm run typecheck`
+
+## 2026-06-12 补充：sidecar lifecycle 摘要持久化
+
+本轮继续补齐 Rust 控制面诊断，不改变 `task_events` 的可信审计边界，也不新增 DB 表。
+
+代码事实：
+
+- `src-tauri/src/services/sidecar_lifecycle_service.rs` 的 `emit_status_event` 现在会把 sidecar lifecycle 状态摘要写入 `sidecar-lifecycle.log`。
+- lifecycle 摘要与 `creative-sidecar-status-changed` 同源，继承同 status 1 秒节流规则，避免健康检查高频刷日志。
+- 日志行只记录 eventType、status、port、pid、recoveryFailureCount、backoff 和 message 摘要，仍通过 `LogService` / `LoggerInfra` 落到 `~/.monster-tools/logs` 并脱敏。
+- `stop_dev_health_server()` 的 `stopped` message 已包含 `durationMs`、`shutdownRequested` 和 `killFallback`，可以区分 graceful shutdown 与 kill fallback。
+- `sidecar-lifecycle.log` 与 `sidecar-runtime.log` 一样会随现有系统诊断日志导出链路被收集，不需要新增导出入口。
+
+边界判定：
+
+| 区域 | 当前状态 | 下一步 |
+|---|---|---|
+| lifecycle 控制面诊断 | 第一阶段落 `sidecar-lifecycle.log` 摘要 | 先观察物理日志是否足够 |
+| runtime workflow 诊断 | 第一阶段落 `sidecar-runtime.log` 摘要 | 不替代 `task_events` |
+| `task_events` | 仍由 Rust settle 写可信审计 | 不混入 lifecycle / provider 控制面事件 |
+| diagnostics 表 | 暂不新增 | 只有需要结构化查询、跨会话去重或 UI 历史筛选时再设计 |
+
+本轮验证通过：
+
+- `cargo test --manifest-path .\\src-tauri\\Cargo.toml services::sidecar_lifecycle_service::tests::status_event_writes_lifecycle_diagnostic_log_when_logger_is_available -- --nocapture --test-threads=1`
+- `cargo test --manifest-path .\\src-tauri\\Cargo.toml services::sidecar_lifecycle_service::tests::stop_dev_health_server_requests_graceful_shutdown -- --nocapture --test-threads=1`
+- `cargo test --manifest-path .\\src-tauri\\Cargo.toml services::sidecar_lifecycle_service::tests::recovery_failure_opens_circuit -- --nocapture --test-threads=1`
+- `npm run check:architecture`
+- `npm run typecheck`
+
+## 2026-06-12 补充：Rust TaskService / BatchJobService 编排边界再复核（二）
+
+本轮按 `docs/ai/workflow-runtime-boundary.md` 再次对照 `src-tauri/src/services/task_service.rs`、`src-tauri/src/services/batch_job_service.rs` 和 `src-tauri/src/services/workflow_settle_service.rs`。本轮未修改 Rust 代码，重点是明确下一轮架构升级优先级。
+
+代码事实：
+
+- `TaskService::run_generate_image_prompt_workflow_after_task` 仍执行 Rust 控制面流程：创建 task、写 queued/running 事件、启动 cancel checkpoint、获取 sidecar endpoint、提交 `/tasks`、校验 `protocolVersion/taskId`、写入 sidecar events、asset、model_runs 和最终 task status。
+- `TaskService::settle_sidecar_non_success` 仍只做协议状态到可信 task status 的映射：`cancelled/blocked/retrying/failed`，没有嵌入真实业务审查或 prompt 规则。
+- `TaskService::run_review_asset_quality_stub` 仍是 Rust stub，会生成 review result asset 和 revise draft task；它不应继续扩展为真实 review/revision/consistency workflow。
+- `BatchJobService::run_batch_supervisor_inner` 仍是 Rust batch supervisor：轮询 snapshot、计算 concurrency slot、claim queued task、spawn prompt/image/mock worker、处理 paused/cancelled/completed。
+- `run_prompt_task_worker` 与 `run_generate_task_worker` 已是过渡 worker shell：它们做取消检查、checkpoint server、sidecar submit 和 settle 分派，provider 调用与图片生成在 Python sidecar。
+- `workflow_settle_service.rs` 已抽出协议校验、sidecar events 落库、model_runs 持久化和普通 ready asset 创建；`BatchWorkerKind`、`handle_batch_worker_failure_with_model_runs`、`handle_batch_worker_cancelled` 已收口 prompt/image 的失败、重试和取消状态。
+- `settle_batch_image_sidecar_response` 的 success 分支仍留在 `BatchJobService`，因为这里包含输出目录授权校验、thumbnail 生成、image-specific metadata 和 asset 创建。
+- `build_prompt_request`、`build_provider_config`、`build_image_provider_config` 仍把 batch payload 适配成 `AiProviderConfig` 测试语义，是当前最明确的 demo-era 业务执行残留。
+
+边界判定：
+
+| 区域 | 当前状态 | 结论 |
+|---|---|---|
+| `TaskService` 普通 workflow 入口 | 合理过渡控制面 | 保留；继续复用通用 settle helper |
+| `TaskService` review stub | demo/stub | 冻结；真实审查与返工迁入 Python workflow |
+| `BatchJobService` supervisor | Rust 可信状态与并发控制 | 短期保留；等受控 worker-pool API 成型后再评估迁移 |
+| prompt/image worker shell | 过渡壳层 | 不新增正式 worker 分支；新增 workflow 走 sidecar 协议 |
+| image success settle | Rust 文件权限与缩略图边界 | 保留；不把路径信任交给 Python |
+| batch prompt builder / provider DTO | demo/test 语义残留 | 下一轮优先迁到 Python prompt builder 和正式 workflow provider DTO |
+
+下一步排序：
+
+1. 不继续强抽 `settle_batch_image_sidecar_response` 的 success 分支，只在必要时抽小型 result/status helper。
+2. 优先把 `build_prompt_request` 迁成 Python workflow prompt builder，把 `AiProviderConfig` 适配改成正式 workflow provider DTO。
+3. 设计 Rust 受控的 worker-pool claim/checkpoint/complete API 后，再评估 supervisor 是否从 Rust 迁给 Python。
+4. 继续禁止 Python 直接写 `monster_workbench.db`，所有 task status、asset、model_runs、task_events 仍由 Rust 可信写入或未来 Rust 受控 API 写入。
+
+本轮文档验证：
+
+- `git diff --check -- docs\\architecture-current-state.md docs\\ai\\workflow-runtime-boundary.md`
+- `npm run check:architecture`
