@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { useI18n } from "../../composables/useI18n";
+import BaseSelect from "./BaseSelect.vue";
 import {
   clampNumber,
   formatTemplate,
-  getEventTargetValue,
   getTotalPages,
   normalizePage,
   normalizePageSizeOptions,
@@ -68,6 +68,7 @@ const start = computed(() => (safeTotal.value === 0 ? 0 : (currentPage.value - 1
 const end = computed(() => clampNumber(currentPage.value * safePageSize.value, 0, safeTotal.value));
 const normalizedPageSizeOptions = computed(() => normalizePageSizeOptions(safePageSize.value, props.pageSizeOptions));
 const pageSizeText = (size: number) => formatTemplate(t("common.pagination.pageSize"), { size });
+const pageSizeSelectOptions = computed(() => normalizedPageSizeOptions.value.map((option) => ({ label: pageSizeText(option), value: option })));
 const resolvedLoadingText = computed(() => props.loadingText || t("common.loading"));
 const summaryAriaText = computed(() =>
   hasRecords.value
@@ -99,9 +100,10 @@ const handleCurrentPageUpdate = (page: number) => {
   emitPage(page);
 };
 
-const emitPageSize = (event: Event) => {
+const emitPageSize = (value: unknown) => {
   if (isDisabled.value) return;
-  const nextPageSize = toIntegerAtLeast(getEventTargetValue(event), 1, safePageSize.value);
+  const rawValue = Array.isArray(value) ? value[0] : value;
+  const nextPageSize = toIntegerAtLeast(rawValue, 1, safePageSize.value);
   const nextPage = hasRecords.value ? 1 : 0;
   emit("update:pageSize", nextPageSize);
   emit("update:page", nextPage);
@@ -156,18 +158,18 @@ const emitPageSize = (event: Event) => {
       />
     </div>
 
-    <select
+    <BaseSelect
       v-if="showPageSize && !simple"
       class="base-pagination__select"
-      :value="safePageSize"
+      :model-value="safePageSize"
+      :options="pageSizeSelectOptions"
       :disabled="isDisabled"
       :aria-label="t('common.pagination.pageSizeLabel')"
-      @change="emitPageSize"
-    >
-      <option v-for="option in normalizedPageSizeOptions" :key="option" :value="option">
-        {{ pageSizeText(option) }}
-      </option>
-    </select>
+      :size="resolvedSize"
+      :teleported="true"
+      :fit-input-width="false"
+      @update:model-value="emitPageSize"
+    />
   </nav>
 </template>
 
@@ -290,19 +292,14 @@ const emitPageSize = (event: Event) => {
 }
 
 .base-pagination__select {
-  @apply h-7 max-w-full rounded-lg border border-slate-200 bg-slate-50 px-2 text-[11px] font-black text-slate-600 outline-none transition focus:border-primary focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-opacity-20 disabled:cursor-not-allowed dark:border-slate-800 dark:bg-slate-950 dark:text-slate-300;
-}
-
-.base-pagination--lg .base-pagination__select {
-  @apply h-8 text-xs;
+  @apply w-36 shrink-0;
 }
 
 @media (prefers-reduced-motion: reduce) {
   .base-pagination,
   :deep(.base-pagination__pager .btn-prev),
   :deep(.base-pagination__pager .btn-next),
-  :deep(.base-pagination__pager .el-pager li),
-  .base-pagination__select {
+  :deep(.base-pagination__pager .el-pager li) {
     transition: none !important;
   }
 }

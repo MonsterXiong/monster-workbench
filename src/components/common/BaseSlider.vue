@@ -403,7 +403,7 @@ onUpdated(() => {
   --el-slider-height: var(--base-slider-track-height);
   --el-slider-button-size: var(--base-slider-thumb-size);
   --el-slider-button-wrapper-size: var(--base-slider-wrapper-size);
-  --el-slider-button-wrapper-offset: calc((var(--base-slider-control-height) - var(--el-slider-button-wrapper-size)) / 2);
+  --el-slider-button-wrapper-offset: calc((var(--base-slider-track-height) - var(--el-slider-button-wrapper-size)) / 2);
   --el-slider-border-radius: 999px;
 }
 

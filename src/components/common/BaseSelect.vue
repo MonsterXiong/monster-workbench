@@ -45,6 +45,7 @@ interface Props {
   valueKey?: string;
   valueOnClear?: SelectClearValue;
   emptyValues?: Array<SelectValue | SelectValue[]>;
+  persistent?: boolean;
   ariaLabel?: string;
   ariaDescribedby?: string;
 }
@@ -74,6 +75,7 @@ const props = withDefaults(defineProps<Props>(), {
   valueKey: "value",
   valueOnClear: undefined,
   emptyValues: () => ["", null, undefined, []],
+  persistent: false,
   ariaLabel: "",
   ariaDescribedby: "",
 });
@@ -216,6 +218,7 @@ watchEffect(() => {
       :value-key="valueKey"
       :value-on-clear="resolvedValueOnClear"
       :empty-values="emptyValues"
+      :persistent="persistent"
       :size="elSize"
       :aria-label="resolvedAriaLabel"
       :aria-describedby="describedBy"
@@ -308,6 +311,11 @@ watchEffect(() => {
 
 .base-select__selected-label {
   @apply block min-w-0 max-w-full truncate;
+  pointer-events: none;
+}
+
+:deep(.el-select__selected-item.el-select__placeholder) {
+  pointer-events: none;
 }
 
 :deep(.el-tag) {
