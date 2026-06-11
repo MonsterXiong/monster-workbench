@@ -8,7 +8,7 @@
 - [ ] 继续收口 AI 域：评估 `src/stores/ai.ts` 剩余 facade / orchestration 是否继续下沉到独立 store、runtime 或 service。
 - [ ] 继续收口 Creative 前端：评估 `src/views/creative/components/CreativeWorkflowDemo.vue` 是否进一步收敛为 orchestration shell，并继续拆分正式工作台。
 - [ ] 继续复核 `/creative` 三栏壳层：左右栏已首轮接入真实项目/资产/任务活动，后续需在真实窗口确认信息密度，并决定是否扩展成正式资产库与 Agent 监控台。
-- [ ] 继续收口 Creative service / backend：评估 `src/services/task.service.ts` 与 Rust `TaskService` 是否继续按领域缩窄。
+- [ ] 继续收口 Creative service / backend：前端 `task.service.ts` 已只剩后台任务兼容入口，下一步重点评估 Rust `TaskService` 是否继续按领域缩窄。
 - [ ] 评估前后端分域对齐：前端已拆出 `creative-task / creative-asset / creative-goal / creative-batch / creative-project` service/store，但 Rust 侧 asset CRUD 与 workflow 仍主要挂在 `TaskService + commands/creative_task.rs` 下。
 - [ ] 完成 `creative_db` 后续治理：补正式 migration、旧库兼容回归，以及 `creative_projects`、资产版本、来源建模。
 - [ ] 明确 Python sidecar 从 stub 进入正式 workflow runtime 的协议、健康检查和失败恢复边界。
@@ -18,7 +18,7 @@
 - [ ] 沉淀 AI Provider 测试链路的最小回归步骤，形成可复用验收脚本或清单。
 - [ ] 确认图片落盘目录、asset URL 映射与 `creative_projects` 归档策略。
 - [ ] 在并行 worktree 改动持续存在的情况下，复盘新增 service / store / doc 的覆盖风险，避免后续提交互相踩踏。
-- [ ] 复核当前剩余未提交基础组件改动：`components.d.ts`、`BaseProgress.vue`、`BaseSearchInput.vue`、`BaseSelect.vue`、`BaseSkeletonCard.vue`、`BaseSlider.vue`，确认是否作为独立 UI 基础组件批次提交；`.playwright-cli/` 临时产物需清理或加入忽略策略后再继续。
+- [ ] 复核当前剩余未提交基础组件改动：`components.d.ts`、`BasePagination.vue`、`BaseProgress.vue`、`BaseSearchInput.vue`、`BaseSelect.vue`、`BaseSkeletonCard.vue`、`BaseSlider.vue`，确认是否作为独立 UI 基础组件批次提交。
 
 ## 文档维护待办
 
