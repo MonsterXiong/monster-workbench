@@ -101,6 +101,29 @@ const bufferPercent = computed(() => {
   return toRangePercent(maxNumber([props.bufferValue, currentValue.value], currentValue.value), normalizedMin.value, normalizedMax.value, props.precision);
 });
 const isIndeterminate = computed(() => props.loading || props.indeterminate);
+const visualPercent = computed(() => (isIndeterminate.value ? 100 : percent.value));
+const elementIndeterminate = computed(() => isIndeterminate.value && props.animated);
+const elementStripedFlow = computed(() => props.striped && props.animated);
+const progressDuration = computed(() => (props.animated ? 3 : 0));
+const progressStrokeWidth = computed(() => {
+  if (props.size === "xs") return 4;
+  if (props.size === "sm") return 6;
+  if (props.size === "lg") return 14;
+  return 10;
+});
+const progressColor = computed(() => {
+  if (props.type === "success") return "#10b981";
+  if (props.type === "warning") return "#f59e0b";
+  if (props.type === "danger") return "#ef4444";
+  if (props.type === "neutral") return "#64748b";
+  return "rgb(var(--color-primary))";
+});
+const elementStatus = computed<"" | "success" | "warning" | "exception">(() => {
+  if (props.type === "success") return "success";
+  if (props.type === "warning") return "warning";
+  if (props.type === "danger") return "exception";
+  return "";
+});
 const resolvedValuePlacement = computed(() => (props.showValue ? props.valuePlacement : "none"));
 const showHeaderValue = computed(() => resolvedValuePlacement.value === "header" || resolvedValuePlacement.value === "both");
 const showTrackValue = computed(() => resolvedValuePlacement.value === "track" || resolvedValuePlacement.value === "both");
@@ -179,11 +202,20 @@ const descriptionStyle = computed(() => {
       :aria-busy="loading ? 'true' : undefined"
     >
       <div v-if="bufferValue > 0 && !isIndeterminate" class="base-progress__buffer" :style="{ width: `${bufferPercent}%` }"></div>
-      <div
-        class="base-progress__bar"
-        :class="{ 'is-striped': striped, 'is-animated': striped && animated }"
-        :style="{ width: isIndeterminate ? undefined : `${percent}%` }"
-      ></div>
+      <el-progress
+        class="base-progress__element"
+        type="line"
+        :percentage="visualPercent"
+        :stroke-width="progressStrokeWidth"
+        :status="elementStatus"
+        :color="progressColor"
+        :show-text="false"
+        :striped="striped"
+        :striped-flow="elementStripedFlow"
+        :indeterminate="elementIndeterminate"
+        :duration="progressDuration"
+        aria-hidden="true"
+      />
       <span v-if="showTrackValue" class="base-progress__track-value" aria-hidden="true">
         {{ resolvedValueText }}
       </span>
@@ -260,23 +292,24 @@ const descriptionStyle = computed(() => {
 }
 
 .base-progress__track {
-  @apply relative overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800;
+  @apply relative flex min-w-0 items-center overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800;
+  min-height: var(--base-progress-track-height);
 }
 
 .base-progress--xs .base-progress__track {
-  @apply h-1;
+  --base-progress-track-height: 4px;
 }
 
 .base-progress--sm .base-progress__track {
-  @apply h-1.5;
+  --base-progress-track-height: 6px;
 }
 
 .base-progress--md .base-progress__track {
-  @apply h-2.5;
+  --base-progress-track-height: 10px;
 }
 
 .base-progress--lg .base-progress__track {
-  @apply h-3.5;
+  --base-progress-track-height: 14px;
 }
 
 .base-progress--value-track .base-progress__track,
@@ -285,30 +318,37 @@ const descriptionStyle = computed(() => {
 }
 
 .base-progress__buffer {
-  @apply absolute inset-y-0 left-0 rounded-full bg-slate-200 dark:bg-slate-700;
+  @apply absolute left-0 rounded-full bg-slate-200 dark:bg-slate-700;
+  top: 50%;
+  z-index: 0;
+  height: var(--base-progress-track-height);
+  transform: translateY(-50%);
 }
 
-.base-progress__bar {
-  @apply relative h-full rounded-full transition-all duration-500;
-  background-color: var(--progress-color);
+.base-progress__element {
+  position: relative;
+  z-index: 1;
+  width: 100%;
 }
 
-.base-progress__bar.is-striped {
-  background-image: linear-gradient(
-    45deg,
-    rgba(255, 255, 255, 0.24) 25%,
-    transparent 25%,
-    transparent 50%,
-    rgba(255, 255, 255, 0.24) 50%,
-    rgba(255, 255, 255, 0.24) 75%,
-    transparent 75%,
-    transparent
-  );
-  background-size: 14px 14px;
+.base-progress__element :deep(.el-progress-bar) {
+  @apply w-full;
+  margin-right: 0;
+  padding-right: 0;
 }
 
-.base-progress__bar.is-striped.is-animated {
-  animation: base-progress-stripes 0.9s linear infinite;
+.base-progress__element :deep(.el-progress-bar__outer) {
+  background-color: transparent;
+  border-radius: 999px;
+}
+
+.base-progress__element :deep(.el-progress-bar__inner) {
+  border-radius: 999px;
+  transition: width 0.5s ease;
+}
+
+.base-progress--indeterminate:not(.base-progress--animated) .base-progress__element :deep(.el-progress-bar__inner) {
+  width: 33% !important;
 }
 
 .base-progress__track-value {
@@ -320,54 +360,11 @@ const descriptionStyle = computed(() => {
   text-shadow: 0 1px 2px rgba(15, 23, 42, 0.56);
 }
 
-.base-progress--indeterminate .base-progress__bar {
-  @apply absolute inset-y-0 left-0 w-1/3;
-}
-
-.base-progress--indeterminate.base-progress--animated .base-progress__bar {
-  animation: base-progress-indeterminate 1.1s ease-in-out infinite;
-}
-
 @media (prefers-reduced-motion: reduce) {
   .base-progress,
-  .base-progress__bar {
+  .base-progress__element :deep(.el-progress-bar__inner) {
     transition: none !important;
     animation: none !important;
   }
-}
-
-@keyframes base-progress-indeterminate {
-  0% {
-    transform: translateX(-120%);
-  }
-  100% {
-    transform: translateX(320%);
-  }
-}
-
-@keyframes base-progress-stripes {
-  to {
-    background-position-x: 14px;
-  }
-}
-
-.base-progress--primary {
-  --progress-color: rgb(var(--color-primary));
-}
-
-.base-progress--success {
-  --progress-color: #10b981;
-}
-
-.base-progress--warning {
-  --progress-color: #f59e0b;
-}
-
-.base-progress--danger {
-  --progress-color: #ef4444;
-}
-
-.base-progress--neutral {
-  --progress-color: #64748b;
 }
 </style>

@@ -76,23 +76,46 @@ const hasHeader = computed(() => props.showHeader && (props.avatar || resolvedTi
     aria-busy="true"
     :aria-label="resolvedLabel"
   >
-    <div v-if="media" class="base-skeleton-card__media" :class="`base-skeleton-card__media--${mediaRatio}`" aria-hidden="true"></div>
-    <div v-if="hasHeader" class="base-skeleton-card__header" aria-hidden="true">
-      <span v-if="avatar" class="base-skeleton-card__avatar" :class="`base-skeleton-card__avatar--${avatarShape}`"></span>
-      <div class="base-skeleton-card__title">
-        <span v-for="index in resolvedTitleLines" :key="index" :class="`is-title-${index}`"></span>
-      </div>
-    </div>
-    <div class="base-skeleton-card__body" aria-hidden="true">
-      <span
-        v-for="index in resolvedLines"
-        :key="index"
-        :class="[`is-line-${index}`, { 'is-short': index === resolvedLines }]"
-      ></span>
-    </div>
-    <div v-if="actions" class="base-skeleton-card__actions" :class="`base-skeleton-card__actions--${actionAlign}`" aria-hidden="true">
-      <span v-for="index in resolvedActionCount" :key="index"></span>
-    </div>
+    <el-skeleton class="base-skeleton-card__skeleton" :animated="animated" :loading="true" :rows="0" aria-hidden="true">
+      <template #template>
+        <el-skeleton-item
+          v-if="media"
+          variant="image"
+          class="base-skeleton-card__media"
+          :class="`base-skeleton-card__media--${mediaRatio}`"
+        />
+        <div v-if="hasHeader" class="base-skeleton-card__header">
+          <el-skeleton-item
+            v-if="avatar"
+            :variant="avatarShape === 'circle' ? 'circle' : 'rect'"
+            class="base-skeleton-card__avatar"
+            :class="`base-skeleton-card__avatar--${avatarShape}`"
+          />
+          <div class="base-skeleton-card__title">
+            <el-skeleton-item
+              v-for="index in resolvedTitleLines"
+              :key="index"
+              variant="text"
+              class="base-skeleton-card__title-line"
+              :class="`is-title-${index}`"
+            />
+          </div>
+        </div>
+        <div class="base-skeleton-card__body">
+          <el-skeleton-item
+            v-for="index in resolvedLines"
+            :key="index"
+            variant="p"
+            class="base-skeleton-card__line"
+            :class="[`is-line-${index}`, { 'is-short': index === resolvedLines }]"
+          />
+        </div>
+        <div v-if="actions" class="base-skeleton-card__actions" :class="`base-skeleton-card__actions--${actionAlign}`">
+          <el-skeleton-item v-for="index in resolvedActionCount" :key="index" variant="button" class="base-skeleton-card__action" />
+        </div>
+      </template>
+      <span class="sr-only">{{ resolvedLabel }}</span>
+    </el-skeleton>
   </section>
 </template>
 
@@ -137,24 +160,22 @@ const hasHeader = computed(() => props.showHeader && (props.avatar || resolvedTi
   @apply p-5;
 }
 
+.base-skeleton-card__skeleton {
+  --el-skeleton-color: #e2e8f0;
+  --el-skeleton-to-color: #cbd5e1;
+  @apply w-full;
+}
+
 .base-skeleton-card__header {
   @apply flex items-center gap-3;
 }
 
 .base-skeleton-card__avatar,
-.base-skeleton-card__title span,
+.base-skeleton-card__title-line,
 .base-skeleton-card__media,
-.base-skeleton-card__body span,
-.base-skeleton-card__actions span {
-  @apply block rounded-full bg-slate-200 dark:bg-slate-800;
-}
-
-.base-skeleton-card:not(.base-skeleton-card--static) .base-skeleton-card__avatar,
-.base-skeleton-card:not(.base-skeleton-card--static) .base-skeleton-card__title span,
-.base-skeleton-card:not(.base-skeleton-card--static) .base-skeleton-card__media,
-.base-skeleton-card:not(.base-skeleton-card--static) .base-skeleton-card__body span,
-.base-skeleton-card:not(.base-skeleton-card--static) .base-skeleton-card__actions span {
-  @apply animate-pulse;
+.base-skeleton-card__line,
+.base-skeleton-card__action {
+  @apply block rounded-full;
 }
 
 .base-skeleton-card__avatar {
@@ -177,11 +198,11 @@ const hasHeader = computed(() => props.showHeader && (props.avatar || resolvedTi
   @apply flex min-w-0 flex-1 flex-col gap-2;
 }
 
-.base-skeleton-card__title span.is-title-1 {
+.base-skeleton-card__title-line.is-title-1 {
   @apply h-3 w-1/3;
 }
 
-.base-skeleton-card__title span.is-title-2 {
+.base-skeleton-card__title-line.is-title-2 {
   @apply h-2.5 w-1/2;
 }
 
@@ -201,6 +222,10 @@ const hasHeader = computed(() => props.showHeader && (props.avatar || resolvedTi
   aspect-ratio: 1 / 1;
 }
 
+.base-skeleton-card__media :deep(svg) {
+  display: none;
+}
+
 .base-skeleton-card__body {
   @apply mt-4 flex flex-col gap-2;
 }
@@ -218,28 +243,28 @@ const hasHeader = computed(() => props.showHeader && (props.avatar || resolvedTi
   @apply mt-4;
 }
 
-.base-skeleton-card__body span {
+.base-skeleton-card__line {
   @apply h-2.5 w-full rounded;
 }
 
-.base-skeleton-card--lg .base-skeleton-card__body span {
+.base-skeleton-card--lg .base-skeleton-card__line {
   @apply h-3;
 }
 
-.base-skeleton-card__body span.is-line-2,
-.base-skeleton-card__body span.is-line-4,
-.base-skeleton-card__body span.is-line-6,
-.base-skeleton-card__body span.is-line-8 {
+.base-skeleton-card__line.is-line-2,
+.base-skeleton-card__line.is-line-4,
+.base-skeleton-card__line.is-line-6,
+.base-skeleton-card__line.is-line-8 {
   @apply w-full;
 }
 
-.base-skeleton-card__body span.is-line-3,
-.base-skeleton-card__body span.is-line-5,
-.base-skeleton-card__body span.is-line-7 {
+.base-skeleton-card__line.is-line-3,
+.base-skeleton-card__line.is-line-5,
+.base-skeleton-card__line.is-line-7 {
   @apply w-5/6;
 }
 
-.base-skeleton-card__body span.is-short {
+.base-skeleton-card__line.is-short {
   @apply w-2/3;
 }
 
@@ -255,28 +280,26 @@ const hasHeader = computed(() => props.showHeader && (props.avatar || resolvedTi
   @apply justify-between;
 }
 
-.base-skeleton-card__actions span {
+.base-skeleton-card__action {
   @apply h-7 w-16 rounded-lg;
 }
 
-.base-skeleton-card--sm .base-skeleton-card__actions span {
+.base-skeleton-card--sm .base-skeleton-card__action {
   @apply h-6 w-12;
 }
 
-.base-skeleton-card--lg .base-skeleton-card__actions span {
+.base-skeleton-card--lg .base-skeleton-card__action {
   @apply h-8 w-20;
+}
+
+:global(.dark) .base-skeleton-card__skeleton {
+  --el-skeleton-color: #1e293b;
+  --el-skeleton-to-color: #334155;
 }
 
 @media (prefers-reduced-motion: reduce) {
   .base-skeleton-card {
     transition: none !important;
-  }
-
-  .base-skeleton-card__avatar,
-  .base-skeleton-card__title span,
-  .base-skeleton-card__body span,
-  .base-skeleton-card__actions span {
-    animation: none;
   }
 }
 </style>
