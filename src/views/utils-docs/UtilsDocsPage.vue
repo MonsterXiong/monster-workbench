@@ -1,4 +1,4 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 import { computed, ref, watch, onMounted, onBeforeUnmount } from "vue";
 import { BookOpen, Braces, Code2, Layers3, Search, SplitSquareHorizontal, Terminal, Play, LayoutGrid, ChevronDown, ChevronRight, AlertTriangle } from "lucide-vue-next";
 import BaseCodeBlock from "../../components/common/BaseCodeBlock.vue";
@@ -158,36 +158,53 @@ function selectFunction(fnName: string) {
   selectedFuncName.value = fnName;
 }
 
-async function runSandbox() {
+let sandboxWorker: Worker | null = null;
+let sandboxWorkerId = 0;
+
+function runSandbox() {
   if (activeDocKey.value === 'overview' || !selectedFuncName.value) return;
   isRunningSandbox.value = true;
   sandboxError.value = "";
-
-  try {
-    const targetFn = (monsterUtils as any)[selectedFuncName.value];
-    if (typeof targetFn !== 'function') {
-      throw new Error("无法找到该目标函数或其不是一个合法函数。");
-    }
-
-    const args = paramValues.value.map(valStr => {
-      const trimmed = valStr.trim();
-      if (!trimmed) return undefined;
-      try {
-        const fn = new Function('return ' + trimmed);
-        return fn();
-      } catch (e) {
-        return trimmed;
-      }
-    });
-
-    const res = await targetFn(...args);
-    sandboxResult.value = res !== undefined ? res : "undefined";
-  } catch (err: any) {
-    sandboxError.value = err?.message || String(err);
-    sandboxResult.value = "";
-  } finally {
-    isRunningSandbox.value = false;
+  if (sandboxWorker) {
+    sandboxWorker.terminate();
   }
+
+  sandboxWorker = new Worker(new URL('./sandboxWorker.ts', import.meta.url), { type: 'module' });
+  const currentId = ++sandboxWorkerId;
+
+  const timeoutId = setTimeout(() => {
+    if (sandboxWorker) {
+      sandboxWorker.terminate();
+      sandboxWorker = null;
+    }
+    if (currentId === sandboxWorkerId) {
+      sandboxError.value = "执行超时 ( > 2000ms )。已强制中断，可能是由于存在死循环或长时间阻塞的计算。";
+      isRunningSandbox.value = false;
+    }
+  }, 2000);
+
+  sandboxWorker.onmessage = (e) => {
+    if (e.data.id !== currentId) return;
+    clearTimeout(timeoutId);
+    if (e.data.success) {
+      sandboxResult.value = e.data.result;
+    } else {
+      sandboxError.value = e.data.error;
+    }
+    isRunningSandbox.value = false;
+  };
+
+  sandboxWorker.onerror = (e) => {
+    clearTimeout(timeoutId);
+    sandboxError.value = "Worker 执行发生致命异常：" + e.message;
+    isRunningSandbox.value = false;
+  };
+
+  sandboxWorker.postMessage({
+    id: currentId,
+    fnName: selectedFuncName.value,
+    argsStrings: Array.from(paramValues.value)
+  });
 }
 
 function stringifyExample(value: unknown): string {
@@ -217,7 +234,13 @@ function handleGlobalKeydown(event: KeyboardEvent) {
 }
 
 onMounted(() => window.addEventListener("keydown", handleGlobalKeydown));
-onBeforeUnmount(() => window.removeEventListener("keydown", handleGlobalKeydown));
+onBeforeUnmount(() => {
+  window.removeEventListener("keydown", handleGlobalKeydown);
+  if (sandboxWorker) {
+    sandboxWorker.terminate();
+    sandboxWorker = null;
+  }
+});
 </script>
 
 <template>
@@ -591,7 +614,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", handleGlobalKeydown)
             </div>
             <div class="flex-1 overflow-y-auto p-4 font-mono text-xs">
               <div v-if="sandboxError" class="text-red-500 break-words">{{ sandboxError }}</div>
-              <pre v-else-if="sandboxResult !== ''" class="text-emerald-600 dark:text-emerald-400 break-words whitespace-pre-wrap">{{ stringifyExample(sandboxResult) }}</pre>
+              <pre v-else-if="sandboxResult !== ''" class="text-emerald-600 dark:text-emerald-400 break-words whitespace-pre-wrap">{{ sandboxResult }}</pre>
               <div v-else class="text-slate-400 italic text-center mt-6">等待执行...</div>
             </div>
           </div>
