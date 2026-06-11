@@ -308,7 +308,7 @@ Python step boundary
 | sidecar lifecycle diagnostics | 已有 `creative-sidecar-status-changed` Tauri event 和 `sidecar-lifecycle.log` 摘要日志 | 控制面诊断，继续保留 | 不新增 DB 表；同源节流、脱敏、随系统诊断导出收集 |
 | `useSidecarStore` / 设置诊断页 | 只读展示 runtime instance、cursor 和最近事件 | 可保留 | 先 `get_sidecar_status`，只有 status 为 `running` 才 polling，避免打开诊断页主动启动 sidecar |
 | `build_prompt_request` | Rust 侧替换 `{{sequenceNo}}` / `{{index}}` | demo-era prompt builder 残留 | 正式 batch prompt builder 放到 Python；Rust 只传 template/input/context |
-| `build_provider_config` / `build_image_provider_config` | 把 batch payload 适配成 `AiProviderConfig` | 测试链路 DTO 语义残留 | 后续改向正式 workflow provider DTO，避免让 `AiProviderService` 测试语义回流到生产 runtime |
+| `build_workflow_provider_config` / `BatchWorkflowProviderConfig` | 把 batch payload 适配成 sidecar workflow provider 配置 | 已退出 `AiProviderConfig` 测试语义 | 保持为 Rust request 适配层；后续如 provider 协议继续扩展，优先靠近 sidecar workflow DTO |
 | `maybe_auto_pause_batch_after_failure` | 基于失败阈值自动暂停 batch | 控制面安全策略，可短期保留 | 不继续扩展成复杂业务失败策略；复杂策略进入 workflow runtime 或受控 policy 配置 |
 
 ### 12.3 当前推进顺序
@@ -325,7 +325,7 @@ Python step boundary
 - 不因为 `TaskService` 同时包含 task / asset / event 方法就立即拆文件；当前更高风险是继续把真实 review/revision 规则写进 `run_review_asset_quality_stub`。
 - 不把 `BatchJobService` 的 supervisor 立即迁给 Python；当前 Rust supervisor 仍是受控 claim、并发槽位、暂停/恢复/取消和最终状态落库的可信入口。
 - 不再为新的正式 batch workflow 增加 Rust worker 分支；新增 workflow 应走统一 sidecar request/result 协议，Rust 只做控制、校验、授权路径和可信落库。
-- `build_prompt_request` 与 `AiProviderConfig` 适配是当前最明确的 demo/test 语义残留；后续应先迁成 Python prompt builder 和正式 workflow provider DTO。
+- `build_prompt_request` 仍是当前最明确的 demo-era 业务执行残留；`AiProviderConfig` 适配已收口为 `BatchWorkflowProviderConfig`，后续应先把 prompt builder 迁到 Python workflow。
 - `settle_sidecar_non_success`、`settle_batch_prompt_sidecar_response`、`settle_batch_image_sidecar_response` 代表同一类 Rust 可信 settle 逻辑；当前已先抽出 sidecar 协议校验、事件落库、model_runs 持久化、普通 ready asset 创建和 batch failure/cancelled 状态映射 helper，后续再评估 image success settle 或 Python `/events` polling，而不是把落库职责迁到 Python。
 - `SidecarLifecycleService` 已有恢复冷却、受控 shutdown、恢复失败指标、节流后的 Tauri 生命周期事件、`sidecar-lifecycle.log` 摘要持久化、Python `/events` polling、runtime instance 字段、设置诊断页只读消费和 `sidecar-runtime.log` 摘要持久化，下一步不要急着上 Python worker pool；先观察物理诊断日志是否足够，再评估正式 diagnostics 表/导出策略或 Rust submit/settle 公共路径。
 
@@ -338,7 +338,7 @@ Python step boundary
 3. `run_prompt_task_worker` / `run_generate_task_worker` 是过渡 worker shell：可以继续负责取消检查、checkpoint server、sidecar submit 和 settle 分派，但不再新增正式业务 worker 分支。
 4. `handle_batch_worker_failure_with_model_runs` 与 `handle_batch_worker_cancelled` 已收口 prompt/image 的失败、重试和取消状态；这类 Rust 可信状态 helper 保留。
 5. `settle_batch_image_sidecar_response` 的 success 分支暂不强抽：它仍包含授权输出目录校验、thumbnail 生成、image-specific metadata 和 asset 创建；后续最多抽小型 result/status helper，不能把路径信任交给 Python。
-6. 当前最明确的业务执行残留是 `build_prompt_request` 和 `build_provider_config` / `build_image_provider_config`：它们仍把 batch payload 适配成 `AiProviderConfig` 测试语义。下一步优先把 prompt builder 放入 Python workflow，并把 Rust 请求改成正式 provider/workflow DTO。
+6. 当前最明确的业务执行残留是 `build_prompt_request`：它仍在 Rust 里替换 `{{sequenceNo}}` / `{{index}}`。`build_provider_config` / `build_image_provider_config` 已收口为 `build_workflow_provider_config` / `BatchWorkflowProviderConfig`，不再依赖 `AiProviderConfig` 测试 DTO；下一步优先把 prompt builder 放入 Python workflow。
 
 ## 13. 不变量
 

@@ -10,7 +10,6 @@ use crate::infra::creative_types::{
 };
 use crate::infra::path::PathProvider;
 use crate::infra::{AppError, AppResult};
-use crate::services::ai_service::AiProviderConfig;
 use crate::services::cancel_checkpoint_service::start_cancel_checkpoint_server;
 use crate::services::sidecar_lifecycle_service::{
     BatchImageGenerateSidecarRequest, BatchImagePromptSidecarRequest, SidecarLifecycleService,
@@ -89,6 +88,38 @@ pub struct CreativeBatchJobEventPayload {
 #[serde(rename_all = "camelCase")]
 struct BatchExecutionBudget {
     max_consecutive_failures: Option<i64>,
+}
+
+#[derive(Debug, Clone)]
+struct BatchWorkflowProviderConfig {
+    provider_type: String,
+    display_name: String,
+    base_url: String,
+    api_key: String,
+    chat_model: String,
+    image_model: String,
+    timeout_ms: u64,
+}
+
+impl BatchWorkflowProviderConfig {
+    fn to_sidecar_provider(&self, request_type: &str) -> SidecarProviderConfig {
+        let model = if request_type == "image" {
+            self.image_model.clone()
+        } else {
+            self.chat_model.clone()
+        };
+
+        SidecarProviderConfig {
+            provider_id: Some(self.display_name.clone()),
+            provider_type: Some(self.provider_type.clone()),
+            display_name: Some(self.display_name.clone()),
+            base_url: self.base_url.clone(),
+            api_key: self.api_key.clone(),
+            model,
+            request_type: request_type.to_string(),
+            timeout_ms: Some(self.timeout_ms),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -972,7 +1003,7 @@ fn run_prompt_task_worker<R: Runtime>(
     }
 
     let prompt_request = build_prompt_request(&task)?;
-    let provider_config = build_provider_config(&task, &prompt_request)?;
+    let provider_config = build_workflow_provider_config(&task)?;
     let workflow_started = Instant::now();
     let sidecar_result =
         start_cancel_checkpoint_server(db_path.to_path_buf(), task.id).and_then(|checkpoint| {
@@ -1019,7 +1050,7 @@ fn submit_batch_prompt_sidecar_workflow<R: Runtime>(
     task: &CreativeTask,
     batch_job_id: i64,
     prompt_request: &str,
-    provider_config: &AiProviderConfig,
+    provider_config: &BatchWorkflowProviderConfig,
     cancel_checkpoint_url: Option<&str>,
     cancel_checkpoint_token: Option<&str>,
 ) -> AppResult<SidecarWorkflowTaskResult> {
@@ -1032,16 +1063,7 @@ fn submit_batch_prompt_sidecar_workflow<R: Runtime>(
                 batch_job_id,
                 sequence_no: task.sequence_no,
                 prompt_request: prompt_request.to_string(),
-                provider: SidecarProviderConfig {
-                    provider_id: Some(provider_config.display_name.clone()),
-                    provider_type: Some(provider_config.provider.clone()),
-                    display_name: Some(provider_config.display_name.clone()),
-                    base_url: provider_config.base_url.clone(),
-                    api_key: provider_config.api_key.clone(),
-                    model: provider_config.model.clone(),
-                    request_type: "chat".to_string(),
-                    timeout_ms: Some(provider_config.timeout_ms),
-                },
+                provider: provider_config.to_sidecar_provider("chat"),
                 budget: Some(SidecarWorkflowBudget {
                     max_duration_ms: Some(provider_config.timeout_ms),
                     max_images: None,
@@ -1080,7 +1102,7 @@ fn settle_batch_prompt_sidecar_response<R: Runtime>(
     batch_job_id: i64,
     task: &CreativeTask,
     prompt_request: &str,
-    provider_config: &AiProviderConfig,
+    provider_config: &BatchWorkflowProviderConfig,
     duration_ms: i64,
     sidecar_response: SidecarWorkflowTaskResult,
 ) -> AppResult<()> {
@@ -1262,7 +1284,7 @@ fn handle_prompt_transport_failure<R: Runtime>(
     batch_job_id: i64,
     task: &CreativeTask,
     prompt_request: &str,
-    provider_config: &AiProviderConfig,
+    provider_config: &BatchWorkflowProviderConfig,
     duration_ms: i64,
     error_message: String,
 ) -> AppResult<()> {
@@ -1273,8 +1295,8 @@ fn handle_prompt_transport_failure<R: Runtime>(
             task_id: Some(task.id),
             asset_id: None,
             provider_id: Some(provider_config.display_name.clone()),
-            provider_type: Some(provider_config.provider.clone()),
-            model: Some(provider_config.model.clone()),
+            provider_type: Some(provider_config.provider_type.clone()),
+            model: Some(provider_config.chat_model.clone()),
             request_type: "chat".to_string(),
             status: "failed".to_string(),
             duration_ms: Some(duration_ms),
@@ -1507,8 +1529,7 @@ fn run_generate_task_worker<R: Runtime>(
     }
 
     let prompt_request = build_prompt_request(&task)?;
-    let provider_config =
-        build_image_provider_config(&task, &prompt_request, batch.image_size.as_deref())?;
+    let provider_config = build_workflow_provider_config(&task)?;
     let output_dir = resolve_batch_image_output_dir(app_handle)?;
     let workflow_started = Instant::now();
     let sidecar_result =
@@ -1559,7 +1580,7 @@ fn submit_batch_image_generate_sidecar_workflow<R: Runtime>(
     task: &CreativeTask,
     batch_job_id: i64,
     prompt_request: &str,
-    provider_config: &AiProviderConfig,
+    provider_config: &BatchWorkflowProviderConfig,
     image_size: &str,
     output_dir: &std::path::Path,
     cancel_checkpoint_url: Option<&str>,
@@ -1576,16 +1597,7 @@ fn submit_batch_image_generate_sidecar_workflow<R: Runtime>(
                 prompt_request: prompt_request.to_string(),
                 image_size: image_size.to_string(),
                 output_dir: output_dir.to_string_lossy().to_string(),
-                provider: SidecarProviderConfig {
-                    provider_id: Some(provider_config.display_name.clone()),
-                    provider_type: Some(provider_config.provider.clone()),
-                    display_name: Some(provider_config.display_name.clone()),
-                    base_url: provider_config.base_url.clone(),
-                    api_key: provider_config.api_key.clone(),
-                    model: provider_config.image_model.clone(),
-                    request_type: "image".to_string(),
-                    timeout_ms: Some(provider_config.timeout_ms),
-                },
+                provider: provider_config.to_sidecar_provider("image"),
                 budget: Some(SidecarWorkflowBudget {
                     max_duration_ms: Some(provider_config.timeout_ms),
                     max_images: Some(1),
@@ -1607,7 +1619,7 @@ fn settle_batch_image_sidecar_response<R: Runtime>(
     batch_job_id: i64,
     task: &CreativeTask,
     prompt_request: &str,
-    provider_config: &AiProviderConfig,
+    provider_config: &BatchWorkflowProviderConfig,
     duration_ms: i64,
     output_dir: &std::path::Path,
     sidecar_response: SidecarWorkflowTaskResult,
@@ -1794,7 +1806,7 @@ fn handle_generate_transport_failure<R: Runtime>(
     batch_job_id: i64,
     task: &CreativeTask,
     prompt_request: &str,
-    provider_config: &AiProviderConfig,
+    provider_config: &BatchWorkflowProviderConfig,
     duration_ms: i64,
     error_message: String,
 ) -> AppResult<()> {
@@ -1805,7 +1817,7 @@ fn handle_generate_transport_failure<R: Runtime>(
             task_id: Some(task.id),
             asset_id: None,
             provider_id: Some(provider_config.display_name.clone()),
-            provider_type: Some(provider_config.provider.clone()),
+            provider_type: Some(provider_config.provider_type.clone()),
             model: Some(provider_config.image_model.clone()),
             request_type: "image".to_string(),
             status: "failed".to_string(),
@@ -1989,7 +2001,7 @@ fn build_prompt_request(task: &CreativeTask) -> AppResult<String> {
         .replace("{{index}}", &sequence_no.to_string()))
 }
 
-fn build_provider_config(task: &CreativeTask, prompt_request: &str) -> AppResult<AiProviderConfig> {
+fn build_workflow_provider_config(task: &CreativeTask) -> AppResult<BatchWorkflowProviderConfig> {
     let payload = task
         .payload_json
         .as_deref()
@@ -2006,66 +2018,14 @@ fn build_provider_config(task: &CreativeTask, prompt_request: &str) -> AppResult
     let provider_config: BatchPromptProviderConfigInput = serde_json::from_value(config_value)
         .map_err(|error| AppError::Config(format!("invalid providerConfig: {error}")))?;
 
-    Ok(AiProviderConfig {
-        provider: provider_config.provider,
+    Ok(BatchWorkflowProviderConfig {
+        provider_type: provider_config.provider,
         display_name: provider_config.display_name,
         base_url: provider_config.base_url,
         api_key: provider_config.api_key,
-        remember_api_key: false,
-        model: provider_config.model.clone(),
-        test_prompt: prompt_request.to_string(),
+        chat_model: provider_config.model.clone(),
         image_model: provider_config.model,
-        image_prompt: String::new(),
-        image_count: 1,
-        image_size: "1024x1024".to_string(),
         timeout_ms: provider_config.timeout_ms.unwrap_or(60_000),
-        queue_mode: provider_config
-            .queue_mode
-            .unwrap_or_else(|| "serial".to_string()),
-        max_concurrency: provider_config.max_concurrency.unwrap_or(1),
-        queue_key: provider_config.queue_key.unwrap_or_default(),
-    })
-}
-
-fn build_image_provider_config(
-    task: &CreativeTask,
-    prompt_request: &str,
-    image_size: Option<&str>,
-) -> AppResult<AiProviderConfig> {
-    let payload = task
-        .payload_json
-        .as_deref()
-        .map(|raw| serde_json::from_str::<Value>(raw))
-        .transpose()
-        .map_err(|error| AppError::Config(format!("invalid batch prompt payload: {error}")))?;
-    let config_value = payload
-        .as_ref()
-        .and_then(|value| value.get("providerConfig"))
-        .cloned()
-        .ok_or_else(|| {
-            AppError::Config("providerConfig is required for generate batch".to_string())
-        })?;
-    let provider_config: BatchPromptProviderConfigInput = serde_json::from_value(config_value)
-        .map_err(|error| AppError::Config(format!("invalid providerConfig: {error}")))?;
-
-    Ok(AiProviderConfig {
-        provider: provider_config.provider,
-        display_name: provider_config.display_name,
-        base_url: provider_config.base_url,
-        api_key: provider_config.api_key,
-        remember_api_key: false,
-        model: provider_config.model.clone(),
-        test_prompt: prompt_request.to_string(),
-        image_model: provider_config.model,
-        image_prompt: prompt_request.to_string(),
-        image_count: 1,
-        image_size: image_size.unwrap_or("1024x1024").to_string(),
-        timeout_ms: provider_config.timeout_ms.unwrap_or(60_000),
-        queue_mode: provider_config
-            .queue_mode
-            .unwrap_or_else(|| "serial".to_string()),
-        max_concurrency: provider_config.max_concurrency.unwrap_or(1),
-        queue_key: provider_config.queue_key.unwrap_or_default(),
     })
 }
 
