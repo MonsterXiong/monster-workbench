@@ -201,6 +201,7 @@ fn main() {
             commands::worker_queue::claim_next_creative_task,
             commands::worker_queue::request_creative_task_cancel,
             commands::worker_queue::check_task_cancel_checkpoint,
+            commands::worker_queue::complete_creative_task,
             commands::worker_queue::recover_interrupted_creative_tasks,
             commands::auth::verify_admin_password,
             commands::updater::trigger_update_download,

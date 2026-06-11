@@ -1,6 +1,7 @@
 use crate::infra::creative_types::CreativeTask;
 use crate::services::worker_queue_service::{
-    WorkerQueueCancelResult, WorkerQueueRecoverySummary, WorkerQueueService,
+    WorkerQueueCancelResult, WorkerQueueCompleteResult, WorkerQueueCompleteTaskInput,
+    WorkerQueueRecoverySummary, WorkerQueueService,
 };
 use std::sync::Mutex;
 use tauri::State;
@@ -39,6 +40,15 @@ pub fn check_task_cancel_checkpoint(
     service
         .check_cancel_checkpoint(task_id)
         .map_err(|e| e.to_json_string())
+}
+
+#[tauri::command]
+pub fn complete_creative_task(
+    input: WorkerQueueCompleteTaskInput,
+    state: WorkerQueueState<'_>,
+) -> Result<WorkerQueueCompleteResult, String> {
+    let service = state.lock().unwrap_or_else(|e| e.into_inner());
+    service.complete_task(input).map_err(|e| e.to_json_string())
 }
 
 #[tauri::command]

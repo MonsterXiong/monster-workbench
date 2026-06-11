@@ -2130,3 +2130,34 @@ Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `
 - `npm run check:architecture`
 - `npm run typecheck`
 - `git diff --check -- src-tauri\\src\\services\\batch_job_service.rs src-tauri\\src\\services\\sidecar_lifecycle_service.rs src-tauri\\sidecars\\python\\creative_health_server.py src-tauri\\sidecars\\python\\test_creative_health_server.py docs\\ai\\workflow-runtime-boundary.md docs\\architecture-current-state.md agent\\open-loops.md`
+
+## 2026-06-12 补充：WorkerQueue complete API 首段落地
+
+本轮继续按 `workflow-runtime-boundary.md` 推进受控 worker-pool API，但只补 Rust IPC/service 首段，不把 batch supervisor 迁给 Python，也不开放 Python 直写 SQLite。
+
+代码事实：
+
+- `src-tauri/src/services/worker_queue_service.rs` 已有 `claim_next_task`、`request_cancel`、`check_cancel_checkpoint` 和 `recover_interrupted_tasks`。
+- 本轮新增 `WorkerQueueCompleteTaskInput`、`WorkerQueueCompleteResult` 与 `WorkerQueueService::complete_task`，形成 claim/checkpoint/complete 的最小 Rust 控制面闭环。
+- `complete_task` 只允许 `running` / `cancelling` 任务被 worker 收敛，终态限制为 `succeeded`、`failed`、`cancelled`、`blocked`。
+- 如果任务已经是 `cancelling`，即使 worker 上报 `succeeded`，Rust 也会把最终状态收敛为 `cancelled`，避免取消中的任务被异步成功结果复活。
+- `src-tauri/src/commands/worker_queue.rs` 新增 `complete_creative_task` Tauri command；`src-tauri/src/main.rs` 已注册该 command。
+- 该 API 当前仍是 Rust IPC/service 边界，不是 Python localhost worker-pool 拉队列协议；后续若要迁移 supervisor，需要继续设计 sidecar control endpoint、鉴权、租约/心跳和结果 asset/model_runs 受控写入协议。
+
+边界判定：
+
+| 区域 | 当前状态 | 下一步 |
+|---|---|---|
+| WorkerQueue claim | 已有 Rust service/command | 保持 Rust 可信状态转移 |
+| WorkerQueue checkpoint | 已有 Rust 查询能力；batch/prompt workflow 已用 localhost checkpoint | 后续纳入 worker-pool 统一控制协议 |
+| WorkerQueue complete | 已有 Rust service/command 首段 | 继续补租约、心跳、worker identity 和 result settle 协议 |
+| Python worker pool | 仍未迁移 | 不允许 Python 直接读写 `monster_workbench.db` |
+| Batch supervisor | 仍在 Rust | 等 control API 完整后再评估迁移 |
+
+本轮验证通过：
+
+- `cargo test --manifest-path .\\src-tauri\\Cargo.toml services::worker_queue_service::tests:: -- --nocapture --test-threads=1`
+- `cargo fmt --manifest-path .\\src-tauri\\Cargo.toml -- --check`
+- `npm run check:architecture`
+- `npm run typecheck`
+- `git diff --check -- src-tauri\\src\\services\\worker_queue_service.rs src-tauri\\src\\commands\\worker_queue.rs src-tauri\\src\\main.rs docs\\ai\\workflow-runtime-boundary.md docs\\architecture-current-state.md agent\\open-loops.md`
