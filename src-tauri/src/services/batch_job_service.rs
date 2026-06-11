@@ -19,7 +19,8 @@ use crate::services::sidecar_lifecycle_service::{
 };
 use crate::services::task_service::CreativeTaskEventPayload;
 use crate::services::workflow_settle_service::{
-    append_sidecar_result_events, persist_sidecar_model_runs, validate_sidecar_task_result,
+    append_sidecar_result_events, create_ready_sidecar_asset, persist_sidecar_model_runs,
+    validate_sidecar_task_result,
 };
 use serde_json::{json, Value};
 use std::collections::HashSet;
@@ -1173,25 +1174,12 @@ fn settle_batch_prompt_sidecar_response<R: Runtime>(
         )));
     }
 
-    let asset = creative_asset_repo::create_asset(
+    let asset = create_ready_sidecar_asset(
         db_path,
-        CreateCreativeAssetInput {
-            project_id: task.project_id.clone(),
-            asset_type: output.asset_type,
-            title: output.title,
-            content: Some(prompt_text.clone()),
-            file_path: output.file_path,
-            thumbnail_path: output.thumbnail_path,
-            metadata_json: output
-                .metadata
-                .as_ref()
-                .map(serde_json::to_string)
-                .transpose()
-                .map_err(|error| {
-                    AppError::Config(format!("failed to encode sidecar output metadata: {error}"))
-                })?,
-            status: Some("ready".to_string()),
-        },
+        task.project_id.clone(),
+        &output,
+        Some(prompt_text.clone()),
+        "sidecar output metadata",
     )?;
     let model_run_ids = persist_sidecar_model_runs(
         db_path,

@@ -12,7 +12,8 @@ use crate::services::sidecar_lifecycle_service::{
     GenerateImagePromptSidecarRequest, SidecarLifecycleService, SidecarWorkflowTaskResult,
 };
 use crate::services::workflow_settle_service::{
-    append_sidecar_result_events, persist_sidecar_model_runs, validate_sidecar_task_result,
+    append_sidecar_result_events, create_ready_sidecar_asset, persist_sidecar_model_runs,
+    validate_sidecar_task_result,
 };
 use serde_json::json;
 use tauri::{AppHandle, Emitter, Runtime, Wry};
@@ -437,27 +438,12 @@ impl<R: Runtime> TaskService<R> {
             sidecar_response.outputs.first().cloned().ok_or_else(|| {
                 AppError::Process("sidecar workflow returned no outputs".to_string())
             })?;
-        let asset = creative_asset_repo::create_asset(
+        let asset = create_ready_sidecar_asset(
             db_path,
-            CreateCreativeAssetInput {
-                project_id: input.project_id.clone(),
-                asset_type: output.asset_type,
-                title: output.title,
-                content: output.content,
-                file_path: output.file_path,
-                thumbnail_path: output.thumbnail_path,
-                metadata_json: output
-                    .metadata
-                    .as_ref()
-                    .map(serde_json::to_string)
-                    .transpose()
-                    .map_err(|error| {
-                        AppError::Config(format!(
-                            "failed to encode sidecar output metadata: {error}"
-                        ))
-                    })?,
-                status: Some("ready".to_string()),
-            },
+            input.project_id.clone(),
+            &output,
+            None,
+            "sidecar output metadata",
         )?;
         events.push(self.append_task_event(CreateTaskEventInput {
             task_id: task.id,

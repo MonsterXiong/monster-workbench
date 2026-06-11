@@ -1,11 +1,13 @@
+use crate::infra::creative_asset_repo;
 use crate::infra::creative_model_run_repo;
 use crate::infra::creative_task_repo;
 use crate::infra::creative_types::{
-    CreateModelRunInput, CreateTaskEventInput, CreativeTask, TaskEvent,
+    CreateCreativeAssetInput, CreateModelRunInput, CreateTaskEventInput, CreativeAsset,
+    CreativeTask, TaskEvent,
 };
 use crate::infra::{AppError, AppResult};
 use crate::services::sidecar_lifecycle_service::{
-    SidecarWorkflowEvent, SidecarWorkflowModelRun, SidecarWorkflowTaskResult,
+    SidecarWorkflowEvent, SidecarWorkflowModelRun, SidecarWorkflowOutput, SidecarWorkflowTaskResult,
 };
 use std::path::Path;
 
@@ -112,4 +114,35 @@ pub(crate) fn persist_sidecar_model_runs(
         model_run_ids.push(persisted.id);
     }
     Ok(model_run_ids)
+}
+
+pub(crate) fn create_ready_sidecar_asset(
+    db_path: &Path,
+    project_id: Option<String>,
+    output: &SidecarWorkflowOutput,
+    content_override: Option<String>,
+    metadata_error_context: &str,
+) -> AppResult<CreativeAsset> {
+    creative_asset_repo::create_asset(
+        db_path,
+        CreateCreativeAssetInput {
+            project_id,
+            asset_type: output.asset_type.clone(),
+            title: output.title.clone(),
+            content: content_override.or_else(|| output.content.clone()),
+            file_path: output.file_path.clone(),
+            thumbnail_path: output.thumbnail_path.clone(),
+            metadata_json: output
+                .metadata
+                .as_ref()
+                .map(serde_json::to_string)
+                .transpose()
+                .map_err(|error| {
+                    AppError::Config(format!(
+                        "failed to encode {metadata_error_context}: {error}"
+                    ))
+                })?,
+            status: Some("ready".to_string()),
+        },
+    )
 }
