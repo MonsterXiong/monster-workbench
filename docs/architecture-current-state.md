@@ -1920,3 +1920,31 @@ Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `
 1. 若 UI 需要实时诊断，优先消费 `poll_sidecar_runtime_events` 的临时 cursor，而不是先做持久化。
 2. 若需要跨会话审计，先设计 Rust-owned sidecar diagnostics 记录，至少包含 runtime instance id / startedAt、source event id、eventType、taskId、workflowType、message 摘要和脱敏 payload。
 3. 继续保留 `BatchJobService` supervisor 与 image success settle 的 Rust 边界；下一步更适合补诊断消费或 runtime instance 边界，而不是迁 Python worker pool。
+
+## 2026-06-12 补充：sidecar `/events` runtime instance 边界
+
+本轮按上一节结论推进最小 runtime instance 边界，不改变 `/events` 的“诊断流”定位，也不新增 DB 表。
+
+代码事实：
+
+- `src-tauri/sidecars/python/creative_health_server.py` 的 `SidecarEventBuffer` 现在在创建时生成 `runtimeInstanceId` 和 `runtimeStartedAt`。
+- `GET /events` response 顶层会返回 `runtimeInstanceId` / `runtimeStartedAt`；每条 event 也带同样字段，后续可用它们和 event `id` 组合定位来源。
+- `src-tauri/src/services/sidecar_lifecycle_service.rs` 的 `SidecarRuntimeEvent` / `SidecarRuntimeEventsResponse` 已同步这两个字段，并保持 `serde(default)` 兼容旧响应。
+- `src/services/sidecar.service.ts` 和 browser mock 已同步类型与 mock response，浏览器预览不会与 Tauri DTO 分叉。
+
+边界判定：
+
+| 区域 | 当前状态 | 下一步 |
+|---|---|---|
+| `/events` cursor | 仍是 Python 进程内自增 id | 只能与 `runtimeInstanceId/runtimeStartedAt` 组合使用 |
+| `/events` 持久化 | 仍不落 DB | 先做 UI 诊断消费或 Rust-owned diagnostics 设计 |
+| `task_events` | 仍由 Rust settle 写可信审计 | 不用 `/events` 全量回灌 |
+| Python DB 权限 | 未新增 | 继续禁止 Python 直接写主库 |
+
+本轮验证通过：
+
+- `python -m py_compile src-tauri\\sidecars\\python\\creative_health_server.py src-tauri\\sidecars\\python\\test_creative_health_server.py`
+- `python src-tauri\\sidecars\\python\\test_creative_health_server.py`
+- `cargo test --manifest-path .\\src-tauri\\Cargo.toml services::sidecar_lifecycle_service::tests::poll_runtime_events_uses_cursor_query_and_parses_events -- --nocapture --test-threads=1`
+- `npm run check:architecture`
+- `npm run typecheck`
