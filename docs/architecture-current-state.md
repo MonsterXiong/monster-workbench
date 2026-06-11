@@ -1859,9 +1859,10 @@ Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `
 - `validate_sidecar_task_result` 统一检查 `protocolVersion` 与 `taskId`，避免 `TaskService` 和 `BatchJobService` 各自重复写一遍基础协议门。
 - `append_sidecar_result_events` 统一把 sidecar 返回的 `events` 持久化为 `task_events`，`TaskService` 继续保留自身的 `events` 聚合结果，`BatchJobService` 只关心可信落库。
 - `persist_sidecar_model_runs` 统一把 sidecar 返回的 `modelRuns` 持久化为 `model_runs`；普通 task 保留 sidecar 自带 `promptHash`，batch prompt/image 仍用 `simple_prompt_hash(prompt_request)` 做 fallback。
+- `create_ready_sidecar_asset` 统一把普通 sidecar output 创建为 `ready` asset；`TaskService::run_generate_image_prompt_workflow` 和 batch prompt success settle 已切换到该 helper。
 - `TaskService::run_generate_image_prompt_workflow`、`settle_batch_prompt_sidecar_response` 和 `settle_batch_image_sidecar_response` 都已切换到这个 helper。
 - `BatchJobService` 新增 `BatchWorkerKind` 与通用 failure/cancelled handler，prompt/image sidecar settle 的 retry、failed、cancelled 状态更新、事件名和 Tauri event emit 已收口；worker 启动前观察到取消的本地分支仍保留原处。
-- 资产创建和成功状态 result_json 仍然留在各自服务里，因为 prompt asset 与 image file/thumbnail 的可信校验和元数据结构不同。
+- image success settle 的资产创建和成功状态 result_json 仍然留在 `BatchJobService`，因为它包含输出文件路径授权、thumbnail 生成和 image-specific metadata。
 
 边界判定：
 
@@ -1870,8 +1871,9 @@ Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `
 | sidecar protocol 校验 | 已抽通用 helper | 保持不变 |
 | sidecar events 落库 | 已抽通用 helper | 保持不变 |
 | sidecar model_runs 落库 | 已抽通用 helper | 保持不变 |
+| 普通 ready asset 创建 | 已抽通用 helper | 保持不变 |
 | batch failure/cancelled status settle | 已抽通用 helper | 保持不变 |
-| asset success settle | 仍分散在 `TaskService` / `BatchJobService` | 继续评估是否抽公共 success settle helper |
+| image success settle | 仍保留在 `BatchJobService` | 继续保留 Rust 路径授权和 thumbnail 边界，后续只抽真正稳定的状态/result_json 小片段 |
 | batch supervisor | 仍保留 Rust | 不因 settle 收口就迁到 Python worker pool |
 
 本轮验证通过：
