@@ -2,12 +2,14 @@
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { AlertTriangle, Bot, MessageSquareText, Plus, Send, UserRound } from "lucide-vue-next";
 import { useAiStore } from "../../../stores/ai";
+import { useAiPromptLibraryStore } from "../../../stores/ai-prompt-library";
 import { useI18n } from "../../../composables/useI18n";
 import { getErrorMessage, isBlank, joinBy, scrollElementToBottom, toTrimmedString } from "../../../utils";
 import type { ActionMenuItem } from "../../../components/common/BaseActionMenu.vue";
 import type { AiChatExportFormat, AiConversationSession } from "../../../types/ai";
 
 const aiStore = useAiStore();
+const promptStore = useAiPromptLibraryStore();
 const { t } = useI18n();
 const input = ref("");
 const messageListRef = ref<HTMLElement | null>(null);
@@ -48,7 +50,7 @@ onMounted(async () => {
 });
 
 watch(
-  () => aiStore.pendingPrompt,
+  () => promptStore.pendingPrompt,
   () => consumePendingPrompt()
 );
 
@@ -61,7 +63,7 @@ watch(
 );
 
 function consumePendingPrompt() {
-  const content = aiStore.consumePendingPrompt("chat");
+  const content = promptStore.consumePendingPrompt("chat");
   if (content) {
     input.value = content;
   }

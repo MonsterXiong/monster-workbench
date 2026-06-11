@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from "vue";
 import { Check, FilePenLine, Plus, ScrollText, Sparkles, Trash2 } from "lucide-vue-next";
-import { useAiStore } from "../../../stores/ai";
+import { useAiPromptLibraryStore } from "../../../stores/ai-prompt-library";
 import { useI18n } from "../../../composables/useI18n";
 import { useToast } from "../../../composables/useToast";
 import { findByValue, firstItem, getErrorMessage, hasByValue, mapToMap } from "../../../utils";
 import type { AiPromptItem, AiPromptType } from "../../../types/ai";
 
-const aiStore = useAiStore();
+const promptStore = useAiPromptLibraryStore();
 const { t } = useI18n();
 const { triggerToast } = useToast();
 
@@ -28,18 +28,18 @@ const emit = defineEmits<{
 }>();
 
 const typeOptions = computed(() =>
-  aiStore.promptTypeOptions.map((option) => ({
+  promptStore.promptTypeOptions.map((option) => ({
     ...option,
     label: t(option.value === "image" ? "aiPage.prompts.typeImage" : "aiPage.prompts.typeChat"),
   }))
 );
-const categoryOptions = computed(() => aiStore.getPromptCategoryOptions(activeType.value));
+const categoryOptions = computed(() => promptStore.getPromptCategoryOptions(activeType.value));
 const filterCategoryOptions = computed(() => [
   { label: t("aiPage.prompts.allCategories"), value: "" },
   ...categoryOptions.value,
 ]);
-const prompts = computed(() => aiStore.getPrompts(activeType.value, filterCategoryId.value));
-const categoryNameMap = computed(() => mapToMap(aiStore.promptLibrary.categories, (item) => item.id, (item) => item.name));
+const prompts = computed(() => promptStore.getPrompts(activeType.value, filterCategoryId.value));
+const categoryNameMap = computed(() => mapToMap(promptStore.promptLibrary.categories, (item) => item.id, (item) => item.name));
 const dialogTitle = computed(() => (editingId.value ? t("aiPage.prompts.editDialog") : t("aiPage.prompts.createDialog")));
 const selectedPrompt = computed(() => findByValue(prompts.value, (prompt) => prompt.id, selectedPromptId.value) ?? firstItem(prompts.value) ?? null);
 
@@ -87,7 +87,7 @@ function openEdit(prompt: AiPromptItem) {
 
 async function savePrompt() {
   try {
-    await aiStore.savePrompt({
+    await promptStore.savePrompt({
       id: editingId.value || undefined,
       type: activeType.value,
       categoryId: draft.categoryId,
@@ -105,7 +105,7 @@ async function savePrompt() {
 
 async function deletePrompt(promptId: string) {
   try {
-    await aiStore.deletePrompt(promptId);
+    await promptStore.deletePrompt(promptId);
     triggerToast(t("aiPage.prompts.deleted"), "success");
   } catch (err) {
     triggerToast(getErrorMessage(err, t("aiPage.prompts.deleteFailed")), "error");
@@ -114,7 +114,7 @@ async function deletePrompt(promptId: string) {
 
 async function usePrompt(promptId: string) {
   try {
-    const prompt = await aiStore.applyPrompt(promptId);
+    const prompt = await promptStore.applyPrompt(promptId);
     triggerToast(t("aiPage.prompts.applied"), "success");
     emit("use", prompt.type);
   } catch (err) {

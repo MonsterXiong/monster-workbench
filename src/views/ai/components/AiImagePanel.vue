@@ -2,6 +2,7 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { AlertTriangle, Bot, ChevronDown, ChevronLeft, ChevronRight, FolderOpen, Image, Maximize2, Plus, RotateCcw, Send, Sparkles, UserRound, XCircle } from "lucide-vue-next";
 import { useAiStore } from "../../../stores/ai";
+import { useAiPromptLibraryStore } from "../../../stores/ai-prompt-library";
 import { useI18n } from "../../../composables/useI18n";
 import type { ActionMenuItem } from "../../../components/common/BaseActionMenu.vue";
 import type { AiConversationSession, AiPromptItem } from "../../../types/ai";
@@ -142,6 +143,7 @@ const IMAGE_SIZE_TIER_LABELS = new Map<string, string>([
 ]);
 
 const aiStore = useAiStore();
+const promptStore = useAiPromptLibraryStore();
 const { t } = useI18n();
 const input = ref("");
 const imageDraftCount = ref(1);
@@ -265,7 +267,7 @@ const imageCountOptions = computed(() =>
   }))
 );
 const activeImageModelName = computed(() => aiStore.activeImageConfig?.imageModel || aiStore.activeImageConfig?.model || "-");
-const stylePromptPresets = computed(() => aiStore.getPrompts("image", STYLE_PROMPT_CATEGORY_ID));
+const stylePromptPresets = computed(() => promptStore.getPrompts("image", STYLE_PROMPT_CATEGORY_ID));
 const filteredStylePromptPresets = computed(() => {
   const keyword = toTrimmedString(stylePromptSearch.value);
   if (!keyword) {
@@ -414,7 +416,7 @@ onUnmounted(() => {
 });
 
 watch(
-  () => aiStore.pendingPrompt,
+  () => promptStore.pendingPrompt,
   () => consumePendingPrompt()
 );
 
@@ -467,7 +469,7 @@ function scrollHistoryToBottom(behavior: ScrollBehavior = "smooth") {
 }
 
 function consumePendingPrompt() {
-  const content = aiStore.consumePendingPrompt("image");
+  const content = promptStore.consumePendingPrompt("image");
   if (content) {
     input.value = content;
     selectedStylePromptId.value = "";
