@@ -1490,7 +1490,7 @@ Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `
 | `TaskService::run_review_asset_quality_stub` | Rust 内部用长度阈值生成 review result，并创建 `revise_asset_quality` draft task | 只能视为 demo/stub；不应继续承载真实审查、返工或一致性规则 | 冻结为验证入口；正式 review/revision 迁入 Python workflow runtime |
 | `BatchJobService` supervisor | Rust 用 `active_supervisors`、`std::thread::spawn`、concurrency slot、queued claim 驱动 batch | 短期仍适合留在 Rust；它承担桌面控制面、暂停/恢复/取消和可信状态转移 | 在 sidecar lifecycle、恢复、熔断协议稳定前，不迁给 Python worker pool |
 | `BatchJobService` prompt/image worker shell | prompt/image 已提交 Python sidecar；Rust 仍构造 request、校验 protocol/taskId/status、落库 asset/model_runs/events | 方向正确，但仍是偏宽 orchestrator；新增生产 worker 不应继续在这里分支扩展 | 后续新增正式 workflow 走 sidecar runtime；Rust 只保留 claim、submit、settle、audit |
-| `BatchJobService` prompt 模板替换 | `build_prompt_request` 在 Rust 内处理 `{{sequenceNo}}` / `{{index}}` | 这是 demo-era prompt 构建残留，生产场景不应扩大 | 正式 batch prompt builder 放到 Python；Rust 只传 template/input/context |
+| `BatchJobService` prompt 模板替换 | 当时 `build_prompt_request` 在 Rust 内处理 `{{sequenceNo}}` / `{{index}}`；后续已迁入 Python workflow | 这是 demo-era prompt 构建残留，生产场景不应扩大 | 正式 batch prompt builder 放到 Python；Rust 只传 template/input/context |
 | `BatchJobService` sidecar lifecycle | batch prompt/image worker 已优先使用 app-managed `SidecarLifecycleService`；没有注入 state 的测试/孤立调用才回退临时 sidecar；batch `/tasks` 请求已移到 lifecycle mutex 锁外执行 | 已从 per-task dev sidecar 启停推进到首段生命周期复用和并发提交锁粒度收口，但仍缺少完整健康熔断与事件节流策略 | 下一步补熔断、事件节流和正式 workflow 命名，再讨论 supervisor 迁移 |
 | batch type 命名 | `demo.image.mock/prompt/generate` 仍兼容；Rust batch 控制面已接受 `image.prompt.batch` / `image.generate.batch` 作为正式别名；sidecar 协议层也使用正式命名 | batch job 类型迁移已进入兼容期；UI / browser mock 已开始提交正式 prompt/generate 命名 | 后续继续保留历史兼容，并避免新增 `demo.image.*` 生产分类 |
 
@@ -1696,7 +1696,7 @@ Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `
 - `TaskService::run_review_asset_quality_stub` 仍是唯一明显的 Rust 内 review/revision 业务 stub：它会生成 review result、创建 `review_result` asset，并在不通过时创建 `revise_asset_quality` draft task。该入口应冻结为演示/验证能力，不继续承载真实审查、返工、一致性规则。
 - `BatchJobService` 已支持正式 batch type 别名 `image.prompt.batch` / `image.generate.batch`，但没有新增 worker 分支，而是继续复用 `is_prompt_batch_type` / `is_generate_batch_type` 路由到现有 prompt / image worker shell。
 - prompt / image worker shell 已不再执行 provider 调用；它们负责检查取消、构造 sidecar request、提交 Python workflow、校验返回结果、写入可信资产与审计记录。
-- `build_prompt_request` 仍在 Rust 内处理 `{{sequenceNo}}` / `{{index}}` 替换，这是 demo-era prompt builder 残留；正式 batch prompt 构建不应继续扩展在 Rust。
+- `build_prompt_request` 当时仍在 Rust 内处理 `{{sequenceNo}}` / `{{index}}` 替换，这是 demo-era prompt builder 残留；该项后续已迁入 Python workflow。
 - `build_provider_config` / `build_image_provider_config` 当时仍复用 `AiProviderConfig` 作为 DTO 适配；当前没有重新调用 `AiProviderService::test_provider`，但这个类型名仍带 provider 测试链路语义。该项后续已在 2026-06-12 收口为 `build_workflow_provider_config` / `BatchWorkflowProviderConfig`。
 - `settle_batch_prompt_sidecar_response` 与 `settle_batch_image_sidecar_response` 有较多相似的 protocol 校验、model_runs 写入、失败/取消/retry 映射和事件广播逻辑；这是可信落库面，不是必须迁到 Python，但后续适合抽成通用 settle helper，避免每个 workflow 在 Rust 手写一套。
 
@@ -1740,7 +1740,7 @@ Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `
 - `run_review_asset_quality_stub` 仍是 Rust 内唯一明显的 review/revision 业务 stub：它会创建 `review_result` asset，并在不通过时创建 `revise_asset_quality` draft task。该入口应冻结，不继续扩展真实审查、返工或一致性规则。
 - `BatchJobService` 仍是更宽的 Rust 编排集中点：它保留 batch 生命周期、supervisor、concurrency slot、claim、pause/resume/cancel、自动暂停、事件广播和可信落库。
 - prompt / image batch worker 已不再直接执行 provider 调用，但 Rust 仍负责构造请求、提交 sidecar、校验 result、映射失败/取消/retry、写入 asset/model_runs/task_events/status。
-- `build_prompt_request` 仍在 Rust 内替换 `{{sequenceNo}}` / `{{index}}`，属于 demo-era prompt builder 残留；正式 prompt builder 不应继续扩展在 Rust。
+- `build_prompt_request` 当时仍在 Rust 内替换 `{{sequenceNo}}` / `{{index}}`，属于 demo-era prompt builder 残留；该项后续已迁入 Python workflow。
 - `build_provider_config` / `build_image_provider_config` 当时仍把 batch payload 适配到 `AiProviderConfig`，这是 provider 测试链路 DTO 语义残留；该项后续已在 2026-06-12 收口为正式 batch workflow provider DTO。
 - `settle_sidecar_non_success`、`settle_batch_prompt_sidecar_response`、`settle_batch_image_sidecar_response` 是同类可信 settle 逻辑，适合下一步抽公共 helper，减少每个 workflow 复制状态映射。
 - `SidecarLifecycleService::ensure_dev_server` 已补首段 recovery circuit / backoff：`unhealthy/failed` 恢复失败后进入短冷却，冷却期间快速拒绝后续恢复请求；健康检查成功或 stop 会清空 circuit。这是首段恢复冷却，不等同于完整事件节流和 shutdown 体系。
@@ -1754,7 +1754,7 @@ Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `
 | `TaskService::run_review_asset_quality_stub` | stub，冻结 | 真实 review/revision 迁入 Python workflow runtime |
 | `BatchJobService` supervisor/concurrency/claim | 短期保留 Rust | sidecar 事件节流、shutdown 语义、受控 worker-pool API 稳定后再评估迁移 |
 | `BatchJobService` prompt/image worker shell | 过渡 shell，方向正确 | 新增正式 workflow 不再新增 Rust worker 分支 |
-| `BatchJobService` prompt builder / provider DTO | prompt builder 仍是 demo 残留；provider DTO 后续已退出 `AiProviderConfig` | prompt builder 迁向 Python workflow，provider DTO 保持靠近正式 workflow provider DTO |
+| `BatchJobService` prompt builder / provider DTO | prompt builder 当时仍是 demo 残留，后续已迁入 Python workflow；provider DTO 后续已退出 `AiProviderConfig` | prompt builder 保持在 Python workflow，provider DTO 保持靠近正式 workflow provider DTO |
 | Rust sidecar settle | 可信落库和审计面，保留 | 抽公共 helper，不迁给 Python 直接写库 |
 
 更安全的推进顺序：
@@ -2046,7 +2046,7 @@ Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `
 - `workflow_settle_service.rs` 已抽出协议校验、sidecar events 落库、model_runs 持久化和普通 ready asset 创建；`BatchWorkerKind`、`handle_batch_worker_failure_with_model_runs`、`handle_batch_worker_cancelled` 已收口 prompt/image 的失败、重试和取消状态。
 - `settle_batch_image_sidecar_response` 的 success 分支仍留在 `BatchJobService`，因为这里包含输出目录授权校验、thumbnail 生成、image-specific metadata 和 asset 创建。
 - `build_provider_config` / `build_image_provider_config` 已收口为 `build_workflow_provider_config` / `BatchWorkflowProviderConfig`，`BatchJobService` 不再依赖 `AiProviderConfig` 测试 DTO。
-- `build_prompt_request` 仍在 Rust 内处理 `{{sequenceNo}}` / `{{index}}` 替换，是当前剩余最明确的 demo-era 业务执行残留。
+- `build_prompt_request` 当时仍在 Rust 内处理 `{{sequenceNo}}` / `{{index}}` 替换，是当时剩余最明确的 demo-era 业务执行残留；该项后续已迁入 Python workflow。
 
 边界判定：
 
@@ -2058,12 +2058,12 @@ Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `
 | prompt/image worker shell | 过渡壳层 | 不新增正式 worker 分支；新增 workflow 走 sidecar 协议 |
 | image success settle | Rust 文件权限与缩略图边界 | 保留；不把路径信任交给 Python |
 | batch provider DTO | 已从 `AiProviderConfig` 收口为 `BatchWorkflowProviderConfig` | 保持靠近 sidecar workflow request，不回流到 Provider 测试 DTO |
-| batch prompt builder | Rust demo-era 模板替换残留 | 下一轮优先迁到 Python prompt builder |
+| batch prompt builder | 当时仍是 Rust demo-era 模板替换残留；后续已迁入 Python workflow | 保持 Python 构建、Rust 可信落库 |
 
 下一步排序：
 
 1. 不继续强抽 `settle_batch_image_sidecar_response` 的 success 分支，只在必要时抽小型 result/status helper。
-2. 优先把 `build_prompt_request` 迁成 Python workflow prompt builder；provider DTO 已先退出 `AiProviderConfig` 测试语义。
+2. 当时优先把 `build_prompt_request` 迁成 Python workflow prompt builder；该项后续已完成，provider DTO 也已退出 `AiProviderConfig` 测试语义。
 3. 设计 Rust 受控的 worker-pool claim/checkpoint/complete API 后，再评估 supervisor 是否从 Rust 迁给 Python。
 4. 继续禁止 Python 直接写 `monster_workbench.db`，所有 task status、asset、model_runs、task_events 仍由 Rust 可信写入或未来 Rust 受控 API 写入。
 
@@ -2082,14 +2082,14 @@ Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `
 - 新增内部 `BatchWorkflowProviderConfig`，只保留 batch sidecar workflow 需要的 providerType、displayName、baseUrl、apiKey、chatModel、imageModel 和 timeoutMs。
 - prompt / image batch worker 现在统一通过 `build_workflow_provider_config` 读取 batch payload 中的 providerConfig，再通过 `to_sidecar_provider("chat" | "image")` 生成 `SidecarProviderConfig`。
 - transport failure 的 `model_runs` 仍由 Rust 写入，但 providerType/model 字段来自 workflow DTO，而不是 Provider 测试 DTO。
-- `build_prompt_request` 仍在 Rust 内做 `{{sequenceNo}}` / `{{index}}` 替换；这部分尚未迁到 Python prompt builder。
+- `build_prompt_request` 当时仍在 Rust 内做 `{{sequenceNo}}` / `{{index}}` 替换；该项后续已收口为 Rust 读取 `promptTemplate`、Python workflow 生成 `promptRequest`。
 
 边界判定：
 
 | 区域 | 当前状态 | 下一步 |
 |---|---|---|
 | batch provider DTO | 已退出 `AiProviderConfig` | 保持靠近 sidecar workflow request |
-| prompt builder | 仍在 Rust 内替换模板 | 下一步迁到 Python workflow |
+| prompt builder | 后续已迁到 Python workflow | Rust 保持 template/input/context 传递和可信落库 |
 | supervisor / claim / cancel | 仍在 Rust | 等受控 worker-pool API 成型后再评估迁移 |
 | image success settle | 仍在 Rust | 继续保留路径授权和 thumbnail 生成边界 |
 
@@ -2099,3 +2099,34 @@ Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `
 - `cargo test --manifest-path .\\src-tauri\\Cargo.toml services::batch_job_service::tests:: -- --nocapture --test-threads=1`
 - `npm run check:architecture`
 - `npm run typecheck`
+
+## 2026-06-12 补充：batch prompt builder 迁入 Python workflow
+
+本轮继续按 `workflow-runtime-boundary.md` 收口 `BatchJobService` 的 demo-era 业务执行残留，只迁移 prompt builder，不迁移 Rust supervisor，不改变 Python 禁止直写主库的边界。
+
+代码事实：
+
+- `src-tauri/src/services/batch_job_service.rs` 已移除 `build_prompt_request` 的模板替换逻辑，改为 `read_batch_prompt_template` 只读取 task payload 中的 `promptTemplate`。
+- `BatchImagePromptSidecarRequest` / `BatchImageGenerateSidecarRequest` 不再携带最终 `promptRequest`，而是把 `promptTemplate` 交给 Python sidecar。
+- `src-tauri/sidecars/python/creative_health_server.py` 新增 `build_batch_prompt_request`，在 Python workflow 内替换 `{{sequenceNo}}` / `{{index}}`，同时保留旧 `promptRequest` 输入兼容。
+- Python result 的 `modelRuns.metadata` 与 output metadata 会回传 `promptRequest` 和 `promptHash`；Rust settle 从 sidecar result 提取这些字段，用于 `model_runs` 审计、image result 摘要和 asset metadata。
+- 如果 sidecar 传输失败导致 Python 未返回 result，Rust fallback `model_runs` 不再伪造最终 prompt hash，只记录 `promptBuilder: python-sidecar`、`promptTemplate` 和 `sequenceNo`。
+
+边界判定：
+
+| 区域 | 当前状态 | 下一步 |
+|---|---|---|
+| batch prompt builder | 已进入 Python workflow | 保持 Python 构建、Rust 可信落库 |
+| batch provider DTO | 已退出 `AiProviderConfig` | 保持靠近 sidecar workflow request |
+| supervisor / claim / cancel | 仍在 Rust | 下一步设计受控 worker-pool claim/checkpoint/complete API |
+| image success settle | 仍在 Rust | 继续保留路径授权和 thumbnail 生成边界 |
+
+本轮验证通过：
+
+- `python src-tauri\\sidecars\\python\\test_creative_health_server.py`
+- `cargo test --manifest-path .\\src-tauri\\Cargo.toml services::sidecar_lifecycle_service::tests::batch_sidecar_requests_use_formal_task_and_workflow_types -- --nocapture --test-threads=1`
+- `cargo test --manifest-path .\\src-tauri\\Cargo.toml services::batch_job_service::tests:: -- --nocapture --test-threads=1`
+- `cargo fmt --manifest-path .\\src-tauri\\Cargo.toml -- --check`
+- `npm run check:architecture`
+- `npm run typecheck`
+- `git diff --check -- src-tauri\\src\\services\\batch_job_service.rs src-tauri\\src\\services\\sidecar_lifecycle_service.rs src-tauri\\sidecars\\python\\creative_health_server.py src-tauri\\sidecars\\python\\test_creative_health_server.py docs\\ai\\workflow-runtime-boundary.md docs\\architecture-current-state.md agent\\open-loops.md`

@@ -88,6 +88,47 @@ class CreativeHealthServerEventsTest(unittest.TestCase):
         self.assertEqual(empty_result["nextCursor"], 1)
         self.assertEqual(empty_result["events"], [])
 
+    def test_batch_prompt_builder_expands_template_inside_sidecar(self):
+        payload = {
+            "protocolVersion": 1,
+            "taskId": 88,
+            "taskType": "image.generate.batch",
+            "workflowType": "image.generate.batch",
+            "input": {
+                "promptTemplate": "Render frame {{sequenceNo}} / {{index}}",
+                "imageSize": "1024x1024",
+            },
+            "context": {
+                "batchJobId": 7,
+                "sequenceNo": 3,
+            },
+        }
+
+        prompt_request = CREATIVE_HEALTH_SERVER.build_batch_prompt_request(payload)
+        self.assertEqual(prompt_request, "Render frame 3 / 3")
+        self.assertEqual(
+            CREATIVE_HEALTH_SERVER.simple_prompt_hash(prompt_request),
+            "193c8ba56dc67cff",
+        )
+
+        result = CREATIVE_HEALTH_SERVER.build_batch_image_result(
+            payload,
+            "failed",
+            None,
+            "provider failed",
+            duration_ms=12,
+            prompt_request=prompt_request,
+        )
+        self.assertEqual(result["modelRuns"][0]["promptHash"], "193c8ba56dc67cff")
+        self.assertEqual(
+            result["modelRuns"][0]["metadata"]["promptRequest"],
+            "Render frame 3 / 3",
+        )
+        self.assertEqual(
+            result["modelRuns"][0]["metadata"]["promptTemplate"],
+            "Render frame {{sequenceNo}} / {{index}}",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

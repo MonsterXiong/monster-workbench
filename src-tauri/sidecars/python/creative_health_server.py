@@ -16,6 +16,7 @@ BATCH_IMAGE_PROMPT_TASK_TYPES = {"image.prompt.batch", "demo.image.prompt"}
 BATCH_IMAGE_PROMPT_WORKFLOW_TYPE = "image.prompt.batch"
 BATCH_IMAGE_GENERATE_TASK_TYPES = {"image.generate.batch", "demo.image.generate"}
 BATCH_IMAGE_GENERATE_WORKFLOW_TYPE = "image.generate.batch"
+DEFAULT_BATCH_PROMPT_TEMPLATE = "Create a production-ready image prompt for a clean visual concept."
 SIDECAR_EVENT_BUFFER_LIMIT = 1000
 
 
@@ -267,8 +268,7 @@ def run_batch_image_prompt(payload):
     if is_cancel_requested(payload):
         return build_batch_prompt_result(payload, "cancelled", None, "batch prompt cancelled")
 
-    task_payload = payload.get("input") or {}
-    prompt_request = str(task_payload.get("promptRequest") or "").strip()
+    prompt_request = build_batch_prompt_request(payload)
     if not prompt_request:
         return build_batch_prompt_result(payload, "failed", None, "promptRequest is required")
 
@@ -288,6 +288,7 @@ def run_batch_image_prompt(payload):
             None,
             "batch prompt provider failed: {0}".format(error),
             duration_ms=duration_ms,
+            prompt_request=prompt_request,
             provider_metadata={"error": str(error)},
         )
 
@@ -299,6 +300,7 @@ def run_batch_image_prompt(payload):
             None,
             "batch prompt cancelled after provider call",
             duration_ms=duration_ms,
+            prompt_request=prompt_request,
             provider_metadata=provider_metadata,
         )
 
@@ -308,6 +310,7 @@ def run_batch_image_prompt(payload):
         prompt_text,
         "batch prompt workflow completed",
         duration_ms=duration_ms,
+        prompt_request=prompt_request,
         provider_metadata=provider_metadata,
     )
 
@@ -317,13 +320,19 @@ def run_batch_image_generate(payload):
         return build_batch_image_result(payload, "cancelled", None, "batch image cancelled")
 
     task_payload = payload.get("input") or {}
-    prompt_request = str(task_payload.get("promptRequest") or "").strip()
+    prompt_request = build_batch_prompt_request(payload)
     image_size = str(task_payload.get("imageSize") or "1024x1024").strip()
     output_dir = str(task_payload.get("outputDir") or "").strip()
     if not prompt_request:
         return build_batch_image_result(payload, "failed", None, "promptRequest is required")
     if not output_dir:
-        return build_batch_image_result(payload, "failed", None, "outputDir is required")
+        return build_batch_image_result(
+            payload,
+            "failed",
+            None,
+            "outputDir is required",
+            prompt_request=prompt_request,
+        )
 
     provider = payload.get("provider") or {}
     started = time.time()
@@ -343,6 +352,7 @@ def run_batch_image_generate(payload):
             None,
             "batch image provider failed: {0}".format(error),
             duration_ms=duration_ms,
+            prompt_request=prompt_request,
             provider_metadata={"error": str(error)},
         )
 
@@ -354,6 +364,7 @@ def run_batch_image_generate(payload):
             image_result,
             "batch image cancelled after provider call",
             duration_ms=duration_ms,
+            prompt_request=prompt_request,
             provider_metadata=image_result.get("metadata") or {},
         )
 
@@ -363,8 +374,64 @@ def run_batch_image_generate(payload):
         image_result,
         "batch image workflow completed",
         duration_ms=duration_ms,
+        prompt_request=prompt_request,
         provider_metadata=image_result.get("metadata") or {},
     )
+
+
+def build_batch_prompt_request(payload):
+    task_payload = payload.get("input") or {}
+    legacy_prompt_request = str(task_payload.get("promptRequest") or "").strip()
+    if legacy_prompt_request:
+        return legacy_prompt_request
+
+    template = str(
+        task_payload.get("promptTemplate") or DEFAULT_BATCH_PROMPT_TEMPLATE
+    ).strip()
+    if not template:
+        template = DEFAULT_BATCH_PROMPT_TEMPLATE
+
+    context = payload.get("context") or {}
+    sequence_no = context.get("sequenceNo")
+    if sequence_no is None:
+        sequence_no = task_payload.get("sequenceNo")
+    if sequence_no is None:
+        sequence_no = payload.get("taskId")
+    sequence_text = str(sequence_no or "").strip()
+
+    variables = {}
+    if isinstance(task_payload.get("templateVariables"), dict):
+        variables.update(task_payload.get("templateVariables") or {})
+    variables.setdefault("sequenceNo", sequence_text)
+    variables.setdefault("index", sequence_text)
+
+    prompt_request = template
+    for key, value in variables.items():
+        prompt_request = prompt_request.replace(
+            "{{" + str(key) + "}}",
+            str(value),
+        )
+    return prompt_request.strip()
+
+
+def simple_prompt_hash(value):
+    hash_value = 1469598103934665603
+    for byte in str(value or "").encode("utf-8"):
+        hash_value ^= byte
+        hash_value = (hash_value * 1099511628211) & 0xFFFFFFFFFFFFFFFF
+    return "{0:016x}".format(hash_value)
+
+
+def batch_prompt_metadata(payload, prompt_request, provider_metadata=None):
+    task_payload = payload.get("input") or {}
+    metadata = dict(provider_metadata or {})
+    metadata.update({
+        "promptBuilder": "python-sidecar",
+        "promptTemplate": task_payload.get("promptTemplate"),
+        "promptRequest": prompt_request,
+        "promptHash": simple_prompt_hash(prompt_request) if prompt_request else None,
+    })
+    return metadata
 
 
 def request_provider_image(provider, prompt_request, image_size, output_dir, budget=None):
@@ -532,6 +599,7 @@ def build_batch_image_result(
     image_result,
     message,
     duration_ms=0,
+    prompt_request=None,
     provider_metadata=None,
 ):
     provider = payload.get("provider") or {}
@@ -540,6 +608,7 @@ def build_batch_image_result(
     task_id = payload.get("taskId")
     batch_job_id = context.get("batchJobId")
     sequence_no = context.get("sequenceNo")
+    prompt_metadata = batch_prompt_metadata(payload, prompt_request, provider_metadata)
     retry = {
         "shouldRetry": status == "failed",
         "reason": message if status == "failed" else None,
@@ -558,7 +627,9 @@ def build_batch_image_result(
                 "batchJobId": batch_job_id,
                 "sourceTaskId": task_id,
                 "sequenceNo": sequence_no,
-                "promptTemplate": task_payload.get("promptRequest"),
+                "promptTemplate": task_payload.get("promptTemplate"),
+                "promptRequest": prompt_request,
+                "promptHash": prompt_metadata.get("promptHash"),
                 "savedFiles": image_result.get("savedFiles") if image_result else [],
                 "providerResult": provider_metadata or {},
             },
@@ -580,14 +651,14 @@ def build_batch_image_result(
             "requestType": provider.get("requestType") or "image",
             "status": model_status,
             "durationMs": duration_ms,
-            "promptHash": None,
+            "promptHash": prompt_metadata.get("promptHash"),
             "promptVersionId": "batch:{0}:{1}".format(batch_job_id, task_id),
             "inputTokenCount": None,
             "outputTokenCount": None,
             "costEstimate": None,
             "errorCode": None if status == "succeeded" else "provider_error",
             "errorMessage": None if status == "succeeded" else message,
-            "metadata": provider_metadata or {},
+            "metadata": prompt_metadata,
         }],
         "events": [{
             "eventType": "batch_image_workflow_completed" if status == "succeeded" else "batch_image_workflow_failed",
@@ -596,6 +667,7 @@ def build_batch_image_result(
                 "batchJobId": batch_job_id,
                 "sequenceNo": sequence_no,
                 "workflowType": payload.get("workflowType") or BATCH_IMAGE_GENERATE_WORKFLOW_TYPE,
+                "promptHash": prompt_metadata.get("promptHash"),
             },
         }],
         "retry": retry,
@@ -701,6 +773,7 @@ def build_batch_prompt_result(
     prompt_text,
     message,
     duration_ms=0,
+    prompt_request=None,
     provider_metadata=None,
 ):
     provider = payload.get("provider") or {}
@@ -708,6 +781,7 @@ def build_batch_prompt_result(
     task_id = payload.get("taskId")
     batch_job_id = context.get("batchJobId")
     sequence_no = context.get("sequenceNo")
+    prompt_metadata = batch_prompt_metadata(payload, prompt_request, provider_metadata)
     retry = {
         "shouldRetry": status == "failed",
         "reason": message if status == "failed" else None,
@@ -726,7 +800,9 @@ def build_batch_prompt_result(
                 "batchJobId": batch_job_id,
                 "sourceTaskId": task_id,
                 "sequenceNo": sequence_no,
-                "promptTemplate": (payload.get("input") or {}).get("promptRequest"),
+                "promptTemplate": (payload.get("input") or {}).get("promptTemplate"),
+                "promptRequest": prompt_request,
+                "promptHash": prompt_metadata.get("promptHash"),
                 "provenance": {
                     "sourceTaskId": task_id,
                     "batchJobId": batch_job_id,
@@ -744,14 +820,14 @@ def build_batch_prompt_result(
         "requestType": provider.get("requestType") or "chat",
         "status": model_status,
         "durationMs": duration_ms,
-        "promptHash": None,
+        "promptHash": prompt_metadata.get("promptHash"),
         "promptVersionId": "batch:{0}:{1}".format(batch_job_id, task_id),
         "inputTokenCount": None,
         "outputTokenCount": None,
         "costEstimate": None,
         "errorCode": None if status == "succeeded" else "provider_error",
         "errorMessage": None if status == "succeeded" else message,
-        "metadata": provider_metadata or {},
+        "metadata": prompt_metadata,
     }
     return {
         "protocolVersion": payload.get("protocolVersion") or 1,
@@ -767,6 +843,7 @@ def build_batch_prompt_result(
                 "batchJobId": batch_job_id,
                 "sequenceNo": sequence_no,
                 "workflowType": payload.get("workflowType") or BATCH_IMAGE_PROMPT_WORKFLOW_TYPE,
+                "promptHash": prompt_metadata.get("promptHash"),
             },
         }],
         "retry": retry,

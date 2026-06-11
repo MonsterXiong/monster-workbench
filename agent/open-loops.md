@@ -11,7 +11,7 @@
 - [ ] 继续收口 Creative service / backend：Rust `TaskService` 二次评估结论是短期可保留 task/asset/event 可信入口，先冻结 `run_review_asset_quality_stub` 的业务扩展，正式 review/revision 迁入 Python workflow runtime。
 - [ ] 评估前后端分域对齐：前端已拆出 `creative-task / creative-asset / creative-goal / creative-batch / creative-project` service/store；Rust 侧 asset CRUD 暂不为拆文件名而拆，后续等资产版本、来源建模稳定后再决定是否独立 `AssetService`。
 - [ ] 完成 `creative_db` 后续治理：补正式 migration、旧库兼容回归，以及 `creative_projects`、资产版本、来源建模。
-- [ ] 继续推进 Python workflow runtime：`generate_image_prompt`、`image.prompt.batch` 与 `image.generate.batch` 已落地 task request/result、model_runs 审计、失败/取消/重试映射、cancel checkpoint、基础 budget/timeout 协议、正式 workflow 类型命名、batch sidecar lifecycle 首段硬化、Python `/events` runtime instance 边界、Rust polling、设置诊断消费、`sidecar-runtime.log` 与 `sidecar-lifecycle.log` 摘要持久化；batch provider DTO 已退出 `AiProviderConfig` 测试语义；下一步优先把 batch prompt builder 迁向 Python workflow，并设计 Rust 受控 worker-pool claim/checkpoint/complete API，继续避免在 `batch_job_service.rs` 新增生产 worker 分支。
+- [ ] 继续推进 Python workflow runtime：`generate_image_prompt`、`image.prompt.batch` 与 `image.generate.batch` 已落地 task request/result、model_runs 审计、失败/取消/重试映射、cancel checkpoint、基础 budget/timeout 协议、正式 workflow 类型命名、batch sidecar lifecycle 首段硬化、Python `/events` runtime instance 边界、Rust polling、设置诊断消费、`sidecar-runtime.log` 与 `sidecar-lifecycle.log` 摘要持久化；batch provider DTO 已退出 `AiProviderConfig` 测试语义，batch prompt builder 已迁向 Python workflow；下一步设计 Rust 受控 worker-pool claim/checkpoint/complete API，继续避免在 `batch_job_service.rs` 新增生产 worker 分支。
 
 ## 回归与验收待办
 

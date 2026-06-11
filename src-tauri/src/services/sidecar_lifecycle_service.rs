@@ -110,7 +110,7 @@ pub struct BatchImagePromptSidecarRequest {
     pub project_id: Option<String>,
     pub batch_job_id: i64,
     pub sequence_no: Option<i64>,
-    pub prompt_request: String,
+    pub prompt_template: Option<String>,
     pub provider: SidecarProviderConfig,
     pub budget: Option<SidecarWorkflowBudget>,
     pub attempt: i64,
@@ -126,7 +126,7 @@ pub struct BatchImageGenerateSidecarRequest {
     pub project_id: Option<String>,
     pub batch_job_id: i64,
     pub sequence_no: Option<i64>,
-    pub prompt_request: String,
+    pub prompt_template: Option<String>,
     pub image_size: String,
     pub output_dir: String,
     pub provider: SidecarProviderConfig,
@@ -672,7 +672,7 @@ impl<R: Runtime> SidecarLifecycleService<R> {
                 .map(|(url, token)| json!({ "url": url, "token": token }))
                 .unwrap_or(Value::Null),
             "input": {
-                "promptRequest": request.prompt_request,
+                "promptTemplate": request.prompt_template,
             },
             "context": {
                 "sourceAssetIds": [],
@@ -736,7 +736,7 @@ impl<R: Runtime> SidecarLifecycleService<R> {
                 .map(|(url, token)| json!({ "url": url, "token": token }))
                 .unwrap_or(Value::Null),
             "input": {
-                "promptRequest": request.prompt_request,
+                "promptTemplate": request.prompt_template,
                 "imageSize": request.image_size,
                 "outputDir": request.output_dir,
             },
@@ -1430,7 +1430,7 @@ mod tests {
                     project_id: Some("project-a".to_string()),
                     batch_job_id: 456,
                     sequence_no: Some(1),
-                    prompt_request: "prompt request".to_string(),
+                    prompt_template: Some("prompt {{sequenceNo}}".to_string()),
                     provider: test_provider("chat"),
                     budget: None,
                     attempt: 1,
@@ -1445,6 +1445,11 @@ mod tests {
             prompt_payload["workflowType"],
             BATCH_IMAGE_PROMPT_WORKFLOW_TYPE
         );
+        assert_eq!(
+            prompt_payload["input"]["promptTemplate"],
+            "prompt {{sequenceNo}}"
+        );
+        assert!(prompt_payload["input"].get("promptRequest").is_none());
 
         let image_payload = capture_sidecar_task_request(|endpoint| {
             SidecarLifecycleService::<Wry>::submit_batch_image_generate_to_endpoint(
@@ -1454,7 +1459,7 @@ mod tests {
                     project_id: Some("project-a".to_string()),
                     batch_job_id: 456,
                     sequence_no: Some(2),
-                    prompt_request: "image request".to_string(),
+                    prompt_template: Some("image {{index}}".to_string()),
                     image_size: "1024x1024".to_string(),
                     output_dir: "C:\\temp\\monster".to_string(),
                     provider: test_provider("image"),
@@ -1471,6 +1476,8 @@ mod tests {
             image_payload["workflowType"],
             BATCH_IMAGE_GENERATE_WORKFLOW_TYPE
         );
+        assert_eq!(image_payload["input"]["promptTemplate"], "image {{index}}");
+        assert!(image_payload["input"].get("promptRequest").is_none());
     }
 
     fn test_provider(request_type: &str) -> SidecarProviderConfig {

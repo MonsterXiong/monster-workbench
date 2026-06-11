@@ -1002,7 +1002,7 @@ fn run_prompt_task_worker<R: Runtime>(
         return Ok(());
     }
 
-    let prompt_request = build_prompt_request(&task)?;
+    let prompt_template = read_batch_prompt_template(&task)?;
     let provider_config = build_workflow_provider_config(&task)?;
     let workflow_started = Instant::now();
     let sidecar_result =
@@ -1011,7 +1011,7 @@ fn run_prompt_task_worker<R: Runtime>(
                 app_handle,
                 &task,
                 batch_job_id,
-                &prompt_request,
+                &prompt_template,
                 &provider_config,
                 Some(&checkpoint.url),
                 Some(&checkpoint.token),
@@ -1025,7 +1025,6 @@ fn run_prompt_task_worker<R: Runtime>(
             db_path,
             batch_job_id,
             &task,
-            &prompt_request,
             &provider_config,
             duration_ms,
             sidecar_response,
@@ -1035,7 +1034,7 @@ fn run_prompt_task_worker<R: Runtime>(
             db_path,
             batch_job_id,
             &current_task,
-            &prompt_request,
+            &prompt_template,
             &provider_config,
             duration_ms,
             error.to_string(),
@@ -1049,7 +1048,7 @@ fn submit_batch_prompt_sidecar_workflow<R: Runtime>(
     app_handle: &AppHandle<R>,
     task: &CreativeTask,
     batch_job_id: i64,
-    prompt_request: &str,
+    prompt_template: &Option<String>,
     provider_config: &BatchWorkflowProviderConfig,
     cancel_checkpoint_url: Option<&str>,
     cancel_checkpoint_token: Option<&str>,
@@ -1062,7 +1061,7 @@ fn submit_batch_prompt_sidecar_workflow<R: Runtime>(
                 project_id: task.project_id.clone(),
                 batch_job_id,
                 sequence_no: task.sequence_no,
-                prompt_request: prompt_request.to_string(),
+                prompt_template: prompt_template.clone(),
                 provider: provider_config.to_sidecar_provider("chat"),
                 budget: Some(SidecarWorkflowBudget {
                     max_duration_ms: Some(provider_config.timeout_ms),
@@ -1101,14 +1100,14 @@ fn settle_batch_prompt_sidecar_response<R: Runtime>(
     db_path: &std::path::Path,
     batch_job_id: i64,
     task: &CreativeTask,
-    prompt_request: &str,
     provider_config: &BatchWorkflowProviderConfig,
     duration_ms: i64,
     sidecar_response: SidecarWorkflowTaskResult,
 ) -> AppResult<()> {
     validate_sidecar_task_result(task, &sidecar_response)?;
     append_sidecar_result_events(db_path, task.id, &sidecar_response)?;
-    let prompt_hash = simple_prompt_hash(prompt_request);
+    let prompt_request = extract_sidecar_prompt_request(&sidecar_response);
+    let prompt_hash = prompt_request.as_deref().map(simple_prompt_hash);
 
     if sidecar_response.status == "succeeded"
         && batch_prompt_cancel_requested(db_path, batch_job_id, task.id)?
@@ -1118,7 +1117,7 @@ fn settle_batch_prompt_sidecar_response<R: Runtime>(
             task,
             None,
             &sidecar_response.model_runs,
-            Some(prompt_hash.as_str()),
+            prompt_hash.as_deref(),
             "batch prompt sidecar model run metadata",
         )?;
         return handle_batch_worker_cancelled(
@@ -1138,7 +1137,7 @@ fn settle_batch_prompt_sidecar_response<R: Runtime>(
             task,
             None,
             &sidecar_response.model_runs,
-            Some(prompt_hash.as_str()),
+            prompt_hash.as_deref(),
             "batch prompt sidecar model run metadata",
         )?;
         return handle_batch_worker_cancelled(
@@ -1161,7 +1160,7 @@ fn settle_batch_prompt_sidecar_response<R: Runtime>(
             task,
             None,
             &sidecar_response.model_runs,
-            Some(prompt_hash.as_str()),
+            prompt_hash.as_deref(),
             "batch prompt sidecar model run metadata",
         )?;
         return handle_batch_worker_failure_with_model_runs(
@@ -1208,7 +1207,7 @@ fn settle_batch_prompt_sidecar_response<R: Runtime>(
         task,
         Some(asset.id),
         &sidecar_response.model_runs,
-        Some(prompt_hash.as_str()),
+        prompt_hash.as_deref(),
         "batch prompt sidecar model run metadata",
     )?;
 
@@ -1283,7 +1282,7 @@ fn handle_prompt_transport_failure<R: Runtime>(
     db_path: &std::path::Path,
     batch_job_id: i64,
     task: &CreativeTask,
-    prompt_request: &str,
+    prompt_template: &Option<String>,
     provider_config: &BatchWorkflowProviderConfig,
     duration_ms: i64,
     error_message: String,
@@ -1300,14 +1299,22 @@ fn handle_prompt_transport_failure<R: Runtime>(
             request_type: "chat".to_string(),
             status: "failed".to_string(),
             duration_ms: Some(duration_ms),
-            prompt_hash: Some(simple_prompt_hash(prompt_request)),
+            prompt_hash: None,
             prompt_version_id: Some(format!("batch:{}:{}", batch_job_id, task.id)),
             input_token_count: None,
             output_token_count: None,
             cost_estimate: None,
             error_code: Some("sidecar_error".to_string()),
             error_message: Some(error_message.clone()),
-            metadata_json: Some(json!({ "transportFailure": true }).to_string()),
+            metadata_json: Some(
+                json!({
+                    "transportFailure": true,
+                    "promptBuilder": "python-sidecar",
+                    "promptTemplate": prompt_template,
+                    "sequenceNo": task.sequence_no,
+                })
+                .to_string(),
+            ),
             finished_at: None,
         },
     )?;
@@ -1528,7 +1535,7 @@ fn run_generate_task_worker<R: Runtime>(
         return Ok(());
     }
 
-    let prompt_request = build_prompt_request(&task)?;
+    let prompt_template = read_batch_prompt_template(&task)?;
     let provider_config = build_workflow_provider_config(&task)?;
     let output_dir = resolve_batch_image_output_dir(app_handle)?;
     let workflow_started = Instant::now();
@@ -1538,7 +1545,7 @@ fn run_generate_task_worker<R: Runtime>(
                 app_handle,
                 &task,
                 batch_job_id,
-                &prompt_request,
+                &prompt_template,
                 &provider_config,
                 batch.image_size.as_deref().unwrap_or("1024x1024"),
                 &output_dir,
@@ -1554,7 +1561,6 @@ fn run_generate_task_worker<R: Runtime>(
             db_path,
             batch_job_id,
             &task,
-            &prompt_request,
             &provider_config,
             duration_ms,
             &output_dir,
@@ -1565,7 +1571,7 @@ fn run_generate_task_worker<R: Runtime>(
             db_path,
             batch_job_id,
             &current_task,
-            &prompt_request,
+            &prompt_template,
             &provider_config,
             duration_ms,
             error.to_string(),
@@ -1579,7 +1585,7 @@ fn submit_batch_image_generate_sidecar_workflow<R: Runtime>(
     app_handle: &AppHandle<R>,
     task: &CreativeTask,
     batch_job_id: i64,
-    prompt_request: &str,
+    prompt_template: &Option<String>,
     provider_config: &BatchWorkflowProviderConfig,
     image_size: &str,
     output_dir: &std::path::Path,
@@ -1594,7 +1600,7 @@ fn submit_batch_image_generate_sidecar_workflow<R: Runtime>(
                 project_id: task.project_id.clone(),
                 batch_job_id,
                 sequence_no: task.sequence_no,
-                prompt_request: prompt_request.to_string(),
+                prompt_template: prompt_template.clone(),
                 image_size: image_size.to_string(),
                 output_dir: output_dir.to_string_lossy().to_string(),
                 provider: provider_config.to_sidecar_provider("image"),
@@ -1618,7 +1624,6 @@ fn settle_batch_image_sidecar_response<R: Runtime>(
     db_path: &std::path::Path,
     batch_job_id: i64,
     task: &CreativeTask,
-    prompt_request: &str,
     provider_config: &BatchWorkflowProviderConfig,
     duration_ms: i64,
     output_dir: &std::path::Path,
@@ -1626,7 +1631,8 @@ fn settle_batch_image_sidecar_response<R: Runtime>(
 ) -> AppResult<()> {
     validate_sidecar_task_result(task, &sidecar_response)?;
     append_sidecar_result_events(db_path, task.id, &sidecar_response)?;
-    let prompt_hash = simple_prompt_hash(prompt_request);
+    let prompt_request = extract_sidecar_prompt_request(&sidecar_response);
+    let prompt_hash = prompt_request.as_deref().map(simple_prompt_hash);
 
     if sidecar_response.status == "succeeded"
         && batch_prompt_cancel_requested(db_path, batch_job_id, task.id)?
@@ -1636,7 +1642,7 @@ fn settle_batch_image_sidecar_response<R: Runtime>(
             task,
             None,
             &sidecar_response.model_runs,
-            Some(prompt_hash.as_str()),
+            prompt_hash.as_deref(),
             "batch sidecar model run metadata",
         )?;
         return handle_batch_worker_cancelled(
@@ -1656,7 +1662,7 @@ fn settle_batch_image_sidecar_response<R: Runtime>(
             task,
             None,
             &sidecar_response.model_runs,
-            Some(prompt_hash.as_str()),
+            prompt_hash.as_deref(),
             "batch sidecar model run metadata",
         )?;
         return handle_batch_worker_cancelled(
@@ -1679,7 +1685,7 @@ fn settle_batch_image_sidecar_response<R: Runtime>(
             task,
             None,
             &sidecar_response.model_runs,
-            Some(prompt_hash.as_str()),
+            prompt_hash.as_deref(),
             "batch sidecar model run metadata",
         )?;
         return handle_batch_worker_failure_with_model_runs(
@@ -1711,6 +1717,10 @@ fn settle_batch_image_sidecar_response<R: Runtime>(
     })?;
     let file_path = validate_sidecar_output_file(output_dir, &source_file_path)?;
     let thumbnail_path = copy_sidecar_thumbnail(&file_path)?;
+    let prompt_request = prompt_request.ok_or_else(|| {
+        AppError::Process("batch image sidecar returned no promptRequest metadata".to_string())
+    })?;
+    let prompt_hash = prompt_hash.unwrap_or_else(|| simple_prompt_hash(&prompt_request));
 
     let image_asset = creative_asset_repo::create_asset(
         db_path,
@@ -1726,7 +1736,7 @@ fn settle_batch_image_sidecar_response<R: Runtime>(
                     "batchJobId": batch_job_id,
                     "sourceTaskId": task.id,
                     "sequenceNo": task.sequence_no,
-                    "promptTemplate": prompt_request,
+                    "promptRequest": prompt_request.clone(),
                     "sidecarMetadata": output.metadata,
                     "filePath": file_path,
                     "thumbnailPath": thumbnail_path,
@@ -1756,7 +1766,7 @@ fn settle_batch_image_sidecar_response<R: Runtime>(
                     "modelRunIds": model_run_ids,
                     "filePath": file_path,
                     "thumbnailPath": thumbnail_path,
-                    "promptExcerpt": summarize_prompt_text(prompt_request),
+                    "promptExcerpt": summarize_prompt_text(&prompt_request),
                     "durationMs": duration_ms,
                     "sidecarStatus": sidecar_response.status,
                 })
@@ -1805,7 +1815,7 @@ fn handle_generate_transport_failure<R: Runtime>(
     db_path: &std::path::Path,
     batch_job_id: i64,
     task: &CreativeTask,
-    prompt_request: &str,
+    prompt_template: &Option<String>,
     provider_config: &BatchWorkflowProviderConfig,
     duration_ms: i64,
     error_message: String,
@@ -1822,14 +1832,22 @@ fn handle_generate_transport_failure<R: Runtime>(
             request_type: "image".to_string(),
             status: "failed".to_string(),
             duration_ms: Some(duration_ms),
-            prompt_hash: Some(simple_prompt_hash(prompt_request)),
+            prompt_hash: None,
             prompt_version_id: Some(format!("batch:{}:{}", batch_job_id, task.id)),
             input_token_count: None,
             output_token_count: None,
             cost_estimate: None,
             error_code: Some("sidecar_error".to_string()),
             error_message: Some(error_message.clone()),
-            metadata_json: Some(json!({ "transportFailure": true }).to_string()),
+            metadata_json: Some(
+                json!({
+                    "transportFailure": true,
+                    "promptBuilder": "python-sidecar",
+                    "promptTemplate": prompt_template,
+                    "sequenceNo": task.sequence_no,
+                })
+                .to_string(),
+            ),
             finished_at: None,
         },
     )?;
@@ -1981,7 +1999,7 @@ fn mock_should_fail(sequence_no: i64) -> bool {
     sequence_no.max(1) % 9 == 0
 }
 
-fn build_prompt_request(task: &CreativeTask) -> AppResult<String> {
+fn read_batch_prompt_template(task: &CreativeTask) -> AppResult<Option<String>> {
     let payload = task
         .payload_json
         .as_deref()
@@ -1994,11 +2012,31 @@ fn build_prompt_request(task: &CreativeTask) -> AppResult<String> {
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .unwrap_or("Create a production-ready image prompt for a clean visual concept.");
-    let sequence_no = task.sequence_no.unwrap_or(task.id);
-    Ok(template
-        .replace("{{sequenceNo}}", &sequence_no.to_string())
-        .replace("{{index}}", &sequence_no.to_string()))
+        .map(ToString::to_string);
+    Ok(template)
+}
+
+fn extract_sidecar_prompt_request(sidecar_response: &SidecarWorkflowTaskResult) -> Option<String> {
+    sidecar_response
+        .model_runs
+        .iter()
+        .find_map(|model_run| metadata_text(&model_run.metadata, "promptRequest"))
+        .or_else(|| {
+            sidecar_response
+                .outputs
+                .iter()
+                .find_map(|output| metadata_text(&output.metadata, "promptRequest"))
+        })
+}
+
+fn metadata_text(metadata: &Option<Value>, key: &str) -> Option<String> {
+    metadata
+        .as_ref()
+        .and_then(|value| value.get(key))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
 }
 
 fn build_workflow_provider_config(task: &CreativeTask) -> AppResult<BatchWorkflowProviderConfig> {
@@ -2758,6 +2796,10 @@ mod tests {
         assert_eq!(model_runs.len(), 1);
         assert_eq!(model_runs[0].request_type, "chat");
         assert_eq!(model_runs[0].status, "succeeded");
+        assert!(
+            model_runs[0].prompt_hash.is_some(),
+            "python sidecar should return prompt hash for batch prompt request"
+        );
 
         let events =
             creative_task_repo::list_task_events(&db_path, task.id).expect("events should list");
@@ -3085,6 +3127,10 @@ mod tests {
         assert_eq!(model_runs.len(), 1);
         assert_eq!(model_runs[0].request_type, "image");
         assert_eq!(model_runs[0].status, "succeeded");
+        assert!(
+            model_runs[0].prompt_hash.is_some(),
+            "python sidecar should return prompt hash for batch image request"
+        );
 
         let events =
             creative_task_repo::list_task_events(&db_path, task.id).expect("events should list");
