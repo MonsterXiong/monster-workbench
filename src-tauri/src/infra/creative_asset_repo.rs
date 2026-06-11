@@ -1,4 +1,4 @@
-use crate::infra::creative_db::{
+﻿use crate::infra::creative_types::{
     AssetLink, CreateAssetLinkInput, CreateCreativeAssetInput, CreativeAsset,
     ListAssetLinksFilter, ListCreativeAssetsFilter,
 };
@@ -33,7 +33,7 @@ pub(crate) fn create_asset(
     )?;
     let id = conn.last_insert_rowid();
     get_asset_with_conn(&conn, id)?
-        .ok_or_else(|| AppError::Database("资产已写入但无法立即读取".to_string()))
+        .ok_or_else(|| AppError::Database("璧勪骇宸插啓鍏ヤ絾鏃犳硶绔嬪嵆璇诲彇".to_string()))
 }
 
 pub(crate) fn get_asset(db_path: &Path, id: i64) -> AppResult<Option<CreativeAsset>> {
@@ -99,7 +99,7 @@ pub(crate) fn create_asset_link(
     )?;
     let id = conn.last_insert_rowid();
     get_asset_link_with_conn(&conn, id)?
-        .ok_or_else(|| AppError::Database("资产关系已写入但无法立即读取".to_string()))
+        .ok_or_else(|| AppError::Database("璧勪骇鍏崇郴宸插啓鍏ヤ絾鏃犳硶绔嬪嵆璇诲彇".to_string()))
 }
 
 pub(crate) fn get_asset_link(db_path: &Path, id: i64) -> AppResult<Option<AssetLink>> {
@@ -182,3 +182,122 @@ fn non_empty_filter(value: Option<String>) -> Option<String> {
         }
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_db_path(name: &str) -> std::path::PathBuf {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be after unix epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "monster_workbench_{}_{}_{}.db",
+            name,
+            std::process::id(),
+            stamp
+        ))
+    }
+
+    #[test]
+    fn can_list_domain_assets_and_links() {
+        let db_path = temp_db_path("creative_assets");
+        init_schema(&db_path).expect("schema should init");
+
+        let prompt_asset = create_asset(
+            &db_path,
+            CreateCreativeAssetInput {
+                project_id: Some("story-assets".to_string()),
+                asset_type: "image_prompt".to_string(),
+                title: Some("Poster prompt".to_string()),
+                content: Some("A clean product poster".to_string()),
+                file_path: None,
+                thumbnail_path: None,
+                metadata_json: Some(r#"{"source":"test"}"#.to_string()),
+                status: Some("draft".to_string()),
+            },
+        )
+        .expect("prompt asset should be created");
+        let character_asset = create_asset(
+            &db_path,
+            CreateCreativeAssetInput {
+                project_id: Some("story-assets".to_string()),
+                asset_type: "character".to_string(),
+                title: Some("Lead character".to_string()),
+                content: Some("A determined protagonist".to_string()),
+                file_path: None,
+                thumbnail_path: None,
+                metadata_json: None,
+                status: Some("ready".to_string()),
+            },
+        )
+        .expect("character asset should be created");
+        let image_asset = create_asset(
+            &db_path,
+            CreateCreativeAssetInput {
+                project_id: Some("story-assets".to_string()),
+                asset_type: "demo_image".to_string(),
+                title: Some("Generated image".to_string()),
+                content: None,
+                file_path: Some("generated/image.png".to_string()),
+                thumbnail_path: Some("generated/thumb.png".to_string()),
+                metadata_json: None,
+                status: Some("ready".to_string()),
+            },
+        )
+        .expect("image asset should be created");
+
+        let prompt_assets = list_assets(
+            &db_path,
+            ListCreativeAssetsFilter {
+                project_id: Some("story-assets".to_string()),
+                asset_type: Some("image_prompt".to_string()),
+                ..Default::default()
+            },
+        )
+        .expect("prompt assets should list");
+        assert_eq!(prompt_assets.len(), 1);
+        assert_eq!(prompt_assets[0].id, prompt_asset.id);
+
+        let derived_link = create_asset_link(
+            &db_path,
+            CreateAssetLinkInput {
+                source_asset_id: image_asset.id,
+                target_asset_id: prompt_asset.id,
+                link_type: "derived_from".to_string(),
+            },
+        )
+        .expect("derived link should create");
+        let character_link = create_asset_link(
+            &db_path,
+            CreateAssetLinkInput {
+                source_asset_id: image_asset.id,
+                target_asset_id: character_asset.id,
+                link_type: "uses_character".to_string(),
+            },
+        )
+        .expect("character link should create");
+
+        let loaded_link = get_asset_link(&db_path, derived_link.id)
+            .expect("link query should pass")
+            .expect("link should exist");
+        assert_eq!(loaded_link.link_type, "derived_from");
+
+        let image_links = list_asset_links(
+            &db_path,
+            ListAssetLinksFilter {
+                source_asset_id: Some(image_asset.id),
+                ..Default::default()
+            },
+        )
+        .expect("links should list");
+        assert_eq!(image_links.len(), 2);
+        assert!(image_links.iter().any(|link| link.id == derived_link.id));
+        assert!(image_links.iter().any(|link| link.id == character_link.id));
+
+        let _ = std::fs::remove_file(db_path);
+    }
+}
+

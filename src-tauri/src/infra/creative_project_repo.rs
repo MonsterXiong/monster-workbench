@@ -1,4 +1,4 @@
-use crate::infra::creative_db::{
+﻿use crate::infra::creative_types::{
     CreativeProject, ListCreativeProjectsFilter, UpsertCreativeProjectInput,
 };
 use crate::infra::creative_db_schema::init_schema;
@@ -121,3 +121,82 @@ fn non_empty_filter(value: Option<String>) -> Option<String> {
         }
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_db_path(name: &str) -> std::path::PathBuf {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be after unix epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "monster_workbench_{}_{}_{}.db",
+            name,
+            std::process::id(),
+            stamp
+        ))
+    }
+
+    #[test]
+    fn can_upsert_and_list_creative_projects() {
+        let db_path = temp_db_path("creative_projects");
+        init_schema(&db_path).expect("schema should init");
+
+        let project = upsert_project(
+            &db_path,
+            UpsertCreativeProjectInput {
+                id: "creative-main-project".to_string(),
+                title: "Creative Main Project".to_string(),
+                description: Some("initial project description".to_string()),
+                status: Some("active".to_string()),
+                settings_json: Some(r#"{"theme":"dark"}"#.to_string()),
+                budget_json: None,
+                archived_at: None,
+            },
+        )
+        .expect("project should be created");
+        assert_eq!(project.id, "creative-main-project");
+
+        let updated = upsert_project(
+            &db_path,
+            UpsertCreativeProjectInput {
+                id: "creative-main-project".to_string(),
+                title: "Creative Main Project".to_string(),
+                description: Some("updated project description".to_string()),
+                status: Some("running".to_string()),
+                settings_json: Some(r#"{"theme":"light"}"#.to_string()),
+                budget_json: Some(r#"{"maxTasks":12}"#.to_string()),
+                archived_at: None,
+            },
+        )
+        .expect("project should be upserted");
+        assert_eq!(updated.status, "running");
+        assert_eq!(
+            updated.description.as_deref(),
+            Some("updated project description")
+        );
+
+        let loaded = get_project(&db_path, "creative-main-project")
+            .expect("project query should pass")
+            .expect("project should exist");
+        assert_eq!(loaded.title, "Creative Main Project");
+
+        let projects = list_projects(
+            &db_path,
+            ListCreativeProjectsFilter {
+                status: Some("running".to_string()),
+                limit: Some(20),
+                offset: Some(0),
+            },
+        )
+        .expect("project list should pass");
+        assert_eq!(projects.len(), 1);
+        assert_eq!(projects[0].id, "creative-main-project");
+
+        let _ = std::fs::remove_file(db_path);
+    }
+}
+

@@ -1,4 +1,4 @@
-use crate::infra::creative_db::{CreateModelRunInput, ListModelRunsFilter, ModelRun};
+﻿use crate::infra::creative_types::{CreateModelRunInput, ListModelRunsFilter, ModelRun};
 use crate::infra::creative_db_schema::init_schema;
 use crate::infra::creative_db_support::{connect, map_model_run};
 use crate::infra::{AppError, AppResult};
@@ -117,3 +117,88 @@ fn non_empty_filter(value: Option<String>) -> Option<String> {
         }
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::infra::creative_task_repo;
+    use crate::infra::creative_types::CreateCreativeTaskInput;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_db_path(name: &str) -> std::path::PathBuf {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be after unix epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "monster_workbench_{}_{}_{}.db",
+            name,
+            std::process::id(),
+            stamp
+        ))
+    }
+
+    #[test]
+    fn can_create_and_list_model_runs() {
+        let db_path = temp_db_path("creative_model_runs");
+        init_schema(&db_path).expect("schema should init");
+
+        let task = creative_task_repo::create_task(
+            &db_path,
+            CreateCreativeTaskInput {
+                project_id: Some("project-model".to_string()),
+                goal_id: None,
+                batch_job_id: None,
+                task_type: "demo.image.prompt".to_string(),
+                status: Some("queued".to_string()),
+                priority: Some(0),
+                payload_json: None,
+                max_retries: Some(1),
+                parent_task_id: None,
+                asset_id: None,
+                sequence_no: None,
+            },
+        )
+        .expect("task should create");
+
+        let run = create_model_run(
+            &db_path,
+            CreateModelRunInput {
+                project_id: Some("project-model".to_string()),
+                task_id: Some(task.id),
+                asset_id: None,
+                provider_id: Some("demo-provider".to_string()),
+                provider_type: Some("custom".to_string()),
+                model: Some("chat-test".to_string()),
+                request_type: "chat".to_string(),
+                status: "succeeded".to_string(),
+                duration_ms: Some(420),
+                prompt_hash: Some("abc".to_string()),
+                prompt_version_id: None,
+                input_token_count: None,
+                output_token_count: None,
+                cost_estimate: None,
+                error_code: None,
+                error_message: None,
+                metadata_json: Some(r#"{"demo":true}"#.to_string()),
+                finished_at: None,
+            },
+        )
+        .expect("model run should create");
+        assert_eq!(run.request_type, "chat");
+
+        let runs = list_model_runs(
+            &db_path,
+            ListModelRunsFilter {
+                task_id: Some(task.id),
+                ..Default::default()
+            },
+        )
+        .expect("model runs should list");
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].id, run.id);
+
+        let _ = std::fs::remove_file(db_path);
+    }
+}
+

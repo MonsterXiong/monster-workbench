@@ -1,4 +1,4 @@
-use crate::infra::creative_db::{
+﻿use crate::infra::creative_types::{
     CreateCreativeGoalInput, CreateCreativeGoalRoleInput,
     CreativeGoal, CreativeGoalRole, CreativeTask, ListCreativeGoalRolesFilter,
     ListCreativeGoalsFilter, ListCreativeTasksFilter, UpdateCreativeGoalStatusInput,
@@ -222,3 +222,4 @@ fn non_empty_filter(value: Option<String>) -> Option<String> {
         }
     })
 }
+

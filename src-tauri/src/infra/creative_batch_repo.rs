@@ -1,4 +1,4 @@
-use crate::infra::creative_db::{
+﻿use crate::infra::creative_types::{
     CreateCreativeBatchJobInput, CreativeBatchJob, CreativeBatchJobSnapshot,
     CreativeBatchJobStats, CreativeTask, ListCreativeBatchJobsFilter, ListCreativeTasksFilter,
     UpdateCreativeBatchJobInput,
@@ -257,3 +257,158 @@ fn non_empty_filter(value: Option<String>) -> Option<String> {
         }
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::infra::creative_task_repo;
+    use crate::infra::creative_types::CreateCreativeTaskInput;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_db_path(name: &str) -> std::path::PathBuf {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be after unix epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "monster_workbench_{}_{}_{}.db",
+            name,
+            std::process::id(),
+            stamp
+        ))
+    }
+
+    #[test]
+    fn can_create_batch_job_and_query_snapshot() {
+        let db_path = temp_db_path("creative_batch");
+        init_schema(&db_path).expect("schema should init");
+
+        let job = create_batch_job(
+            &db_path,
+            CreateCreativeBatchJobInput {
+                project_id: Some("batch-production".to_string()),
+                name: "Batch Snapshot".to_string(),
+                batch_type: "demo.image.mock".to_string(),
+                status: Some("draft".to_string()),
+                total_count: Some(3),
+                concurrency: Some(2),
+                max_retries: Some(1),
+                prompt_template: Some("Prompt {{sequenceNo}}".to_string()),
+                provider_id: Some("demo-provider".to_string()),
+                model: Some("mock-image-model".to_string()),
+                image_size: Some("1024x1024".to_string()),
+                budget_json: Some(r#"{"maxConsecutiveFailures":3}"#.to_string()),
+            },
+        )
+        .expect("batch job should create");
+
+        let task_1 = creative_task_repo::create_task(
+            &db_path,
+            CreateCreativeTaskInput {
+                project_id: Some("batch-production".to_string()),
+                goal_id: None,
+                batch_job_id: Some(job.id),
+                task_type: "demo.image.mock".to_string(),
+                status: Some("queued".to_string()),
+                priority: Some(0),
+                payload_json: Some(r#"{"sequenceNo":1}"#.to_string()),
+                max_retries: Some(1),
+                parent_task_id: None,
+                asset_id: None,
+                sequence_no: Some(1),
+            },
+        )
+        .expect("task 1 should create");
+        let task_2 = creative_task_repo::create_task(
+            &db_path,
+            CreateCreativeTaskInput {
+                project_id: Some("batch-production".to_string()),
+                goal_id: None,
+                batch_job_id: Some(job.id),
+                task_type: "demo.image.mock".to_string(),
+                status: Some("running".to_string()),
+                priority: Some(0),
+                payload_json: Some(r#"{"sequenceNo":2}"#.to_string()),
+                max_retries: Some(1),
+                parent_task_id: None,
+                asset_id: None,
+                sequence_no: Some(2),
+            },
+        )
+        .expect("task 2 should create");
+        let task_3 = creative_task_repo::create_task(
+            &db_path,
+            CreateCreativeTaskInput {
+                project_id: Some("batch-production".to_string()),
+                goal_id: None,
+                batch_job_id: Some(job.id),
+                task_type: "demo.image.mock".to_string(),
+                status: Some("succeeded".to_string()),
+                priority: Some(0),
+                payload_json: Some(r#"{"sequenceNo":3}"#.to_string()),
+                max_retries: Some(1),
+                parent_task_id: None,
+                asset_id: None,
+                sequence_no: Some(3),
+            },
+        )
+        .expect("task 3 should create");
+
+        let snapshot = get_batch_job_snapshot(&db_path, job.id)
+            .expect("snapshot should query")
+            .expect("snapshot should exist");
+        assert_eq!(snapshot.job.id, job.id);
+        assert_eq!(snapshot.stats.total_tasks, 3);
+        assert_eq!(snapshot.stats.queued_tasks, 1);
+        assert_eq!(snapshot.stats.running_tasks, 1);
+        assert_eq!(snapshot.stats.succeeded_tasks, 1);
+        assert!(!snapshot.stats.paused);
+
+        let updated_job = update_batch_job(
+            &db_path,
+            UpdateCreativeBatchJobInput {
+                id: job.id,
+                status: Some("paused".to_string()),
+                concurrency: None,
+                max_retries: None,
+                prompt_template: None,
+                provider_id: None,
+                model: None,
+                image_size: None,
+                budget_json: None,
+                started_at: None,
+                finished_at: None,
+            },
+        )
+        .expect("batch should update");
+        assert_eq!(updated_job.status, "paused");
+
+        let paused_snapshot = get_batch_job_snapshot(&db_path, job.id)
+            .expect("paused snapshot should query")
+            .expect("paused snapshot should exist");
+        assert!(paused_snapshot.stats.paused);
+        assert_eq!(paused_snapshot.stats.total_tasks, 3);
+
+        let listed_jobs = list_batch_jobs(
+            &db_path,
+            ListCreativeBatchJobsFilter {
+                project_id: Some("batch-production".to_string()),
+                status: Some("paused".to_string()),
+                ..Default::default()
+            },
+        )
+        .expect("batch jobs should list");
+        assert_eq!(listed_jobs.len(), 1);
+        assert_eq!(listed_jobs[0].id, job.id);
+
+        let listed_tasks = list_batch_job_tasks(&db_path, job.id)
+            .expect("batch tasks should list");
+        assert_eq!(listed_tasks.len(), 3);
+        assert!(listed_tasks.iter().any(|task| task.id == task_1.id));
+        assert!(listed_tasks.iter().any(|task| task.id == task_2.id));
+        assert!(listed_tasks.iter().any(|task| task.id == task_3.id));
+
+        let _ = std::fs::remove_file(db_path);
+    }
+}
+
