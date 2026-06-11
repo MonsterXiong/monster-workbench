@@ -1729,3 +1729,43 @@ Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `
 - `src/services/tauri.mock.ts` 现在通过 helper 同时识别正式值与旧 `demo.image.prompt/generate`，包括 worker 分支、启动事件标签、取消消息和 batch type 过滤。
 - `useCreativeFormatters()` 已补正式 batch/task type 的用户可见映射，避免历史页或活动流直接展示内部协议名。
 - 这一步完成 UI / browser mock 层退出 demo-era prompt/generate 提交值；下一步重点回到共享 sidecar lifecycle 的健康熔断、事件节流、shutdown/recovery 语义，以及 Rust sidecar result settle 公共路径。
+
+## 2026-06-11 补充：Rust TaskService / BatchJobService 编排边界再评估
+
+本轮按 `docs/ai/workflow-runtime-boundary.md` 再次复核 `src-tauri/src/services/task_service.rs` 与 `src-tauri/src/services/batch_job_service.rs`。结论是：当前不优先拆 `TaskService` 文件名，也不优先迁走 Rust batch supervisor；更高价值的升级点是收敛业务执行残留和抽通用 settle。
+
+代码事实：
+
+- `TaskService` 仍主要承担 task / asset / event 的可信写读、`generate_image_prompt` 过渡 workflow 入口、`run_review_asset_quality_stub` 演示入口。`run_generate_image_prompt_workflow` 已符合“Rust 创建 task 与可信落库，Python 执行业务 workflow”的过渡模式。
+- `run_review_asset_quality_stub` 仍是 Rust 内唯一明显的 review/revision 业务 stub：它会创建 `review_result` asset，并在不通过时创建 `revise_asset_quality` draft task。该入口应冻结，不继续扩展真实审查、返工或一致性规则。
+- `BatchJobService` 仍是更宽的 Rust 编排集中点：它保留 batch 生命周期、supervisor、concurrency slot、claim、pause/resume/cancel、自动暂停、事件广播和可信落库。
+- prompt / image batch worker 已不再直接执行 provider 调用，但 Rust 仍负责构造请求、提交 sidecar、校验 result、映射失败/取消/retry、写入 asset/model_runs/task_events/status。
+- `build_prompt_request` 仍在 Rust 内替换 `{{sequenceNo}}` / `{{index}}`，属于 demo-era prompt builder 残留；正式 prompt builder 不应继续扩展在 Rust。
+- `build_provider_config` / `build_image_provider_config` 仍把 batch payload 适配到 `AiProviderConfig`，这是 provider 测试链路 DTO 语义残留；后续应改向正式 workflow provider DTO。
+- `settle_sidecar_non_success`、`settle_batch_prompt_sidecar_response`、`settle_batch_image_sidecar_response` 是同类可信 settle 逻辑，适合下一步抽公共 helper，减少每个 workflow 复制状态映射。
+- `SidecarLifecycleService::ensure_dev_server` 已补首段 recovery circuit / backoff：`unhealthy/failed` 恢复失败后进入短冷却，冷却期间快速拒绝后续恢复请求；健康检查成功或 stop 会清空 circuit。这是首段恢复冷却，不等同于完整事件节流和 shutdown 体系。
+
+当前边界判定：
+
+| 区域 | 判定 | 后续动作 |
+|---|---|---|
+| `TaskService` task/asset/event 写读 | Rust 控制面，保留 | 不为文件名先拆；等资产版本、来源、权限模型稳定后再考虑 `AssetService` |
+| `TaskService::run_generate_image_prompt_workflow` | 合理过渡入口 | 收敛为通用 submit/settle 模式，避免正式 workflow 逐个手写 |
+| `TaskService::run_review_asset_quality_stub` | stub，冻结 | 真实 review/revision 迁入 Python workflow runtime |
+| `BatchJobService` supervisor/concurrency/claim | 短期保留 Rust | sidecar 事件节流、shutdown 语义、受控 worker-pool API 稳定后再评估迁移 |
+| `BatchJobService` prompt/image worker shell | 过渡 shell，方向正确 | 新增正式 workflow 不再新增 Rust worker 分支 |
+| `BatchJobService` prompt builder / provider DTO | demo/test 语义残留 | 迁向 Python prompt builder 与正式 workflow provider DTO |
+| Rust sidecar settle | 可信落库和审计面，保留 | 抽公共 helper，不迁给 Python 直接写库 |
+
+更安全的推进顺序：
+
+1. 继续保留旧 `demo.image.prompt/generate` 读取兼容，UI 新提交继续使用 `image.prompt.batch` / `image.generate.batch`。
+2. 共享 `SidecarLifecycleService` 已有首段恢复冷却；继续补事件节流、shutdown 语义和失败恢复可观测性。
+3. 抽象 Rust workflow submit/settle 公共路径，先消除 `TaskService` 与 `BatchJobService` 的状态映射重复。
+4. 最后才评估 Python 拉队列或 worker pool；前提是有受控 claim/checkpoint/complete API，不允许 Python 任意读写主库。
+
+本轮验证通过：
+
+- `cargo test --manifest-path .\\src-tauri\\Cargo.toml services::sidecar_lifecycle_service::tests:: -- --nocapture --test-threads=1`
+- `cargo check --manifest-path .\\src-tauri\\Cargo.toml`
+- `npm run check:architecture`
