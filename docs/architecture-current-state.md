@@ -1769,3 +1769,29 @@ Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `
 - `cargo test --manifest-path .\\src-tauri\\Cargo.toml services::sidecar_lifecycle_service::tests:: -- --nocapture --test-threads=1`
 - `cargo check --manifest-path .\\src-tauri\\Cargo.toml`
 - `npm run check:architecture`
+
+## 2026-06-11 补充：sidecar shutdown 语义硬化
+
+本轮继续按上一节边界结论推进 `SidecarLifecycleService`，只硬化 Rust 控制面与 Python sidecar 生命周期，不迁移 batch supervisor，也不新增生产 workflow worker。
+
+代码事实：
+
+- `src-tauri/sidecars/python/creative_health_server.py` 新增受 `X-Monster-Token` 保护的 `POST /shutdown`，返回 `shutting_down` 后异步调用 `server.shutdown()`。
+- `src-tauri/src/services/sidecar_lifecycle_service.rs` 的 `stop_dev_health_server()` 现在会先向当前 sidecar endpoint 发送 `/shutdown`，再等待短窗口；如果 Python 未退出，才回退到 `child.kill()`。
+- `stop_dev_health_server()` 仍负责清空 `port/pid/runtime_token` 与 recovery circuit，保持 Rust 是生命周期权威状态入口。
+- 测试覆盖了 Rust 是否真的发出 `POST /shutdown`，以及既有 batch sidecar managed lifecycle 锁粒度未退化。
+
+边界判定：
+
+| 区域 | 当前状态 | 下一步 |
+|---|---|---|
+| sidecar recovery | 已有短冷却 circuit / backoff | 补恢复失败指标和事件可观测性 |
+| sidecar shutdown | 已有 graceful `/shutdown` + kill fallback | 后续可补 shutdown 原因、耗时和失败事件 |
+| batch supervisor | 仍保留 Rust | 不因 shutdown 已硬化就提前迁给 Python worker pool |
+| workflow settle | 仍分散在 `TaskService` / `BatchJobService` | 下一阶段优先抽通用 submit/settle helper |
+
+本轮验证通过：
+
+- `python -m py_compile src-tauri\\sidecars\\python\\creative_health_server.py`
+- `cargo test --manifest-path .\\src-tauri\\Cargo.toml services::sidecar_lifecycle_service::tests:: -- --nocapture --test-threads=1`
+- `cargo test --manifest-path .\\src-tauri\\Cargo.toml services::batch_job_service::tests::submit_with_batch_sidecar_uses_managed_lifecycle_and_releases_lock -- --nocapture --test-threads=1`

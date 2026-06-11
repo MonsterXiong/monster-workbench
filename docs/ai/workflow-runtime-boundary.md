@@ -69,9 +69,9 @@ Provider Gateway -> 管业务状态
 - Sidecar request 已不再使用空 `budget` 占位：Rust 会提交 `maxDurationMs / maxImages / maxTokens / maxCostEstimate` 形态的预算对象，sidecar HTTP read timeout 和 Python provider timeout 会按该预算收敛。
 - `TaskService::run_review_asset_quality_stub` 仍在 Rust 内生成 review result 和 revise draft task；这只能作为 stub，不应扩展成真实审查/返工/一致性规则。
 - `batch_job_service.rs` 的 prompt/image worker 已不再直接每个任务独立 new/stop sidecar；生产路径会优先复用 Tauri app-managed `SidecarLifecycleService`，未注入 state 的测试/孤立调用才退回临时 sidecar。当前 batch 提交只在确保 sidecar endpoint 时持有 lifecycle 锁，实际 `/tasks` 长请求在锁外执行，避免 Rust lifecycle mutex 把 batch 并发槽位串行化。
-- `SidecarLifecycleService::ensure_dev_server` 已具备首段 recovery circuit：`unhealthy/failed` 后会尝试受控恢复，恢复失败会打开短冷却窗口，冷却期间快速拒绝后续恢复请求；健康检查成功或显式 stop 会清空该 circuit。这仍是首段恢复冷却，不等同于完整事件节流、shutdown 和 worker-pool 熔断体系。
+- `SidecarLifecycleService` 已具备首段 recovery circuit 与 graceful shutdown：`unhealthy/failed` 后会尝试受控恢复，恢复失败会打开短冷却窗口，冷却期间快速拒绝后续恢复请求；显式 stop 会先向 Python sidecar 发送受 token 保护的 `/shutdown`，短等待后再兜底 kill；健康检查成功或显式 stop 会清空 recovery circuit。这仍不等同于完整事件节流和 worker-pool 熔断体系。
 
-因此下一阶段不是直接让 Python 任意读写主库，也不是继续把新生产型 worker 分支写进 `BatchJobService`；重点应转向 sidecar runtime 正式化、事件节流、shutdown 语义和通用 workflow settle。
+因此下一阶段不是直接让 Python 任意读写主库，也不是继续把新生产型 worker 分支写进 `BatchJobService`；重点应转向 sidecar runtime 事件节流、失败恢复可观测性和通用 workflow settle。
 
 ## 7. 推荐迁移模式：Rust 主动提交，Python 执行业务
 
@@ -257,7 +257,7 @@ Python step boundary
 2. `demo.image.prompt` batch job 的 provider 调用已从 Rust worker 迁到 Python `image.prompt.batch` workflow；Rust 仍负责 claim、running、结果落库和 batch progress event。
 3. `demo.image.generate` batch job 的 provider 调用和图片处理已从 Rust worker 迁到 Python `image.generate.batch` workflow；Rust 负责校验输出文件路径、创建 asset、复制 thumbnail、写 `model_runs`。
 4. 新增正式 batch 类型时不要继续扩展 `demo.image.*` 命名；sidecar 协议层已先使用 `image.prompt.batch` / `image.generate.batch`，Rust batch 控制面也已接受同名 batch type 别名；UI / browser mock 当前也已把 prompt/generate 提交值切到正式命名，并保留旧值兼容。
-5. batch prompt / image sidecar workflow 已接入 cancel checkpoint，并已具备基础 budget/timeout 协议；batch worker 已优先复用 app-managed sidecar lifecycle，且 batch `/tasks` 提交不再长时间持有 lifecycle mutex。当前已补首段 recovery circuit / backoff，下一步优先补事件节流、更明确的 shutdown 语义和受控 worker-pool API；只有这些协议稳定后，再讨论 supervisor 是否从 Rust 迁到 Python worker pool。
+5. batch prompt / image sidecar workflow 已接入 cancel checkpoint，并已具备基础 budget/timeout 协议；batch worker 已优先复用 app-managed sidecar lifecycle，且 batch `/tasks` 提交不再长时间持有 lifecycle mutex。当前已补首段 recovery circuit / backoff 与 graceful shutdown，下一步优先补事件节流、失败恢复可观测性和受控 worker-pool API；只有这些协议稳定后，再讨论 supervisor 是否从 Rust 迁到 Python worker pool。
 
 ## 12. Rust 服务代码级边界清单
 
@@ -278,7 +278,7 @@ Python step boundary
 | 函数 / 区域 | 当前职责 | 边界判定 | 后续约束 |
 |---|---|---|---|
 | `create_batch_image_job` / `start_batch_job` / `pause_batch_job` / `resume_batch_job` / `cancel_batch_job` | batch 生命周期、任务创建、暂停/恢复/取消、事件广播 | Rust 控制面，保留 | 保持为状态控制，不下沉 provider 或业务 workflow 逻辑 |
-| `run_batch_supervisor_inner` | 轮询 snapshot、按 concurrency claim queued task、spawn worker、判断 completed | 短期保留 | 首段 sidecar recovery circuit 已有；但在事件节流、shutdown 语义和受控 worker-pool API 稳定前，不迁给 Python worker pool |
+| `run_batch_supervisor_inner` | 轮询 snapshot、按 concurrency claim queued task、spawn worker、判断 completed | 短期保留 | 首段 sidecar recovery circuit 与 graceful shutdown 已有；但在事件节流、失败恢复可观测性和受控 worker-pool API 稳定前，不迁给 Python worker pool |
 | `run_mock_task_worker` | 本地 smoke worker、模拟耗时/失败/取消 | demo，本地验证可保留 | 只服务本地 smoke，不作为正式业务类型模板 |
 | `run_prompt_task_worker` / `run_generate_task_worker` | 检查取消、构造 sidecar request、提交 Python workflow、交给 settle 归档 | 过渡 worker shell | 不新增生产 worker 分支；新增正式 workflow 走 sidecar runtime |
 | `settle_batch_prompt_sidecar_response` / `settle_batch_image_sidecar_response` | 校验 protocol/taskId/status，写入 asset/model_runs/task_events/status | Rust 可信落库和审计面，保留 | 可抽成通用 settle helper，避免 prompt/image 各自复制状态映射 |
@@ -290,7 +290,7 @@ Python step boundary
 ### 12.3 当前推进顺序
 
 1. UI / browser mock 的 prompt/generate batch type 提交值已切到 `image.prompt.batch` / `image.generate.batch`；旧 `demo.image.prompt/generate` 只作为历史兼容保留。
-2. 共享 `SidecarLifecycleService` 已具备首段 recovery circuit / backoff；继续补事件节流、shutdown 语义和失败恢复可观测性。
+2. 共享 `SidecarLifecycleService` 已具备首段 recovery circuit / backoff 与 graceful shutdown；继续补事件节流和失败恢复可观测性。
 3. 再抽象 Rust workflow submit/settle 公共路径，减少 `TaskService` 和 `BatchJobService` 内重复的 sidecar 状态映射。
 4. 最后才评估 supervisor 是否迁给 Python worker pool；迁移前必须先有受控 claim/checkpoint/complete API，不允许 Python 任意写主库。
 
@@ -303,6 +303,7 @@ Python step boundary
 - 不再为新的正式 batch workflow 增加 Rust worker 分支；新增 workflow 应走统一 sidecar request/result 协议，Rust 只做控制、校验、授权路径和可信落库。
 - `build_prompt_request` 与 `AiProviderConfig` 适配是当前最明确的 demo/test 语义残留；后续应先迁成 Python prompt builder 和正式 workflow provider DTO。
 - `settle_sidecar_non_success`、`settle_batch_prompt_sidecar_response`、`settle_batch_image_sidecar_response` 代表同一类 Rust 可信 settle 逻辑；后续优先抽公共 helper，而不是把落库职责迁到 Python。
+- `SidecarLifecycleService` 已有恢复冷却和受控 shutdown，下一步不要急着上 Python worker pool；先补 sidecar event polling / event throttling 或恢复失败指标。
 
 ## 13. 不变量
 
