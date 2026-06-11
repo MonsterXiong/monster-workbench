@@ -7,6 +7,9 @@ export interface SidecarStatusSnapshot {
   lastError: string | null;
   startedAt: string | null;
   checkedAt: string | null;
+  recoveryFailureCount: number;
+  lastRecoveryFailureAt: string | null;
+  recoveryBackoffRemainingMs: number | null;
 }
 
 export const sidecarService = {

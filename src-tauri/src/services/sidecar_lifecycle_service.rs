@@ -37,6 +37,9 @@ pub struct SidecarStatusSnapshot {
     pub last_error: Option<String>,
     pub started_at: Option<String>,
     pub checked_at: Option<String>,
+    pub recovery_failure_count: u64,
+    pub last_recovery_failure_at: Option<String>,
+    pub recovery_backoff_remaining_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -202,28 +205,37 @@ impl<R: Runtime> SidecarLifecycleService<R> {
                 last_error: None,
                 started_at: None,
                 checked_at: None,
+                recovery_failure_count: 0,
+                last_recovery_failure_at: None,
+                recovery_backoff_remaining_ms: None,
             },
         }
     }
 
     pub fn get_status(&mut self) -> SidecarStatusSnapshot {
         self.refresh_exit_status();
-        self.snapshot.clone()
+        self.snapshot_with_observability()
     }
 
     fn reset_recovery_circuit(&mut self) {
         self.recovery_backoff_until = None;
+        self.snapshot.recovery_backoff_remaining_ms = None;
     }
 
     fn open_recovery_circuit(&mut self) {
         self.recovery_backoff_until =
             Some(now_millis().saturating_add(SIDECAR_RECOVERY_BACKOFF_MS));
+        self.snapshot.recovery_backoff_remaining_ms = Some(SIDECAR_RECOVERY_BACKOFF_MS as u64);
     }
 
     fn mark_recovery_failure(&mut self, message: String) {
+        let now = now_text();
         self.snapshot.status = "failed".to_string();
         self.snapshot.last_error = Some(message);
-        self.snapshot.checked_at = Some(now_text());
+        self.snapshot.checked_at = Some(now.clone());
+        self.snapshot.recovery_failure_count =
+            self.snapshot.recovery_failure_count.saturating_add(1);
+        self.snapshot.last_recovery_failure_at = Some(now);
         self.open_recovery_circuit();
     }
 
@@ -236,6 +248,19 @@ impl<R: Runtime> SidecarLifecycleService<R> {
         self.recovery_circuit_remaining_ms()
             .map(|remaining| remaining > 0)
             .unwrap_or(false)
+    }
+
+    fn snapshot_with_observability(&self) -> SidecarStatusSnapshot {
+        let mut snapshot = self.snapshot.clone();
+        snapshot.recovery_backoff_remaining_ms =
+            self.recovery_circuit_remaining_ms().and_then(|remaining| {
+                if remaining == 0 {
+                    None
+                } else {
+                    Some(remaining.min(u64::MAX as u128) as u64)
+                }
+            });
+        snapshot
     }
 
     #[cfg(test)]
@@ -277,10 +302,10 @@ impl<R: Runtime> SidecarLifecycleService<R> {
     pub fn check_health(&mut self) -> AppResult<SidecarStatusSnapshot> {
         self.refresh_exit_status();
         let Some(port) = self.snapshot.port else {
-            return Ok(self.snapshot.clone());
+            return Ok(self.snapshot_with_observability());
         };
         let Some(token) = self.runtime_token.clone() else {
-            return Ok(self.snapshot.clone());
+            return Ok(self.snapshot_with_observability());
         };
 
         match health_check(port, &token) {
@@ -289,7 +314,7 @@ impl<R: Runtime> SidecarLifecycleService<R> {
                 self.snapshot.last_error = None;
                 self.snapshot.checked_at = Some(now_text());
                 self.reset_recovery_circuit();
-                Ok(self.snapshot.clone())
+                Ok(self.snapshot_with_observability())
             }
             Err(error) => {
                 if self.child.is_some() {
@@ -297,7 +322,7 @@ impl<R: Runtime> SidecarLifecycleService<R> {
                 }
                 self.snapshot.last_error = Some(error.to_string());
                 self.snapshot.checked_at = Some(now_text());
-                Ok(self.snapshot.clone())
+                Ok(self.snapshot_with_observability())
             }
         }
     }
@@ -322,7 +347,7 @@ impl<R: Runtime> SidecarLifecycleService<R> {
         self.snapshot.checked_at = Some(now_text());
         self.runtime_token = None;
         self.reset_recovery_circuit();
-        Ok(self.snapshot.clone())
+        Ok(self.snapshot_with_observability())
     }
 
     pub fn shutdown_reserved(&mut self) {
@@ -374,15 +399,16 @@ impl<R: Runtime> SidecarLifecycleService<R> {
             };
             if recovered.status == "running" {
                 self.reset_recovery_circuit();
-                return Ok(recovered);
+                return Ok(self.snapshot_with_observability());
             }
 
-            self.open_recovery_circuit();
-            return Err(AppError::Process(format!(
+            let message = format!(
                 "sidecar recovery failed after {previous_status}: {}; previous error: {}",
                 recovered.status,
                 previous_error.unwrap_or_else(|| "unknown".to_string())
-            )));
+            );
+            self.mark_recovery_failure(message.clone());
+            return Err(AppError::Process(message));
         }
 
         Err(AppError::Process(format!(
@@ -841,6 +867,7 @@ mod tests {
         let mut service = SidecarLifecycleService::new(app.handle().clone());
 
         service.mark_recovery_failure("sidecar failed to start".to_string());
+        let status = service.get_status();
 
         assert_eq!(service.snapshot.status, "failed");
         assert_eq!(
@@ -848,6 +875,9 @@ mod tests {
             Some("sidecar failed to start")
         );
         assert!(service.recovery_circuit_is_open());
+        assert_eq!(status.recovery_failure_count, 1);
+        assert!(status.last_recovery_failure_at.is_some());
+        assert!(status.recovery_backoff_remaining_ms.is_some());
     }
 
     #[test]
@@ -881,6 +911,8 @@ mod tests {
 
         assert_eq!(snapshot.status, "stopped");
         assert!(service.recovery_backoff_until.is_none());
+        assert_eq!(snapshot.recovery_failure_count, 0);
+        assert!(snapshot.recovery_backoff_remaining_ms.is_none());
     }
 
     #[test]
@@ -918,6 +950,7 @@ mod tests {
         assert!(request.contains(&format!("X-Monster-Token: {token}")));
         assert_eq!(snapshot.status, "stopped");
         assert!(service.recovery_backoff_until.is_none());
+        assert_eq!(snapshot.recovery_failure_count, 0);
     }
 
     #[test]
