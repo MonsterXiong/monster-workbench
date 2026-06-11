@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { useI18n } from "../../composables/useI18n";
-import { isEmptyArray, toIntegerAtLeast } from "../../utils";
+import { clampNumber, createLineClampStyle, isEmptyArray, toIntegerAtLeast } from "../../utils";
+
+type KeyValueStatus = "primary" | "success" | "warning" | "danger" | "neutral";
 
 export interface KeyValueItem {
   key: string;
@@ -9,9 +11,15 @@ export interface KeyValueItem {
   value: string | number;
   description?: string;
   icon?: string;
-  status?: "primary" | "success" | "warning" | "danger" | "neutral";
+  status?: KeyValueStatus;
+  statusLabel?: string;
+  statusPulse?: boolean;
   span?: 1 | 2 | 3;
 }
+
+type ResolvedKeyValueItem = KeyValueItem & {
+  resolvedSpan: 1 | 2 | 3;
+};
 
 interface Props {
   items: KeyValueItem[];
@@ -29,6 +37,7 @@ interface Props {
   wrapLabel?: boolean;
   wrapValue?: boolean;
   wrapDescription?: boolean;
+  maxDescriptionLines?: number;
   ariaLabel?: string;
 }
 
@@ -47,21 +56,42 @@ const props = withDefaults(defineProps<Props>(), {
   wrapLabel: false,
   wrapValue: false,
   wrapDescription: false,
+  maxDescriptionLines: 1,
   ariaLabel: "",
 });
 
 const { t } = useI18n();
 const resolvedSize = computed(() => (props.compact ? "sm" : props.size));
+const resolvedColumns = computed(() => clampNumber(props.columns, 1, 3, 2, 0) as 1 | 2 | 3);
 const isEmpty = computed(() => !props.loading && isEmptyArray(props.items));
 const skeletonCount = computed(() => toIntegerAtLeast(props.skeletonRows, 1, 3));
 const resolvedLoadingText = computed(() => props.loadingText || t("common.loading"));
+const statusLabels: Record<KeyValueStatus, string> = {
+  primary: "重点",
+  success: "正常",
+  warning: "警告",
+  danger: "异常",
+  neutral: "普通",
+};
+const normalizedItems = computed<ResolvedKeyValueItem[]>(() =>
+  props.items.map((item) => ({
+    ...item,
+    resolvedSpan: clampNumber(item.span ?? 1, 1, resolvedColumns.value, 1, 0) as 1 | 2 | 3,
+  }))
+);
+const descriptionStyle = computed(() => (props.wrapDescription ? undefined : createLineClampStyle(props.maxDescriptionLines)));
+const getItemSpanClass = (item: ResolvedKeyValueItem) => (item.resolvedSpan > 1 ? `base-key-value-list__item--span-${item.resolvedSpan}` : "");
+const getItemStatusLabel = (item: KeyValueItem) => {
+  if (!item.status) return "";
+  return `${item.label}状态：${item.statusLabel || statusLabels[item.status]}`;
+};
 </script>
 
 <template>
   <dl
     class="base-key-value-list"
     :class="[
-      `base-key-value-list--cols-${columns}`,
+      `base-key-value-list--cols-${resolvedColumns}`,
       `base-key-value-list--${resolvedSize}`,
       `base-key-value-list--${surface}`,
       {
@@ -94,18 +124,18 @@ const resolvedLoadingText = computed(() => props.loadingText || t("common.loadin
 
     <div
       v-else
-      v-for="item in items"
+      v-for="item in normalizedItems"
       :key="item.key"
       class="base-key-value-list__item"
-      :class="item.span ? `base-key-value-list__item--span-${item.span}` : ''"
+      :class="getItemSpanClass(item)"
     >
       <div class="base-key-value-list__label-row">
         <BaseIcon v-if="item.icon" :name="item.icon" size="14" class="text-slate-400" aria-hidden="true" />
         <dt class="base-key-value-list__label">{{ item.label }}</dt>
-        <BaseStatusDot v-if="item.status" :type="item.status" size="sm" :aria-label="item.status" />
+        <BaseStatusDot v-if="item.status" :type="item.status" size="sm" :pulse="item.statusPulse" :aria-label="getItemStatusLabel(item)" />
       </div>
       <dd class="base-key-value-list__value" :title="String(item.value)">{{ item.value }}</dd>
-      <dd v-if="item.description" class="base-key-value-list__description" :title="item.description">{{ item.description }}</dd>
+      <dd v-if="item.description" class="base-key-value-list__description" :title="item.description" :style="descriptionStyle">{{ item.description }}</dd>
     </div>
   </dl>
 </template>
@@ -214,11 +244,14 @@ const resolvedLoadingText = computed(() => props.loadingText || t("common.loadin
 }
 
 .base-key-value-list__description {
-  @apply mt-0.5 truncate text-[10px] font-bold text-slate-400 dark:text-slate-500;
+  @apply mt-0.5 overflow-hidden text-[10px] font-bold text-slate-400 dark:text-slate-500;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
 }
 
 .base-key-value-list--wrap-description .base-key-value-list__description {
   @apply whitespace-normal;
+  display: block;
   overflow: visible;
   overflow-wrap: anywhere;
   text-overflow: clip;

@@ -4,7 +4,7 @@ import PlaygroundDemoSection from "../../PlaygroundDemoSection.vue";
 const descriptionItems = [
   { key: "name", label: "组件名称", value: "BaseDescriptionList", status: "primary" as const },
   { key: "category", label: "所属分类", value: "基础控件" },
-  { key: "coverage", label: "覆盖能力", value: "属性 / 状态 / 描述", status: "success" as const },
+  { key: "coverage", label: "覆盖能力", value: "属性 / 状态 / 描述", status: "success" as const, statusLabel: "已覆盖" },
   { key: "density", label: "显示密度", value: "compact", description: "适合侧栏和详情摘要" },
   { key: "remark", label: "备注", value: "支持跨列", description: "span 可用于长字段", span: 2 as const },
 ];
@@ -41,8 +41,27 @@ const longDescriptionItems = [
   },
 ];
 
+const narrowDescriptionItems = [
+  {
+    key: "span",
+    label: "跨列字段",
+    value: "传入 span: 3，但当前容器为 2 列时会自动收敛为 2 列",
+    description: "用于避免隐式网格列把详情容器撑宽。",
+    span: 3 as const,
+    status: "warning" as const,
+    statusLabel: "已收敛",
+  },
+  {
+    key: "path",
+    label: "长标识",
+    value: "component.foundation.description-list.narrow-container.long-readable-key",
+    description: "窄容器里开启换行后不会产生横向滚动。",
+    status: "success" as const,
+  },
+];
+
 const keyValueItems = [
-  { key: "runtime", label: "运行态", value: "正常", icon: "Activity", status: "success" as const, description: "实时状态" },
+  { key: "runtime", label: "运行态", value: "正常", icon: "Activity", status: "success" as const, statusPulse: true, description: "实时状态" },
   { key: "version", label: "版本", value: "0.0.3", icon: "Package", description: "当前包版本" },
   { key: "quality", label: "质量门禁", value: "通过", icon: "ShieldCheck", status: "primary" as const },
 ];
@@ -73,6 +92,25 @@ const keyValueLongItems = [
     span: 2 as const,
   },
 ];
+
+const narrowKeyValueItems = [
+  {
+    key: "queue",
+    label: "队列状态",
+    value: "等待窗口复核",
+    icon: "ListChecks",
+    status: "warning" as const,
+    statusLabel: "待复核",
+    description: "状态点只有图形时也提供可读语义。",
+  },
+  {
+    key: "span",
+    label: "跨列摘要",
+    value: "span 会根据 columns 自动收敛，避免卡片内部生成额外隐式列。",
+    icon: "Columns3",
+    span: 3 as const,
+  },
+];
 </script>
 
 <template>
@@ -98,6 +136,19 @@ const keyValueLongItems = [
             wrap-value
             wrap-description
           />
+        </BasePanel>
+        <BasePanel title="窄容器边界" subtitle="span 会按当前列数收敛，长内容不会撑破侧栏。">
+          <div class="narrow-demo-frame">
+            <BaseDescriptionList
+              aria-label="窄容器描述列表"
+              :items="narrowDescriptionItems"
+              :columns="2"
+              surface="muted"
+              wrap-label
+              wrap-value
+              :max-description-lines="2"
+            />
+          </div>
         </BasePanel>
         <BasePanel title="状态兜底" subtitle="加载、空态和禁用态让异步详情区域更稳定。">
           <div class="description-state-stack">
@@ -138,6 +189,16 @@ const keyValueLongItems = [
               wrap-value
               wrap-description
             />
+            <div class="narrow-demo-frame">
+              <BaseKeyValueList
+                aria-label="窄容器键值摘要"
+                :items="narrowKeyValueItems"
+                :columns="2"
+                surface="card"
+                wrap-value
+                :max-description-lines="2"
+              />
+            </div>
             <BaseKeyValueList aria-label="嵌套键值摘要" :items="keyValueAuditItems.slice(0, 3)" :columns="3" surface="plain" :bordered="false" compact />
             <div class="key-value-state-grid">
               <BaseKeyValueList aria-label="加载中的键值摘要" :items="[]" loading loading-text="正在加载摘要" :skeleton-rows="4" compact />
@@ -188,5 +249,9 @@ const keyValueLongItems = [
 
 .status-dot-size-grid {
   @apply grid min-w-0 gap-3 sm:grid-cols-2 lg:grid-cols-5;
+}
+
+.narrow-demo-frame {
+  @apply w-full max-w-[280px] min-w-0;
 }
 </style>

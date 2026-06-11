@@ -24,6 +24,7 @@ const props = withDefaults(defineProps<Props>(), {
 });
 
 const accessibleLabel = computed(() => props.ariaLabel || props.label || props.description || "");
+const hasVisibleText = computed(() => Boolean(props.label || props.description));
 </script>
 
 <template>
@@ -37,8 +38,9 @@ const accessibleLabel = computed(() => props.ariaLabel || props.label || props.d
         'is-disabled': disabled,
       },
     ]"
-    :aria-label="accessibleLabel || undefined"
-    :aria-hidden="accessibleLabel ? undefined : 'true'"
+    :role="!hasVisibleText && accessibleLabel ? 'img' : undefined"
+    :aria-label="!hasVisibleText && accessibleLabel ? accessibleLabel : undefined"
+    :aria-hidden="!hasVisibleText && !accessibleLabel ? 'true' : undefined"
     :aria-disabled="disabled ? 'true' : undefined"
     :title="accessibleLabel || undefined"
   >

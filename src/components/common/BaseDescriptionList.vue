@@ -1,16 +1,24 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { useI18n } from "../../composables/useI18n";
-import { isEmptyArray, toIntegerAtLeast } from "../../utils";
+import { clampNumber, createLineClampStyle, isEmptyArray, toIntegerAtLeast } from "../../utils";
+
+type DescriptionStatus = "primary" | "success" | "warning" | "danger" | "neutral";
 
 export interface DescriptionListItem {
   key: string;
   label: string;
   value: string | number;
   description?: string;
-  status?: "primary" | "success" | "warning" | "danger" | "neutral";
+  status?: DescriptionStatus;
+  statusLabel?: string;
+  statusPulse?: boolean;
   span?: 1 | 2 | 3;
 }
+
+type ResolvedDescriptionListItem = DescriptionListItem & {
+  resolvedSpan: 1 | 2 | 3;
+};
 
 interface Props {
   items: DescriptionListItem[];
@@ -28,6 +36,7 @@ interface Props {
   wrapLabel?: boolean;
   wrapValue?: boolean;
   wrapDescription?: boolean;
+  maxDescriptionLines?: number;
   ariaLabel?: string;
 }
 
@@ -46,21 +55,43 @@ const props = withDefaults(defineProps<Props>(), {
   wrapLabel: false,
   wrapValue: false,
   wrapDescription: false,
+  maxDescriptionLines: 1,
   ariaLabel: "",
 });
 
 const { t } = useI18n();
 const resolvedSize = computed(() => (props.compact ? "sm" : props.size));
+const resolvedColumns = computed(() => clampNumber(props.columns, 1, 3, 2, 0) as 1 | 2 | 3);
 const isEmpty = computed(() => !props.loading && isEmptyArray(props.items));
 const skeletonCount = computed(() => toIntegerAtLeast(props.skeletonRows, 1, 4));
 const resolvedLoadingText = computed(() => props.loadingText || t("common.loading"));
+const statusLabels: Record<DescriptionStatus, string> = {
+  primary: "重点",
+  success: "正常",
+  warning: "警告",
+  danger: "异常",
+  neutral: "普通",
+};
+const normalizedItems = computed<ResolvedDescriptionListItem[]>(() =>
+  props.items.map((item) => ({
+    ...item,
+    resolvedSpan: clampNumber(item.span ?? 1, 1, resolvedColumns.value, 1, 0) as 1 | 2 | 3,
+  }))
+);
+const descriptionStyle = computed(() => (props.wrapDescription ? undefined : createLineClampStyle(props.maxDescriptionLines)));
+const getItemSpanClass = (item: ResolvedDescriptionListItem) =>
+  item.resolvedSpan > 1 ? `base-description-list__item--span-${item.resolvedSpan}` : "";
+const getItemStatusLabel = (item: DescriptionListItem) => {
+  if (!item.status) return "";
+  return `${item.label}状态：${item.statusLabel || statusLabels[item.status]}`;
+};
 </script>
 
 <template>
   <dl
     class="base-description-list"
     :class="[
-      `base-description-list--cols-${columns}`,
+      `base-description-list--cols-${resolvedColumns}`,
       `base-description-list--${resolvedSize}`,
       `base-description-list--${surface}`,
       {
@@ -93,17 +124,17 @@ const resolvedLoadingText = computed(() => props.loadingText || t("common.loadin
 
     <div
       v-else
-      v-for="item in items"
+      v-for="item in normalizedItems"
       :key="item.key"
       class="base-description-list__item"
-      :class="item.span ? `base-description-list__item--span-${item.span}` : ''"
+      :class="getItemSpanClass(item)"
     >
       <dt>
         <span>{{ item.label }}</span>
-        <BaseStatusDot v-if="item.status" :type="item.status" size="sm" :aria-label="item.status" />
+        <BaseStatusDot v-if="item.status" :type="item.status" size="sm" :pulse="item.statusPulse" :aria-label="getItemStatusLabel(item)" />
       </dt>
       <dd :title="String(item.value)">{{ item.value }}</dd>
-      <p v-if="item.description" :title="item.description">{{ item.description }}</p>
+      <p v-if="item.description" :title="item.description" :style="descriptionStyle">{{ item.description }}</p>
     </div>
   </dl>
 </template>
@@ -208,11 +239,14 @@ const resolvedLoadingText = computed(() => props.loadingText || t("common.loadin
 }
 
 .base-description-list p {
-  @apply mt-0.5 truncate text-[10px] font-bold text-slate-400 dark:text-slate-500;
+  @apply mt-0.5 overflow-hidden text-[10px] font-bold text-slate-400 dark:text-slate-500;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
 }
 
 .base-description-list--wrap-description p {
   @apply whitespace-normal;
+  display: block;
   overflow: visible;
   overflow-wrap: anywhere;
   text-overflow: clip;
