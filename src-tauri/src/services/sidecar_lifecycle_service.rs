@@ -1,10 +1,12 @@
 use crate::infra::{AppError, AppResult};
+use crate::services::log_service::LogService;
 use serde_json::{json, Value};
 use std::collections::{HashSet, VecDeque};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::Mutex;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager, Runtime, Wry};
 
@@ -30,6 +32,7 @@ const SIDECAR_RECOVERY_BACKOFF_MS: u128 = 5_000;
 const SIDECAR_SHUTDOWN_TIMEOUT_MS: u64 = 1_000;
 const SIDECAR_STATUS_EVENT_THROTTLE_MS: u128 = 1_000;
 const SIDECAR_STATUS_EVENT_NAME: &str = "creative-sidecar-status-changed";
+const SIDECAR_LIFECYCLE_DIAGNOSTIC_LOG_FILE: &str = "sidecar-lifecycle.log";
 const SIDECAR_RUNTIME_EVENT_DEDUPE_LIMIT: usize = 2_000;
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -351,9 +354,21 @@ impl<R: Runtime> SidecarLifecycleService<R> {
             recovery_backoff_remaining_ms: snapshot.recovery_backoff_remaining_ms,
             created_at: now_text(),
         };
+        self.write_status_diagnostic(&payload);
         let _ = self.app_handle.emit(SIDECAR_STATUS_EVENT_NAME, payload);
         self.last_status_event_status = Some(snapshot.status);
         self.last_status_event_at = Some(now);
+    }
+
+    fn write_status_diagnostic(&self, payload: &SidecarStatusEventPayload) {
+        let Some(log_state) = self.app_handle.try_state::<Mutex<LogService>>() else {
+            return;
+        };
+        let logger = log_state.lock().unwrap_or_else(|error| error.into_inner());
+        let _ = logger.write_log(
+            SIDECAR_LIFECYCLE_DIAGNOSTIC_LOG_FILE,
+            &format_sidecar_status_diagnostic(payload),
+        );
     }
 
     #[cfg(test)]
@@ -429,16 +444,20 @@ impl<R: Runtime> SidecarLifecycleService<R> {
     }
 
     pub fn stop_dev_health_server(&mut self) -> AppResult<SidecarStatusSnapshot> {
+        let stop_started = Instant::now();
         self.snapshot.status = "stopping".to_string();
         self.emit_status_event("stopping", Some("sidecar stopping".to_string()), true);
+        let mut shutdown_requested = false;
         if let (Some(port), Some(token)) = (self.snapshot.port, self.runtime_token.as_deref()) {
-            let _ = request_shutdown(port, token);
+            shutdown_requested = request_shutdown(port, token).is_ok();
         }
+        let mut kill_fallback = false;
         if let Some(mut child) = self.child.take() {
             if !wait_child_exit(
                 &mut child,
                 Duration::from_millis(SIDECAR_SHUTDOWN_TIMEOUT_MS),
             ) {
+                kill_fallback = true;
                 let _ = child.kill();
                 let _ = child.wait();
             }
@@ -449,7 +468,16 @@ impl<R: Runtime> SidecarLifecycleService<R> {
         self.snapshot.checked_at = Some(now_text());
         self.runtime_token = None;
         self.reset_recovery_circuit();
-        self.emit_status_event("stopped", Some("sidecar stopped".to_string()), true);
+        self.emit_status_event(
+            "stopped",
+            Some(format!(
+                "sidecar stopped durationMs={} shutdownRequested={} killFallback={}",
+                stop_started.elapsed().as_millis(),
+                shutdown_requested,
+                kill_fallback
+            )),
+            true,
+        );
         Ok(self.snapshot_with_observability())
     }
 
@@ -1040,6 +1068,39 @@ fn runtime_event_source_key(
     ))
 }
 
+fn format_sidecar_status_diagnostic(payload: &SidecarStatusEventPayload) -> String {
+    format!(
+        "[{}] [SIDECAR_LIFECYCLE] eventType={} status={} port={} pid={} recoveryFailureCount={} recoveryBackoffRemainingMs={} message={}",
+        payload.created_at,
+        compact_status_log_field(&payload.event_type),
+        compact_status_log_field(&payload.status),
+        payload
+            .port
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "-".to_string()),
+        payload
+            .pid
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "-".to_string()),
+        payload.recovery_failure_count,
+        payload
+            .recovery_backoff_remaining_ms
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "-".to_string()),
+        payload
+            .message
+            .as_deref()
+            .map(compact_status_log_field)
+            .unwrap_or_else(|| "-".to_string())
+    )
+}
+
+fn compact_status_log_field(value: &str) -> String {
+    const MAX_LOG_FIELD_CHARS: usize = 500;
+    let compact = value.split_whitespace().collect::<Vec<_>>().join(" ");
+    compact.chars().take(MAX_LOG_FIELD_CHARS).collect()
+}
+
 fn encode_budget(budget: Option<SidecarWorkflowBudget>) -> AppResult<Value> {
     budget
         .map(serde_json::to_value)
@@ -1060,6 +1121,9 @@ fn budget_read_timeout(budget: &Value) -> Duration {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::infra::path::PathProvider;
+    use crate::services::log_service::LogService;
+    use std::path::PathBuf;
     use std::sync::mpsc;
 
     #[test]
@@ -1127,6 +1191,40 @@ mod tests {
             service.last_status_event_status.as_deref(),
             Some("unhealthy")
         );
+    }
+
+    #[test]
+    fn status_event_writes_lifecycle_diagnostic_log_when_logger_is_available() {
+        let app = tauri::test::mock_app();
+        let root = temp_root("lifecycle-diagnostic-log");
+        let app_dir = root.join("app-data");
+        let path_provider =
+            PathProvider::new_for_test(app_dir.clone(), app_dir.join("monster_workbench.db"));
+        app.manage(Mutex::new(LogService::new(path_provider)));
+
+        let mut service = SidecarLifecycleService::new(app.handle().clone());
+        service.snapshot.status = "running".to_string();
+        service.snapshot.port = Some(43123);
+        service.emit_status_event(
+            "health_ok",
+            Some("sidecar ok apiKey=plain-secret".to_string()),
+            true,
+        );
+
+        let persisted = std::fs::read_to_string(
+            app_dir
+                .join("logs")
+                .join(SIDECAR_LIFECYCLE_DIAGNOSTIC_LOG_FILE),
+        )
+        .expect("lifecycle diagnostic log should be written");
+
+        assert!(persisted.contains("[SIDECAR_LIFECYCLE]"));
+        assert!(persisted.contains("eventType=health_ok"));
+        assert!(persisted.contains("status=running"));
+        assert!(persisted.contains("port=43123"));
+        assert!(!persisted.contains("plain-secret"));
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
@@ -1309,6 +1407,17 @@ mod tests {
         assert_eq!(first.len(), 1);
         assert!(duplicate.is_empty());
         assert_eq!(after_restart.len(), 1);
+    }
+
+    fn temp_root(name: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be valid")
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "monster-workbench-sidecar-{name}-{}-{nanos}",
+            std::process::id()
+        ))
     }
 
     #[test]
