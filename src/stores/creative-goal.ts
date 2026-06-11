@@ -1,19 +1,19 @@
 import { defineStore } from "pinia";
 import { ref } from "vue";
 import {
-  creativeTaskService,
+  creativeGoalService,
   type CreateCreativeGoalInput,
   type CreateGoalMultiAgentStubInput,
   type CreativeGoal,
   type CreativeGoalRole,
   type CreativeGoalStatusSnapshot,
-  type CreativeTask,
-} from "../services/creative-task.service";
+} from "../services/creative-goal.service";
+import type { CreativeTask } from "../services/task.service";
 
 export type {
   CreativeGoal,
   CreativeGoalRole as CreativeRoleSpec,
-} from "../services/task.service";
+} from "../services/creative-goal.service";
 
 export const useCreativeGoalStore = defineStore("creative-goal", () => {
   const goalResult = ref<CreativeGoal | null>(null);
@@ -24,7 +24,7 @@ export const useCreativeGoalStore = defineStore("creative-goal", () => {
   const goalRunning = ref(false);
 
   const createCreativeGoal = async (input: CreateCreativeGoalInput) => {
-    return creativeTaskService.createCreativeGoal(input);
+    return creativeGoalService.createCreativeGoal(input);
   };
 
   const runGoalMultiAgentStub = async (input: CreateGoalMultiAgentStubInput) => {
@@ -32,14 +32,14 @@ export const useCreativeGoalStore = defineStore("creative-goal", () => {
     goalRunning.value = true;
 
     try {
-      const result = await creativeTaskService.createGoalMultiAgentStub(input);
+      const result = await creativeGoalService.createGoalMultiAgentStub(input);
       goalResult.value = result.goal;
       goalRoleResults.value = result.roles;
       goalTaskResults.value = [
         ...result.tasks,
         ...(result.mergeTask ? [result.mergeTask] : []),
       ];
-      goalStatusSnapshot.value = await creativeTaskService.getGoalStatus(result.goal.id);
+      goalStatusSnapshot.value = await creativeGoalService.getGoalStatus(result.goal.id);
       return result;
     } catch (error) {
       const message = error instanceof Error ? error.message : "goal multi-agent stub failed";
@@ -51,12 +51,12 @@ export const useCreativeGoalStore = defineStore("creative-goal", () => {
   };
 
   const refreshGoalStatus = async (goalId: number) => {
-    goalStatusSnapshot.value = await creativeTaskService.getGoalStatus(goalId);
+    goalStatusSnapshot.value = await creativeGoalService.getGoalStatus(goalId);
     return goalStatusSnapshot.value;
   };
 
   const stopCreativeGoal = async (goalId: number) => {
-    goalStatusSnapshot.value = await creativeTaskService.stopCreativeGoal(goalId);
+    goalStatusSnapshot.value = await creativeGoalService.stopCreativeGoal(goalId);
     goalResult.value = goalStatusSnapshot.value.goal;
     return goalStatusSnapshot.value;
   };

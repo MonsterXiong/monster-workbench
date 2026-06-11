@@ -1,14 +1,14 @@
 import { defineStore } from "pinia";
 import { ref } from "vue";
 import {
-  creativeTaskService,
+  creativeAssetService,
   type CreateCreativeAssetInput,
   type CreateCreativeAssetLinkInput,
   type CreativeAsset,
   type CreativeAssetLink,
-} from "../services/creative-task.service";
+} from "../services/creative-asset.service";
 
-export type { CreativeAsset, CreativeAssetLink } from "../services/task.service";
+export type { CreativeAsset, CreativeAssetLink } from "../services/creative-asset.service";
 
 export const useCreativeAssetStore = defineStore("creative-asset", () => {
   const domainAssets = ref<CreativeAsset[]>([]);
@@ -17,11 +17,11 @@ export const useCreativeAssetStore = defineStore("creative-asset", () => {
   const domainAssetRunning = ref(false);
 
   const createDomainAsset = async (input: CreateCreativeAssetInput) => {
-    return creativeTaskService.createCreativeAsset(input);
+    return creativeAssetService.createCreativeAsset(input);
   };
 
   const createDomainAssetLink = async (input: CreateCreativeAssetLinkInput) => {
-    return creativeTaskService.createCreativeAssetLink(input);
+    return creativeAssetService.createCreativeAssetLink(input);
   };
 
   const runDomainAssetDraft = async (input: {

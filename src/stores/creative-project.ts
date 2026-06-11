@@ -8,10 +8,16 @@ import {
 } from "../services/creative-project.service";
 import {
   creativeTaskService,
-  type CreativeAsset,
-  type CreativeGoal,
   type CreativeTask,
 } from "../services/creative-task.service";
+import {
+  creativeAssetService,
+  type CreativeAsset,
+} from "../services/creative-asset.service";
+import {
+  creativeGoalService,
+  type CreativeGoal,
+} from "../services/creative-goal.service";
 import {
   creativeBatchService,
   type CreativeBatchJob,
@@ -78,8 +84,8 @@ export const useCreativeProjectStore = defineStore("creative-project", () => {
   const loadCreativeProjectIndex = async () => {
     const [indexTasks, indexAssets, indexGoals, indexBatchJobs] = await Promise.all([
       creativeTaskService.listCreativeTasks({ limit: 200 }),
-      creativeTaskService.listCreativeAssets({ limit: 200 }),
-      creativeTaskService.listCreativeGoals({ limit: 100 }),
+      creativeAssetService.listCreativeAssets({ limit: 200 }),
+      creativeGoalService.listCreativeGoals({ limit: 100 }),
       creativeBatchService.listBatchJobs({ limit: 100 }),
     ]);
 
@@ -104,8 +110,8 @@ export const useCreativeProjectStore = defineStore("creative-project", () => {
       const filter = projectId ? { projectId } : {};
       const [historyTasks, historyAssets, historyGoals, historyBatchJobs] = await Promise.all([
         creativeTaskService.listCreativeTasks({ ...filter, limit: 80 }),
-        creativeTaskService.listCreativeAssets({ ...filter, limit: 80 }),
-        creativeTaskService.listCreativeGoals({ ...filter, limit: 40 }),
+        creativeAssetService.listCreativeAssets({ ...filter, limit: 80 }),
+        creativeGoalService.listCreativeGoals({ ...filter, limit: 40 }),
         creativeBatchService.listBatchJobs({ ...filter, limit: 40 }),
       ]);
 

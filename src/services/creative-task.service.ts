@@ -5,57 +5,31 @@ import {
 } from "./native-event.service";
 import { isTauriRuntime } from "./runtime";
 import type {
-  CreateCreativeAssetInput,
-  CreateCreativeAssetLinkInput,
-  CreateCreativeGoalInput,
   CreateCreativeTaskInput,
-  CreateGoalMultiAgentStubInput,
   CreateTaskEventInput,
-  CreativeAsset,
-  CreativeAssetLink,
-  CreativeGoal,
-  CreativeGoalStatusSnapshot,
   CreativeTask,
   CreativeTaskEventPayload,
   GenerateImagePromptWorkflowInput,
   GenerateImagePromptWorkflowResult,
-  GoalMultiAgentStubResult,
-  ListCreativeAssetLinksFilter,
-  ListCreativeAssetsFilter,
-  ListCreativeGoalsFilter,
   ListCreativeTasksFilter,
   ReviewAssetQualityStubInput,
   ReviewAssetQualityStubResult,
-  TaskEvent,
   UpdateCreativeTaskStatusInput,
+  TaskEvent,
 } from "./task.service";
 
 export type {
-  CreateCreativeAssetInput,
-  CreateCreativeAssetLinkInput,
-  CreateCreativeGoalInput,
   CreateCreativeTaskInput,
-  CreateGoalMultiAgentStubInput,
   CreateTaskEventInput,
-  CreativeAsset,
-  CreativeAssetLink,
-  CreativeGoal,
-  CreativeGoalStatusSnapshot,
   CreativeTask,
   CreativeTaskEventPayload,
   GenerateImagePromptWorkflowInput,
   GenerateImagePromptWorkflowResult,
-  GoalMultiAgentStubResult,
-  ListCreativeAssetLinksFilter,
-  ListCreativeAssetsFilter,
-  ListCreativeGoalsFilter,
   ListCreativeTasksFilter,
   ReviewAssetQualityStubInput,
   ReviewAssetQualityStubResult,
-  ReviewResultPayload,
   TaskEvent,
   UpdateCreativeTaskStatusInput,
-  CreativeGoalRole,
 } from "./task.service";
 
 function listenBrowserEvent<T>(
@@ -104,24 +78,6 @@ export const creativeTaskService = {
     callTauri<CreativeTask>("update_creative_task_status", { input }),
   appendTaskEvent: (input: CreateTaskEventInput) =>
     callTauri<TaskEvent>("append_task_event", { input }),
-  createCreativeAsset: (input: CreateCreativeAssetInput) =>
-    callTauri<CreativeAsset>("create_creative_asset", { input }),
-  listCreativeAssets: (filter: ListCreativeAssetsFilter = {}) =>
-    callTauri<CreativeAsset[]>("list_creative_assets", { filter }),
-  createCreativeAssetLink: (input: CreateCreativeAssetLinkInput) =>
-    callTauri<CreativeAssetLink>("create_asset_link", { input }),
-  listCreativeAssetLinks: (filter: ListCreativeAssetLinksFilter = {}) =>
-    callTauri<CreativeAssetLink[]>("list_asset_links", { filter }),
-  createCreativeGoal: (input: CreateCreativeGoalInput) =>
-    callTauri<CreativeGoal>("create_creative_goal", { input }),
-  listCreativeGoals: (filter: ListCreativeGoalsFilter = {}) =>
-    callTauri<CreativeGoal[]>("list_creative_goals", { filter }),
-  createGoalMultiAgentStub: (input: CreateGoalMultiAgentStubInput) =>
-    callTauri<GoalMultiAgentStubResult>("create_goal_multi_agent_stub", { input }),
-  getGoalStatus: (goalId: number) =>
-    callTauri<CreativeGoalStatusSnapshot>("get_goal_status", { goalId }),
-  stopCreativeGoal: (goalId: number) =>
-    callTauri<CreativeGoalStatusSnapshot>("stop_creative_goal", { goalId }),
   runGenerateImagePromptWorkflow: (input: GenerateImagePromptWorkflowInput) =>
     callTauri<GenerateImagePromptWorkflowResult>(
       "run_generate_image_prompt_workflow",
