@@ -131,23 +131,33 @@ npm run check:architecture
 | [docs/ai/maintenance.md](docs/ai/maintenance.md) | 新增、修改、删除规则 |
 ---
 
-## 8. Codex Goal 模式与持续型 AI 创作系统改造入口
+## 8. Codex Goal 模式与持续型 AI 创作系统
 
-本项目正在以渐进式方式，从现有 AI Provider / 对话 / 生图工作台，升级为持续型 AI 创作系统。该改造必须遵守本 `AGENTS.md` 既有分层与安全红线。
+本项目正在以渐进式方式，从现有 AI Provider / 对话 / 生图工作台，升级为持续型 AI 创作系统。该方向已经完成早期 Goal 链路验证；后续推进以当前代码事实、`docs/architecture-current-state.md` 和 `agent/open-loops.md` 为准，不再依赖历史 Phase / Goal 执行包。
 
 ### 8.1 入口文档
 
-涉及 Codex Goal、多 Agent 并行、创作任务系统、Python sidecar 常驻化、任务队列、资产库、审查返工时，必须先阅读：
+涉及 Codex Goal、多 Agent 并行、创作任务系统、Python sidecar、任务队列、资产库、审查返工时，必须先阅读：
 
 | 文档 | 适用场景 |
 |------|----------|
-| [docs/ai/codex-goal-ops-manual.md](docs/ai/codex-goal-ops-manual.md) | 从零到一执行 Codex Goal 推进 |
 | [docs/ai/codex-goal-mode.md](docs/ai/codex-goal-mode.md) | Goal 模式基本规则 |
 | [docs/ai/creative-architecture-guardrails.md](docs/ai/creative-architecture-guardrails.md) | 创作系统架构护栏 |
-| [docs/ai/creative-system-roadmap.md](docs/ai/creative-system-roadmap.md) | 阶段路线图 |
 | [docs/ai/creative-regression-checklist.md](docs/ai/creative-regression-checklist.md) | 回归检查清单 |
 | [docs/ai/multi-agent-operating-model.md](docs/ai/multi-agent-operating-model.md) | 多 Agent 并行协作规则 |
-| [docs/ai/phase-prompt-index.md](docs/ai/phase-prompt-index.md) | 每个阶段应对 Codex 说什么 |
+
+按任务边界继续阅读：
+
+| 文档 | 适用场景 |
+|------|----------|
+| [docs/ai/task-state-machine.md](docs/ai/task-state-machine.md) | 任务状态、事件、恢复语义 |
+| [docs/ai/database-migration-policy.md](docs/ai/database-migration-policy.md) | SQLite schema / repo / 迁移 |
+| [docs/ai/workflow-runtime-boundary.md](docs/ai/workflow-runtime-boundary.md) | Vue / Rust / Python / Provider 职责边界 |
+| [docs/ai/execution-budget-and-kill-switch.md](docs/ai/execution-budget-and-kill-switch.md) | 批量任务、预算、熔断、暂停取消 |
+| [docs/ai/model-provider-observability.md](docs/ai/model-provider-observability.md) | 模型调用审计与 `model_runs` |
+| [docs/ai/asset-versioning-and-provenance.md](docs/ai/asset-versioning-and-provenance.md) | 资产版本、来源、关系 |
+| [docs/ai/python-sidecar-packaging-strategy.md](docs/ai/python-sidecar-packaging-strategy.md) | Python sidecar 发布与预检 |
+| [docs/ai/security-threat-model.md](docs/ai/security-threat-model.md) | 安全威胁、权限、敏感信息 |
 
 ### 8.2 改造红线
 
@@ -163,20 +173,10 @@ npm run check:architecture
 - Python 逐步承载 workflow、worker、Provider 调用、prompt 构建、审查、返工、资产入库和一致性分析。
 - 任何阶段完成前，按任务影响范围运行 `npm run check:architecture`、`npm run typecheck`、必要时运行 `npx tauri build --no-bundle`。
 
-### 8.3 默认推进顺序
+### 8.3 默认推进方式
 
-除非用户明确调整，否则按以下顺序推进：
-
-1. 文档护栏与基线
-2. 最小任务/资产 SQLite 模型
-3. Rust TaskService 与 Tauri commands
-4. 任务事件桥接
-5. Rust SidecarLifecycleService
-6. Python 常驻 sidecar stub
-7. 第一个真实 creative workflow
-8. worker 队列骨架
-9. 审查与返工骨架
-10. 角色/场景/道具/分镜/小说/剧本资产域
-11. Goal 模式与多 Agent 并行创作流
+- 不重开已完成的历史 Goal 链路；新任务按当前代码事实重新切小目标。
+- 先确认 `docs/architecture-current-state.md` 与实际代码是否一致，再决定是否需要更新架构说明。
+- 未闭环事项只记录到 `agent/open-loops.md` 或 `TODO.md`，不要新增平行路线图、阶段提示词或一次性执行包。
 
 ---

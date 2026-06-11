@@ -1120,7 +1120,7 @@ infra/creative/goal_repo.rs
 
 ### 10.8 文档状态需要收敛
 
-`docs/ai/creative-master-plan.md` 已记录 Goal 00-13 真实 Tauri 验证闭环；`agent/open-loops.md` 现已同步清理，后续待办统一收敛到 post-goal architecture hardening 与真实回归缺口，不再重新打开已完成 Goal 的收口条目。
+Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `agent/open-loops.md` 与真实回归缺口，不再重新打开已完成 Goal 的收口条目。
 
 ---
 
@@ -1152,7 +1152,7 @@ infra/creative/goal_repo.rs
 2. 继续收敛 `src/stores/ai.ts` façade，避免新的 session / queue / image runtime 逻辑重新回流到单一入口。
 3. 继续收敛 `TaskService` 与 `BatchJobService` 的 orchestration 边界，尽量让 asset CRUD、goal CRUD、batch snapshot 等稳定职责停留在对应 repo/service。
 4. 在现有 `schema_migrations` 基础上继续补齐旧库兼容回归、备份策略与更细粒度 migration 约束。
-5. 持续同步 `agent/open-loops.md`、`docs/architecture-upgrade-baseline.md` 与本文件，避免“代码已经推进、当前状态文档仍停留在旧阶段”。
+5. 持续同步 `agent/open-loops.md` 与本文件，避免“代码已经推进、当前状态文档仍停留在旧阶段”。
 
 ### 阶段 B：正式项目与资产域
 

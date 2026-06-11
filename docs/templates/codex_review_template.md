@@ -13,7 +13,7 @@
 7. 是否把小说/prompt/审查业务写进 Rust；
 8. 是否把大图/base64 传入前端状态；
 9. 是否修改了不相关文件；
-10. 是否需要更新 docs/ai/creative-master-plan.md 或 agent/open-loops.md。
+10. 是否需要更新 docs/architecture-current-state.md、agent/open-loops.md 或 TODO.md。
 
 请输出：
 - Approved / Not Approved

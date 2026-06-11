@@ -107,15 +107,17 @@
 
 不建议在以下阶段并行：
 
-- 文档护栏尚未建立；
-- 最小数据库模型尚未落地；
-- Codex 尚未正确理解 AGENTS.md。
+- 当前任务的边界还不清楚；
+- 代码事实还没有核对；
+- 需要同时触碰多个高冲突文件；
+- 验收命令和合并顺序还没有确定。
 
 可以并行的阶段：
 
-- TaskService 与 Vue debug UI 草案；
-- SidecarLifecycleService 与 Python health server 原型；
-- QA 回归脚本与文档完善。
+- 并行设计或草案；
+- 前后端 contract 已稳定后的 UI / Rust / Python 分工；
+- QA 回归与实现任务并行；
+- 文档校对与代码实现并行，但文档必须以最终代码事实为准。
 
 ## 4. 高冲突文件
 
@@ -133,23 +135,19 @@ SQLite migration 核心文件
 ## 5. 分支建议
 
 ```text
-codex/goal-00-docs
-codex/goal-01-db-model
-codex/goal-02-task-service
-codex/goal-03-event-bridge
-codex/goal-04-sidecar-lifecycle
-codex/goal-05-python-sidecar-stub
-codex/goal-06-first-creative-workflow
+codex/<domain>-<intent>
+codex/creative-batch-hardening
+codex/ai-provider-observability
+codex/python-sidecar-runtime
+codex/architecture-doc-cleanup
 ```
 
 ## 6. 合并顺序
 
 ```text
-Goal 00
-  -> Goal 01
-  -> Goal 02
-  -> Goal 03
-  -> Goal 04
-  -> Goal 05
-  -> Goal 06
+先合并底层 contract / migration
+再合并 Rust service / command
+再合并 frontend service / store
+再合并 UI
+最后合并 QA / 文档收口
 ```

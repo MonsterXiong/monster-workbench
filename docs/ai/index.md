@@ -1,175 +1,127 @@
 # AI 文档索引与治理元规范
 
-本文件是 `docs/ai/` 目录的索引入口，管理 AI 协作治理体系。
+本文件是 `docs/ai/` 的当前入口，只保留仍会影响后续协作的规则与边界。历史 Phase / Goal 执行包已经清理，后续不要新增平行路线图或一次性提示词包。
 
-> 原则：按需阅读，不要默认读取所有文档。根据任务类型选择性阅读。
+> 原则：按需阅读，不要默认读取所有文档；先看当前代码事实，再看约束文档。
 
 ---
 
-## 1. 文档体系全景图
+## 1. 首读顺序
 
+重要任务优先按这个顺序进入：
+
+```text
+AGENTS.md
+  -> docs/architecture-current-state.md（理解当前架构事实）
+  -> docs/architecture.md（分层与目录红线）
+  -> 当前任务对应的专题文档
 ```
-AGENTS.md                    ← 首读入口，全局红线（最高优先级）
-├── docs/                    ← 项目开发规范（管"代码怎么写"）
-│   ├── engineering-playbook.md ← 快速迭代工程手册
-│   ├── architecture.md      ← 架构与目录
-│   ├── frontend-style.md    ← 样式与视觉
-│   ├── i18n.md              ← 国际化
-│   ├── error-code.md        ← 错误码日志
-│   ├── rust-backend.md      ← Rust 后端
-│   ├── request-and-tauri.md ← 请求与 Tauri 兼容
-│   ├── global-components.md ← 全局组件注册
-│   ├── routing-and-async.md ← 路由与异步
-│   └── ui-patterns.md       ← UI 模式与数据一致性
-└── docs/ai/                 ← AI 协作治理（管"AI 怎么协作"）
-    ├── index.md             ← 本文件
-    ├── review-checklist.md  ← 代码审查与自检清单
-    ├── decisions.md         ← 架构决策记录 (ADR)
-    └── maintenance.md       ← 文档维护方法论
+
+涉及持续型 AI 创作系统、Goal、多 Agent、任务队列、资产、sidecar 或审查返工时，再读：
+
+```text
+docs/ai/codex-goal-mode.md
+docs/ai/creative-architecture-guardrails.md
+docs/ai/creative-regression-checklist.md
 ```
 
 ---
 
-## 2. 按任务类型的阅读路线图
+## 2. 当前有效文档
+
+### AI 协作治理
+
+| 文档 | 用途 |
+|------|------|
+| `codex-goal-mode.md` | 长目标拆分、验收、合并方式 |
+| `creative-architecture-guardrails.md` | 创作系统边界与禁止项 |
+| `multi-agent-operating-model.md` | 多 Agent 并行与串行合并规则 |
+| `creative-regression-checklist.md` | 创作系统改动后的回归清单 |
+| `review-checklist.md` | 常规代码审查与自检 |
+| `decisions.md` | 架构决策记录 |
+| `maintenance.md` | 文档新增、修改、删除规则 |
+
+### 创作系统专题边界
+
+| 文档 | 用途 |
+|------|------|
+| `task-state-machine.md` | `creative_tasks` 状态语义、流转、事件 |
+| `database-migration-policy.md` | SQLite schema / repo / migration 约束 |
+| `workflow-runtime-boundary.md` | Vue / Rust / Python / Provider 职责边界 |
+| `execution-budget-and-kill-switch.md` | 批量任务、预算、熔断、暂停取消 |
+| `model-provider-observability.md` | 模型调用审计、`model_runs` 与脱敏 |
+| `asset-versioning-and-provenance.md` | 资产版本、来源、关系 |
+| `python-sidecar-packaging-strategy.md` | Python sidecar 发布、预检、错误呈现 |
+| `security-threat-model.md` | 权限、端口、密钥、大对象与高风险操作 |
+
+---
+
+## 3. 按任务类型阅读
 
 ### 新增页面 / 模块
 
-```
-必读: AGENTS.md → engineering-playbook.md → architecture.md → frontend-style.md → i18n.md
+```text
+必读: AGENTS.md -> engineering-playbook.md -> architecture.md -> frontend-style.md -> i18n.md
 可选: global-components.md（新增公共组件时）
-完成后: review-checklist.md（自检）
+完成后: review-checklist.md
 ```
 
-### 修改 / 新增 Vue 组件
+### 修改 Vue 组件 / Store / Service
 
-```
-必读: AGENTS.md → architecture.md → frontend-style.md
-可选: i18n.md（涉及文案时）→ global-components.md（涉及全局组件时）
-完成后: review-checklist.md（自检）
-```
-
-### 前端 Service / Store 开发
-
-```
-必读: AGENTS.md → engineering-playbook.md → architecture.md → error-code.md
-可选: request-and-tauri.md（涉及 HTTP 或 Tauri API 时）
-完成后: review-checklist.md（自检）
+```text
+必读: AGENTS.md -> architecture.md -> frontend-style.md
+Store / Service: 追加阅读 engineering-playbook.md、error-code.md
+涉及 Tauri / HTTP: 追加阅读 request-and-tauri.md
+完成后: review-checklist.md
 ```
 
-### Rust 后端开发
+### Rust 后端 / DB / Tauri
 
-```
-必读: AGENTS.md → engineering-playbook.md → rust-backend.md → error-code.md
-完成后: review-checklist.md（自检）
-```
-
-### Bug 修复
-
-```
-必读: AGENTS.md → 直接定位问题代码
-按需: 根据 bug 所在层级读取对应文档
-完成后: review-checklist.md（自检）
-```
-
-### UI 样式调整
-
-```
-必读: AGENTS.md → engineering-playbook.md → frontend-style.md
-可选: i18n.md（涉及文案时）
-完成后: review-checklist.md（自检）
-```
-
-### 路由 / 异步 / 弹窗相关
-
-```
-必读: AGENTS.md → routing-and-async.md → ui-patterns.md
-完成后: review-checklist.md（自检）
-```
-
-### 发布 / CI / 脚本
-
-```
-必读: AGENTS.md → engineering-playbook.md → review-checklist.md
-按需: rust-backend.md（涉及 Rust 或 sidecar 时）→ maintenance.md（涉及规范更新时）
-完成后: release:test 或 release:test:full 视发布风险选择
-```
-
-### 理解架构决策
-
-```
-必读: decisions.md
-```
-
-### 新增 / 修改规范文档
-
-```
-必读: AGENTS.md → maintenance.md → 本文件
+```text
+必读: AGENTS.md -> engineering-playbook.md -> rust-backend.md -> error-code.md
+涉及 DB: 追加阅读 docs/ai/database-migration-policy.md
+涉及 creative task: 追加阅读 docs/ai/task-state-machine.md
 ```
 
 ### 持续型 AI 创作系统
 
+```text
+必读: AGENTS.md -> docs/architecture-current-state.md -> codex-goal-mode.md -> creative-architecture-guardrails.md
+按需: task-state-machine.md、workflow-runtime-boundary.md、execution-budget-and-kill-switch.md
+按需: model-provider-observability.md、asset-versioning-and-provenance.md、security-threat-model.md
+完成后: creative-regression-checklist.md
 ```
-必读: codex-goal-ops-manual.md → codex-goal-mode.md → creative-architecture-guardrails.md
-按需: creative-system-roadmap.md → creative-regression-checklist.md → multi-agent-operating-model.md → v2-addon-index.md
+
+### 多 Agent 并行
+
+```text
+必读: AGENTS.md -> codex-goal-mode.md -> multi-agent-operating-model.md
+必须: 串行合并、串行验收，不并行改高冲突文件
+```
+
+### 新增 / 修改 / 删除规范文档
+
+```text
+必读: AGENTS.md -> maintenance.md -> 本文件
+原则: 先查重；优先更新旧文档；过期文档直接删除
 ```
 
 ---
 
-## 3. 规则晋升机制
+## 4. 文档更新规则
 
-规则的沉淀路径（从临时到稳定）：
-
-```
-聊天中的临时约定
-  ↓ 经过 2-3 次真实任务验证
-docs/ai/*.md（AI 协作治理文档）
-  ↓ 如果是项目开发规范而非 AI 治理
-docs/*.md（项目开发规范）
-  ↓ 如果是全局红线级别
-AGENTS.md（最高优先级入口）
-```
-
-**晋升判断标准**：
-
-- 这条规则是否在 **多次任务** 中被反复触发？
-- 这条规则如果 AI 不遵守，是否会造成 **难以修复的问题**？
-- 这条规则是否 **所有类型的任务** 都需要遵守？
-
-只有三个问题都是"是"，才值得进入 `AGENTS.md`。
+1. 文档必须与当前代码事实一致；不确定时先读代码。
+2. 长期有效规则进入专题文档；全局红线才进入 `AGENTS.md`。
+3. 已完成阶段、历史提示词、一次性执行包不再保留在 `docs/`。
+4. 未闭环事项写入 `agent/open-loops.md` 或 `TODO.md`。
+5. 新增文档前先确认不能合并到已有文档。
 
 ---
 
-## 4. 文档更新流程
+## 5. 文档膨胀检查
 
-当需要新增或修改规则时：
-
-1. **先查重**：搜索 `AGENTS.md` 和 `docs/` 中是否已有类似规则。
-2. **选择位置**：按晋升机制决定规则应该放在哪个层级。
-3. **专题优先**：优先更新对应的专题文档，而非 `AGENTS.md`。
-4. **保持简短**：每条规则用一句话表达，示例放在正文中而非标题中。
-5. **避免噪声**：规则正文只保留当前有效结论；来源和讨论过程只在确有长期价值时写入 ADR。
-
----
-
-## 5. 文档膨胀检查清单
-
-定期（或在新增规则时）检查：
-
-- [ ] `AGENTS.md` 是否超过 200 行？如果超过，考虑将细节下沉到 `docs/`。
-- [ ] 是否有规则在 `AGENTS.md` 和 `docs/` 中重复出现？
-- [ ] 是否有规则可以通过代码（ESLint 规则、TypeScript 类型）强制执行而非文档约束？
-- [ ] 是否有过期或不再需要的规则？如果有，直接更新或删除。
-- [ ] 是否有过于细节化的规则（应该放在代码注释而非文档中）？
-- [ ] 文档描述是否与项目代码事实一致？
-
----
-
-## 6. 任务后复盘提示
-
-每次任务完成后，AI 应额外检查：
-
-1. 本次是否暴露出 AI 需要长期记住的规则？
-2. 如果有，应该写入哪个 `docs/ai/` 文件？
-3. 是否足够重要到进入 `AGENTS.md`？
-4. 是否有重复或可合并的旧规则？
-5. 默认只给建议，不自动修改文档；用户明确要求规范化、更新文档或沉淀规则时，可以直接修改对应文档。
+- `AGENTS.md` 是否只保留全局红线？
+- 是否存在重复路线图、重复清单、重复架构摘要？
+- 是否有文档仍引用已删除或已完成的历史阶段？
+- 是否有文档描述已经不符合当前代码？
+- 是否可以用脚本、类型或测试替代文档约束？

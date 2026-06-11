@@ -41,6 +41,6 @@
 
 ## 是否更新文档
 
-- [ ] docs/ai/creative-master-plan.md
+- [ ] docs/architecture-current-state.md
 - [ ] agent/open-loops.md
 - [ ] TODO.md

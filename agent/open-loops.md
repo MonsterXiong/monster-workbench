@@ -1,10 +1,10 @@
-﻿# Open Loops
+# Open Loops
 
 本文件只保留当前仍未闭环、且会影响后续推进的事项。已完成 Goal 的历史记录不再堆积在这里。
 
 ## 2026-06-11 架构硬化待跟进
 
-- [ ] 基于 `docs/architecture-current-state.md`、`docs/architecture-upgrade-baseline.md` 和 `docs/architecture-upgrade-roadmap.md`，确认 post-goal architecture hardening 的拆分顺序与验收边界。
+- [ ] 基于 `docs/architecture-current-state.md` 和实际代码，确认 post-goal architecture hardening 的拆分顺序与验收边界。
 - [ ] 继续收口 AI 域：评估 `src/stores/ai.ts` 剩余 facade / orchestration 是否继续下沉到独立 store、runtime 或 service。
 - [ ] 继续收口 Creative 前端：评估 `src/views/creative/components/CreativeWorkflowDemo.vue` 是否进一步收敛为 orchestration shell，并继续拆分正式工作台。
 - [ ] 评估 `/creative` 当前三栏壳层的真实定位：`CreativeAssetSidebar.vue` 与 `CreativeAgentMonitor.vue` 目前仍偏静态占位，需决定是接成正式项目/队列视图，还是回收到验证壳层。
@@ -26,7 +26,7 @@
 - [ ] 基于本轮 batch repo 化进展，继续评估 Rust `src-tauri/src/services/batch_job_service.rs` 的剩余 orchestration 边界，明确哪些 supervisor / worker / provider 流程继续留在 Rust，哪些应为后续 Python runtime 正式化预留出口。
 - [ ] 评估 `src-tauri/src/infra/creative_db_tests.rs` 与各 creative repo 的下一轮边界：当前 `CreativeDbInfra` 已移除，shared types 已迁出到 `creative_types.rs`，测试入口也已直接化；下一步需要决定是继续把测试按领域拆散，还是保留当前集中回归入口。
   - 2026-06-11：已完成 creative_task_repo、creative_asset_repo、creative_batch_repo 的 repo 级测试下沉；creative_db_tests.rs 当前仅保留 schema / migration 回归。
-- [ ] 如后续继续扩写架构材料，优先更新现有基线、路线图和执行清单，不再平行新增重复摘要文档。
+- [ ] 如后续继续扩写架构材料，优先更新 `docs/architecture-current-state.md` 和对应专题文档，不再新增平行路线图、阶段提示词或一次性执行包。
 
 ## 维护规则
 
