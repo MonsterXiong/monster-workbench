@@ -224,7 +224,7 @@ Python step boundary
   -> return status cancelled
 ```
 
-当前 `WorkerQueueService::check_cancel_checkpoint(task_id)` 已具备 Rust 侧查询能力。正式协议需要把它暴露给 Python sidecar，而不是让 Python 直接查询 SQLite。
+当前 `WorkerQueueService::check_cancel_checkpoint(task_id)` 已具备 Rust 侧查询能力；`generate_image_prompt`、`demo.image.prompt` 与 `demo.image.generate` 已通过 Rust 暴露的 localhost checkpoint 让 Python 在步骤边界查询取消状态，而不是让 Python 直接查询 SQLite。
 
 最低要求：
 
@@ -241,7 +241,7 @@ Python step boundary
 2. `demo.image.prompt` 的 provider 调用已从 Rust worker 迁到 Python workflow；Rust 仍负责 claim、running、结果落库和 batch progress event。
 3. `demo.image.generate` 的 provider 调用和图片处理已从 Rust worker 迁到 Python workflow；Rust 负责校验输出文件路径、创建 asset、复制 thumbnail、写 `model_runs`。
 4. 新增正式 batch 类型时不要继续使用 `demo.image.*` 命名；应使用业务语义，例如 `image.prompt.batch`、`image.generate.batch` 或后续领域命名。
-5. 下一步优先补 batch sidecar cancel checkpoint、预算/超时和 sidecar lifecycle 复用；只有在这些协议稳定后，再讨论 supervisor 是否从 Rust 迁到 Python worker pool。
+5. batch prompt / image sidecar workflow 已接入 cancel checkpoint；下一步优先补预算/超时协议和 sidecar lifecycle 复用。只有在这些协议稳定后，再讨论 supervisor 是否从 Rust 迁到 Python worker pool。
 
 ## 12. 不变量
 

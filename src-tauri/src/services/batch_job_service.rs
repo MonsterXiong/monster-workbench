@@ -11,6 +11,7 @@ use crate::infra::creative_types::{
 use crate::infra::path::PathProvider;
 use crate::infra::{AppError, AppResult};
 use crate::services::ai_service::AiProviderConfig;
+use crate::services::cancel_checkpoint_service::start_cancel_checkpoint_server;
 use crate::services::sidecar_lifecycle_service::{
     BatchImageGenerateSidecarRequest, BatchImagePromptSidecarRequest, SidecarLifecycleService,
     SidecarProviderConfig, SidecarWorkflowModelRun, SidecarWorkflowTaskResult,
@@ -893,13 +894,18 @@ fn run_prompt_task_worker<R: Runtime>(
     let prompt_request = build_prompt_request(&task)?;
     let provider_config = build_provider_config(&task, &prompt_request)?;
     let workflow_started = Instant::now();
-    let sidecar_result = submit_batch_prompt_sidecar_workflow(
-        app_handle,
-        &task,
-        batch_job_id,
-        &prompt_request,
-        &provider_config,
-    );
+    let sidecar_result =
+        start_cancel_checkpoint_server(db_path.to_path_buf(), task.id).and_then(|checkpoint| {
+            submit_batch_prompt_sidecar_workflow(
+                app_handle,
+                &task,
+                batch_job_id,
+                &prompt_request,
+                &provider_config,
+                Some(&checkpoint.url),
+                Some(&checkpoint.token),
+            )
+        });
     let duration_ms = workflow_started.elapsed().as_millis() as i64;
 
     match sidecar_result {
@@ -934,6 +940,8 @@ fn submit_batch_prompt_sidecar_workflow<R: Runtime>(
     batch_job_id: i64,
     prompt_request: &str,
     provider_config: &AiProviderConfig,
+    cancel_checkpoint_url: Option<&str>,
+    cancel_checkpoint_token: Option<&str>,
 ) -> AppResult<SidecarWorkflowTaskResult> {
     let mut sidecar_service = SidecarLifecycleService::new(app_handle.clone());
     let result = sidecar_service.submit_batch_image_prompt(BatchImagePromptSidecarRequest {
@@ -954,8 +962,8 @@ fn submit_batch_prompt_sidecar_workflow<R: Runtime>(
         },
         attempt: task.retry_count + 1,
         max_retries: task.max_retries,
-        cancel_checkpoint_url: None,
-        cancel_checkpoint_token: None,
+        cancel_checkpoint_url: cancel_checkpoint_url.map(ToString::to_string),
+        cancel_checkpoint_token: cancel_checkpoint_token.map(ToString::to_string),
     });
     let _ = sidecar_service.stop_dev_health_server();
     result
@@ -1489,15 +1497,20 @@ fn run_generate_task_worker<R: Runtime>(
         build_image_provider_config(&task, &prompt_request, batch.image_size.as_deref())?;
     let output_dir = resolve_batch_image_output_dir(app_handle)?;
     let workflow_started = Instant::now();
-    let sidecar_result = submit_batch_image_generate_sidecar_workflow(
-        app_handle,
-        &task,
-        batch_job_id,
-        &prompt_request,
-        &provider_config,
-        batch.image_size.as_deref().unwrap_or("1024x1024"),
-        &output_dir,
-    );
+    let sidecar_result =
+        start_cancel_checkpoint_server(db_path.to_path_buf(), task.id).and_then(|checkpoint| {
+            submit_batch_image_generate_sidecar_workflow(
+                app_handle,
+                &task,
+                batch_job_id,
+                &prompt_request,
+                &provider_config,
+                batch.image_size.as_deref().unwrap_or("1024x1024"),
+                &output_dir,
+                Some(&checkpoint.url),
+                Some(&checkpoint.token),
+            )
+        });
     let duration_ms = workflow_started.elapsed().as_millis() as i64;
 
     match sidecar_result {
@@ -1535,6 +1548,8 @@ fn submit_batch_image_generate_sidecar_workflow<R: Runtime>(
     provider_config: &AiProviderConfig,
     image_size: &str,
     output_dir: &std::path::Path,
+    cancel_checkpoint_url: Option<&str>,
+    cancel_checkpoint_token: Option<&str>,
 ) -> AppResult<SidecarWorkflowTaskResult> {
     let mut sidecar_service = SidecarLifecycleService::new(app_handle.clone());
     let result = sidecar_service.submit_batch_image_generate(BatchImageGenerateSidecarRequest {
@@ -1557,8 +1572,8 @@ fn submit_batch_image_generate_sidecar_workflow<R: Runtime>(
         },
         attempt: task.retry_count + 1,
         max_retries: task.max_retries,
-        cancel_checkpoint_url: None,
-        cancel_checkpoint_token: None,
+        cancel_checkpoint_url: cancel_checkpoint_url.map(ToString::to_string),
+        cancel_checkpoint_token: cancel_checkpoint_token.map(ToString::to_string),
     });
     let _ = sidecar_service.stop_dev_health_server();
     result
@@ -2347,7 +2362,7 @@ mod tests {
         }
     }
 
-    fn start_prompt_provider_server(prompt_text: &'static str) -> (String, JoinHandle<()>) {
+    fn bind_provider_listener() -> (String, TcpListener) {
         let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
         listener
             .set_nonblocking(true)
@@ -2356,6 +2371,11 @@ mod tests {
             "http://127.0.0.1:{}",
             listener.local_addr().expect("addr should exist").port()
         );
+        (base_url, listener)
+    }
+
+    fn start_prompt_provider_server(prompt_text: &'static str) -> (String, JoinHandle<()>) {
+        let (base_url, listener) = bind_provider_listener();
         let handle = std::thread::spawn(move || {
             let deadline = std::time::Instant::now() + Duration::from_secs(10);
             let mut handled = 0;
@@ -2390,15 +2410,49 @@ mod tests {
         (base_url, handle)
     }
 
+    fn start_cancelling_prompt_provider_server(
+        listener: TcpListener,
+        prompt_text: &'static str,
+        request_started: std::sync::mpsc::Sender<()>,
+        release_response: std::sync::mpsc::Receiver<()>,
+    ) -> JoinHandle<()> {
+        std::thread::spawn(move || {
+            let deadline = std::time::Instant::now() + Duration::from_secs(10);
+            let mut handled = 0;
+            while handled < 1 && std::time::Instant::now() < deadline {
+                match listener.accept() {
+                    Ok((mut stream, _)) => {
+                        let request = read_http_request(&mut stream);
+                        let body = if request.starts_with("POST /chat/completions ") {
+                            let _ = request_started.send(());
+                            let _ = release_response.recv_timeout(Duration::from_secs(5));
+                            serde_json::json!({
+                                "choices": [
+                                    {
+                                        "message": {
+                                            "content": prompt_text
+                                        }
+                                    }
+                                ]
+                            })
+                            .to_string()
+                        } else {
+                            "{\"error\":\"unexpected route\"}".to_string()
+                        };
+                        write_json_response(&mut stream, 200, &body);
+                        handled += 1;
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                    Err(error) => panic!("cancelling prompt test server accept failed: {error}"),
+                }
+            }
+        })
+    }
+
     fn start_image_provider_server(model: &'static str) -> (String, JoinHandle<()>) {
-        let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
-        listener
-            .set_nonblocking(true)
-            .expect("listener should allow non-blocking");
-        let base_url = format!(
-            "http://127.0.0.1:{}",
-            listener.local_addr().expect("addr should exist").port()
-        );
+        let (base_url, listener) = bind_provider_listener();
         let handle = std::thread::spawn(move || {
             let deadline = std::time::Instant::now() + Duration::from_secs(10);
             let mut handled = 0;
@@ -2440,15 +2494,46 @@ mod tests {
         (base_url, handle)
     }
 
+    fn start_cancelling_image_provider_server(
+        listener: TcpListener,
+        request_started: std::sync::mpsc::Sender<()>,
+        release_response: std::sync::mpsc::Receiver<()>,
+    ) -> JoinHandle<()> {
+        std::thread::spawn(move || {
+            let deadline = std::time::Instant::now() + Duration::from_secs(10);
+            let mut handled = 0;
+            while handled < 1 && std::time::Instant::now() < deadline {
+                match listener.accept() {
+                    Ok((mut stream, _)) => {
+                        let request = read_http_request(&mut stream);
+                        let body = if request.starts_with("POST /images/generations ") {
+                            let _ = request_started.send(());
+                            let _ = release_response.recv_timeout(Duration::from_secs(5));
+                            serde_json::json!({
+                                "data": [
+                                    {
+                                        "b64_json": TINY_PNG_BASE64
+                                    }
+                                ]
+                            })
+                            .to_string()
+                        } else {
+                            "{\"error\":\"unexpected route\"}".to_string()
+                        };
+                        write_json_response(&mut stream, 200, &body);
+                        handled += 1;
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                    Err(error) => panic!("cancelling image test server accept failed: {error}"),
+                }
+            }
+        })
+    }
+
     fn start_failing_image_provider_server(model: &'static str) -> (String, JoinHandle<()>) {
-        let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
-        listener
-            .set_nonblocking(true)
-            .expect("listener should allow non-blocking");
-        let base_url = format!(
-            "http://127.0.0.1:{}",
-            listener.local_addr().expect("addr should exist").port()
-        );
+        let (base_url, listener) = bind_provider_listener();
         let handle = std::thread::spawn(move || {
             let deadline = std::time::Instant::now() + Duration::from_secs(10);
             let mut handled = 0;
@@ -2765,7 +2850,14 @@ mod tests {
         let persisted_task = creative_task_repo::get_task(&db_path, task.id)
             .expect("task lookup should succeed")
             .expect("task should exist");
-        assert_eq!(persisted_task.status, "succeeded");
+        assert_eq!(
+            persisted_task.status,
+            "succeeded",
+            "task error={:?}, result={:?}, events={:?}",
+            persisted_task.error_message,
+            persisted_task.result_json,
+            creative_task_repo::list_task_events(&db_path, task.id).expect("events should list")
+        );
         let asset_id = persisted_task
             .asset_id
             .expect("task should reference an asset");
@@ -2808,6 +2900,161 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn prompt_batch_worker_observes_sidecar_cancel_checkpoint_after_provider_call() {
+        if !python_available() {
+            eprintln!("python runtime is unavailable; skipping prompt checkpoint test");
+            return;
+        }
+
+        let app = tauri::test::mock_app();
+        let root = temp_root("prompt-cancel-checkpoint");
+        let db_path = root.join("monster_workbench.db");
+        let path_provider = PathProvider::new_for_test(root.clone(), db_path.clone());
+        let service = BatchJobService::new(app.handle().clone(), path_provider.clone());
+        init_schema(&db_path).expect("schema should init");
+
+        let (base_url, listener) = bind_provider_listener();
+        let snapshot = service
+            .create_batch_image_job(CreateBatchImageJobInput {
+                project_id: Some("project-batch-prompt-cancel".to_string()),
+                name: "Prompt Batch Cancel".to_string(),
+                batch_type: Some("demo.image.prompt".to_string()),
+                total_count: Some(1),
+                concurrency: Some(1),
+                max_retries: Some(0),
+                prompt_template: Some("Prompt {{sequenceNo}}".to_string()),
+                provider_id: Some("local-test".to_string()),
+                model: Some("gpt-4.1-mini".to_string()),
+                image_size: Some("1024x1024".to_string()),
+                budget_json: None,
+                provider_config: Some(provider_config(base_url, "gpt-4.1-mini")),
+            })
+            .expect("batch job should create");
+
+        creative_batch_repo::update_batch_job(
+            &db_path,
+            UpdateCreativeBatchJobInput {
+                id: snapshot.job.id,
+                status: Some("running".to_string()),
+                concurrency: None,
+                max_retries: None,
+                prompt_template: None,
+                provider_id: None,
+                model: None,
+                image_size: None,
+                budget_json: None,
+                started_at: None,
+                finished_at: None,
+            },
+        )
+        .expect("batch should transition to running");
+
+        let task = service
+            .list_batch_job_tasks(snapshot.job.id, Some(10), Some(0))
+            .expect("task list should load")
+            .into_iter()
+            .next()
+            .expect("task should exist");
+        let running_task = creative_task_repo::update_task_status(
+            &db_path,
+            UpdateCreativeTaskStatusInput {
+                id: task.id,
+                status: "running".to_string(),
+                result_json: None,
+                error_message: None,
+                asset_id: None,
+                retry_count_increment: None,
+            },
+        )
+        .expect("task should move to running");
+
+        let (request_tx, request_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let server = start_cancelling_prompt_provider_server(
+            listener,
+            "This prompt should not become an asset.",
+            request_tx,
+            release_rx,
+        );
+        let worker_app = app.handle().clone();
+        let worker_db_path = db_path.clone();
+        let worker_batch_job_id = snapshot.job.id;
+        let worker = std::thread::spawn(move || {
+            run_prompt_task_worker(
+                &worker_app,
+                &worker_db_path,
+                worker_batch_job_id,
+                running_task,
+            )
+            .expect("prompt worker should settle cancellation");
+        });
+        request_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("provider request should start");
+        creative_task_repo::update_task_status(
+            &db_path,
+            UpdateCreativeTaskStatusInput {
+                id: task.id,
+                status: "cancelling".to_string(),
+                result_json: None,
+                error_message: Some("test checkpoint cancel".to_string()),
+                asset_id: None,
+                retry_count_increment: None,
+            },
+        )
+        .expect("task should be marked cancelling");
+        release_tx
+            .send(())
+            .expect("provider response should be released");
+        worker.join().expect("prompt worker thread should join");
+        server
+            .join()
+            .expect("cancelling prompt test server should join");
+
+        let persisted_task = creative_task_repo::get_task(&db_path, task.id)
+            .expect("task lookup should succeed")
+            .expect("task should exist");
+        let assets = creative_asset_repo::list_assets(
+            &db_path,
+            ListCreativeAssetsFilter {
+                asset_type: Some("demo_image_prompt".to_string()),
+                ..Default::default()
+            },
+        )
+        .expect("asset list should succeed");
+        let model_runs = creative_model_run_repo::list_model_runs(
+            &db_path,
+            ListModelRunsFilter {
+                task_id: Some(task.id),
+                ..Default::default()
+            },
+        )
+        .expect("model runs should list");
+        let events =
+            creative_task_repo::list_task_events(&db_path, task.id).expect("events should list");
+
+        let _ = std::fs::remove_dir_all(root);
+
+        assert_eq!(
+            persisted_task.status, "cancelled",
+            "task should be cancelled, error={:?}, result={:?}, events={:?}, modelRuns={:?}",
+            persisted_task.error_message, persisted_task.result_json, events, model_runs
+        );
+        assert!(
+            assets.is_empty(),
+            "cancelled prompt should not create an asset"
+        );
+        assert_eq!(model_runs.len(), 1);
+        assert_eq!(model_runs[0].status, "cancelled");
+        assert!(
+            events
+                .iter()
+                .any(|event| event.event_type == "prompt_cancelled"),
+            "prompt worker should persist prompt_cancelled event"
+        );
     }
 
     #[test]
@@ -2888,7 +3135,14 @@ mod tests {
         let persisted_task = creative_task_repo::get_task(&db_path, task.id)
             .expect("task lookup should succeed")
             .expect("task should exist");
-        assert_eq!(persisted_task.status, "succeeded");
+        assert_eq!(
+            persisted_task.status,
+            "succeeded",
+            "task error={:?}, result={:?}, events={:?}",
+            persisted_task.error_message,
+            persisted_task.result_json,
+            creative_task_repo::list_task_events(&db_path, task.id).expect("events should list")
+        );
         let asset_id = persisted_task
             .asset_id
             .expect("task should reference an asset");
@@ -2938,5 +3192,158 @@ mod tests {
         cleanup_asset_files(&assets[0]);
         std::env::remove_var("MONSTER_TOOLS_TEST_OUTPUT_DIR");
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn generate_batch_worker_observes_sidecar_cancel_checkpoint_after_provider_call() {
+        if !python_available() {
+            eprintln!("python runtime is unavailable; skipping image checkpoint test");
+            return;
+        }
+
+        let app = tauri::test::mock_app();
+        let root = temp_root("generate-cancel-checkpoint");
+        let db_path = root.join("monster_workbench.db");
+        let generated_root = root.join("generated");
+        let path_provider = PathProvider::new_for_test(root.clone(), db_path.clone());
+        let service = BatchJobService::new(app.handle().clone(), path_provider.clone());
+        init_schema(&db_path).expect("schema should init");
+        std::env::set_var("MONSTER_TOOLS_TEST_OUTPUT_DIR", &generated_root);
+
+        let (base_url, listener) = bind_provider_listener();
+        let snapshot = service
+            .create_batch_image_job(CreateBatchImageJobInput {
+                project_id: Some("project-batch-image-cancel".to_string()),
+                name: "Image Batch Cancel".to_string(),
+                batch_type: Some("demo.image.generate".to_string()),
+                total_count: Some(1),
+                concurrency: Some(1),
+                max_retries: Some(0),
+                prompt_template: Some("Render batch image {{sequenceNo}}".to_string()),
+                provider_id: Some("local-test".to_string()),
+                model: Some("gpt-image-1".to_string()),
+                image_size: Some("1024x1024".to_string()),
+                budget_json: None,
+                provider_config: Some(provider_config(base_url, "gpt-image-1")),
+            })
+            .expect("batch job should create");
+
+        creative_batch_repo::update_batch_job(
+            &db_path,
+            UpdateCreativeBatchJobInput {
+                id: snapshot.job.id,
+                status: Some("running".to_string()),
+                concurrency: None,
+                max_retries: None,
+                prompt_template: None,
+                provider_id: None,
+                model: None,
+                image_size: None,
+                budget_json: None,
+                started_at: None,
+                finished_at: None,
+            },
+        )
+        .expect("batch should transition to running");
+
+        let task = service
+            .list_batch_job_tasks(snapshot.job.id, Some(10), Some(0))
+            .expect("task list should load")
+            .into_iter()
+            .next()
+            .expect("task should exist");
+        let running_task = creative_task_repo::update_task_status(
+            &db_path,
+            UpdateCreativeTaskStatusInput {
+                id: task.id,
+                status: "running".to_string(),
+                result_json: None,
+                error_message: None,
+                asset_id: None,
+                retry_count_increment: None,
+            },
+        )
+        .expect("task should move to running");
+
+        let (request_tx, request_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let server = start_cancelling_image_provider_server(listener, request_tx, release_rx);
+        let worker_app = app.handle().clone();
+        let worker_db_path = db_path.clone();
+        let worker_batch_job_id = snapshot.job.id;
+        let worker = std::thread::spawn(move || {
+            run_generate_task_worker(
+                &worker_app,
+                &worker_db_path,
+                worker_batch_job_id,
+                running_task,
+            )
+            .expect("image worker should settle cancellation");
+        });
+        request_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("provider request should start");
+        creative_task_repo::update_task_status(
+            &db_path,
+            UpdateCreativeTaskStatusInput {
+                id: task.id,
+                status: "cancelling".to_string(),
+                result_json: None,
+                error_message: Some("test checkpoint cancel".to_string()),
+                asset_id: None,
+                retry_count_increment: None,
+            },
+        )
+        .expect("task should be marked cancelling");
+        release_tx
+            .send(())
+            .expect("provider response should be released");
+        worker.join().expect("image worker thread should join");
+        server
+            .join()
+            .expect("cancelling image test server should join");
+
+        let persisted_task = creative_task_repo::get_task(&db_path, task.id)
+            .expect("task lookup should succeed")
+            .expect("task should exist");
+        let assets = creative_asset_repo::list_assets(
+            &db_path,
+            ListCreativeAssetsFilter {
+                asset_type: Some("demo_image".to_string()),
+                ..Default::default()
+            },
+        )
+        .expect("asset list should succeed");
+        let model_runs = creative_model_run_repo::list_model_runs(
+            &db_path,
+            ListModelRunsFilter {
+                task_id: Some(task.id),
+                ..Default::default()
+            },
+        )
+        .expect("model runs should list");
+        let events =
+            creative_task_repo::list_task_events(&db_path, task.id).expect("events should list");
+
+        std::env::remove_var("MONSTER_TOOLS_TEST_OUTPUT_DIR");
+        let _ = std::fs::remove_dir_all(root);
+
+        assert_eq!(
+            persisted_task.status, "cancelled",
+            "task should be cancelled, error={:?}, result={:?}, events={:?}, modelRuns={:?}",
+            persisted_task.error_message, persisted_task.result_json, events, model_runs
+        );
+        assert!(
+            assets.is_empty(),
+            "cancelled image should not create an asset"
+        );
+        assert_eq!(model_runs.len(), 1);
+        assert_eq!(model_runs[0].status, "cancelled");
+        assert!(
+            events
+                .iter()
+                .any(|event| event.event_type == "image_cancelled"),
+            "image worker should persist image_cancelled event"
+        );
     }
 }

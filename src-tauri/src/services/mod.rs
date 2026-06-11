@@ -2,6 +2,7 @@ pub mod ai_service;
 pub mod app_service;
 pub mod auth_service;
 pub mod batch_job_service;
+pub mod cancel_checkpoint_service;
 pub mod config_service;
 pub mod creative_project_service;
 pub mod database_service;

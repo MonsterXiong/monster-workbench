@@ -1495,7 +1495,7 @@ Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `
   - `python -m py_compile src-tauri\\sidecars\\python\\creative_health_server.py`
   - `cargo test --manifest-path .\\src-tauri\\Cargo.toml generate_image_prompt_workflow_persists_task_asset_and_events -- --nocapture`
   - `cargo check --manifest-path .\\src-tauri\\Cargo.toml`
-- 下一步应继续补：
+- 该阶段下一步应继续补：
   1. Python sidecar cancel checkpoint API。
   2. 将 batch prompt worker 的 provider 调用改成 sidecar workflow，而不是继续扩展 Rust worker 分支。
 
@@ -1513,7 +1513,7 @@ Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `
   - `cargo test --manifest-path .\\src-tauri\\Cargo.toml generate_image_prompt_workflow_maps_sidecar_failure_result -- --nocapture`
   - `cargo test --manifest-path .\\src-tauri\\Cargo.toml sidecar_failure_status_respects_retry_budget -- --nocapture`
   - `cargo check --manifest-path .\\src-tauri\\Cargo.toml`
-- 下一步剩余重点：
+- 该阶段下一步剩余重点：
   1. Python sidecar cancel checkpoint API。
   2. 将 batch prompt worker 的 provider 调用迁到 sidecar workflow。
 
@@ -1548,13 +1548,32 @@ Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `
 - `src-tauri/src/services/sidecar_lifecycle_service.rs` 新增 `submit_batch_image_generate`，按 `protocolVersion / taskId / workflowType / provider / input / context` 把 batch image task 提交给 Python sidecar，并把 Rust 授权的 `outputDir` 明确传入执行面。
 - `src-tauri/sidecars/python/creative_health_server.py` 新增 `demo.image.generate` workflow：Python 侧调用 OpenAI-compatible `/images/generations`，保存 `b64_json` 或安全图片 URL 到授权输出目录，再返回标准 `outputs / modelRuns / events / retry` workflow result。
 - Rust 收到 sidecar result 后会校验 `protocolVersion`、`taskId`、`assetType` 和输出文件 canonical path，确认图片文件仍位于授权输出目录内，再复制 thumbnail、创建 `demo_image` asset 并写入 `model_runs`。
-- 这一步完成了 batch prompt / image 两条 provider 执行链路从 Rust worker 到 Python sidecar workflow 的迁移；`BatchJobService` 当前更清晰地保留为 Rust 控制面和可信落库面，但仍偏宽，后续应优先硬化 sidecar lifecycle、batch cancel checkpoint、预算/超时协议和正式 workflow 命名。
+- 这一步完成了 batch prompt / image 两条 provider 执行链路从 Rust worker 到 Python sidecar workflow 的迁移；`BatchJobService` 当前更清晰地保留为 Rust 控制面和可信落库面，但仍偏宽，当时后续重点是硬化 sidecar lifecycle、batch cancel checkpoint、预算/超时协议和正式 workflow 命名。
 - 本轮验证通过：
   - `python -m py_compile src-tauri\\sidecars\\python\\creative_health_server.py`
   - `cargo test --manifest-path .\\src-tauri\\Cargo.toml generate_batch_worker_persists_image_asset_files_and_model_run -- --nocapture --test-threads=1`
   - `cargo test --manifest-path .\\src-tauri\\Cargo.toml prompt_batch_worker_persists_prompt_asset_and_model_run -- --nocapture --test-threads=1`
   - `cargo check --manifest-path .\\src-tauri\\Cargo.toml`
-- 下一步剩余重点：
+- 该阶段下一步剩余重点：
   1. 给 batch prompt / image sidecar workflow 接入真实 cancel checkpoint，而不是只在 Rust worker 提交前后判断取消。
   2. 将当前 per-task dev sidecar 启停策略升级为更清晰的 sidecar lifecycle 复用与超时/熔断策略。
+  3. 设计正式 batch task type 命名，避免把 `demo.image.*` 继续扩展成生产业务分类。
+
+## 2026-06-11 补充：batch sidecar cancel checkpoint 接入
+
+- 已新增 `src-tauri/src/services/cancel_checkpoint_service.rs`，把原先只在 `TaskService` 内部使用的 localhost cancel checkpoint 抽成共享 Rust 控制面能力。
+- `TaskService::run_generate_image_prompt_workflow` 继续使用同一 checkpoint 协议；`BatchJobService` 的 `demo.image.prompt` 与 `demo.image.generate` sidecar request 现在也会携带 `cancelCheckpoint.url/token`。
+- Python sidecar 已在 batch prompt / image workflow 的 provider 调用前后检查 checkpoint：若 Rust 侧 task 已进入 `cancelling/cancelled`，Python 返回标准 `cancelled` workflow result；Rust 再按既有可信路径写入 task status、task_events 和 model_runs，不创建最终 asset。
+- 这一步把 batch 取消从“Rust worker 提交前后兜底判断”推进为“Python 执行面步骤边界可见的受控取消”，仍保持 Python 不直接读 SQLite、不知道 Tauri IPC、不拥有文件/DB 权限。
+- 本轮验证通过：
+  - `cargo test --manifest-path .\\src-tauri\\Cargo.toml prompt_batch_worker_observes_sidecar_cancel_checkpoint_after_provider_call -- --nocapture --test-threads=1`
+  - `cargo test --manifest-path .\\src-tauri\\Cargo.toml generate_batch_worker_observes_sidecar_cancel_checkpoint_after_provider_call -- --nocapture --test-threads=1`
+  - `cargo test --manifest-path .\\src-tauri\\Cargo.toml cancel_checkpoint_server_reads_task_cancel_status -- --nocapture --test-threads=1`
+  - `cargo test --manifest-path .\\src-tauri\\Cargo.toml prompt_batch_worker_persists_prompt_asset_and_model_run -- --nocapture --test-threads=1`
+  - `cargo test --manifest-path .\\src-tauri\\Cargo.toml generate_batch_worker_persists_image_asset_files_and_model_run -- --nocapture --test-threads=1`
+  - `cargo check --manifest-path .\\src-tauri\\Cargo.toml`
+  - `npm run check:architecture`
+- 下一步剩余重点：
+  1. 将当前 per-task dev sidecar 启停策略升级为更清晰的 sidecar lifecycle 复用与超时/熔断策略。
+  2. 把 `budget` 从 `Value::Null` 推进为明确的 workflow 预算/超时协议。
   3. 设计正式 batch task type 命名，避免把 `demo.image.*` 继续扩展成生产业务分类。

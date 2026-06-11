@@ -661,7 +661,7 @@ def is_cancel_requested(payload):
     try:
         with urllib.request.urlopen(request, timeout=1.0) as response:
             body = response.read().decode("utf-8")
-    except (urllib.error.URLError, TimeoutError, ValueError):
+    except Exception:
         return False
     try:
         result = json.loads(body or "{}")
