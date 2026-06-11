@@ -169,6 +169,12 @@ pub struct SidecarLifecycleService<R: Runtime = Wry> {
     snapshot: SidecarStatusSnapshot,
 }
 
+impl<R: Runtime> Drop for SidecarLifecycleService<R> {
+    fn drop(&mut self) {
+        let _ = self.stop_dev_health_server();
+    }
+}
+
 impl<R: Runtime> SidecarLifecycleService<R> {
     pub fn new(app_handle: AppHandle<R>) -> Self {
         Self {
@@ -189,6 +195,12 @@ impl<R: Runtime> SidecarLifecycleService<R> {
     pub fn get_status(&mut self) -> SidecarStatusSnapshot {
         self.refresh_exit_status();
         self.snapshot.clone()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_test_status(&mut self, status: &str, pid: Option<u32>) {
+        self.snapshot.status = status.to_string();
+        self.snapshot.pid = pid;
     }
 
     pub fn start_dev_health_server(&mut self) -> AppResult<SidecarStatusSnapshot> {

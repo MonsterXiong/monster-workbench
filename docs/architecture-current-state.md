@@ -1491,7 +1491,7 @@ Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `
 | `BatchJobService` supervisor | Rust 用 `active_supervisors`、`std::thread::spawn`、concurrency slot、queued claim 驱动 batch | 短期仍适合留在 Rust；它承担桌面控制面、暂停/恢复/取消和可信状态转移 | 在 sidecar lifecycle、恢复、熔断协议稳定前，不迁给 Python worker pool |
 | `BatchJobService` prompt/image worker shell | prompt/image 已提交 Python sidecar；Rust 仍构造 request、校验 protocol/taskId/status、落库 asset/model_runs/events | 方向正确，但仍是偏宽 orchestrator；新增生产 worker 不应继续在这里分支扩展 | 后续新增正式 workflow 走 sidecar runtime；Rust 只保留 claim、submit、settle、audit |
 | `BatchJobService` prompt 模板替换 | `build_prompt_request` 在 Rust 内处理 `{{sequenceNo}}` / `{{index}}` | 这是 demo-era prompt 构建残留，生产场景不应扩大 | 正式 batch prompt builder 放到 Python；Rust 只传 template/input/context |
-| `BatchJobService` sidecar lifecycle | 每个 batch worker 内部 `SidecarLifecycleService::new(...)`，提交后 `stop_dev_health_server()` | 不属于业务越界，但说明 runtime 生命周期仍是 per-task dev 策略 | 下一步优先改为受控复用/熔断/健康检查策略，再讨论 supervisor 迁移 |
+| `BatchJobService` sidecar lifecycle | batch prompt/image worker 已优先使用 app-managed `SidecarLifecycleService`；没有注入 state 的测试/孤立调用才回退临时 sidecar | 已从 per-task dev sidecar 启停推进到首段生命周期复用，但仍缺少健康熔断与并发提交策略 | 下一步补熔断、恢复、事件节流和正式 workflow 命名，再讨论 supervisor 迁移 |
 | `demo.image.*` task type | `demo.image.mock/prompt/generate` 仍是唯一 batch 类型白名单 | 可保留为过渡验证命名，不能扩展成正式业务分类 | 新增正式类型前先定义 `workflowType` / `taskType` 命名规范 |
 
 本轮二次结论：
@@ -1616,5 +1616,22 @@ Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `
   - `cargo check --manifest-path .\\src-tauri\\Cargo.toml`
   - `npm run check:architecture`
 - 下一步剩余重点：
-  1. 将当前 per-task dev sidecar 启停策略升级为更清晰的 sidecar lifecycle 复用与超时/熔断策略。
+  1. 将首段 sidecar lifecycle 复用继续升级为健康熔断、恢复和并发提交策略。
   2. 设计正式 batch task type 命名，避免把 `demo.image.*` 继续扩展成生产业务分类。
+
+## 2026-06-11 补充：batch sidecar lifecycle 首段复用
+
+- `src-tauri/src/services/batch_job_service.rs` 新增 `submit_with_batch_sidecar`，batch prompt/image worker 提交 Python workflow 时会优先获取 Tauri app state 中的共享 `SidecarLifecycleService`。
+- 生产路径不再在每个 batch prompt/image task 内部 `SidecarLifecycleService::new(...)` 后立即 `stop_dev_health_server()`；未注入共享 state 的测试或孤立调用仍会使用临时 sidecar，并通过 lifecycle `Drop` 兜底清理子进程。
+- `src-tauri/src/services/sidecar_lifecycle_service.rs` 已为 `SidecarLifecycleService` 增加 Drop 清理，降低异常路径或测试路径遗留 Python sidecar 进程的风险。
+- 这一步只解决“每个 batch task 重启 sidecar”的生命周期问题，不改变 Rust supervisor 归属，也不把新的生产 workflow 分支写进 Rust worker。
+- 本轮验证通过：
+  - `cargo test --manifest-path .\\src-tauri\\Cargo.toml submit_with_batch_sidecar_uses_managed_lifecycle_when_present -- --nocapture --test-threads=1`
+  - `cargo test --manifest-path .\\src-tauri\\Cargo.toml prompt_batch_worker_persists_prompt_asset_and_model_run -- --nocapture --test-threads=1`
+  - `cargo test --manifest-path .\\src-tauri\\Cargo.toml generate_batch_worker_persists_image_asset_files_and_model_run -- --nocapture --test-threads=1`
+  - `cargo test --manifest-path .\\src-tauri\\Cargo.toml prompt_batch_worker_observes_sidecar_cancel_checkpoint_after_provider_call -- --nocapture --test-threads=1`
+  - `cargo test --manifest-path .\\src-tauri\\Cargo.toml generate_batch_worker_observes_sidecar_cancel_checkpoint_after_provider_call -- --nocapture --test-threads=1`
+  - `cargo check --manifest-path .\\src-tauri\\Cargo.toml`
+- 下一步剩余重点：
+  1. 为共享 sidecar 补健康熔断、异常重启和事件节流策略。
+  2. 设计正式 `taskType` / `workflowType` 命名，避免继续扩展 `demo.image.*`。
