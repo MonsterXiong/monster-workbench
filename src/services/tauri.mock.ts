@@ -72,12 +72,32 @@ const mockNavigations = [
 
 let navigationsStore = [...mockNavigations];
 const APP_CONFIG_STORE_KEY = "monsterWorkbench.mock.preferenceConfig";
+const BATCH_TYPE_MOCK_DEMO = "demo.image.mock";
+const BATCH_TYPE_PROMPT_DEMO = "demo.image.prompt";
+const BATCH_TYPE_GENERATE_DEMO = "demo.image.generate";
+const BATCH_TYPE_PROMPT_FORMAL = "image.prompt.batch";
+const BATCH_TYPE_GENERATE_FORMAL = "image.generate.batch";
 const defaultAppConfigStore = {
   theme: "light",
   language: "zh-CN",
   logLevel: "info",
   autoUpdate: true
 };
+
+function isMockPromptBatchType(batchType?: string | null) {
+  return batchType === BATCH_TYPE_PROMPT_DEMO || batchType === BATCH_TYPE_PROMPT_FORMAL;
+}
+
+function isMockGenerateBatchType(batchType?: string | null) {
+  return batchType === BATCH_TYPE_GENERATE_DEMO || batchType === BATCH_TYPE_GENERATE_FORMAL;
+}
+
+function mockBatchTypeMatchesFilter(batchType: string, filterType: string) {
+  if (batchType === filterType) return true;
+  if (isMockPromptBatchType(batchType) && isMockPromptBatchType(filterType)) return true;
+  if (isMockGenerateBatchType(batchType) && isMockGenerateBatchType(filterType)) return true;
+  return false;
+}
 let appConfigStore = loadMockPreferenceConfig();
 
 function readMockStorageItem(key: string) {
@@ -220,7 +240,7 @@ function createMockBatchJobRecord(input: Record<string, unknown>) {
     id: mockBatchJobId,
     projectId: (input.projectId as string | null | undefined) ?? null,
     name: String(input.name || "Batch Job"),
-    batchType: String(input.batchType || "demo.image.mock"),
+    batchType: String(input.batchType || BATCH_TYPE_MOCK_DEMO),
     status: String(input.status || "draft"),
     totalCount: Math.max(0, Number(input.totalCount || 0)),
     concurrency: Math.max(1, Number(input.concurrency || 1)),
@@ -449,15 +469,17 @@ function runMockBatchSupervisor(batchJobId: number) {
           emitMockTaskStatus(
             current,
             "creative-task-event",
-            currentJob.batchType === "demo.image.prompt"
+            isMockPromptBatchType(currentJob.batchType)
               ? "prompt worker observed cancellation"
+              : isMockGenerateBatchType(currentJob.batchType)
+                ? "image worker observed cancellation"
               : "mock worker observed cancellation"
           );
           return;
         }
-        if (currentJob.batchType === "demo.image.prompt") {
+        if (isMockPromptBatchType(currentJob.batchType)) {
           completeMockPromptBatchTask(current, currentJob, taskDuration);
-        } else if (currentJob.batchType === "demo.image.generate") {
+        } else if (isMockGenerateBatchType(currentJob.batchType)) {
           completeMockGenerateBatchTask(current, currentJob, taskDuration);
         } else {
           completeMockBatchTask(current, currentJob, taskDuration);
@@ -729,10 +751,10 @@ function completeMockGenerateBatchTask(task: any, batchJob: any, durationMs: num
 }
 
 function getMockBatchWorkerStartedLabels(batchType: string): [string, string] {
-  if (batchType === "demo.image.prompt") {
+  if (isMockPromptBatchType(batchType)) {
     return ["prompt_started", "prompt worker started"];
   }
-  if (batchType === "demo.image.generate") {
+  if (isMockGenerateBatchType(batchType)) {
     return ["image_started", "image worker started"];
   }
   return ["mock_started", "mock worker started"];
@@ -1368,7 +1390,7 @@ export async function mockCallTauri<T = unknown>(
       const input = (args.input || {}) as Record<string, unknown>;
       const batchJob = createMockBatchJobRecord({
         ...input,
-        batchType: input.batchType || "demo.image.mock",
+        batchType: input.batchType || BATCH_TYPE_MOCK_DEMO,
         totalCount: input.totalCount || 100,
         concurrency: input.concurrency || 5,
         maxRetries: input.maxRetries || 0,
@@ -1425,7 +1447,9 @@ export async function mockCallTauri<T = unknown>(
         items = items.filter((job) => job.status === filter.status);
       }
       if (filter.batchType) {
-        items = items.filter((job) => job.batchType === filter.batchType);
+        items = items.filter((job) =>
+          mockBatchTypeMatchesFilter(job.batchType, String(filter.batchType))
+        );
       }
       const offset = Math.max(0, Number(filter.offset || 0));
       const limit = Math.max(1, Math.min(200, Number(filter.limit || 50)));

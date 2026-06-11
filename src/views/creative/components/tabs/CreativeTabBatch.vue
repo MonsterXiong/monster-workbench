@@ -13,7 +13,7 @@ const props = defineProps<{
 }>();
 
 const { t } = useI18n();
-const { statusLabel, userFacingEventMessage } = useCreativeFormatters();
+const { statusLabel, userFacingEventMessage, userFacingTaskType } = useCreativeFormatters();
 
 const creativeBatchStore = useCreativeBatchStore();
 const creativeProjectStore = useCreativeProjectStore();
@@ -72,6 +72,12 @@ const modeOptions = [
     description: "在受控并发下生成图片与缩略图。",
   },
 ];
+
+const batchTypeForMode = (mode: "mock" | "prompt" | "real") => {
+  if (mode === "prompt") return "image.prompt.batch";
+  if (mode === "real") return "image.generate.batch";
+  return "demo.image.mock";
+};
 
 const advancedItems = computed(() => [
   {
@@ -161,7 +167,7 @@ const taskTableRows = computed(() =>
   batchJobTasks.value.map((task) => ({
     id: task.id,
     sequence: `#${task.sequenceNo}`,
-    taskType: task.taskType,
+    taskType: userFacingTaskType(task.taskType),
     statusTone: task.status,
     statusLabel: statusLabel(task.status),
     asset: String(task.assetId || "-"),
@@ -226,11 +232,7 @@ const createBatchJob = async () => {
     await creativeBatchStore.createBatchImageJob({
       projectId: props.activeProjectId,
       name: form.value.name,
-      batchType: isRealBatch
-        ? "demo.image.generate"
-        : isPromptBatch
-          ? "demo.image.prompt"
-          : "demo.image.mock",
+      batchType: batchTypeForMode(form.value.mode),
       totalCount: form.value.totalCount,
       concurrency: form.value.concurrency,
       maxRetries: form.value.maxRetries,

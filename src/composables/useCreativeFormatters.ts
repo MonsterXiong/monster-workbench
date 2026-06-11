@@ -38,6 +38,8 @@ export function useCreativeFormatters() {
       "demo.image.mock": "模拟验证",
       "demo.image.prompt": "提示词生成",
       "demo.image.generate": "图片生成",
+      "image.prompt.batch": "提示词生成",
+      "image.generate.batch": "图片生成",
     };
     if (!taskType) return "-";
     return typeMap[taskType] ?? taskType.replaceAll(".", " / ").replaceAll("_", " ");
@@ -66,6 +68,8 @@ export function useCreativeFormatters() {
       "demo.image.mock": "模拟验证",
       "demo.image.prompt": "提示词生成",
       "demo.image.generate": "图片生成",
+      "image.prompt.batch": "提示词生成",
+      "image.generate.batch": "图片生成",
     };
     if (!batchType) return "-";
     return typeMap[batchType] ?? batchType.replaceAll(".", " / ");

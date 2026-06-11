@@ -80,6 +80,12 @@ const batchModeOptions = [
   { label: "图片生成", value: "real" },
 ];
 
+const batchTypeForMode = (mode: string) => {
+  if (mode === "prompt") return "image.prompt.batch";
+  if (mode === "real") return "image.generate.batch";
+  return "demo.image.mock";
+};
+
 watch(() => batchJobForm.value.mode, (mode) => {
   if (mode === "mock") {
     batchJobForm.value.name = "批量模拟任务";
@@ -103,7 +109,7 @@ const createBatchJob = async () => {
     await creativeBatchStore.createBatchImageJob({
       projectId: activeCreativeProjectId.value,
       name: batchJobForm.value.name,
-      batchType: isRealBatch ? "demo.image.generate" : isPromptBatch ? "demo.image.prompt" : "demo.image.mock",
+      batchType: batchTypeForMode(batchJobForm.value.mode),
       totalCount: batchJobForm.value.totalCount,
       concurrency: batchJobForm.value.concurrency,
       maxRetries: batchJobForm.value.maxRetries,

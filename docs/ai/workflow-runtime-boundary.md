@@ -255,7 +255,7 @@ Python step boundary
 1. 保留 `demo.image.mock` 作为 Rust 本地 smoke worker。
 2. `demo.image.prompt` batch job 的 provider 调用已从 Rust worker 迁到 Python `image.prompt.batch` workflow；Rust 仍负责 claim、running、结果落库和 batch progress event。
 3. `demo.image.generate` batch job 的 provider 调用和图片处理已从 Rust worker 迁到 Python `image.generate.batch` workflow；Rust 负责校验输出文件路径、创建 asset、复制 thumbnail、写 `model_runs`。
-4. 新增正式 batch 类型时不要继续扩展 `demo.image.*` 命名；sidecar 协议层已先使用 `image.prompt.batch` / `image.generate.batch`，Rust batch 控制面也已接受同名 batch type 别名；后续 UI 再按业务域逐步退出 demo 命名。
+4. 新增正式 batch 类型时不要继续扩展 `demo.image.*` 命名；sidecar 协议层已先使用 `image.prompt.batch` / `image.generate.batch`，Rust batch 控制面也已接受同名 batch type 别名；UI / browser mock 当前也已把 prompt/generate 提交值切到正式命名，并保留旧值兼容。
 5. batch prompt / image sidecar workflow 已接入 cancel checkpoint，并已具备基础 budget/timeout 协议；batch worker 已优先复用 app-managed sidecar lifecycle，且 batch `/tasks` 提交不再长时间持有 lifecycle mutex。下一步优先补完整健康熔断、事件节流和 UI / batch job 类型命名，只有这些协议稳定后，再讨论 supervisor 是否从 Rust 迁到 Python worker pool。
 
 ## 12. Rust 服务代码级边界清单
@@ -288,7 +288,7 @@ Python step boundary
 
 ### 12.3 当前推进顺序
 
-1. 先把 UI / browser mock 的 batch type 提交值从 `demo.image.prompt/generate` 切到 `image.prompt.batch` / `image.generate.batch`，继续兼容历史 `demo.image.*`。
+1. UI / browser mock 的 prompt/generate batch type 提交值已切到 `image.prompt.batch` / `image.generate.batch`；旧 `demo.image.prompt/generate` 只作为历史兼容保留。
 2. 再补共享 `SidecarLifecycleService` 的健康熔断、事件节流、shutdown/recovery 语义。
 3. 再抽象 Rust workflow submit/settle 公共路径，减少 `TaskService` 和 `BatchJobService` 内重复的 sidecar 状态映射。
 4. 最后才评估 supervisor 是否迁给 Python worker pool；迁移前必须先有受控 claim/checkpoint/complete API，不允许 Python 任意写主库。

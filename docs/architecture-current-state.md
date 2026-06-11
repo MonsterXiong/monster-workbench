@@ -892,12 +892,12 @@ sequenceDiagram
     Supervisor->>Worker: run task worker
     alt demo.image.mock
       Worker->>Repo: mock result / retry / failed / succeeded
-    else demo.image.prompt
+    else image.prompt.batch
       Worker->>Sidecar: submit_batch_image_prompt
       Sidecar->>Py: OpenAI-compatible chat workflow
       Py-->>Sidecar: outputs / modelRuns / events
       Worker->>Repo: validate result + create demo_image_prompt asset + model_runs
-    else demo.image.generate
+    else image.generate.batch
       Worker->>Sidecar: submit_batch_image_generate
       Sidecar->>Py: OpenAI-compatible image workflow + save file
       Py-->>Sidecar: filePath / modelRuns / events
@@ -1492,7 +1492,7 @@ Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `
 | `BatchJobService` prompt/image worker shell | prompt/image 已提交 Python sidecar；Rust 仍构造 request、校验 protocol/taskId/status、落库 asset/model_runs/events | 方向正确，但仍是偏宽 orchestrator；新增生产 worker 不应继续在这里分支扩展 | 后续新增正式 workflow 走 sidecar runtime；Rust 只保留 claim、submit、settle、audit |
 | `BatchJobService` prompt 模板替换 | `build_prompt_request` 在 Rust 内处理 `{{sequenceNo}}` / `{{index}}` | 这是 demo-era prompt 构建残留，生产场景不应扩大 | 正式 batch prompt builder 放到 Python；Rust 只传 template/input/context |
 | `BatchJobService` sidecar lifecycle | batch prompt/image worker 已优先使用 app-managed `SidecarLifecycleService`；没有注入 state 的测试/孤立调用才回退临时 sidecar；batch `/tasks` 请求已移到 lifecycle mutex 锁外执行 | 已从 per-task dev sidecar 启停推进到首段生命周期复用和并发提交锁粒度收口，但仍缺少完整健康熔断与事件节流策略 | 下一步补熔断、事件节流和正式 workflow 命名，再讨论 supervisor 迁移 |
-| `demo.image.*` batch type | `demo.image.mock/prompt/generate` 仍兼容；Rust batch 控制面已接受 `image.prompt.batch` / `image.generate.batch` 作为正式别名；sidecar 协议层也使用正式命名 | batch job 类型迁移已进入兼容期，但 UI 仍主要发送 demo 命名 | 后续 UI 再按业务域逐步退出 `demo.image.*` |
+| batch type 命名 | `demo.image.mock/prompt/generate` 仍兼容；Rust batch 控制面已接受 `image.prompt.batch` / `image.generate.batch` 作为正式别名；sidecar 协议层也使用正式命名 | batch job 类型迁移已进入兼容期；UI / browser mock 已开始提交正式 prompt/generate 命名 | 后续继续保留历史兼容，并避免新增 `demo.image.*` 生产分类 |
 
 本轮二次结论：
 
@@ -1711,11 +1711,21 @@ Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `
 | `BatchJobService` prompt/image worker shell | 过渡 shell，方向正确 | 新增正式 workflow 不再新增 Rust worker 分支，统一提交 sidecar |
 | `BatchJobService` prompt builder | demo 残留 | 正式 prompt builder 迁入 Python，Rust 只传 template/input/context |
 | `BatchJobService` provider DTO | `AiProviderConfig` 语义残留 | 改向正式 `SidecarProviderConfig` / workflow provider DTO |
-| batch type 命名 | Rust 已兼容正式别名，UI/browser mock 仍多处发送 `demo.image.*` | 下一批先迁 UI 提交值和 mock 分支判断，保留历史兼容 |
+| batch type 命名 | Rust 已兼容正式别名，UI/browser mock prompt/generate 提交值已切到 `image.prompt.batch` / `image.generate.batch`；旧 `demo.image.prompt/generate` 继续兼容 | 下一步保持历史兼容，继续清理文档与测试夹具里的 demo-era 语义 |
 
 因此当前仍不建议马上迁走 Rust supervisor。更安全的顺序是：
 
-1. 先迁 UI / browser mock 的 batch type 提交值到 `image.prompt.batch` / `image.generate.batch`。
+1. 继续保留旧 `demo.image.prompt/generate` 的读取兼容，但 UI 新提交不再使用这两个值。
 2. 再补共享 sidecar lifecycle 的健康熔断、事件节流、shutdown/recovery 语义。
 3. 再抽象 Rust sidecar result settle 公共路径，减少 `TaskService` 与 `BatchJobService` 中重复的状态映射。
 4. 最后才评估 Python 拉队列或 worker pool；前提是有受控 claim/checkpoint/complete API，不允许 Python 任意读写主库。
+
+## 2026-06-11 补充：UI / browser mock batch type 正式命名
+
+- `/creative` 的批量任务创建入口已把 prompt / image 提交值切到正式 batch type：
+  - `image.prompt.batch`
+  - `image.generate.batch`
+- `demo.image.mock` 继续作为本地 smoke worker 默认值保留。
+- `src/services/tauri.mock.ts` 现在通过 helper 同时识别正式值与旧 `demo.image.prompt/generate`，包括 worker 分支、启动事件标签、取消消息和 batch type 过滤。
+- `useCreativeFormatters()` 已补正式 batch/task type 的用户可见映射，避免历史页或活动流直接展示内部协议名。
+- 这一步完成 UI / browser mock 层退出 demo-era prompt/generate 提交值；下一步重点回到共享 sidecar lifecycle 的健康熔断、事件节流、shutdown/recovery 语义，以及 Rust sidecar result settle 公共路径。
