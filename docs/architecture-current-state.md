@@ -1863,7 +1863,8 @@ Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `
 - `TaskService::run_generate_image_prompt_workflow`、`settle_batch_prompt_sidecar_response` 和 `settle_batch_image_sidecar_response` 都已切换到这个 helper。
 - `BatchJobService` 新增 `BatchWorkerKind` 与通用 failure/cancelled handler，prompt/image sidecar settle 的 retry、failed、cancelled 状态更新、事件名和 Tauri event emit 已收口；worker 启动前观察到取消的本地分支仍保留原处。
 - image success settle 的资产创建和成功状态 result_json 仍然留在 `BatchJobService`，因为它包含输出文件路径授权、thumbnail 生成和 image-specific metadata。
-- 继续复核 `src-tauri/sidecars/python/creative_health_server.py` 后确认：`GET /events` 仍只是 `{"ok": true, "events": []}` 空 stub；Rust 侧已有 `creative-sidecar-status-changed` 生命周期事件，但还没有 Python workflow 内部事件缓冲或 Rust polling 通道。
+- `src-tauri/sidecars/python/creative_health_server.py` 的 `GET /events` 已从空 stub 升级为内存 ring buffer：每次 `/tasks` 返回前会把 workflow result 中的 `events` 追加到 buffer，`GET /events?after=<cursor>&limit=<n>` 返回 `events` 和 `nextCursor`。
+- `src-tauri/src/services/sidecar_lifecycle_service.rs` 新增 `SidecarRuntimeEvent` / `SidecarRuntimeEventsResponse` 与 `poll_runtime_events`，`commands/creative_sidecar.rs` 新增 Tauri command `poll_sidecar_runtime_events`，前端 `src/services/sidecar.service.ts` 与 browser mock 已补齐只读入口。
 
 边界判定：
 
@@ -1876,12 +1877,14 @@ Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `
 | batch failure/cancelled status settle | 已抽通用 helper | 保持不变 |
 | image success settle | 仍保留在 `BatchJobService` | 继续保留 Rust 路径授权和 thumbnail 边界，后续只抽真正稳定的状态/result_json 小片段 |
 | Rust sidecar lifecycle event | 已有 Tauri `creative-sidecar-status-changed` | 作为控制面观测能力保留；如需跨会话审计再设计持久化 |
-| Python sidecar `/events` | 仍是空事件 stub | 下一步优先补事件缓冲、Rust polling 和持久化策略 |
+| Python sidecar `/events` | 已有内存 buffer 与 Rust polling command | 下一步设计事件持久化策略和 UI 诊断消费；不替代 Rust `task_events` |
 | batch supervisor | 仍保留 Rust | 不因 settle 收口就迁到 Python worker pool |
 
-继续评估后的结论：当前不要继续强抽 batch image success settle，也不要把 Rust batch supervisor 提前迁给 Python。下一步更有价值的是补齐 Python `/events` 真实事件流，并明确这些事件如何进入 Rust 受控的 `task_events`/诊断记录，再评估受控 worker-pool API。
+继续评估后的结论：当前不要继续强抽 batch image success settle，也不要把 Rust batch supervisor 提前迁给 Python。Python `/events` 已能作为 workflow 诊断事件流被 Rust 拉取，下一步更有价值的是明确这些事件哪些进入 Rust 受控的 `task_events`/诊断记录，再评估受控 worker-pool API。
 
 本轮验证通过：
 
 - `cargo test --manifest-path .\\src-tauri\\Cargo.toml services::task_service::tests:: -- --nocapture --test-threads=1`
 - `cargo test --manifest-path .\\src-tauri\\Cargo.toml services::batch_job_service::tests:: -- --nocapture --test-threads=1`
+- `cargo test --manifest-path .\\src-tauri\\Cargo.toml services::sidecar_lifecycle_service::tests::poll_runtime_events_uses_cursor_query_and_parses_events -- --nocapture --test-threads=1`
+- `python src-tauri\\sidecars\\python\\test_creative_health_server.py`
