@@ -1892,3 +1892,31 @@ Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `
 - `python src-tauri\\sidecars\\python\\test_creative_health_server.py`
 - `cargo test --manifest-path .\\src-tauri\\Cargo.toml services::task_service::tests::generate_image_prompt_workflow_persists_task_asset_and_events -- --nocapture --test-threads=1`
 - `cargo test --manifest-path .\\src-tauri\\Cargo.toml services::task_service::tests::generate_image_prompt_workflow_maps_sidecar_failure_result -- --nocapture --test-threads=1`
+
+## 2026-06-12 补充：sidecar `/events` 持久化边界复核
+
+本轮继续按 `docs/ai/workflow-runtime-boundary.md` 复核 `TaskService` / `BatchJobService` 的编排边界，未修改 Rust 代码。重点从“是否继续抽 batch settle”转为“Python `/events` 是否应进入持久化审计”。
+
+代码事实：
+
+- `src-tauri/src/services/workflow_settle_service.rs` 的 `append_sidecar_result_events` 已把 `/tasks` 返回体中的 `events` 经 Rust settle 持久化为 `task_events`。
+- `src-tauri/sidecars/python/creative_health_server.py` 的 `/events` 是进程内 ring buffer，event `id` 只在当前 Python 进程内递增，重启后会重新开始。
+- `src-tauri/src/services/sidecar_lifecycle_service.rs` 的 `poll_runtime_events` 只是只读拉取 `/events?after=&limit=`，没有写 DB。
+- 当前主库没有 sidecar runtime diagnostics 专表；已有物理日志由 `LogService` / `LoggerInfra` 写入 `~/.monster-tools/logs`，并会做敏感信息脱敏。
+- `task_events` 是 `creative_tasks` 的任务审计表，必须由 Rust 可信写入或未来的 Rust 受控 API 写入。
+
+边界结论：
+
+| 事件来源 | 当前归属 | 持久化策略 |
+|---|---|---|
+| `/tasks` result `events` | workflow 结果审计 | 已由 Rust settle 写 `task_events`，保持不变 |
+| Python `/events` polling | runtime 诊断/进度观察 | 默认不写 `task_events`，避免与 settle 事件重复 |
+| Tauri lifecycle event | Rust sidecar 控制面状态 | 保持 UI/runtime event；如需跨会话审计，由 Rust 设计诊断记录 |
+
+因此当前不新增 DB 表、不把 `/events` 全量灌入 `task_events`、也不让 Python 直接写主库。后续若要落诊断事件，应先定义 Rust 侧过滤、脱敏、限流、去重和 runtime instance 边界；只有能关联到已知 task 且未通过 `/tasks` result settle 落库的任务语义事件，才可以由 Rust 转成 `task_events`。
+
+下一步建议：
+
+1. 若 UI 需要实时诊断，优先消费 `poll_sidecar_runtime_events` 的临时 cursor，而不是先做持久化。
+2. 若需要跨会话审计，先设计 Rust-owned sidecar diagnostics 记录，至少包含 runtime instance id / startedAt、source event id、eventType、taskId、workflowType、message 摘要和脱敏 payload。
+3. 继续保留 `BatchJobService` supervisor 与 image success settle 的 Rust 边界；下一步更适合补诊断消费或 runtime instance 边界，而不是迁 Python worker pool。
