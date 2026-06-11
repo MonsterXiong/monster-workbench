@@ -1,20 +1,18 @@
 use crate::infra::creative_asset_repo;
-use crate::infra::creative_model_run_repo;
 use crate::infra::creative_task_repo;
 use crate::infra::creative_types::{
-    CreateAssetLinkInput, CreateCreativeAssetInput, CreateCreativeTaskInput, CreateModelRunInput,
-    CreateTaskEventInput, CreativeAsset, CreativeTask, ListAssetLinksFilter,
-    ListCreativeAssetsFilter, ListCreativeTasksFilter, TaskEvent, UpdateCreativeTaskStatusInput,
+    CreateAssetLinkInput, CreateCreativeAssetInput, CreateCreativeTaskInput, CreateTaskEventInput,
+    CreativeAsset, CreativeTask, ListAssetLinksFilter, ListCreativeAssetsFilter,
+    ListCreativeTasksFilter, TaskEvent, UpdateCreativeTaskStatusInput,
 };
 use crate::infra::path::PathProvider;
 use crate::infra::{AppError, AppResult};
 use crate::services::cancel_checkpoint_service::start_cancel_checkpoint_server;
 use crate::services::sidecar_lifecycle_service::{
-    GenerateImagePromptSidecarRequest, SidecarLifecycleService, SidecarWorkflowModelRun,
-    SidecarWorkflowTaskResult,
+    GenerateImagePromptSidecarRequest, SidecarLifecycleService, SidecarWorkflowTaskResult,
 };
 use crate::services::workflow_settle_service::{
-    append_sidecar_result_events, validate_sidecar_task_result,
+    append_sidecar_result_events, persist_sidecar_model_runs, validate_sidecar_task_result,
 };
 use serde_json::json;
 use tauri::{AppHandle, Emitter, Runtime, Wry};
@@ -468,42 +466,14 @@ impl<R: Runtime> TaskService<R> {
             payload_json: Some(json!({ "assetId": asset.id }).to_string()),
         })?);
 
-        let mut model_run_ids = Vec::new();
-        for model_run in sidecar_response.model_runs {
-            let model_run = creative_model_run_repo::create_model_run(
-                db_path,
-                CreateModelRunInput {
-                    project_id: input.project_id.clone(),
-                    task_id: Some(task.id),
-                    asset_id: Some(asset.id),
-                    provider_id: model_run.provider_id,
-                    provider_type: model_run.provider_type,
-                    model: model_run.model,
-                    request_type: model_run.request_type,
-                    status: model_run.status,
-                    duration_ms: model_run.duration_ms,
-                    prompt_hash: model_run.prompt_hash,
-                    prompt_version_id: model_run.prompt_version_id,
-                    input_token_count: model_run.input_token_count,
-                    output_token_count: model_run.output_token_count,
-                    cost_estimate: model_run.cost_estimate,
-                    error_code: model_run.error_code,
-                    error_message: model_run.error_message,
-                    metadata_json: model_run
-                        .metadata
-                        .as_ref()
-                        .map(serde_json::to_string)
-                        .transpose()
-                        .map_err(|error| {
-                            AppError::Config(format!(
-                                "failed to encode sidecar model run metadata: {error}"
-                            ))
-                        })?,
-                    finished_at: None,
-                },
-            )?;
-            model_run_ids.push(model_run.id);
-        }
+        let model_run_ids = persist_sidecar_model_runs(
+            db_path,
+            task,
+            Some(asset.id),
+            &sidecar_response.model_runs,
+            None,
+            "sidecar model run metadata",
+        )?;
 
         let result_json = json!({
             "assetId": asset.id,
@@ -541,8 +511,14 @@ impl<R: Runtime> TaskService<R> {
         task: &CreativeTask,
         sidecar_response: &SidecarWorkflowTaskResult,
     ) -> AppResult<()> {
-        let model_run_ids =
-            persist_sidecar_model_runs(db_path, task, None, &sidecar_response.model_runs)?;
+        let model_run_ids = persist_sidecar_model_runs(
+            db_path,
+            task,
+            None,
+            &sidecar_response.model_runs,
+            None,
+            "sidecar model run metadata",
+        )?;
         let next_status = resolve_sidecar_failure_status(task, sidecar_response);
         let retry_increment = if next_status == "retrying" {
             Some(1)
@@ -736,51 +712,6 @@ impl<R: Runtime> TaskService<R> {
             events,
         })
     }
-}
-
-fn persist_sidecar_model_runs(
-    db_path: &std::path::Path,
-    task: &CreativeTask,
-    asset_id: Option<i64>,
-    model_runs: &[SidecarWorkflowModelRun],
-) -> AppResult<Vec<i64>> {
-    let mut model_run_ids = Vec::new();
-    for model_run in model_runs {
-        let persisted = creative_model_run_repo::create_model_run(
-            db_path,
-            CreateModelRunInput {
-                project_id: task.project_id.clone(),
-                task_id: Some(task.id),
-                asset_id,
-                provider_id: model_run.provider_id.clone(),
-                provider_type: model_run.provider_type.clone(),
-                model: model_run.model.clone(),
-                request_type: model_run.request_type.clone(),
-                status: model_run.status.clone(),
-                duration_ms: model_run.duration_ms,
-                prompt_hash: model_run.prompt_hash.clone(),
-                prompt_version_id: model_run.prompt_version_id.clone(),
-                input_token_count: model_run.input_token_count,
-                output_token_count: model_run.output_token_count,
-                cost_estimate: model_run.cost_estimate,
-                error_code: model_run.error_code.clone(),
-                error_message: model_run.error_message.clone(),
-                metadata_json: model_run
-                    .metadata
-                    .as_ref()
-                    .map(serde_json::to_string)
-                    .transpose()
-                    .map_err(|error| {
-                        AppError::Config(format!(
-                            "failed to encode sidecar model run metadata: {error}"
-                        ))
-                    })?,
-                finished_at: None,
-            },
-        )?;
-        model_run_ids.push(persisted.id);
-    }
-    Ok(model_run_ids)
 }
 
 fn resolve_sidecar_failure_status(

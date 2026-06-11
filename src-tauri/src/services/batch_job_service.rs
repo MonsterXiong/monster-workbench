@@ -14,12 +14,12 @@ use crate::services::ai_service::AiProviderConfig;
 use crate::services::cancel_checkpoint_service::start_cancel_checkpoint_server;
 use crate::services::sidecar_lifecycle_service::{
     BatchImageGenerateSidecarRequest, BatchImagePromptSidecarRequest, SidecarLifecycleService,
-    SidecarProviderConfig, SidecarRuntimeEndpoint, SidecarWorkflowBudget, SidecarWorkflowModelRun,
+    SidecarProviderConfig, SidecarRuntimeEndpoint, SidecarWorkflowBudget,
     SidecarWorkflowTaskResult,
 };
 use crate::services::task_service::CreativeTaskEventPayload;
 use crate::services::workflow_settle_service::{
-    append_sidecar_result_events, validate_sidecar_task_result,
+    append_sidecar_result_events, persist_sidecar_model_runs, validate_sidecar_task_result,
 };
 use serde_json::{json, Value};
 use std::collections::HashSet;
@@ -1042,16 +1042,18 @@ fn settle_batch_prompt_sidecar_response<R: Runtime>(
 ) -> AppResult<()> {
     validate_sidecar_task_result(task, &sidecar_response)?;
     append_sidecar_result_events(db_path, task.id, &sidecar_response)?;
+    let prompt_hash = simple_prompt_hash(prompt_request);
 
     if sidecar_response.status == "succeeded"
         && batch_prompt_cancel_requested(db_path, batch_job_id, task.id)?
     {
-        let model_run_ids = persist_batch_prompt_sidecar_model_runs(
+        let model_run_ids = persist_sidecar_model_runs(
             db_path,
             task,
             None,
-            prompt_request,
             &sidecar_response.model_runs,
+            Some(prompt_hash.as_str()),
+            "batch prompt sidecar model run metadata",
         )?;
         return handle_prompt_cancelled(
             app_handle,
@@ -1064,12 +1066,13 @@ fn settle_batch_prompt_sidecar_response<R: Runtime>(
     }
 
     if sidecar_response.status == "cancelled" {
-        let model_run_ids = persist_batch_prompt_sidecar_model_runs(
+        let model_run_ids = persist_sidecar_model_runs(
             db_path,
             task,
             None,
-            prompt_request,
             &sidecar_response.model_runs,
+            Some(prompt_hash.as_str()),
+            "batch prompt sidecar model run metadata",
         )?;
         return handle_prompt_cancelled(
             app_handle,
@@ -1085,12 +1088,13 @@ fn settle_batch_prompt_sidecar_response<R: Runtime>(
     }
 
     if sidecar_response.status != "succeeded" {
-        let model_run_ids = persist_batch_prompt_sidecar_model_runs(
+        let model_run_ids = persist_sidecar_model_runs(
             db_path,
             task,
             None,
-            prompt_request,
             &sidecar_response.model_runs,
+            Some(prompt_hash.as_str()),
+            "batch prompt sidecar model run metadata",
         )?;
         return handle_prompt_failure_with_model_runs(
             app_handle,
@@ -1143,12 +1147,13 @@ fn settle_batch_prompt_sidecar_response<R: Runtime>(
             status: Some("ready".to_string()),
         },
     )?;
-    let model_run_ids = persist_batch_prompt_sidecar_model_runs(
+    let model_run_ids = persist_sidecar_model_runs(
         db_path,
         task,
         Some(asset.id),
-        prompt_request,
         &sidecar_response.model_runs,
+        Some(prompt_hash.as_str()),
+        "batch prompt sidecar model run metadata",
     )?;
 
     let updated_task = creative_task_repo::update_task_status(
@@ -1215,55 +1220,6 @@ fn batch_prompt_cancel_requested(
         AppError::Database("task not found while checking prompt cancellation".to_string())
     })?;
     Ok(batch.status == "cancelled" || matches!(task.status.as_str(), "cancelling" | "cancelled"))
-}
-
-fn persist_batch_prompt_sidecar_model_runs(
-    db_path: &std::path::Path,
-    task: &CreativeTask,
-    asset_id: Option<i64>,
-    prompt_request: &str,
-    model_runs: &[SidecarWorkflowModelRun],
-) -> AppResult<Vec<i64>> {
-    let mut model_run_ids = Vec::new();
-    for model_run in model_runs {
-        let persisted = creative_model_run_repo::create_model_run(
-            db_path,
-            CreateModelRunInput {
-                project_id: task.project_id.clone(),
-                task_id: Some(task.id),
-                asset_id,
-                provider_id: model_run.provider_id.clone(),
-                provider_type: model_run.provider_type.clone(),
-                model: model_run.model.clone(),
-                request_type: model_run.request_type.clone(),
-                status: model_run.status.clone(),
-                duration_ms: model_run.duration_ms,
-                prompt_hash: model_run
-                    .prompt_hash
-                    .clone()
-                    .or_else(|| Some(simple_prompt_hash(prompt_request))),
-                prompt_version_id: model_run.prompt_version_id.clone(),
-                input_token_count: model_run.input_token_count,
-                output_token_count: model_run.output_token_count,
-                cost_estimate: model_run.cost_estimate,
-                error_code: model_run.error_code.clone(),
-                error_message: model_run.error_message.clone(),
-                metadata_json: model_run
-                    .metadata
-                    .as_ref()
-                    .map(serde_json::to_string)
-                    .transpose()
-                    .map_err(|error| {
-                        AppError::Config(format!(
-                            "failed to encode batch prompt sidecar model run metadata: {error}"
-                        ))
-                    })?,
-                finished_at: None,
-            },
-        )?;
-        model_run_ids.push(persisted.id);
-    }
-    Ok(model_run_ids)
 }
 
 fn handle_prompt_transport_failure<R: Runtime>(
@@ -1621,16 +1577,18 @@ fn settle_batch_image_sidecar_response<R: Runtime>(
 ) -> AppResult<()> {
     validate_sidecar_task_result(task, &sidecar_response)?;
     append_sidecar_result_events(db_path, task.id, &sidecar_response)?;
+    let prompt_hash = simple_prompt_hash(prompt_request);
 
     if sidecar_response.status == "succeeded"
         && batch_prompt_cancel_requested(db_path, batch_job_id, task.id)?
     {
-        let model_run_ids = persist_batch_sidecar_model_runs(
+        let model_run_ids = persist_sidecar_model_runs(
             db_path,
             task,
             None,
-            prompt_request,
             &sidecar_response.model_runs,
+            Some(prompt_hash.as_str()),
+            "batch sidecar model run metadata",
         )?;
         return handle_generate_cancelled(
             app_handle,
@@ -1643,12 +1601,13 @@ fn settle_batch_image_sidecar_response<R: Runtime>(
     }
 
     if sidecar_response.status == "cancelled" {
-        let model_run_ids = persist_batch_sidecar_model_runs(
+        let model_run_ids = persist_sidecar_model_runs(
             db_path,
             task,
             None,
-            prompt_request,
             &sidecar_response.model_runs,
+            Some(prompt_hash.as_str()),
+            "batch sidecar model run metadata",
         )?;
         return handle_generate_cancelled(
             app_handle,
@@ -1664,12 +1623,13 @@ fn settle_batch_image_sidecar_response<R: Runtime>(
     }
 
     if sidecar_response.status != "succeeded" {
-        let model_run_ids = persist_batch_sidecar_model_runs(
+        let model_run_ids = persist_sidecar_model_runs(
             db_path,
             task,
             None,
-            prompt_request,
             &sidecar_response.model_runs,
+            Some(prompt_hash.as_str()),
+            "batch sidecar model run metadata",
         )?;
         return handle_generate_failure_with_model_runs(
             app_handle,
@@ -1724,12 +1684,13 @@ fn settle_batch_image_sidecar_response<R: Runtime>(
             status: Some("ready".to_string()),
         },
     )?;
-    let model_run_ids = persist_batch_sidecar_model_runs(
+    let model_run_ids = persist_sidecar_model_runs(
         db_path,
         task,
         Some(image_asset.id),
-        prompt_request,
         &sidecar_response.model_runs,
+        Some(prompt_hash.as_str()),
+        "batch sidecar model run metadata",
     )?;
 
     let updated_task = creative_task_repo::update_task_status(
@@ -2037,55 +1998,6 @@ fn copy_sidecar_thumbnail(file_path: &str) -> AppResult<String> {
     fs::copy(&source_path, &thumbnail_path)
         .map_err(|error| AppError::Io(format!("failed to create image thumbnail: {error}")))?;
     Ok(thumbnail_path.to_string_lossy().to_string())
-}
-
-fn persist_batch_sidecar_model_runs(
-    db_path: &std::path::Path,
-    task: &CreativeTask,
-    asset_id: Option<i64>,
-    prompt_request: &str,
-    model_runs: &[SidecarWorkflowModelRun],
-) -> AppResult<Vec<i64>> {
-    let mut model_run_ids = Vec::new();
-    for model_run in model_runs {
-        let persisted = creative_model_run_repo::create_model_run(
-            db_path,
-            CreateModelRunInput {
-                project_id: task.project_id.clone(),
-                task_id: Some(task.id),
-                asset_id,
-                provider_id: model_run.provider_id.clone(),
-                provider_type: model_run.provider_type.clone(),
-                model: model_run.model.clone(),
-                request_type: model_run.request_type.clone(),
-                status: model_run.status.clone(),
-                duration_ms: model_run.duration_ms,
-                prompt_hash: model_run
-                    .prompt_hash
-                    .clone()
-                    .or_else(|| Some(simple_prompt_hash(prompt_request))),
-                prompt_version_id: model_run.prompt_version_id.clone(),
-                input_token_count: model_run.input_token_count,
-                output_token_count: model_run.output_token_count,
-                cost_estimate: model_run.cost_estimate,
-                error_code: model_run.error_code.clone(),
-                error_message: model_run.error_message.clone(),
-                metadata_json: model_run
-                    .metadata
-                    .as_ref()
-                    .map(serde_json::to_string)
-                    .transpose()
-                    .map_err(|error| {
-                        AppError::Config(format!(
-                            "failed to encode batch sidecar model run metadata: {error}"
-                        ))
-                    })?,
-                finished_at: None,
-            },
-        )?;
-        model_run_ids.push(persisted.id);
-    }
-    Ok(model_run_ids)
 }
 
 fn emit_batch_progress<R: Runtime>(

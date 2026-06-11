@@ -1,7 +1,12 @@
+use crate::infra::creative_model_run_repo;
 use crate::infra::creative_task_repo;
-use crate::infra::creative_types::{CreateTaskEventInput, CreativeTask, TaskEvent};
+use crate::infra::creative_types::{
+    CreateModelRunInput, CreateTaskEventInput, CreativeTask, TaskEvent,
+};
 use crate::infra::{AppError, AppResult};
-use crate::services::sidecar_lifecycle_service::{SidecarWorkflowEvent, SidecarWorkflowTaskResult};
+use crate::services::sidecar_lifecycle_service::{
+    SidecarWorkflowEvent, SidecarWorkflowModelRun, SidecarWorkflowTaskResult,
+};
 use std::path::Path;
 
 pub(crate) fn validate_sidecar_task_result(
@@ -56,4 +61,55 @@ fn append_sidecar_task_events(
         )?);
     }
     Ok(persisted_events)
+}
+
+pub(crate) fn persist_sidecar_model_runs(
+    db_path: &Path,
+    task: &CreativeTask,
+    asset_id: Option<i64>,
+    model_runs: &[SidecarWorkflowModelRun],
+    prompt_hash_fallback: Option<&str>,
+    metadata_error_context: &str,
+) -> AppResult<Vec<i64>> {
+    let prompt_hash_fallback = prompt_hash_fallback.map(ToString::to_string);
+    let mut model_run_ids = Vec::new();
+    for model_run in model_runs {
+        let persisted = creative_model_run_repo::create_model_run(
+            db_path,
+            CreateModelRunInput {
+                project_id: task.project_id.clone(),
+                task_id: Some(task.id),
+                asset_id,
+                provider_id: model_run.provider_id.clone(),
+                provider_type: model_run.provider_type.clone(),
+                model: model_run.model.clone(),
+                request_type: model_run.request_type.clone(),
+                status: model_run.status.clone(),
+                duration_ms: model_run.duration_ms,
+                prompt_hash: model_run
+                    .prompt_hash
+                    .clone()
+                    .or_else(|| prompt_hash_fallback.clone()),
+                prompt_version_id: model_run.prompt_version_id.clone(),
+                input_token_count: model_run.input_token_count,
+                output_token_count: model_run.output_token_count,
+                cost_estimate: model_run.cost_estimate,
+                error_code: model_run.error_code.clone(),
+                error_message: model_run.error_message.clone(),
+                metadata_json: model_run
+                    .metadata
+                    .as_ref()
+                    .map(serde_json::to_string)
+                    .transpose()
+                    .map_err(|error| {
+                        AppError::Config(format!(
+                            "failed to encode {metadata_error_context}: {error}"
+                        ))
+                    })?,
+                finished_at: None,
+            },
+        )?;
+        model_run_ids.push(persisted.id);
+    }
+    Ok(model_run_ids)
 }
