@@ -39,3 +39,15 @@ pub fn stop_sidecar_dev_health_server(
         .stop_dev_health_server()
         .map_err(|e| e.to_json_string())
 }
+
+#[tauri::command]
+pub fn poll_sidecar_runtime_events(
+    state: SidecarState<'_>,
+    after: Option<u64>,
+    limit: Option<u64>,
+) -> Result<crate::services::sidecar_lifecycle_service::SidecarRuntimeEventsResponse, String> {
+    let mut service = state.lock().unwrap_or_else(|e| e.into_inner());
+    service
+        .poll_runtime_events(after, limit)
+        .map_err(|e| e.to_json_string())
+}

@@ -190,6 +190,26 @@ pub struct SidecarWorkflowTaskResult {
     pub retry: Option<SidecarWorkflowRetry>,
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SidecarRuntimeEvent {
+    pub id: u64,
+    pub task_id: Option<i64>,
+    pub workflow_type: Option<String>,
+    pub event_type: String,
+    pub message: Option<String>,
+    pub payload: Option<Value>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SidecarRuntimeEventsResponse {
+    pub ok: bool,
+    pub next_cursor: u64,
+    pub events: Vec<SidecarRuntimeEvent>,
+}
+
 #[derive(Debug, Clone)]
 pub struct SidecarRuntimeEndpoint {
     pub port: u16,
@@ -697,6 +717,33 @@ impl<R: Runtime> SidecarLifecycleService<R> {
         })
     }
 
+    pub fn poll_runtime_events(
+        &mut self,
+        after: Option<u64>,
+        limit: Option<u64>,
+    ) -> AppResult<SidecarRuntimeEventsResponse> {
+        let endpoint = self.ensure_runtime_endpoint()?;
+        Self::poll_runtime_events_from_endpoint(&endpoint, after, limit)
+    }
+
+    pub fn poll_runtime_events_from_endpoint(
+        endpoint: &SidecarRuntimeEndpoint,
+        after: Option<u64>,
+        limit: Option<u64>,
+    ) -> AppResult<SidecarRuntimeEventsResponse> {
+        let after = after.unwrap_or(0);
+        let limit = limit.unwrap_or(100).clamp(1, 500);
+        let response = get_json(
+            endpoint.port,
+            &endpoint.token,
+            &format!("/events?after={after}&limit={limit}"),
+            Duration::from_secs(5),
+        )?;
+        serde_json::from_str::<SidecarRuntimeEventsResponse>(&response).map_err(|error| {
+            AppError::Process(format!("failed to parse sidecar events response: {error}"))
+        })
+    }
+
     fn refresh_exit_status(&mut self) {
         let Some(child) = self.child.as_mut() else {
             return;
@@ -892,6 +939,46 @@ fn post_json(
         .ok_or_else(|| AppError::Process("sidecar response body is missing".to_string()))
 }
 
+fn get_json(port: u16, token: &str, path: &str, read_timeout: Duration) -> AppResult<String> {
+    let mut stream = TcpStream::connect_timeout(
+        &format!("127.0.0.1:{port}")
+            .parse()
+            .map_err(|error| AppError::Process(format!("invalid sidecar endpoint: {error}")))?,
+        Duration::from_secs(2),
+    )
+    .map_err(|error| AppError::Process(format!("sidecar connect failed: {error}")))?;
+    stream
+        .set_read_timeout(Some(read_timeout))
+        .map_err(|error| AppError::Process(format!("failed to set read timeout: {error}")))?;
+    stream
+        .set_write_timeout(Some(Duration::from_secs(2)))
+        .map_err(|error| AppError::Process(format!("failed to set write timeout: {error}")))?;
+
+    let request = format!(
+        "GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\nAccept: application/json\r\nX-Monster-Token: {token}\r\n\r\n"
+    );
+    stream
+        .write_all(request.as_bytes())
+        .map_err(|error| AppError::Process(format!("sidecar request failed: {error}")))?;
+
+    let mut response = String::new();
+    stream
+        .read_to_string(&mut response)
+        .map_err(|error| AppError::Process(format!("sidecar response failed: {error}")))?;
+    if !response.contains("200 OK") && !response.contains("202 Accepted") {
+        return Err(AppError::Process(format!(
+            "unexpected sidecar response: {}",
+            response.lines().next().unwrap_or("empty response")
+        )));
+    }
+
+    response
+        .split("\r\n\r\n")
+        .nth(1)
+        .map(|body| body.to_string())
+        .ok_or_else(|| AppError::Process("sidecar response body is missing".to_string()))
+}
+
 fn encode_budget(budget: Option<SidecarWorkflowBudget>) -> AppResult<Value> {
     budget
         .map(serde_json::to_value)
@@ -1052,6 +1139,63 @@ mod tests {
         assert_eq!(snapshot.status, "stopped");
         assert!(service.recovery_backoff_until.is_none());
         assert_eq!(snapshot.recovery_failure_count, 0);
+    }
+
+    #[test]
+    fn poll_runtime_events_uses_cursor_query_and_parses_events() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
+        let port = listener
+            .local_addr()
+            .expect("listener addr should exist")
+            .port();
+        let token = "sidecar-events-test";
+        let (request_tx, request_rx) = mpsc::channel();
+        let handle = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("events request should arrive");
+            let request = read_test_http_request(&mut stream);
+            request_tx
+                .send(request.clone())
+                .expect("events request should send");
+            write_test_json_response(
+                &mut stream,
+                r#"{"ok":true,"nextCursor":15,"events":[{"id":13,"taskId":77,"workflowType":"image_prompt","eventType":"workflow_step_completed","message":"prompt built","payload":{"workflowType":"image_prompt"},"createdAt":"2026-06-12T08:00:00Z"}]}"#,
+            );
+        });
+
+        let events = SidecarLifecycleService::<Wry>::poll_runtime_events_from_endpoint(
+            &SidecarRuntimeEndpoint {
+                port,
+                token: token.to_string(),
+            },
+            Some(12),
+            Some(2),
+        )
+        .expect("events should parse");
+
+        handle.join().expect("events server should finish");
+        let request = request_rx
+            .recv()
+            .expect("events request should be captured");
+
+        assert!(request.starts_with("GET /events?after=12&limit=2 "));
+        assert!(request.contains(&format!("X-Monster-Token: {token}")));
+        assert!(events.ok);
+        assert_eq!(events.next_cursor, 15);
+        assert_eq!(events.events.len(), 1);
+        assert_eq!(events.events[0].id, 13);
+        assert_eq!(events.events[0].task_id, Some(77));
+        assert_eq!(
+            events.events[0].workflow_type.as_deref(),
+            Some("image_prompt")
+        );
+        assert_eq!(events.events[0].event_type, "workflow_step_completed");
+        assert_eq!(
+            events.events[0]
+                .payload
+                .as_ref()
+                .and_then(|value| value["workflowType"].as_str()),
+            Some("image_prompt")
+        );
     }
 
     #[test]

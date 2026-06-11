@@ -195,6 +195,7 @@ fn main() {
             commands::creative_sidecar::start_sidecar_dev_health_server,
             commands::creative_sidecar::check_sidecar_health,
             commands::creative_sidecar::stop_sidecar_dev_health_server,
+            commands::creative_sidecar::poll_sidecar_runtime_events,
             commands::creative_task::run_generate_image_prompt_workflow,
             commands::creative_task::run_review_asset_quality_stub,
             commands::worker_queue::claim_next_creative_task,

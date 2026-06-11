@@ -2084,6 +2084,13 @@ export async function mockCallTauri<T = unknown>(
       dispatchMockSidecarStatusEvent("stopped", "sidecar stopped", mockSidecarStatus);
       return mockSidecarStatus as T;
 
+    case "poll_sidecar_runtime_events":
+      return {
+        ok: true,
+        nextCursor: Number(args.after ?? 0),
+        events: [],
+      } as T;
+
     // 日志系统
     case "write_log_entry": {
       const line = args.line as string;

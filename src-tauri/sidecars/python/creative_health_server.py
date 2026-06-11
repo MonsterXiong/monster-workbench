@@ -16,6 +16,55 @@ BATCH_IMAGE_PROMPT_TASK_TYPES = {"image.prompt.batch", "demo.image.prompt"}
 BATCH_IMAGE_PROMPT_WORKFLOW_TYPE = "image.prompt.batch"
 BATCH_IMAGE_GENERATE_TASK_TYPES = {"image.generate.batch", "demo.image.generate"}
 BATCH_IMAGE_GENERATE_WORKFLOW_TYPE = "image.generate.batch"
+SIDECAR_EVENT_BUFFER_LIMIT = 1000
+
+
+class SidecarEventBuffer:
+    def __init__(self, limit=SIDECAR_EVENT_BUFFER_LIMIT):
+        self.limit = max(int(limit or SIDECAR_EVENT_BUFFER_LIMIT), 1)
+        self._events = []
+        self._next_id = 1
+        self._lock = threading.Lock()
+
+    def append_result_events(self, result, source_payload):
+        task_id = result.get("taskId", source_payload.get("taskId"))
+        workflow_type = source_payload.get("workflowType")
+        for event in result.get("events") or []:
+            if not isinstance(event, dict):
+                continue
+            self.append_event(
+                task_id=task_id,
+                workflow_type=workflow_type,
+                event_type=str(event.get("eventType") or "workflow_event"),
+                message=event.get("message"),
+                payload=event.get("payload"),
+            )
+
+    def append_event(self, task_id, workflow_type, event_type, message=None, payload=None):
+        with self._lock:
+            event_id = self._next_id
+            self._next_id += 1
+            event = {
+                "id": event_id,
+                "taskId": task_id,
+                "workflowType": workflow_type,
+                "eventType": event_type,
+                "message": message,
+                "payload": payload,
+                "createdAt": utc_now_text(),
+            }
+            self._events.append(event)
+            if len(self._events) > self.limit:
+                self._events = self._events[-self.limit:]
+            return event
+
+    def list_after(self, after=0, limit=100):
+        after = positive_int(after, 0)
+        limit = min(max(positive_int(limit, 100), 1), 500)
+        with self._lock:
+            events = [event for event in self._events if event["id"] > after][:limit]
+            next_cursor = events[-1]["id"] if events else after
+        return {"ok": True, "nextCursor": next_cursor, "events": events}
 
 
 def parse_args():
@@ -47,15 +96,23 @@ class CreativeHealthHandler(BaseHTTPRequestHandler):
             self._reject()
             return
 
-        if self.path == "/health":
+        parsed_path = urllib.parse.urlparse(self.path)
+        if parsed_path.path == "/health":
             self._write_json(HTTPStatus.OK, {"ok": True, "status": "ok"})
             return
 
-        if self.path.startswith("/events"):
-            self._write_json(HTTPStatus.OK, {"ok": True, "events": []})
+        if parsed_path.path == "/events":
+            query = urllib.parse.parse_qs(parsed_path.query or "")
+            after = query.get("after", [0])[0]
+            limit = query.get("limit", [100])[0]
+            self._write_json(HTTPStatus.OK, self.server.event_buffer.list_after(after, limit))
             return
 
         self._write_json(HTTPStatus.NOT_FOUND, {"ok": False, "error": "not_found"})
+
+    def _write_task_result(self, result, source_payload):
+        self.server.event_buffer.append_result_events(result, source_payload)
+        self._write_json(HTTPStatus.OK, result)
 
     def do_POST(self):
         if not self._authorized():
@@ -82,12 +139,12 @@ class CreativeHealthHandler(BaseHTTPRequestHandler):
         if payload.get("taskType") == "generate_image_prompt":
             task_payload = payload.get("input") or payload.get("payload") or {}
             if is_cancel_requested(payload):
-                self._write_json(HTTPStatus.OK, build_forced_result(payload, "cancelled"))
+                self._write_task_result(build_forced_result(payload, "cancelled"), payload)
                 return
 
             forced_status = resolve_forced_status(task_payload)
             if forced_status:
-                self._write_json(HTTPStatus.OK, build_forced_result(payload, forced_status))
+                self._write_task_result(build_forced_result(payload, forced_status), payload)
                 return
 
             prompt = build_image_prompt(task_payload)
@@ -101,11 +158,10 @@ class CreativeHealthHandler(BaseHTTPRequestHandler):
             }
             time.sleep(0.2)
             if is_cancel_requested(payload):
-                self._write_json(HTTPStatus.OK, build_forced_result(payload, "cancelled"))
+                self._write_task_result(build_forced_result(payload, "cancelled"), payload)
                 return
 
-            self._write_json(
-                HTTPStatus.OK,
+            self._write_task_result(
                 {
                     "protocolVersion": payload.get("protocolVersion") or 1,
                     "taskId": payload.get("taskId"),
@@ -148,16 +204,17 @@ class CreativeHealthHandler(BaseHTTPRequestHandler):
                         "reason": None,
                     },
                 },
+                payload,
             )
             return
 
         task_type = payload.get("taskType")
         if task_type in BATCH_IMAGE_PROMPT_TASK_TYPES:
-            self._write_json(HTTPStatus.OK, run_batch_image_prompt(payload))
+            self._write_task_result(run_batch_image_prompt(payload), payload)
             return
 
         if task_type in BATCH_IMAGE_GENERATE_TASK_TYPES:
-            self._write_json(HTTPStatus.OK, run_batch_image_generate(payload))
+            self._write_task_result(run_batch_image_generate(payload), payload)
             return
 
         self._write_json(
@@ -173,6 +230,7 @@ def main():
     args = parse_args()
     server = ThreadingHTTPServer(("127.0.0.1", args.port), CreativeHealthHandler)
     server.access_token = args.token
+    server.event_buffer = SidecarEventBuffer()
     server.serve_forever()
 
 
@@ -592,6 +650,10 @@ def positive_int(value, default_value):
     except (TypeError, ValueError):
         return default_value
     return parsed if parsed > 0 else default_value
+
+
+def utc_now_text():
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
 def build_chat_url(base_url):

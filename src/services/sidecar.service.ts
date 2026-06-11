@@ -23,6 +23,22 @@ export interface SidecarStatusEventPayload extends SidecarStatusSnapshot {
   createdAt: string;
 }
 
+export interface SidecarRuntimeEvent {
+  id: number;
+  taskId: number | null;
+  workflowType: string | null;
+  eventType: string;
+  message: string | null;
+  payload: Record<string, unknown> | null;
+  createdAt: string;
+}
+
+export interface SidecarRuntimeEventsResponse {
+  ok: boolean;
+  nextCursor: number;
+  events: SidecarRuntimeEvent[];
+}
+
 function listenBrowserEvent<T>(
   eventName: string,
   callback: (payload: T) => void
@@ -58,5 +74,10 @@ export const sidecarService = {
   checkHealth: () => callTauri<SidecarStatusSnapshot>("check_sidecar_health"),
   stopDevHealthServer: () =>
     callTauri<SidecarStatusSnapshot>("stop_sidecar_dev_health_server"),
+  pollRuntimeEvents: (after = 0, limit = 100) =>
+    callTauri<SidecarRuntimeEventsResponse>("poll_sidecar_runtime_events", {
+      after,
+      limit,
+    }),
   listenStatusChanged: listenSidecarStatusChanged,
 };
