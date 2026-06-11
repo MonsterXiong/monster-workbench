@@ -3,6 +3,7 @@ import base64
 import binascii
 import json
 import os
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -59,6 +60,11 @@ class CreativeHealthHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         if not self._authorized():
             self._reject()
+            return
+
+        if self.path == "/shutdown":
+            self._write_json(HTTPStatus.OK, {"ok": True, "status": "shutting_down"})
+            threading.Thread(target=self.server.shutdown, daemon=True).start()
             return
 
         if self.path != "/tasks":

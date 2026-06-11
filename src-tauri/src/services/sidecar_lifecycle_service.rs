@@ -4,7 +4,7 @@ use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Manager, Runtime, Wry};
 
 const PYTHON_SIDECAR_ENV_ALLOWLIST: &[&str] = &[
@@ -26,6 +26,7 @@ const BATCH_IMAGE_PROMPT_WORKFLOW_TYPE: &str = "image.prompt.batch";
 const BATCH_IMAGE_GENERATE_TASK_TYPE: &str = "image.generate.batch";
 const BATCH_IMAGE_GENERATE_WORKFLOW_TYPE: &str = "image.generate.batch";
 const SIDECAR_RECOVERY_BACKOFF_MS: u128 = 5_000;
+const SIDECAR_SHUTDOWN_TIMEOUT_MS: u64 = 1_000;
 
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -215,7 +216,8 @@ impl<R: Runtime> SidecarLifecycleService<R> {
     }
 
     fn open_recovery_circuit(&mut self) {
-        self.recovery_backoff_until = Some(now_millis().saturating_add(SIDECAR_RECOVERY_BACKOFF_MS));
+        self.recovery_backoff_until =
+            Some(now_millis().saturating_add(SIDECAR_RECOVERY_BACKOFF_MS));
     }
 
     fn mark_recovery_failure(&mut self, message: String) {
@@ -302,9 +304,17 @@ impl<R: Runtime> SidecarLifecycleService<R> {
 
     pub fn stop_dev_health_server(&mut self) -> AppResult<SidecarStatusSnapshot> {
         self.snapshot.status = "stopping".to_string();
+        if let (Some(port), Some(token)) = (self.snapshot.port, self.runtime_token.as_deref()) {
+            let _ = request_shutdown(port, token);
+        }
         if let Some(mut child) = self.child.take() {
-            let _ = child.kill();
-            let _ = child.wait();
+            if !wait_child_exit(
+                &mut child,
+                Duration::from_millis(SIDECAR_SHUTDOWN_TIMEOUT_MS),
+            ) {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
         }
         self.snapshot.status = "stopped".to_string();
         self.snapshot.port = None;
@@ -675,6 +685,59 @@ fn health_check(port: u16, token: &str) -> AppResult<()> {
     )))
 }
 
+fn request_shutdown(port: u16, token: &str) -> AppResult<()> {
+    let mut stream = TcpStream::connect_timeout(
+        &format!("127.0.0.1:{port}")
+            .parse()
+            .map_err(|error| AppError::Process(format!("invalid shutdown endpoint: {error}")))?,
+        Duration::from_millis(500),
+    )
+    .map_err(|error| AppError::Process(format!("shutdown connect failed: {error}")))?;
+    stream
+        .set_read_timeout(Some(Duration::from_millis(500)))
+        .map_err(|error| {
+            AppError::Process(format!("failed to set shutdown read timeout: {error}"))
+        })?;
+    stream
+        .set_write_timeout(Some(Duration::from_millis(500)))
+        .map_err(|error| {
+            AppError::Process(format!("failed to set shutdown write timeout: {error}"))
+        })?;
+    let request = format!(
+        "POST /shutdown HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\nContent-Length: 0\r\nX-Monster-Token: {token}\r\n\r\n"
+    );
+    stream
+        .write_all(request.as_bytes())
+        .map_err(|error| AppError::Process(format!("shutdown request failed: {error}")))?;
+
+    let mut response = String::new();
+    stream
+        .read_to_string(&mut response)
+        .map_err(|error| AppError::Process(format!("shutdown response failed: {error}")))?;
+    if response.contains("200 OK") && response.contains("shutting_down") {
+        return Ok(());
+    }
+
+    Err(AppError::Process(format!(
+        "unexpected shutdown response: {}",
+        response.lines().next().unwrap_or("empty response")
+    )))
+}
+
+fn wait_child_exit(child: &mut Child, timeout: Duration) -> bool {
+    let started = Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => return true,
+            Ok(None) if started.elapsed() < timeout => {
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            Ok(None) => return false,
+            Err(_) => return false,
+        }
+    }
+}
+
 fn post_json(
     port: u16,
     token: &str,
@@ -816,6 +879,43 @@ mod tests {
             .stop_dev_health_server()
             .expect("stop should clear recovery circuit");
 
+        assert_eq!(snapshot.status, "stopped");
+        assert!(service.recovery_backoff_until.is_none());
+    }
+
+    #[test]
+    fn stop_dev_health_server_requests_graceful_shutdown() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
+        let port = listener
+            .local_addr()
+            .expect("listener addr should exist")
+            .port();
+        let token = "sidecar-shutdown-test";
+        let (request_tx, request_rx) = mpsc::channel();
+        let handle = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("shutdown request should arrive");
+            let request = read_test_http_request(&mut stream);
+            request_tx
+                .send(request.clone())
+                .expect("shutdown request should send");
+            write_test_json_response(&mut stream, r#"{"ok":true,"status":"shutting_down"}"#);
+        });
+
+        let app = tauri::test::mock_app();
+        let mut service = SidecarLifecycleService::new(app.handle().clone());
+        service.set_test_endpoint(port, token);
+
+        let snapshot = service
+            .stop_dev_health_server()
+            .expect("stop should request graceful shutdown");
+
+        handle.join().expect("shutdown server should finish");
+        let request = request_rx
+            .recv()
+            .expect("shutdown request should be captured");
+
+        assert!(request.starts_with("POST /shutdown "));
+        assert!(request.contains(&format!("X-Monster-Token: {token}")));
         assert_eq!(snapshot.status, "stopped");
         assert!(service.recovery_backoff_until.is_none());
     }
