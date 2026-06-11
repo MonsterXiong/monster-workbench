@@ -1,4 +1,4 @@
-use crate::infra::creative_db::{
+﻿use crate::infra::creative_types::{
     CreateAssetLinkInput, CreateCreativeAssetInput, CreateCreativeTaskInput, CreateTaskEventInput,
     CreativeAsset, CreativeTask, ListAssetLinksFilter, ListCreativeAssetsFilter,
     ListCreativeTasksFilter, TaskEvent, UpdateCreativeTaskStatusInput,
@@ -108,7 +108,7 @@ impl<R: Runtime> TaskService<R> {
         }
     }
 
-    /// 开启一个模拟的后台长任务，用以测试进度通知机制
+    /// 寮€鍚竴涓ā鎷熺殑鍚庡彴闀夸换鍔★紝鐢ㄤ互娴嬭瘯杩涘害閫氱煡鏈哄埗
     pub fn start_dummy_task(&self, task_id: String, task_name: String) -> AppResult<()> {
         let handle = self.app_handle.clone();
         std::thread::spawn(move || {
@@ -122,9 +122,9 @@ impl<R: Runtime> TaskService<R> {
                     "running".to_string()
                 };
                 let message = if i == total_steps {
-                    "任务执行完毕".to_string()
+                    "浠诲姟鎵ц瀹屾瘯".to_string()
                 } else {
-                    format!("正在处理第 {}/{} 部分...", i, total_steps)
+                    format!("姝ｅ湪澶勭悊绗?{}/{} 閮ㄥ垎...", i, total_steps)
                 };
 
                 let payload = TaskProgressPayload {
@@ -200,7 +200,7 @@ impl<R: Runtime> TaskService<R> {
     pub fn create_asset_link(
         &self,
         input: CreateAssetLinkInput,
-    ) -> AppResult<crate::infra::creative_db::AssetLink> {
+    ) -> AppResult<crate::infra::creative_types::AssetLink> {
         validate_asset_link_input(&input)?;
         creative_asset_repo::create_asset_link(&self.db_path()?, input)
     }
@@ -208,7 +208,7 @@ impl<R: Runtime> TaskService<R> {
     pub fn list_asset_links(
         &self,
         filter: ListAssetLinksFilter,
-    ) -> AppResult<Vec<crate::infra::creative_db::AssetLink>> {
+    ) -> AppResult<Vec<crate::infra::creative_types::AssetLink>> {
         creative_asset_repo::list_asset_links(&self.db_path()?, filter)
     }
 
@@ -508,7 +508,7 @@ impl<R: Runtime> TaskService<R> {
         )?;
         let _ = creative_asset_repo::create_asset_link(
             &db_path,
-            crate::infra::creative_db::CreateAssetLinkInput {
+            crate::infra::creative_types::CreateAssetLinkInput {
                 source_asset_id: review_asset.id,
                 target_asset_id: source_asset.id,
                 link_type: "review_of".to_string(),
@@ -841,3 +841,4 @@ mod tests {
         let _ = std::fs::remove_dir_all(root);
     }
 }
+

@@ -1,4 +1,4 @@
-use crate::infra::creative_db::{
+﻿use crate::infra::creative_types::{
     CreateAssetLinkInput, CreateCreativeTaskInput, CreateTaskEventInput, CreativeAsset,
     CreativeTask, ListAssetLinksFilter, ListCreativeAssetsFilter, ListCreativeTasksFilter,
     TaskEvent, UpdateCreativeTaskStatusInput,
@@ -117,7 +117,7 @@ pub fn list_creative_assets(
 pub fn create_asset_link(
     input: CreateAssetLinkInput,
     state: TaskState<'_>,
-) -> Result<crate::infra::creative_db::AssetLink, String> {
+) -> Result<crate::infra::creative_types::AssetLink, String> {
     let service = state.lock().unwrap_or_else(|e| e.into_inner());
     service
         .create_asset_link(input)
@@ -128,9 +128,10 @@ pub fn create_asset_link(
 pub fn list_asset_links(
     filter: Option<ListAssetLinksFilter>,
     state: TaskState<'_>,
-) -> Result<Vec<crate::infra::creative_db::AssetLink>, String> {
+) -> Result<Vec<crate::infra::creative_types::AssetLink>, String> {
     let service = state.lock().unwrap_or_else(|e| e.into_inner());
     service
         .list_asset_links(filter.unwrap_or_default())
         .map_err(|e| e.to_json_string())
 }
+

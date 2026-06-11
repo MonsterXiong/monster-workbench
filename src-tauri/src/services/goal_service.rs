@@ -1,4 +1,4 @@
-use crate::infra::creative_db::{
+﻿use crate::infra::creative_types::{
     CreateCreativeGoalInput, CreateCreativeGoalRoleInput, CreateCreativeTaskInput,
     CreateTaskEventInput, CreativeGoal, CreativeGoalRole, CreativeTask,
     ListCreativeGoalRolesFilter, ListCreativeGoalsFilter, UpdateCreativeGoalStatusInput,
@@ -398,3 +398,4 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 }
+

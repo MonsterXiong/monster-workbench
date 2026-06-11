@@ -1,4 +1,4 @@
-use crate::infra::creative_db::CreativeTask;
+﻿use crate::infra::creative_types::CreativeTask;
 use crate::services::worker_queue_service::{
     WorkerQueueCancelResult, WorkerQueueRecoverySummary, WorkerQueueService,
 };
@@ -50,3 +50,4 @@ pub fn recover_interrupted_creative_tasks(
         .recover_interrupted_tasks()
         .map_err(|e| e.to_json_string())
 }
+

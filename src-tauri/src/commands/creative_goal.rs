@@ -1,4 +1,4 @@
-use crate::infra::creative_db::{CreateCreativeGoalInput, CreativeGoal, ListCreativeGoalsFilter};
+﻿use crate::infra::creative_types::{CreateCreativeGoalInput, CreativeGoal, ListCreativeGoalsFilter};
 use crate::services::goal_service::{
     CreateGoalMultiAgentStubInput, CreativeGoalStatusSnapshot, GoalService,
 };
@@ -57,3 +57,4 @@ pub fn stop_creative_goal(
     let service = state.lock().unwrap_or_else(|e| e.into_inner());
     service.stop_goal(goal_id).map_err(|e| e.to_json_string())
 }
+

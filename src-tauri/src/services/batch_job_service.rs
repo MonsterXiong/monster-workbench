@@ -1,4 +1,4 @@
-use crate::infra::creative_db::{
+﻿use crate::infra::creative_types::{
     CreateCreativeAssetInput, CreateCreativeBatchJobInput, CreateCreativeTaskInput,
     CreateModelRunInput, CreateTaskEventInput, CreativeBatchJob, CreativeBatchJobSnapshot,
     CreativeTask, ListCreativeBatchJobsFilter, ListCreativeTasksFilter, UpdateCreativeBatchJobInput,
@@ -1788,7 +1788,7 @@ fn current_retry_count(task: &CreativeTask) -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::infra::creative_db::{
+    use crate::infra::creative_types::{
         CreativeAsset, ListCreativeAssetsFilter, ListModelRunsFilter, UpdateCreativeBatchJobInput,
     };
     use crate::infra::creative_db_schema::init_schema;
@@ -2436,3 +2436,4 @@ mod tests {
         let _ = std::fs::remove_dir_all(root);
     }
 }
+
