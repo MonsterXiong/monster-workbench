@@ -1,11 +1,11 @@
-﻿use crate::infra::creative_types::{
-    CreateCreativeGoalInput, CreateCreativeGoalRoleInput,
-    CreativeGoal, CreativeGoalRole, CreativeTask, ListCreativeGoalRolesFilter,
-    ListCreativeGoalsFilter, ListCreativeTasksFilter, UpdateCreativeGoalStatusInput,
-};
 use crate::infra::creative_db_schema::init_schema;
 use crate::infra::creative_db_support::{connect, map_creative_goal, map_creative_goal_role};
 use crate::infra::creative_task_repo;
+use crate::infra::creative_types::{
+    CreateCreativeGoalInput, CreateCreativeGoalRoleInput, CreativeGoal, CreativeGoalRole,
+    CreativeTask, ListCreativeGoalRolesFilter, ListCreativeGoalsFilter, ListCreativeTasksFilter,
+    UpdateCreativeGoalStatusInput,
+};
 use crate::infra::{AppError, AppResult};
 use rusqlite::{params, params_from_iter, types::Value, Connection, OptionalExtension};
 use std::path::Path;
@@ -222,4 +222,3 @@ fn non_empty_filter(value: Option<String>) -> Option<String> {
         }
     })
 }
-

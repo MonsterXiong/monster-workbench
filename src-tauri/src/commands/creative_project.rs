@@ -1,4 +1,4 @@
-﻿use crate::infra::creative_types::{
+use crate::infra::creative_types::{
     CreativeProject, ListCreativeProjectsFilter, UpsertCreativeProjectInput,
 };
 use crate::services::creative_project_service::CreativeProjectService;
@@ -37,4 +37,3 @@ pub fn list_creative_projects(
         .list_projects(filter.unwrap_or_default())
         .map_err(|e| e.to_json_string())
 }
-

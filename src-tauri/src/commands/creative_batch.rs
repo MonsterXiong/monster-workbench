@@ -1,4 +1,4 @@
-﻿use crate::infra::creative_types::{
+use crate::infra::creative_types::{
     CreativeBatchJob, CreativeBatchJobSnapshot, CreativeTask, ListCreativeBatchJobsFilter,
 };
 use crate::services::batch_job_service::{BatchJobService, CreateBatchImageJobInput};
@@ -96,4 +96,3 @@ pub fn list_batch_job_tasks(
         .list_batch_job_tasks(batch_job_id, limit, offset)
         .map_err(|e| e.to_json_string())
 }
-

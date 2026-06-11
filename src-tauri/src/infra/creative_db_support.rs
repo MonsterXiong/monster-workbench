@@ -1,4 +1,4 @@
-﻿use crate::infra::creative_types::{
+use crate::infra::creative_types::{
     AssetLink, CreativeAsset, CreativeBatchJob, CreativeGoal, CreativeGoalRole, CreativeProject,
     CreativeTask, ModelRun, TaskEvent,
 };
@@ -194,4 +194,3 @@ pub(crate) fn map_creative_project(row: &rusqlite::Row<'_>) -> rusqlite::Result<
         archived_at: row.get(8)?,
     })
 }
-

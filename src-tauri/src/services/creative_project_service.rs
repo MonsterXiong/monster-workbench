@@ -1,5 +1,7 @@
-﻿use crate::infra::creative_types::{CreativeProject, ListCreativeProjectsFilter, UpsertCreativeProjectInput};
 use crate::infra::creative_project_repo;
+use crate::infra::creative_types::{
+    CreativeProject, ListCreativeProjectsFilter, UpsertCreativeProjectInput,
+};
 use crate::infra::path::PathProvider;
 use crate::infra::AppResult;
 
@@ -31,4 +33,3 @@ impl CreativeProjectService {
         self.path_provider.get_db_file_path()
     }
 }
-

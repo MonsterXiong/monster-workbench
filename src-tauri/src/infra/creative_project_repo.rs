@@ -1,8 +1,8 @@
-﻿use crate::infra::creative_types::{
-    CreativeProject, ListCreativeProjectsFilter, UpsertCreativeProjectInput,
-};
 use crate::infra::creative_db_schema::init_schema;
 use crate::infra::creative_db_support::{connect, map_creative_project};
+use crate::infra::creative_types::{
+    CreativeProject, ListCreativeProjectsFilter, UpsertCreativeProjectInput,
+};
 use crate::infra::{AppError, AppResult};
 use rusqlite::{params, params_from_iter, types::Value, Connection, OptionalExtension};
 use std::path::Path;
@@ -199,4 +199,3 @@ mod tests {
         let _ = std::fs::remove_file(db_path);
     }
 }
-

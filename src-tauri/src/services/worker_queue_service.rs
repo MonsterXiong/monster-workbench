@@ -1,7 +1,7 @@
-﻿use crate::infra::creative_types::{
+use crate::infra::creative_task_repo;
+use crate::infra::creative_types::{
     CreateTaskEventInput, CreativeTask, ListCreativeTasksFilter, UpdateCreativeTaskStatusInput,
 };
-use crate::infra::creative_task_repo;
 use crate::infra::path::PathProvider;
 use crate::infra::{AppError, AppResult};
 
@@ -236,8 +236,8 @@ impl WorkerQueueService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::infra::creative_types::CreateCreativeTaskInput;
     use crate::infra::creative_db_schema::init_schema;
+    use crate::infra::creative_types::CreateCreativeTaskInput;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -371,4 +371,3 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 }
-

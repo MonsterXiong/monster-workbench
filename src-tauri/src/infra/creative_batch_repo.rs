@@ -1,11 +1,11 @@
-﻿use crate::infra::creative_types::{
-    CreateCreativeBatchJobInput, CreativeBatchJob, CreativeBatchJobSnapshot,
-    CreativeBatchJobStats, CreativeTask, ListCreativeBatchJobsFilter, ListCreativeTasksFilter,
-    UpdateCreativeBatchJobInput,
-};
 use crate::infra::creative_db_schema::init_schema;
 use crate::infra::creative_db_support::{connect, map_creative_batch_job};
 use crate::infra::creative_task_repo;
+use crate::infra::creative_types::{
+    CreateCreativeBatchJobInput, CreativeBatchJob, CreativeBatchJobSnapshot, CreativeBatchJobStats,
+    CreativeTask, ListCreativeBatchJobsFilter, ListCreativeTasksFilter,
+    UpdateCreativeBatchJobInput,
+};
 use crate::infra::{AppError, AppResult};
 use rusqlite::{params, params_from_iter, types::Value, Connection, OptionalExtension};
 use std::path::Path;
@@ -401,8 +401,7 @@ mod tests {
         assert_eq!(listed_jobs.len(), 1);
         assert_eq!(listed_jobs[0].id, job.id);
 
-        let listed_tasks = list_batch_job_tasks(&db_path, job.id)
-            .expect("batch tasks should list");
+        let listed_tasks = list_batch_job_tasks(&db_path, job.id).expect("batch tasks should list");
         assert_eq!(listed_tasks.len(), 3);
         assert!(listed_tasks.iter().any(|task| task.id == task_1.id));
         assert!(listed_tasks.iter().any(|task| task.id == task_2.id));
@@ -411,4 +410,3 @@ mod tests {
         let _ = std::fs::remove_file(db_path);
     }
 }
-
