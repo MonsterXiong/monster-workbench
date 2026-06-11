@@ -1972,3 +1972,33 @@ Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `
 
 - `npm run check:architecture`
 - `npm run typecheck`
+
+## 2026-06-12 补充：sidecar diagnostics 摘要持久化
+
+本轮在不新增 DB 表、不改变 `task_events` 可信审计边界的前提下，为 `/events` 诊断流补了 Rust-owned 物理日志落点。
+
+代码事实：
+
+- `src-tauri/src/commands/creative_sidecar.rs` 的 `poll_sidecar_runtime_events` 现在会在成功拉取 `/events` 后，把新的 runtime events 摘要 best-effort 写入 `sidecar-runtime.log`。
+- 写入仍走 `LogService` / `LoggerInfra`，文件名固定，路径仍在 `~/.monster-tools/logs`，日志内容会经过既有敏感信息脱敏。
+- 诊断日志行只包含 `runtimeInstanceId`、`runtimeStartedAt`、source event id、taskId、workflowType、eventType 和 message 摘要，不写 payload、完整 prompt、大对象、base64 或密钥。
+- `SidecarLifecycleService` 维护 runtime event source key 去重缓存，key 使用 `runtimeInstanceId + runtimeStartedAt + sourceEventId`，避免 UI 重复 polling 时重复写入日志；缓存上限为 2000 个 key。
+- 系统诊断导出本来会收集 `logs/*.log`，因此 `sidecar-runtime.log` 会自然进入诊断包，不需要新增导出链路。
+
+边界判定：
+
+| 区域 | 当前状态 | 下一步 |
+|---|---|---|
+| `/events` 诊断持久化 | 第一阶段落 `sidecar-runtime.log` 摘要 | 观察是否足够；需要结构化查询时再设计 diagnostics 表 |
+| `task_events` | 仍只由 Rust settle 写可信审计 | 不从 `/events` 全量回灌 |
+| payload / 大对象 | 不写入诊断日志 | 继续保持摘要字段和脱敏 |
+| 去重 | Rust lifecycle service 内存 key cache | 若未来跨会话去重，再引入结构化 diagnostics 记录 |
+
+本轮验证通过：
+
+- `cargo test --manifest-path .\\src-tauri\\Cargo.toml services::sidecar_lifecycle_service::tests::runtime_event_diagnostics_dedupes_by_runtime_source_key -- --nocapture --test-threads=1`
+- `cargo test --manifest-path .\\src-tauri\\Cargo.toml commands::creative_sidecar::tests::format_sidecar_runtime_event_omits_payload_and_compacts_message -- --nocapture --test-threads=1`
+- `cargo test --manifest-path .\\src-tauri\\Cargo.toml services::sidecar_lifecycle_service::tests::poll_runtime_events_uses_cursor_query_and_parses_events -- --nocapture --test-threads=1`
+- `python src-tauri\\sidecars\\python\\test_creative_health_server.py`
+- `npm run check:architecture`
+- `npm run typecheck`

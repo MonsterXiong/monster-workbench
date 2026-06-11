@@ -90,7 +90,8 @@ Provider Gateway -> 管业务状态
 - 只有能关联到已知 `creative_tasks.id`、且未通过 `/tasks` result settle 落过库的任务语义事件，才可由 Rust 转成 `task_events`。
 - lifecycle、provider 细节、恢复/关闭耗时、runtime 异常等非任务审计信息，应进入 Rust 控制的诊断记录或物理日志，不混入 `task_events`。
 - 持久化 payload 只能包含小型摘要、ID、状态、耗时、错误码等字段，不存 API key、完整 prompt、大文本、base64、大响应体或未授权文件路径。
-- `/events` response 和 event 已携带 `runtimeInstanceId` / `runtimeStartedAt`；持久化时必须把它们和 source event id 一起作为来源边界，不能单独依赖 Python 进程内自增 `id`。
+- `/events` response 和 event 已携带 `runtimeInstanceId` / `runtimeStartedAt`；Rust 会把它们和 source event id 组合成诊断来源键，不能单独依赖 Python 进程内自增 `id`。
+- 当前第一阶段持久化落点是 Rust-owned 物理日志 `sidecar-runtime.log`，由 `poll_sidecar_runtime_events` 在成功拉取后 best-effort 写入。日志行只包含 runtime/source id、taskId、workflowType、eventType、message 摘要，不写 payload；具体落盘仍经过 `LoggerInfra` 脱敏，并会被系统诊断导出收集。
 
 ## 7. 推荐迁移模式：Rust 主动提交，Python 执行业务
 
@@ -302,7 +303,7 @@ Python step boundary
 | `run_prompt_task_worker` / `run_generate_task_worker` | 检查取消、构造 sidecar request、提交 Python workflow、交给 settle 归档 | 过渡 worker shell | 不新增生产 worker 分支；新增正式 workflow 走 sidecar runtime |
 | `settle_batch_prompt_sidecar_response` / `settle_batch_image_sidecar_response` | 校验 protocol/taskId/status，写入 asset/model_runs/task_events/status | Rust 可信落库和审计面，保留 | protocol 校验、sidecar events、model_runs、普通 ready asset 与 batch failure/cancelled 状态映射已收口；image 文件 success settle 仍因路径授权和 thumbnail 生成保留在 batch 服务 |
 | `validate_sidecar_output_file` / `copy_sidecar_thumbnail` | 校验 Python 输出文件仍在 Rust 授权目录内，并生成缩略图 | Rust 权限与文件边界，保留 | Python 不返回可直接信任的任意绝对路径 |
-| Python sidecar `/events` | 已有内存 ring buffer、runtime instance 字段与 Rust `poll_sidecar_runtime_events` 读取入口 | 过渡诊断流，继续保留 | 不替代 Rust settle 写入的 `task_events`；持久化前仍必须先有 Rust 侧过滤、脱敏、限流和去重策略 |
+| Python sidecar `/events` | 已有内存 ring buffer、runtime instance 字段、Rust `poll_sidecar_runtime_events` 读取入口和 `sidecar-runtime.log` 摘要日志 | 过渡诊断流，继续保留 | 不替代 Rust settle 写入的 `task_events`；继续只写诊断摘要，不写 payload / 大对象 / 密钥 |
 | `useSidecarStore` / 设置诊断页 | 只读展示 runtime instance、cursor 和最近事件 | 可保留 | 先 `get_sidecar_status`，只有 status 为 `running` 才 polling，避免打开诊断页主动启动 sidecar |
 | `build_prompt_request` | Rust 侧替换 `{{sequenceNo}}` / `{{index}}` | demo-era prompt builder 残留 | 正式 batch prompt builder 放到 Python；Rust 只传 template/input/context |
 | `build_provider_config` / `build_image_provider_config` | 把 batch payload 适配成 `AiProviderConfig` | 测试链路 DTO 语义残留 | 后续改向正式 workflow provider DTO，避免让 `AiProviderService` 测试语义回流到生产 runtime |
@@ -311,8 +312,8 @@ Python step boundary
 ### 12.3 当前推进顺序
 
 1. UI / browser mock 的 prompt/generate batch type 提交值已切到 `image.prompt.batch` / `image.generate.batch`；旧 `demo.image.prompt/generate` 只作为历史兼容保留。
-2. 共享 `SidecarLifecycleService` 已具备首段 recovery circuit / backoff、graceful shutdown、恢复可观测字段、节流后的 Tauri 生命周期事件、Python `/events` polling 入口、runtime instance 字段和设置诊断页只读消费；继续补恢复/关闭事件记录或 Rust-owned 诊断持久化策略。
-3. 再抽象 Rust workflow submit/settle 公共路径，减少 `TaskService` 和 `BatchJobService` 内重复的 sidecar 状态映射；当前已先落地 sidecar 协议校验、事件落库、model_runs 持久化、普通 ready asset 创建和 batch failure/cancelled 状态映射 helper，下一步再评估 image success settle 或 Rust-owned 诊断记录。
+2. 共享 `SidecarLifecycleService` 已具备首段 recovery circuit / backoff、graceful shutdown、恢复可观测字段、节流后的 Tauri 生命周期事件、Python `/events` polling 入口、runtime instance 字段、设置诊断页只读消费和 `sidecar-runtime.log` 摘要持久化；继续补恢复/关闭事件记录或更正式的 Rust-owned diagnostics 表/导出策略。
+3. 再抽象 Rust workflow submit/settle 公共路径，减少 `TaskService` 和 `BatchJobService` 内重复的 sidecar 状态映射；当前已先落地 sidecar 协议校验、事件落库、model_runs 持久化、普通 ready asset 创建和 batch failure/cancelled 状态映射 helper，下一步再评估 image success settle 或恢复/关闭诊断记录。
 4. 最后才评估 supervisor 是否迁给 Python worker pool；迁移前必须先有受控 claim/checkpoint/complete API，不允许 Python 任意写主库。
 
 ### 12.4 当前边界结论
@@ -324,7 +325,7 @@ Python step boundary
 - 不再为新的正式 batch workflow 增加 Rust worker 分支；新增 workflow 应走统一 sidecar request/result 协议，Rust 只做控制、校验、授权路径和可信落库。
 - `build_prompt_request` 与 `AiProviderConfig` 适配是当前最明确的 demo/test 语义残留；后续应先迁成 Python prompt builder 和正式 workflow provider DTO。
 - `settle_sidecar_non_success`、`settle_batch_prompt_sidecar_response`、`settle_batch_image_sidecar_response` 代表同一类 Rust 可信 settle 逻辑；当前已先抽出 sidecar 协议校验、事件落库、model_runs 持久化、普通 ready asset 创建和 batch failure/cancelled 状态映射 helper，后续再评估 image success settle 或 Python `/events` polling，而不是把落库职责迁到 Python。
-- `SidecarLifecycleService` 已有恢复冷却、受控 shutdown、恢复失败指标、节流后的 Tauri 生命周期事件、Python `/events` polling、runtime instance 字段和设置诊断页只读消费，下一步不要急着上 Python worker pool；先补恢复/关闭记录、Rust-owned 诊断持久化策略或 Rust submit/settle 公共路径。
+- `SidecarLifecycleService` 已有恢复冷却、受控 shutdown、恢复失败指标、节流后的 Tauri 生命周期事件、Python `/events` polling、runtime instance 字段、设置诊断页只读消费和 `sidecar-runtime.log` 摘要持久化，下一步不要急着上 Python worker pool；先补恢复/关闭记录、正式 diagnostics 表/导出策略或 Rust submit/settle 公共路径。
 
 ## 13. 不变量
 
