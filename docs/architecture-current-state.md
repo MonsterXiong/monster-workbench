@@ -1865,6 +1865,7 @@ Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `
 - image success settle 的资产创建和成功状态 result_json 仍然留在 `BatchJobService`，因为它包含输出文件路径授权、thumbnail 生成和 image-specific metadata。
 - `src-tauri/sidecars/python/creative_health_server.py` 的 `GET /events` 已从空 stub 升级为内存 ring buffer：每次 `/tasks` 返回前会把 workflow result 中的 `events` 追加到 buffer，`GET /events?after=<cursor>&limit=<n>` 返回 `events` 和 `nextCursor`。
 - `src-tauri/src/services/sidecar_lifecycle_service.rs` 新增 `SidecarRuntimeEvent` / `SidecarRuntimeEventsResponse` 与 `poll_runtime_events`，`commands/creative_sidecar.rs` 新增 Tauri command `poll_sidecar_runtime_events`，前端 `src/services/sidecar.service.ts` 与 browser mock 已补齐只读入口。
+- `commands/creative_task.rs` 的 `run_generate_image_prompt_workflow` 已改为 endpoint-provider 模式：只在获取 sidecar endpoint 时短暂持有 lifecycle mutex，实际 `/tasks` 长请求通过 `SidecarLifecycleService::submit_generate_image_prompt_to_endpoint` 在锁外执行，和 batch prompt/image 提交路径的锁粒度保持一致。
 
 边界判定：
 
@@ -1878,6 +1879,7 @@ Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `
 | image success settle | 仍保留在 `BatchJobService` | 继续保留 Rust 路径授权和 thumbnail 边界，后续只抽真正稳定的状态/result_json 小片段 |
 | Rust sidecar lifecycle event | 已有 Tauri `creative-sidecar-status-changed` | 作为控制面观测能力保留；如需跨会话审计再设计持久化 |
 | Python sidecar `/events` | 已有内存 buffer 与 Rust polling command | 下一步设计事件持久化策略和 UI 诊断消费；不替代 Rust `task_events` |
+| 普通 prompt workflow sidecar 锁粒度 | 已释放 `/tasks` 长请求期间的 lifecycle mutex | 保持 endpoint-provider 模式；后续通用 workflow submit/settle 沿用该锁边界 |
 | batch supervisor | 仍保留 Rust | 不因 settle 收口就迁到 Python worker pool |
 
 继续评估后的结论：当前不要继续强抽 batch image success settle，也不要把 Rust batch supervisor 提前迁给 Python。Python `/events` 已能作为 workflow 诊断事件流被 Rust 拉取，下一步更有价值的是明确这些事件哪些进入 Rust 受控的 `task_events`/诊断记录，再评估受控 worker-pool API。
@@ -1888,3 +1890,5 @@ Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `
 - `cargo test --manifest-path .\\src-tauri\\Cargo.toml services::batch_job_service::tests:: -- --nocapture --test-threads=1`
 - `cargo test --manifest-path .\\src-tauri\\Cargo.toml services::sidecar_lifecycle_service::tests::poll_runtime_events_uses_cursor_query_and_parses_events -- --nocapture --test-threads=1`
 - `python src-tauri\\sidecars\\python\\test_creative_health_server.py`
+- `cargo test --manifest-path .\\src-tauri\\Cargo.toml services::task_service::tests::generate_image_prompt_workflow_persists_task_asset_and_events -- --nocapture --test-threads=1`
+- `cargo test --manifest-path .\\src-tauri\\Cargo.toml services::task_service::tests::generate_image_prompt_workflow_maps_sidecar_failure_result -- --nocapture --test-threads=1`
