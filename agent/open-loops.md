@@ -20,6 +20,9 @@
 ## 文档维护待办
 
 - [ ] 以代码事实为准继续同步 `docs/architecture-current-state.md`，至少修正 `useTaskStore` 退场、Creative store 拆分现状，以及 AI facade 最新边界。
+- [ ] 基于当前 `/creative` 三栏工作台的实际代码边界，继续评审“正式业务核心”和“原型/展示壳层”的分界，决定后续是否拆出正式工作台页面。
+- [ ] 基于本轮 batch repo 化进展，继续评估 Rust `src-tauri/src/services/batch_job_service.rs` 的剩余 orchestration 边界，明确哪些 supervisor / worker / provider 流程继续留在 Rust，哪些应为后续 Python runtime 正式化预留出口。
+- [ ] 评估 `src-tauri/src/infra/creative_db.rs` 的下一轮收口方式：当前生产代码已不再直接依赖 `CreativeDbInfra`，下一步需要决定是继续保留其“类型汇总 + 遗留 façade + 测试入口”角色，还是把 shared types 进一步拆到更细粒度领域模块。
 - [ ] 如后续继续扩写架构材料，优先更新现有基线、路线图和执行清单，不再平行新增重复摘要文档。
 
 ## 维护规则
