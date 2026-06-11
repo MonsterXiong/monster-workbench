@@ -1855,9 +1855,10 @@ Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `
 
 代码事实：
 
-- 新增 `src-tauri/src/services/workflow_settle_service.rs`，把 sidecar 结果的协议校验与事件落库抽成通用 helper。
+- 新增 `src-tauri/src/services/workflow_settle_service.rs`，把 sidecar 结果的协议校验、事件落库与 model_runs 持久化抽成通用 helper。
 - `validate_sidecar_task_result` 统一检查 `protocolVersion` 与 `taskId`，避免 `TaskService` 和 `BatchJobService` 各自重复写一遍基础协议门。
 - `append_sidecar_result_events` 统一把 sidecar 返回的 `events` 持久化为 `task_events`，`TaskService` 继续保留自身的 `events` 聚合结果，`BatchJobService` 只关心可信落库。
+- `persist_sidecar_model_runs` 统一把 sidecar 返回的 `modelRuns` 持久化为 `model_runs`；普通 task 保留 sidecar 自带 `promptHash`，batch prompt/image 仍用 `simple_prompt_hash(prompt_request)` 做 fallback。
 - `TaskService::run_generate_image_prompt_workflow`、`settle_batch_prompt_sidecar_response` 和 `settle_batch_image_sidecar_response` 都已切换到这个 helper；资产创建、取消/重试分支和最终状态映射仍然留在各自服务里。
 
 边界判定：
@@ -1866,7 +1867,8 @@ Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `
 |---|---|---|
 | sidecar protocol 校验 | 已抽通用 helper | 保持不变 |
 | sidecar events 落库 | 已抽通用 helper | 保持不变 |
-| model run / asset / status settle | 仍分散在 `TaskService` / `BatchJobService` | 继续评估是否抽公共 model run/状态映射 helper |
+| sidecar model_runs 落库 | 已抽通用 helper | 保持不变 |
+| asset / status settle | 仍分散在 `TaskService` / `BatchJobService` | 继续评估是否抽公共 asset/status mapping helper |
 | batch supervisor | 仍保留 Rust | 不因 settle 收口就迁到 Python worker pool |
 
 本轮验证通过：
