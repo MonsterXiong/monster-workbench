@@ -5,6 +5,7 @@ import { storeToRefs } from "pinia";
 import { useToast } from "../../../composables/useToast";
 import { useConfirm } from "../../../composables/useConfirm";
 import { useLoading } from "../../../composables/useLoading";
+import { useSidecarStore } from "../../../stores/sidecar";
 import { useSystemStore } from "../../../stores/system";
 import { getErrorMessage, getLogLevelFromText, isWindowsUserAgent } from "../../../utils";
 
@@ -12,6 +13,7 @@ const { triggerToast } = useToast();
 const { confirm } = useConfirm();
 const { showLoading, hideLoading } = useLoading();
 const systemStore = useSystemStore();
+const sidecarStore = useSidecarStore();
 const {
   localPath,
   dbStatus,
@@ -19,6 +21,15 @@ const {
   todayLogFileName,
   recentLogLines,
 } = storeToRefs(systemStore);
+const {
+  status: sidecarStatus,
+  runtimeInstanceId,
+  runtimeStartedAt,
+  runtimeCursor,
+  recentRuntimeEvents,
+  runtimeEventLoading,
+  runtimeEventError,
+} = storeToRefs(sidecarStore);
 
 const appVersion = computed(() => isDesktopRuntime.value ? "V0.0.3-Native" : "V0.0.3-Browser (Mock)");
 const platform = computed(() => {
@@ -32,6 +43,18 @@ const dbStatusText = computed(() => {
   if (dbStatus.value === "checking") return "检查中";
   return "离线";
 });
+const sidecarStatusText = computed(() => sidecarStatus.value?.status || "unknown");
+
+function formatRuntimeEventTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleTimeString("zh-CN", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+}
 
 // 加载日志
 function getDiagnosticLogClass(log: string) {
@@ -51,6 +74,10 @@ async function loadLogs() {
   } catch (err) {
     console.error("加载日志失败", err);
   }
+}
+
+async function handleRefreshSidecarEvents() {
+  await sidecarStore.refreshRuntimeEvents();
 }
 
 // 清除物理日志
@@ -90,6 +117,7 @@ async function handleExportDiagnostics() {
 
 onMounted(async () => {
   await systemStore.loadDiagnostics("未找到");
+  await sidecarStore.refreshRuntimeEvents();
   await loadLogs();
 });
 </script>
@@ -167,6 +195,62 @@ onMounted(async () => {
         <template #icon><Download class="h-3.5 w-3.5" /></template>
         导出诊断包
       </BaseButton>
+    </div>
+
+    <!-- Sidecar runtime 诊断流 -->
+    <div class="p-4 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 flex flex-col min-h-0">
+      <div class="flex items-center justify-between border-b border-slate-250 dark:border-slate-800 pb-3 mb-3">
+        <div class="flex items-center gap-2 min-w-0">
+          <span class="h-1.5 w-1.5 rounded-full" :class="sidecarStatusText === 'running' ? 'bg-emerald-500' : 'bg-slate-400'"></span>
+          <div class="min-w-0">
+            <div class="text-[10px] font-black tracking-wider text-slate-500 dark:text-slate-400 uppercase">
+              Sidecar runtime events
+            </div>
+            <div class="text-[9px] text-slate-500 dark:text-slate-500 font-mono truncate">
+              {{ runtimeInstanceId || 'no-runtime' }} · cursor {{ runtimeCursor }}
+            </div>
+          </div>
+        </div>
+        <button
+          class="action-btn text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-100 hover:bg-slate-200/50 dark:hover:bg-slate-800"
+          title="刷新 sidecar runtime events"
+          :disabled="runtimeEventLoading"
+          @click="handleRefreshSidecarEvents"
+        >
+          <RefreshCw class="h-3.5 w-3.5" :class="{ 'animate-spin': runtimeEventLoading }" />
+        </button>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-2 mb-3 text-[10px] font-bold text-slate-600 dark:text-slate-400">
+        <div class="rounded-lg bg-slate-50 dark:bg-slate-900 px-2 py-1.5">
+          状态：<span class="text-slate-800 dark:text-slate-200">{{ sidecarStatusText }}</span>
+        </div>
+        <div class="rounded-lg bg-slate-50 dark:bg-slate-900 px-2 py-1.5">
+          启动：<span class="text-slate-800 dark:text-slate-200">{{ runtimeStartedAt || '-' }}</span>
+        </div>
+        <div class="rounded-lg bg-slate-50 dark:bg-slate-900 px-2 py-1.5">
+          事件：<span class="text-slate-800 dark:text-slate-200">{{ recentRuntimeEvents.length }}</span>
+        </div>
+      </div>
+
+      <div v-if="runtimeEventError" class="rounded-lg bg-amber-500/10 text-amber-700 dark:text-amber-300 px-3 py-2 text-[10px] font-bold">
+        {{ runtimeEventError }}
+      </div>
+      <div v-else class="overflow-y-auto no-scrollbar font-mono text-[9px] leading-relaxed space-y-1.5 max-h-40 select-text">
+        <div v-if="recentRuntimeEvents.length === 0" class="text-slate-500 text-center py-4 font-bold">
+          暂无 sidecar runtime events
+        </div>
+        <div
+          v-for="event in recentRuntimeEvents"
+          :key="`${event.runtimeInstanceId || 'runtime'}-${event.id}`"
+          class="p-1.5 rounded bg-slate-50 dark:bg-slate-900 text-slate-700 dark:text-slate-300"
+        >
+          <span class="text-slate-500">[{{ formatRuntimeEventTime(event.createdAt) }}]</span>
+          <span class="text-sky-600 dark:text-sky-300">{{ event.eventType }}</span>
+          <span v-if="event.taskId" class="text-slate-500">#{{ event.taskId }}</span>
+          <span v-if="event.message"> {{ event.message }}</span>
+        </div>
+      </div>
     </div>
 
     <!-- 日志流追踪审计看板 -->
