@@ -25,6 +25,7 @@ const BATCH_IMAGE_PROMPT_TASK_TYPE: &str = "image.prompt.batch";
 const BATCH_IMAGE_PROMPT_WORKFLOW_TYPE: &str = "image.prompt.batch";
 const BATCH_IMAGE_GENERATE_TASK_TYPE: &str = "image.generate.batch";
 const BATCH_IMAGE_GENERATE_WORKFLOW_TYPE: &str = "image.generate.batch";
+const SIDECAR_RECOVERY_BACKOFF_MS: u128 = 5_000;
 
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -176,6 +177,7 @@ pub struct SidecarLifecycleService<R: Runtime = Wry> {
     app_handle: AppHandle<R>,
     child: Option<Child>,
     runtime_token: Option<String>,
+    recovery_backoff_until: Option<u128>,
     snapshot: SidecarStatusSnapshot,
 }
 
@@ -191,6 +193,7 @@ impl<R: Runtime> SidecarLifecycleService<R> {
             app_handle,
             child: None,
             runtime_token: None,
+            recovery_backoff_until: None,
             snapshot: SidecarStatusSnapshot {
                 status: "stopped".to_string(),
                 port: None,
@@ -205,6 +208,32 @@ impl<R: Runtime> SidecarLifecycleService<R> {
     pub fn get_status(&mut self) -> SidecarStatusSnapshot {
         self.refresh_exit_status();
         self.snapshot.clone()
+    }
+
+    fn reset_recovery_circuit(&mut self) {
+        self.recovery_backoff_until = None;
+    }
+
+    fn open_recovery_circuit(&mut self) {
+        self.recovery_backoff_until = Some(now_millis().saturating_add(SIDECAR_RECOVERY_BACKOFF_MS));
+    }
+
+    fn mark_recovery_failure(&mut self, message: String) {
+        self.snapshot.status = "failed".to_string();
+        self.snapshot.last_error = Some(message);
+        self.snapshot.checked_at = Some(now_text());
+        self.open_recovery_circuit();
+    }
+
+    fn recovery_circuit_remaining_ms(&self) -> Option<u128> {
+        self.recovery_backoff_until
+            .map(|deadline| deadline.saturating_sub(now_millis()))
+    }
+
+    fn recovery_circuit_is_open(&self) -> bool {
+        self.recovery_circuit_remaining_ms()
+            .map(|remaining| remaining > 0)
+            .unwrap_or(false)
     }
 
     #[cfg(test)]
@@ -257,6 +286,7 @@ impl<R: Runtime> SidecarLifecycleService<R> {
                 self.snapshot.status = "running".to_string();
                 self.snapshot.last_error = None;
                 self.snapshot.checked_at = Some(now_text());
+                self.reset_recovery_circuit();
                 Ok(self.snapshot.clone())
             }
             Err(error) => {
@@ -281,6 +311,7 @@ impl<R: Runtime> SidecarLifecycleService<R> {
         self.snapshot.pid = None;
         self.snapshot.checked_at = Some(now_text());
         self.runtime_token = None;
+        self.reset_recovery_circuit();
         Ok(self.snapshot.clone())
     }
 
@@ -289,7 +320,29 @@ impl<R: Runtime> SidecarLifecycleService<R> {
     }
 
     pub fn ensure_dev_server(&mut self) -> AppResult<SidecarStatusSnapshot> {
-        let status = self.start_dev_health_server()?;
+        self.refresh_exit_status();
+        if matches!(self.snapshot.status.as_str(), "unhealthy" | "failed")
+            && self.recovery_circuit_is_open()
+        {
+            let remaining_ms = self.recovery_circuit_remaining_ms().unwrap_or(0);
+            return Err(AppError::Process(format!(
+                "sidecar recovery circuit open for {remaining_ms}ms after {}: {}",
+                self.snapshot.status,
+                self.snapshot
+                    .last_error
+                    .clone()
+                    .unwrap_or_else(|| "unknown".to_string())
+            )));
+        }
+
+        let status = match self.start_dev_health_server() {
+            Ok(status) => status,
+            Err(error) => {
+                let message = error.to_string();
+                self.mark_recovery_failure(message);
+                return Err(error);
+            }
+        };
         if status.status == "running" {
             return Ok(status);
         }
@@ -298,11 +351,23 @@ impl<R: Runtime> SidecarLifecycleService<R> {
             let previous_status = status.status.clone();
             let previous_error = status.last_error.clone();
             let _ = self.stop_dev_health_server();
-            let recovered = self.start_dev_health_server()?;
+            let recovered = match self.start_dev_health_server() {
+                Ok(status) => status,
+                Err(error) => {
+                    let error_message = error.to_string();
+                    self.mark_recovery_failure(error_message.clone());
+                    return Err(AppError::Process(format!(
+                        "sidecar recovery failed after {previous_status}: start failed: {error_message}; previous error: {}",
+                        previous_error.unwrap_or_else(|| "unknown".to_string())
+                    )));
+                }
+            };
             if recovered.status == "running" {
+                self.reset_recovery_circuit();
                 return Ok(recovered);
             }
 
+            self.open_recovery_circuit();
             return Err(AppError::Process(format!(
                 "sidecar recovery failed after {previous_status}: {}; previous error: {}",
                 recovered.status,
@@ -705,6 +770,54 @@ mod tests {
 
         assert!(budget.is_null());
         assert_eq!(budget_read_timeout(&budget), Duration::from_millis(125_000));
+    }
+
+    #[test]
+    fn recovery_failure_opens_circuit() {
+        let app = tauri::test::mock_app();
+        let mut service = SidecarLifecycleService::new(app.handle().clone());
+
+        service.mark_recovery_failure("sidecar failed to start".to_string());
+
+        assert_eq!(service.snapshot.status, "failed");
+        assert_eq!(
+            service.snapshot.last_error.as_deref(),
+            Some("sidecar failed to start")
+        );
+        assert!(service.recovery_circuit_is_open());
+    }
+
+    #[test]
+    fn ensure_dev_server_respects_recovery_circuit() {
+        let app = tauri::test::mock_app();
+        let mut service = SidecarLifecycleService::new(app.handle().clone());
+        service.snapshot.status = "failed".to_string();
+        service.snapshot.last_error = Some("previous recovery failed".to_string());
+        service.recovery_backoff_until =
+            Some(now_millis().saturating_add(SIDECAR_RECOVERY_BACKOFF_MS));
+
+        let error = service
+            .ensure_dev_server()
+            .expect_err("open circuit should block recovery");
+
+        assert!(error.to_string().contains("recovery circuit open"));
+        assert_eq!(service.snapshot.status, "failed");
+    }
+
+    #[test]
+    fn stop_dev_health_server_clears_recovery_circuit() {
+        let app = tauri::test::mock_app();
+        let mut service = SidecarLifecycleService::new(app.handle().clone());
+        service.snapshot.status = "failed".to_string();
+        service.recovery_backoff_until =
+            Some(now_millis().saturating_add(SIDECAR_RECOVERY_BACKOFF_MS));
+
+        let snapshot = service
+            .stop_dev_health_server()
+            .expect("stop should clear recovery circuit");
+
+        assert_eq!(snapshot.status, "stopped");
+        assert!(service.recovery_backoff_until.is_none());
     }
 
     #[test]
