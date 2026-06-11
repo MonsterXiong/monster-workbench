@@ -11,7 +11,7 @@
 - [ ] 继续收口 Creative service / backend：Rust `TaskService` 二次评估结论是短期可保留 task/asset/event 可信入口，先冻结 `run_review_asset_quality_stub` 的业务扩展，正式 review/revision 迁入 Python workflow runtime。
 - [ ] 评估前后端分域对齐：前端已拆出 `creative-task / creative-asset / creative-goal / creative-batch / creative-project` service/store；Rust 侧 asset CRUD 暂不为拆文件名而拆，后续等资产版本、来源建模稳定后再决定是否独立 `AssetService`。
 - [ ] 完成 `creative_db` 后续治理：补正式 migration、旧库兼容回归，以及 `creative_projects`、资产版本、来源建模。
-- [ ] 继续推进 Python workflow runtime：`generate_image_prompt`、`image.prompt.batch` 与 `image.generate.batch` 已落地 task request/result、model_runs 审计、失败/取消/重试映射、cancel checkpoint、基础 budget/timeout 协议、正式 workflow 类型命名和 batch sidecar lifecycle 首段硬化；下一步优先补 Python sidecar `/events` 事件缓冲、Rust polling/持久化策略和受控 worker-pool API，并避免在 `batch_job_service.rs` 新增生产 worker 分支。
+- [ ] 继续推进 Python workflow runtime：`generate_image_prompt`、`image.prompt.batch` 与 `image.generate.batch` 已落地 task request/result、model_runs 审计、失败/取消/重试映射、cancel checkpoint、基础 budget/timeout 协议、正式 workflow 类型命名、batch sidecar lifecycle 首段硬化、Python `/events` runtime instance 边界、Rust polling、设置诊断消费、`sidecar-runtime.log` 与 `sidecar-lifecycle.log` 摘要持久化；下一步优先把 batch prompt builder 和 `AiProviderConfig` 适配迁向 Python prompt builder / 正式 workflow provider DTO，并设计 Rust 受控 worker-pool claim/checkpoint/complete API，继续避免在 `batch_job_service.rs` 新增生产 worker 分支。
 
 ## 回归与验收待办
 
@@ -31,3 +31,9 @@
 
 - [ ] 已完成 Goal 00-13 的历史收口不再回填到本文件。
 - [ ] 本文件只记录仍未闭环的问题；完成后及时删除，或迁入对应项目文档。
+
+## 2026-06-11 公共组件治理待跟进
+
+- [ ] 继续按“高频稳定控件优先 Element Plus，复杂容器/业务形态自研补足”的原则评估剩余 `BaseForm` 壳层与未收口的稳定控件；迁移前需逐项确认现有 `Base*` API、slot、键盘交互与 Playground 示例不会被压缩。
+- [ ] `BaseTable` 已接入 `el-table`，后续如继续增强可补充排序、选择列、固定列等数据表格能力，但应与 `BaseDataTable` 的职责边界分开。
+- [ ] `BaseSearchInput` 可继续评估与 `BaseInput` 共享 size 映射和状态样式工具，进一步收敛 Element Plus 输入封装的重复样式与尺寸映射逻辑。
