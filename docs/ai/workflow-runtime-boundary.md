@@ -258,7 +258,42 @@ Python step boundary
 4. 新增正式 batch 类型时不要继续扩展 `demo.image.*` 命名；sidecar 协议层已先使用 `image.prompt.batch` / `image.generate.batch`，Rust batch 控制面也已接受同名 batch type 别名；后续 UI 再按业务域逐步退出 demo 命名。
 5. batch prompt / image sidecar workflow 已接入 cancel checkpoint，并已具备基础 budget/timeout 协议；batch worker 已优先复用 app-managed sidecar lifecycle，且 batch `/tasks` 提交不再长时间持有 lifecycle mutex。下一步优先补完整健康熔断、事件节流和 UI / batch job 类型命名，只有这些协议稳定后，再讨论 supervisor 是否从 Rust 迁到 Python worker pool。
 
-## 12. 不变量
+## 12. Rust 服务代码级边界清单
+
+本节用于评估 `src-tauri/src/services/task_service.rs` 与 `src-tauri/src/services/batch_job_service.rs` 是否继续扩张。后续改动优先按这里判断，而不是只按文件名判断。
+
+### 12.1 `TaskService`
+
+| 函数 / 区域 | 当前职责 | 边界判定 | 后续约束 |
+|---|---|---|---|
+| `create_creative_task` / `update_creative_task_status` / `append_task_event` | 校验输入、调用 repo、发 Tauri event | Rust 控制面，保留 | 继续保持薄状态入口，不写业务 prompt/review 规则 |
+| asset / asset_link 读写方法 | 通过 `creative_asset_repo` 写入资产和关系 | 短期可保留 | 不因为文件名不理想而优先拆；等资产版本、来源、权限模型稳定后再拆 `AssetService` |
+| `run_generate_image_prompt_workflow` | 创建 task、启动 cancel checkpoint、提交 sidecar、校验 result、写 asset/model_runs/events/status | 合理的过渡 workflow 入口 | 后续抽象为通用 workflow submit/settle，不为每个正式 workflow 手写一套 Rust 编排 |
+| `settle_sidecar_non_success` / `resolve_sidecar_failure_status` | 把 sidecar 非成功结果映射为受控 task 状态 | Rust 可信状态面，保留 | 只处理协议状态和 retry budget，不嵌入业务判断 |
+| `run_review_asset_quality_stub` / `build_review_result` | Rust 内生成 review result 和 revise draft task | demo/stub，冻结 | 不继续扩展真实审查、返工、一致性规则；正式 review/revision 迁入 Python workflow runtime |
+
+### 12.2 `BatchJobService`
+
+| 函数 / 区域 | 当前职责 | 边界判定 | 后续约束 |
+|---|---|---|---|
+| `create_batch_image_job` / `start_batch_job` / `pause_batch_job` / `resume_batch_job` / `cancel_batch_job` | batch 生命周期、任务创建、暂停/恢复/取消、事件广播 | Rust 控制面，保留 | 保持为状态控制，不下沉 provider 或业务 workflow 逻辑 |
+| `run_batch_supervisor_inner` | 轮询 snapshot、按 concurrency claim queued task、spawn worker、判断 completed | 短期保留 | 在 sidecar lifecycle、恢复、熔断、shutdown 语义稳定前，不迁给 Python worker pool |
+| `run_mock_task_worker` | 本地 smoke worker、模拟耗时/失败/取消 | demo，本地验证可保留 | 只服务本地 smoke，不作为正式业务类型模板 |
+| `run_prompt_task_worker` / `run_generate_task_worker` | 检查取消、构造 sidecar request、提交 Python workflow、交给 settle 归档 | 过渡 worker shell | 不新增生产 worker 分支；新增正式 workflow 走 sidecar runtime |
+| `settle_batch_prompt_sidecar_response` / `settle_batch_image_sidecar_response` | 校验 protocol/taskId/status，写入 asset/model_runs/task_events/status | Rust 可信落库和审计面，保留 | 可抽成通用 settle helper，避免 prompt/image 各自复制状态映射 |
+| `validate_sidecar_output_file` / `copy_sidecar_thumbnail` | 校验 Python 输出文件仍在 Rust 授权目录内，并生成缩略图 | Rust 权限与文件边界，保留 | Python 不返回可直接信任的任意绝对路径 |
+| `build_prompt_request` | Rust 侧替换 `{{sequenceNo}}` / `{{index}}` | demo-era prompt builder 残留 | 正式 batch prompt builder 放到 Python；Rust 只传 template/input/context |
+| `build_provider_config` / `build_image_provider_config` | 把 batch payload 适配成 `AiProviderConfig` | 测试链路 DTO 语义残留 | 后续改向正式 workflow provider DTO，避免让 `AiProviderService` 测试语义回流到生产 runtime |
+| `maybe_auto_pause_batch_after_failure` | 基于失败阈值自动暂停 batch | 控制面安全策略，可短期保留 | 不继续扩展成复杂业务失败策略；复杂策略进入 workflow runtime 或受控 policy 配置 |
+
+### 12.3 当前推进顺序
+
+1. 先把 UI / browser mock 的 batch type 提交值从 `demo.image.prompt/generate` 切到 `image.prompt.batch` / `image.generate.batch`，继续兼容历史 `demo.image.*`。
+2. 再补共享 `SidecarLifecycleService` 的健康熔断、事件节流、shutdown/recovery 语义。
+3. 再抽象 Rust workflow submit/settle 公共路径，减少 `TaskService` 和 `BatchJobService` 内重复的 sidecar 状态映射。
+4. 最后才评估 supervisor 是否迁给 Python worker pool；迁移前必须先有受控 claim/checkpoint/complete API，不允许 Python 任意写主库。
+
+## 13. 不变量
 
 - Vue 永远不知道 Python 端口和 token。
 - Python 不拥有 Tauri capability，也不绕过 Rust 访问用户文件。

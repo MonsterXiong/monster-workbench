@@ -1687,3 +1687,35 @@ Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `
 - 下一步剩余重点：
   1. 为共享 sidecar 补完整健康熔断、事件节流和更明确的 shutdown 语义。
   2. 在前端 UI / browser mock 层逐步把 batch type 提交值切到正式命名。
+
+## 2026-06-11 补充：Rust 编排边界复核（正式 batch type 后）
+
+本轮继续按 `docs/ai/workflow-runtime-boundary.md` 复核 `TaskService` 与 `BatchJobService` 的边界，未修改 Rust 代码。代码事实如下：
+
+- `TaskService::run_generate_image_prompt_workflow` 仍符合“Rust 主动提交、Python 执行业务、Rust 可信落库”的过渡模式：Rust 创建 task、启动 cancel checkpoint、提交 sidecar、校验 `protocolVersion/taskId/status`，并写入 asset、model_runs、task_events 和最终 task 状态。
+- `TaskService::run_review_asset_quality_stub` 仍是唯一明显的 Rust 内 review/revision 业务 stub：它会生成 review result、创建 `review_result` asset，并在不通过时创建 `revise_asset_quality` draft task。该入口应冻结为演示/验证能力，不继续承载真实审查、返工、一致性规则。
+- `BatchJobService` 已支持正式 batch type 别名 `image.prompt.batch` / `image.generate.batch`，但没有新增 worker 分支，而是继续复用 `is_prompt_batch_type` / `is_generate_batch_type` 路由到现有 prompt / image worker shell。
+- prompt / image worker shell 已不再执行 provider 调用；它们负责检查取消、构造 sidecar request、提交 Python workflow、校验返回结果、写入可信资产与审计记录。
+- `build_prompt_request` 仍在 Rust 内处理 `{{sequenceNo}}` / `{{index}}` 替换，这是 demo-era prompt builder 残留；正式 batch prompt 构建不应继续扩展在 Rust。
+- `build_provider_config` / `build_image_provider_config` 仍复用 `AiProviderConfig` 作为 DTO 适配；当前没有重新调用 `AiProviderService::test_provider`，但这个类型名仍带 provider 测试链路语义，后续应改向正式 workflow provider DTO。
+- `settle_batch_prompt_sidecar_response` 与 `settle_batch_image_sidecar_response` 有较多相似的 protocol 校验、model_runs 写入、失败/取消/retry 映射和事件广播逻辑；这是可信落库面，不是必须迁到 Python，但后续适合抽成通用 settle helper，避免每个 workflow 在 Rust 手写一套。
+
+本轮边界判定：
+
+| 区域 | 当前结论 | 升级方向 |
+|---|---|---|
+| `TaskService` task/asset/event 写读 | Rust 控制面，短期保留 | 等资产版本、来源、权限模型稳定后再考虑独立 `AssetService` |
+| `TaskService::run_generate_image_prompt_workflow` | 合理的过渡 workflow 入口 | 收敛为通用 submit/settle，不为每个正式 workflow 复制一套 Rust 编排 |
+| `TaskService::run_review_asset_quality_stub` | stub，冻结 | 真实 review/revision 进入 Python workflow runtime |
+| `BatchJobService` supervisor/concurrency/claim | 短期保留 Rust | sidecar lifecycle、熔断、恢复、shutdown 稳定后再评估 Python worker pool |
+| `BatchJobService` prompt/image worker shell | 过渡 shell，方向正确 | 新增正式 workflow 不再新增 Rust worker 分支，统一提交 sidecar |
+| `BatchJobService` prompt builder | demo 残留 | 正式 prompt builder 迁入 Python，Rust 只传 template/input/context |
+| `BatchJobService` provider DTO | `AiProviderConfig` 语义残留 | 改向正式 `SidecarProviderConfig` / workflow provider DTO |
+| batch type 命名 | Rust 已兼容正式别名，UI/browser mock 仍多处发送 `demo.image.*` | 下一批先迁 UI 提交值和 mock 分支判断，保留历史兼容 |
+
+因此当前仍不建议马上迁走 Rust supervisor。更安全的顺序是：
+
+1. 先迁 UI / browser mock 的 batch type 提交值到 `image.prompt.batch` / `image.generate.batch`。
+2. 再补共享 sidecar lifecycle 的健康熔断、事件节流、shutdown/recovery 语义。
+3. 再抽象 Rust sidecar result settle 公共路径，减少 `TaskService` 与 `BatchJobService` 中重复的状态映射。
+4. 最后才评估 Python 拉队列或 worker pool；前提是有受控 claim/checkpoint/complete API，不允许 Python 任意读写主库。
