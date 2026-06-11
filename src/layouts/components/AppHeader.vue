@@ -16,7 +16,7 @@ import {
   Loader2
 } from "lucide-vue-next";
 
-import { useTaskStore } from "../../stores/task";
+import { useBackgroundTaskStore } from "../../stores/background-task";
 import { useI18n } from "../../composables/useI18n";
 import { addDomEventListener, countWhere, isEventTargetInsideElement, type DomEventCleanup } from "../../utils";
 
@@ -30,7 +30,7 @@ const { t, locale, setLocale } = useI18n();
 const showLangMenu = ref(false);
 const langMenuRef = ref<HTMLElement | null>(null);
 
-const taskStore = useTaskStore();
+const taskStore = useBackgroundTaskStore();
 let stopOutsideClickListener: DomEventCleanup | null = null;
 
 // 计算进行中的任务数

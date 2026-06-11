@@ -133,6 +133,7 @@ const MOCK_AI_TASK_LIMIT = 40;
 let mockCreativeTaskId = 0;
 let mockTaskEventId = 0;
 let mockCreativeTasks: any[] = [];
+let mockCreativeProjects: any[] = [];
 const mockTaskEvents = new Map<number, any[]>();
 let mockCreativeAssets: any[] = [];
 let mockModelRunId = 0;
@@ -234,6 +235,37 @@ function createMockBatchJobRecord(input: Record<string, unknown>) {
     startedAt: null,
     finishedAt: null,
   };
+}
+
+function createMockCreativeProjectRecord(input: Record<string, unknown>) {
+  const now = formatCurrentIsoDateTime(" ");
+  const id = String(input.id || input.projectId || "").trim();
+  if (!id) {
+    throw new Error("[ERR_IPC_BROWSER] Mock creative project id is required");
+  }
+
+  const existingIndex = findIndexByValue(mockCreativeProjects, (item) => item.id, id);
+  const existing = existingIndex >= 0 ? mockCreativeProjects[existingIndex] : null;
+  const project = {
+    id,
+    title: String(input.title || existing?.title || id),
+    description:
+      (input.description as string | null | undefined) ?? existing?.description ?? null,
+    status: String(input.status || existing?.status || "active"),
+    settingsJson:
+      (input.settingsJson as string | null | undefined) ?? existing?.settingsJson ?? null,
+    budgetJson: (input.budgetJson as string | null | undefined) ?? existing?.budgetJson ?? null,
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+    archivedAt:
+      (input.archivedAt as string | null | undefined) ?? existing?.archivedAt ?? null,
+  };
+
+  if (existingIndex >= 0) {
+    mockCreativeProjects.splice(existingIndex, 1);
+  }
+  mockCreativeProjects = [project, ...mockCreativeProjects];
+  return project;
 }
 
 function createMockBatchSnapshot(job: any) {
@@ -1222,6 +1254,29 @@ export async function mockCallTauri<T = unknown>(
       return task as T;
     }
 
+    case "upsert_creative_project": {
+      const input = (args.input || {}) as Record<string, unknown>;
+      return createMockCreativeProjectRecord(input) as T;
+    }
+
+    case "get_creative_project": {
+      const id = String(args.id || "").trim();
+      return (
+        findByValue(mockCreativeProjects, (project) => project.id, id) ?? null
+      ) as T;
+    }
+
+    case "list_creative_projects": {
+      const filter = (args.filter || {}) as Record<string, unknown>;
+      let items = [...mockCreativeProjects];
+      if (filter.status) {
+        items = items.filter((project) => project.status === filter.status);
+      }
+      const offset = Math.max(0, Number(filter.offset || 0));
+      const limit = Math.max(1, Math.min(200, Number(filter.limit || 50)));
+      return items.slice(offset, offset + limit) as T;
+    }
+
     case "get_creative_task":
       return (
         findByValue(mockCreativeTasks, (task) => task.id, Number(args.id)) ?? null
@@ -1884,6 +1939,7 @@ export async function mockCallTauri<T = unknown>(
     case "reset_database":
       navigationsStore = [...mockNavigations];
       mockCreativeTasks = [];
+      mockCreativeProjects = [];
       mockCreativeAssets = [];
       mockModelRuns = [];
       mockCreativeAssetLinks = [];

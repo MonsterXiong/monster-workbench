@@ -6,8 +6,8 @@ import {
 } from "../services/app-updater";
 import { updaterService } from "../services/updater.service";
 import { getTranslation } from "../locales";
+import { useBackgroundTaskStore } from "./background-task";
 import { useSettingStore } from "./settings";
-import { useTaskStore } from "./task";
 import { createInterval, formatTemplate, getCurrentTimestampMs, joinIdParts, stringifyErrorMessage } from "../utils";
 
 let autoCheckInitialized = false;
@@ -114,7 +114,7 @@ export const useUpdateStore = defineStore("update", {
      * 触发后台模拟升级包下载（用于开发演示及任务进度联动）
      */
     async triggerDummyDownload() {
-      const taskStore = useTaskStore();
+      const taskStore = useBackgroundTaskStore();
       const taskId = joinIdParts(["update", getCurrentTimestampMs()]);
       const taskName = "系统更新包下载";
       taskStore.addTask(taskId, taskName);

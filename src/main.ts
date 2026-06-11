@@ -5,8 +5,8 @@ import "./styles/index.css";
 import "element-plus/theme-chalk/dark/css-vars.css";
 import { router } from "./router";
 import { ErrorHandler } from "./services/error-handler";
+import { useBackgroundTaskStore } from "./stores/background-task";
 import { useSettingStore } from "./stores/settings";
-import { useTaskStore } from "./stores/task";
 
 // 引入高频基础通用组件
 import BaseIcon from "./components/common/BaseIcon.vue";
@@ -164,8 +164,8 @@ async function bootstrap() {
   await settingsStore.initSettings();
 
   // 3. 开启底座长任务通知侦听
-  const taskStore = useTaskStore();
-  await taskStore.initTaskListener();
+  const backgroundTaskStore = useBackgroundTaskStore();
+  await backgroundTaskStore.initTaskListener();
 
   // 4. 挂载
   app.mount("#app");
