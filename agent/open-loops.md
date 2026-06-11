@@ -5,7 +5,7 @@
 ## 2026-06-11 架构硬化待跟进
 
 - [ ] 基于 `docs/architecture-current-state.md` 和实际代码，确认 post-goal architecture hardening 的拆分顺序与验收边界。
-- [ ] 继续收口 AI 域：评估 `src/stores/ai.ts` 剩余 facade / orchestration 是否继续下沉到独立 store、runtime 或 service。
+- [ ] 继续收口 AI 域：2026-06-12 复核确认 `src/stores/ai.ts` 已是薄 façade 且不直接调用 service；后续重点改为约束 `ai-image-runtime.ts` / `ai-provider-runtime.ts` 膨胀，必要时抽 task polling、backend queue sync、pending message recovery 等稳定 helper，并在改 AI 页面时逐步减少对 `useAiStore()` 兼容入口的依赖。
 - [ ] 继续收口 Creative 前端：评估 `src/views/creative/components/CreativeWorkflowDemo.vue` 是否进一步收敛为 orchestration shell，并继续拆分正式工作台。
 - [ ] 继续复核 `/creative` 三栏壳层：左右栏已首轮接入真实项目/资产/任务活动，后续需在真实窗口确认信息密度，并决定是否扩展成正式资产库与 Agent 监控台。
 - [ ] 继续收口 Creative service / backend：Rust `TaskService` 二次评估结论是短期可保留 task/asset/event 可信入口，先冻结 `run_review_asset_quality_stub` 的业务扩展，正式 review/revision 迁入 Python workflow runtime。

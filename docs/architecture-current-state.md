@@ -209,7 +209,7 @@ Store 是当前前端业务编排层。核心 store 如下：
 | `navigation` | 导航分页、分类、增删改、排序、导入导出 | `navigation.service` |
 | `file-manager` | 上传文件列表、预览、批量删除、拖拽上传 | `file-manager.service` |
 | `tools` | 工具箱各工具状态与系统工具调用 | `tools.service` |
-| `ai` | AI façade，协调 provider/session/queue/image/prompt | `ai.service`、`config.service`、`system.service` |
+| `ai` | AI façade，兼容旧页面入口并转发 provider/session/queue/image/prompt 分域 store | 通过 `ai-*` 分域 store 间接使用 `ai.service`、`ai-preferences`、`ai-session-storage`、`system.service` |
 | `background-task` | 全局后台任务进度 | `background-task.service` |
 | `creative-project` | 当前项目、项目索引、种子、历史聚合 | `creative-project.service` |
 | `creative-task` | prompt/review workflow 与任务事件 | `creative-task.service` |
@@ -222,7 +222,7 @@ Store 是当前前端业务编排层。核心 store 如下：
 
 当前仍需持续观察的中心点：
 
-- `src/stores/ai.ts`：当前已收缩为 façade，主要负责 provider/session/queue/image/prompt 之间的协调。
+- `src/stores/ai.ts`：当前已收缩为 façade，不直接导入 service；主要把 provider/session/queue/image/prompt 分域 store 的 state/action 重新暴露给现有 AI 页面。
 - `src/views/creative/components/CreativeWorkflowDemo.vue`：当前已从综合大模板收敛为 orchestrator shell，但仍是 `/creative` 中央工作区的主要跨域编排点。
 
 创作域 store 本身已经基本拆到位；后续更值得关注的是 façade 协调层和页面壳层是否继续膨胀。
@@ -1016,18 +1016,39 @@ background-task.store.ts
 此前 `useAiStore` 曾同时承载 provider、session、prompt library、queue、chat/image runtime。当前主拆分已经落地：
 
 ```text
-ai-provider.store.ts
-ai-session.store.ts
+ai-provider.ts
+ai-session.ts
 ai-session-runtime.ts
-ai-image.store.ts
+ai-image.ts
 ai-image-runtime.ts
-ai-prompt-library.store.ts
-ai-queue.store.ts
+ai-prompt-library.ts
+ai-queue.ts
 ai-chat-runtime.ts
 ai-provider-runtime.ts
 ```
 
-当前更真实的剩余压力点是 `src/stores/ai.ts` 仍作为 façade 负责跨 store 编排，而不是旧的“大一统 store”问题。
+当前更真实的剩余压力点不再是 `src/stores/ai.ts` 这个 façade 本身。它现在没有直接导入 `src/services/*`，主要通过 `storeToRefs` 和薄 action 转发兼容 `AiProviderPanel.vue`、`AiChatPanel.vue`、`AiImagePanel.vue` 仍统一使用 `useAiStore()` 的旧页面入口。
+
+代码事实：
+
+- `src/stores/ai.ts` 约 230 行，职责是聚合和转发分域 store，不直接调用 `ai.service`、`system.service`、`callTauri()` 或 `fetch()`。
+- `src/views/ai/components/AiProviderPanel.vue`、`AiChatPanel.vue`、`AiImagePanel.vue` 当前仍使用 `useAiStore()`，因此 façade 仍有兼容价值。
+- `src/stores/ai-provider-runtime.ts` 约 327 行，负责 provider 测试 runtime、后端队列同步、任务轮询、取消 queued task 和本地队列状态归并。
+- `src/stores/ai-image-runtime.ts` 约 597 行，负责生图会话消息、后端任务轮询、刷新恢复、取消、保存位置打开、尺寸白名单和 image result patch。
+- `src/stores/ai-chat-runtime.ts` 约 244 行，负责 chat session export、发送消息、typewriter 效果和 chat provider 调用。
+- `src/stores/ai-session-runtime.ts` 约 146 行，负责配置加载、session 选择/复制/删除/重命名、prompt library hydration 和 pending image recovery 触发。
+
+边界判定：
+
+| 区域 | 当前状态 | 下一步 |
+|---|---|---|
+| `src/stores/ai.ts` | 薄 façade / 兼容入口 | 可保留；不要再把新 runtime 逻辑写回这里 |
+| AI 页面组件 | 仍统一消费 `useAiStore()` | 后续若改 AI 页面，可逐步改为直接消费分域 store，减少 façade 暴露面 |
+| `ai-provider-runtime.ts` | provider 测试与队列 runtime | 继续约束为前端 runtime 层；不要下沉 Tauri/HTTP 直连，复杂队列协议应沉到 service/Rust |
+| `ai-image-runtime.ts` | image session + backend task recovery runtime | 是当前 AI 前端最宽热区；后续优先抽稳定的 task polling/recovery helper 或 service adapter |
+| `ai-chat-runtime.ts` | chat workflow 与导出 | 可保留；导出继续通过 `system.service`，模型调用继续通过 provider runtime |
+
+因此下一步不是继续拆 `src/stores/ai.ts` 文件名，而是：新功能尽量直接进入对应分域 store/runtime；若 `ai-image-runtime.ts` 或 `ai-provider-runtime.ts` 继续增长，优先抽 task polling、backend queue sync、pending message recovery 这类稳定小 helper。
 
 ### 10.3 `commands/database.rs` 已恢复为窄命名边界
 
