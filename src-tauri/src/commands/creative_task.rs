@@ -74,9 +74,11 @@ pub fn run_generate_image_prompt_workflow(
     sidecar_state: SidecarState<'_>,
 ) -> Result<GenerateImagePromptWorkflowResult, String> {
     let task_service = task_state.lock().unwrap_or_else(|e| e.into_inner());
-    let mut sidecar_service = sidecar_state.lock().unwrap_or_else(|e| e.into_inner());
     task_service
-        .run_generate_image_prompt_workflow(input, &mut sidecar_service)
+        .run_generate_image_prompt_workflow_with_endpoint_provider(input, || {
+            let mut sidecar_service = sidecar_state.lock().unwrap_or_else(|e| e.into_inner());
+            sidecar_service.ensure_runtime_endpoint()
+        })
         .map_err(|e| e.to_json_string())
 }
 
@@ -134,4 +136,3 @@ pub fn list_asset_links(
         .list_asset_links(filter.unwrap_or_default())
         .map_err(|e| e.to_json_string())
 }
-

@@ -526,6 +526,7 @@ impl<R: Runtime> SidecarLifecycleService<R> {
         Ok(SidecarRuntimeEndpoint { port, token })
     }
 
+    #[allow(dead_code)]
     pub fn submit_generate_image_prompt(
         &mut self,
         request: GenerateImagePromptSidecarRequest,

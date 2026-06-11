@@ -9,7 +9,8 @@ use crate::infra::path::PathProvider;
 use crate::infra::{AppError, AppResult};
 use crate::services::cancel_checkpoint_service::start_cancel_checkpoint_server;
 use crate::services::sidecar_lifecycle_service::{
-    GenerateImagePromptSidecarRequest, SidecarLifecycleService, SidecarWorkflowTaskResult,
+    GenerateImagePromptSidecarRequest, SidecarLifecycleService, SidecarRuntimeEndpoint,
+    SidecarWorkflowTaskResult,
 };
 use crate::services::workflow_settle_service::{
     append_sidecar_result_events, create_ready_sidecar_asset, persist_sidecar_model_runs,
@@ -259,6 +260,16 @@ impl<R: Runtime> TaskService<R> {
         input: GenerateImagePromptWorkflowInput,
         sidecar_service: &mut SidecarLifecycleService<R>,
     ) -> AppResult<GenerateImagePromptWorkflowResult> {
+        self.run_generate_image_prompt_workflow_with_endpoint_provider(input, || {
+            sidecar_service.ensure_runtime_endpoint()
+        })
+    }
+
+    pub fn run_generate_image_prompt_workflow_with_endpoint_provider(
+        &self,
+        input: GenerateImagePromptWorkflowInput,
+        ensure_endpoint: impl FnOnce() -> AppResult<SidecarRuntimeEndpoint>,
+    ) -> AppResult<GenerateImagePromptWorkflowResult> {
         validate_generate_image_prompt_input(&input)?;
         let db_path = self.db_path()?;
         let task_payload_json = serde_json::to_string(&input).map_err(|error| {
@@ -285,7 +296,7 @@ impl<R: Runtime> TaskService<R> {
             &db_path,
             &task,
             input,
-            sidecar_service,
+            ensure_endpoint,
         );
 
         match result {
@@ -363,7 +374,7 @@ impl<R: Runtime> TaskService<R> {
         db_path: &std::path::Path,
         task: &CreativeTask,
         input: GenerateImagePromptWorkflowInput,
-        sidecar_service: &mut SidecarLifecycleService<R>,
+        ensure_endpoint: impl FnOnce() -> AppResult<SidecarRuntimeEndpoint>,
     ) -> AppResult<GenerateImagePromptWorkflowResult> {
         let mut events = Vec::new();
 
@@ -389,31 +400,31 @@ impl<R: Runtime> TaskService<R> {
             payload_json: None,
         })?);
 
-        let sidecar_status = sidecar_service.ensure_dev_server()?;
+        let sidecar_endpoint = ensure_endpoint()?;
         events.push(self.append_task_event(CreateTaskEventInput {
             task_id: task.id,
             event_type: "sidecar_ready".to_string(),
-            message: Some(format!(
-                "sidecar ready on port {}",
-                sidecar_status.port.unwrap_or_default()
-            )),
+            message: Some(format!("sidecar ready on port {}", sidecar_endpoint.port)),
             payload_json: None,
         })?);
 
         let checkpoint_server = start_cancel_checkpoint_server(db_path.to_path_buf(), task.id)?;
         let sidecar_response =
-            sidecar_service.submit_generate_image_prompt(GenerateImagePromptSidecarRequest {
-                task_id: task.id,
-                project_id: input.project_id.clone(),
-                brief: input.brief.clone(),
-                style: input.style.clone(),
-                mood: input.mood.clone(),
-                aspect_ratio: input.aspect_ratio.clone(),
-                attempt: task.retry_count + 1,
-                max_retries: task.max_retries,
-                cancel_checkpoint_url: Some(checkpoint_server.url.clone()),
-                cancel_checkpoint_token: Some(checkpoint_server.token.clone()),
-            })?;
+            SidecarLifecycleService::<R>::submit_generate_image_prompt_to_endpoint(
+                &sidecar_endpoint,
+                GenerateImagePromptSidecarRequest {
+                    task_id: task.id,
+                    project_id: input.project_id.clone(),
+                    brief: input.brief.clone(),
+                    style: input.style.clone(),
+                    mood: input.mood.clone(),
+                    aspect_ratio: input.aspect_ratio.clone(),
+                    attempt: task.retry_count + 1,
+                    max_retries: task.max_retries,
+                    cancel_checkpoint_url: Some(checkpoint_server.url.clone()),
+                    cancel_checkpoint_token: Some(checkpoint_server.token.clone()),
+                },
+            )?;
         validate_sidecar_task_result(task, &sidecar_response)?;
         events.push(self.append_task_event(CreateTaskEventInput {
             task_id: task.id,
