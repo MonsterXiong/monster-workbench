@@ -1948,3 +1948,27 @@ Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `
 - `cargo test --manifest-path .\\src-tauri\\Cargo.toml services::sidecar_lifecycle_service::tests::poll_runtime_events_uses_cursor_query_and_parses_events -- --nocapture --test-threads=1`
 - `npm run check:architecture`
 - `npm run typecheck`
+
+## 2026-06-12 补充：sidecar `/events` 设置诊断消费
+
+本轮继续沿 `/events` 诊断流推进 UI 消费，不改变持久化策略，也不让设置页直接连 Tauri/Python。
+
+代码事实：
+
+- 新增 `src/stores/sidecar.ts`，作为 `sidecar.service.ts` 之上的 Pinia Store，符合 `Component -> Store -> Frontend Service -> callTauri -> Rust` 链路。
+- `refreshRuntimeEvents` 会先调用 `get_sidecar_status`；只有 sidecar status 为 `running` 时才调用 `poll_sidecar_runtime_events`，避免打开设置诊断页就隐式启动 Python sidecar。
+- Store 会维护 `runtimeCursor`、`runtimeInstanceId`、`runtimeStartedAt` 和最近 runtime events；如果检测到 `runtimeInstanceId` 改变，会清空旧缓存并从 cursor 0 重拉，避免 Python 重启后因 event id 重新计数而漏事件。
+- `src/views/settings/components/SettingsDiagnosticsPanel.vue` 新增只读 sidecar runtime events 卡片，展示 runtime instance、cursor、状态、启动时间和最近 10 条事件。
+
+边界判定：
+
+| 区域 | 当前状态 | 下一步 |
+|---|---|---|
+| UI 诊断消费 | 已接入设置诊断页 | 保持只读，不写 DB，不替代 `task_events` |
+| sidecar 启动语义 | 诊断页不会主动启动 sidecar | 如需启动，仍走已有 sidecar lifecycle command |
+| cursor 归属 | 已用 runtime instance 保护重启场景 | 后续持久化仍需 Rust 侧过滤/脱敏/限流/去重 |
+
+本轮验证通过：
+
+- `npm run check:architecture`
+- `npm run typecheck`
