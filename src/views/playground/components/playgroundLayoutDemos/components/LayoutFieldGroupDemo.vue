@@ -179,7 +179,7 @@ const fieldGroupCollapsed = ref(false);
 
 .field-group-demo-stack {
   @apply grid min-w-0;
-  gap: clamp(4rem, 6vw, 4.75rem);
+  gap: clamp(1.5rem, 2.5vw, 2rem);
 }
 
 .field-group-demo-grid {
