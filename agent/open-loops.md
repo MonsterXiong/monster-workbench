@@ -21,10 +21,9 @@
 
 ## 文档维护待办
 
-- [ ] 以代码事实为准继续同步 `docs/architecture-current-state.md`，重点继续修正剩余的 AI façade 最新职责、`creative_db_tests.rs` 下沉后的 repo/test 结构，以及 `/creative` 三栏壳层的后续产品化边界。
+- [ ] 以代码事实为准继续同步 `docs/architecture-current-state.md`，重点继续修正剩余的 AI façade 最新职责、`/creative` 三栏壳层的后续产品化边界，以及 migration / project / asset provenance 的正式化缺口。
 - [ ] 基于当前 `/creative` 三栏工作台的实际代码边界，继续评审“正式业务核心”和“原型/展示壳层”的分界：左栏分类目前只 emit 未接线，右栏 properties 与中间 Goal/Batch tabs 有入口重叠，正式化前先定义这两处交互契约。
-- [ ] 评估 `src-tauri/src/infra/creative_db_tests.rs` 与各 creative repo 的下一轮边界：当前 `CreativeDbInfra` 已移除，shared types 已迁出到 `creative_types.rs`，测试入口也已直接化；下一步需要决定是继续把测试按领域拆散，还是保留当前集中回归入口。
-  - 2026-06-11：已完成 creative_task_repo、creative_asset_repo、creative_batch_repo 的 repo 级测试下沉；creative_db_tests.rs 当前仅保留 schema / migration 回归。
+- [ ] 继续补齐 Creative repo 测试缺口：2026-06-12 复核确认 `creative_db_tests.rs` 只保留 schema / migration 回归，task / asset / batch / project / model_run repo 行为测试已在对应 repo 内；后续如补 `creative_goal_repo` 行为回归，应放在该 repo 的 test module，不回流到 `creative_db_tests.rs`。
 - [ ] 如后续继续扩写架构材料，优先更新 `docs/architecture-current-state.md` 和对应专题文档，不再新增平行路线图、阶段提示词或一次性执行包。
 
 ## 维护规则

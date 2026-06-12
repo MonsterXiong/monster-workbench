@@ -376,7 +376,7 @@ commands/
 | `path.rs` | 统一定位 `~/.monster-tools` 与 `monster_workbench.db` |
 | `db.rs` | 主 DB 导入/导出/重置，SQLite 文件校验 |
 | `db_nav.rs` | `navigation.db` 建表、CRUD、自愈列补充 |
-| `creative_db_schema.rs` + `creative_*_repo.rs` + `creative_db_tests.rs` | creative schema、repo 查询写入、旧库兼容回归 |
+| `creative_db_schema.rs` + `creative_*_repo.rs` + `creative_db_tests.rs` | creative schema/migration、领域 repo 查询写入、schema 兼容回归 |
 | `fs.rs` | 测试文件、目录结构生成、目录树读取 |
 | `logger.rs` | 日志目录读写、脱敏、路径穿透防护 |
 | `sensitive.rs` | 密钥、token、authorization、password 等脱敏 |
@@ -552,8 +552,8 @@ erDiagram
 
 当前不足：
 
-- 没有独立 `projects` 表，`project_id` 仍是字符串维度，适合 demo，不适合正式多项目治理。
-- creative schema 已切换到最小版本化 migration 框架：当前通过 `schema_migrations` 记录版本，并落地了 `bootstrap_creative_schema` 与 `add_creative_task_goal_batch_columns` 两个幂等迁移；但迁移前备份、破坏性变更审批与更细粒度领域迁移仍未完全正式化。
+- 已有 `creative_projects` 表，但 `creative_tasks` / `assets` / `batch_jobs` 等表的 `project_id` 仍主要是字符串维度，尚未形成 DB-level FK、归档传播或完整项目生命周期约束。
+- creative schema 已切换到最小版本化 migration 框架：当前通过 `schema_migrations` 记录版本，并落地 `bootstrap_creative_schema`、`add_creative_task_goal_batch_columns`、`add_creative_projects` 三个幂等迁移；但迁移前备份、破坏性变更审批与更细粒度领域迁移仍未完全正式化。
 - `asset_version`、`parent_asset_id`、`source_task_id` 等 provenance 字段主要依赖 `metadata_json` 与 `asset_links` 表达，正式化后建议结构化。
 - `task_status` 没有 DB-level enum 约束，状态合法性主要靠 service 层约束。
 
@@ -1071,36 +1071,27 @@ commands/worker_queue.rs
 
 ### 10.4 `creative_db` 已完成去 façade 化
 
-此前 `creative_db.rs` / `CreativeDbInfra` 曾同时承载 schema 初始化、领域 CRUD 和测试入口。当前阶段已经完成三步收口：
+此前 `creative_db.rs` / `CreativeDbInfra` 曾同时承载 schema 初始化、领域 CRUD 和测试入口。当前阶段已经完成四步收口：
 
 - `CreativeDbInfra` 已从 crate 生产与测试调用面移除。
 - creative 领域共享类型已迁到 `src-tauri/src/infra/creative_types.rs`。
-- `creative_db.rs` test-only 模块壳已删除，测试直接接到 `creative_db_tests.rs`。
+- `creative_db.rs` test-only 模块壳已删除，`creative_db_tests.rs` 由 `infra/mod.rs` 仅在 `#[cfg(test)]` 下直接注册。
+- `creative_db_tests.rs` 当前只保留 schema / migration 回归：幂等初始化、旧 `creative_tasks` 缺少 `goal_id/batch_job_id/sequence_no` 时的兼容迁移，以及现有当前 schema 的 migration history 回填。
 
 当前创作域数据访问的真实形态更接近：
 
 ```text
-creative_db_schema.rs
-creative_task_repo.rs
-creative_asset_repo.rs
-creative_project_repo.rs
-creative_goal_repo.rs
-creative_batch_repo.rs
-creative_model_run_repo.rs
-creative_db_tests.rs
+creative_db_schema.rs        schema + migration
+creative_db_tests.rs         schema / migration regression only
+creative_task_repo.rs        task + task_events repo behavior and tests
+creative_asset_repo.rs       asset + asset_links repo behavior and tests
+creative_project_repo.rs     creative_projects repo behavior and tests
+creative_goal_repo.rs        goal / role / goal task query repo
+creative_batch_repo.rs       batch repo behavior and snapshot tests
+creative_model_run_repo.rs   model_runs repo behavior and tests
 ```
 
-建议未来按领域拆 repo：
-
-```text
-infra/creative/schema.rs
-infra/creative/task_repo.rs
-infra/creative/event_repo.rs
-infra/creative/asset_repo.rs
-infra/creative/model_run_repo.rs
-infra/creative/batch_repo.rs
-infra/creative/goal_repo.rs
-```
+因此下一步不是继续把 repo 行为测试塞回 `creative_db_tests.rs`，也不是为了目录名再拆一层 `infra/creative/*`。更实际的边界是：schema/migration 回归继续留在 `creative_db_tests.rs`；领域行为回归继续靠近对应 repo；若补 `creative_goal_repo` 行为测试，应直接放在 `creative_goal_repo.rs` 的 test module。
 
 ### 10.5 正式 migration 体系仍需继续硬化
 
@@ -1109,18 +1100,18 @@ infra/creative/goal_repo.rs
 - [x] `schema_migrations` 表。
 - [x] 版本号。
 - [x] 幂等 migration。
+- [x] `creative_projects` 建表 migration。
 - [ ] 破坏性迁移审批。
 - [ ] migration dry-run / backup。
-- [ ] 覆盖更多历史旧库形态的兼容测试。
+- [ ] 覆盖更多历史旧库形态的兼容测试，尤其是新增 project / asset provenance / worker lease 字段前后的旧库矩阵。
 
-### 10.6 Python execution plane 仍是 stub
+### 10.6 Python execution plane 仍是过渡 runtime
 
-当前 `creative_health_server.py` 是健康和最小任务 stub，不是正式 workflow engine。未来正式系统需要：
+当前 `creative_health_server.py` 不再只是健康 stub：它已经提供 token 保护的 `/health`、`/events`、`/shutdown` 和 `/tasks`，并具备 runtime instance 事件 buffer。`generate_image_prompt` 仍是本地 prompt stub；`image.prompt.batch` / `image.generate.batch` 已能调用 OpenAI-compatible chat / image provider，构造 prompt、保存图片到 Rust 授权目录，并把 outputs / modelRuns / events 交回 Rust settle。
 
-- workflow runtime。
+它仍不是正式 worker engine：
+
 - worker loop。
-- provider clients。
-- prompt builder。
 - review/revision agent。
 - context builder。
 - consistency analysis。
@@ -1179,7 +1170,7 @@ Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `
 1. 继续产品化 `/creative` 三栏工作台：中间 `CreativeWorkflowDemo.vue` 已是 orchestration shell，后续重点转为左栏资产分类是否驱动中间 workspace、右栏 quick forms 是否保留，以及正式资产库 / Agent 监控台的产品深度。
 2. 继续约束 AI 前端 runtime 热区：`src/stores/ai.ts` façade 可保留为兼容入口，新逻辑不要回流；后续重点是 `ai-image-runtime.ts` / `ai-provider-runtime.ts` 的 task polling、backend queue sync、pending message recovery 等稳定 helper。
 3. 继续收敛 `TaskService` 与 `BatchJobService` 的 orchestration 边界，尽量让 asset CRUD、goal CRUD、batch snapshot 等稳定职责停留在对应 repo/service。
-4. 在现有 `schema_migrations` 基础上继续补齐旧库兼容回归、备份策略与更细粒度 migration 约束。
+4. 在现有 `schema_migrations` 基础上继续补齐旧库兼容回归、备份策略与更细粒度 migration 约束；repo 行为测试继续靠近对应 repo，`creative_db_tests.rs` 只保留 schema / migration 回归。
 5. 持续同步 `agent/open-loops.md` 与本文件，避免“代码已经推进、当前状态文档仍停留在旧阶段”。
 
 ### 阶段 B：正式项目与资产域
@@ -1237,7 +1228,7 @@ Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `
 后续做升级评审时，建议按这些问题推进：
 
 1. `creative_projects` 是否已经足够承接正式项目生命周期，还是仍需补充更稳定的项目键策略？
-2. `creative_db_schema.rs` 与各 repo 是否先继续细分，还是先上 migration 治理？
+2. `creative_db_schema.rs` 是否先补 migration dry-run / backup / 历史 fixture，还是先补项目、资产 provenance、worker lease 等新 schema？
 3. `/creative` 三栏工作台中，哪些内容应视为正式工作台，哪些仍应留在验证/展示壳层？
 4. Python worker 是由 Rust 主动提交任务，还是 Python 拉取 SQLite-backed queue？
 5. model_runs 是否作为所有 AI 调用的强制审计点？
