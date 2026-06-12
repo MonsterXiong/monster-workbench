@@ -376,6 +376,26 @@ Python worker
 
 在这些协议和必要 schema migration 稳定前，`BatchJobService::run_batch_supervisor_inner` 继续保留在 Rust；`run_prompt_task_worker` / `run_generate_task_worker` 也继续作为过渡 shell，只负责提交 Python workflow 与 Rust settle，不新增正式业务 worker 分支。
 
+### 12.7 2026-06-12 继续评估：迁移门禁
+
+本轮继续对照 `task_service.rs`、`batch_job_service.rs`、`worker_queue_service.rs`、`creative_task_repo.rs` 与 `workflow_settle_service.rs` 后，迁移门禁按“能保留、可抽象、不可迁移”三类执行：
+
+| 类别 | 当前代码事实 | 结论 |
+|---|---|---|
+| Rust 必须保留 | `creative_task_repo::claim_next_queued_task` 仍只是事务内选择 queued task 并更新为 running；`WorkerQueueCompleteTaskInput` 只有 `taskId/status/resultJson/errorMessage/assetId` | 这只能作为 Rust 内受控收敛入口，不能作为 Python worker-pool 的最终 claim/complete 协议 |
+| Rust 必须保留 | `settle_batch_image_sidecar_response` success 分支仍校验输出文件 canonical path、复制 thumbnail、创建 image asset、绑定 model_runs 并写 task status/event | image success settle 暂不迁 Python，也不应强抽成脱离权限上下文的通用 helper |
+| Rust 可继续抽象 | `workflow_settle_service.rs` 已承接 protocol/taskId 校验、sidecar events、model_runs、普通 ready asset 创建 | 后续可继续抽 submit/settle 公共骨架，但必须保持 Rust 写库和路径授权 |
+| 过渡壳层可保留 | `run_prompt_task_worker` / `run_generate_task_worker` 只做 checkpoint、sidecar submit、transport fallback 和 settle 分派 | 不新增正式生产 worker 分支；新增 workflow 继续走 sidecar request/result |
+| 不能提前迁移 | `BatchJobService::run_batch_supervisor_inner` 仍负责 concurrency slot、claim、暂停/取消/完成收敛 | 没有 worker identity、lease、heartbeat、lease-aware complete 前，不让 Python 直接拉队列或拥有 batch supervisor |
+
+因此下一步不是继续移动函数位置，而是先设计最小控制协议和 schema：
+
+1. `creative_tasks` 增加 worker ownership / lease 支撑字段前，继续把任务拥有权留在 Rust supervisor。
+2. localhost sidecar control API 必须先定义 `claim -> checkpoint -> heartbeat -> complete`，并复用 runtime token 或等价鉴权。
+3. `complete` 必须校验 worker identity、lease token 和 lease deadline，再进入 Rust settle helper；不能复用当前 Tauri IPC `complete_creative_task` 作为 Python worker 协议。
+4. Python workflow 只返回受控结果摘要、modelRuns、events 和授权输出目录内的文件引用；asset、model_runs、task_events、task status 仍由 Rust 可信写入。
+5. 在 control API 和 migration 通过旧库兼容回归前，`BatchJobService` 的 supervisor / worker shell 只做收窄和复用，不做所有权迁移。
+
 ## 13. 不变量
 
 - Vue 永远不知道 Python 端口和 token。
