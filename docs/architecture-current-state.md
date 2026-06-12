@@ -193,8 +193,7 @@ sequenceDiagram
    - 负责一致的桌面 UI 原子能力：按钮、输入、表格、面板、时间线、分页、弹窗、状态、上传、布局等。
    - 在 `main.ts` 中集中注册高频基础组件。
    - 当前公共组件层已经大量把 Element Plus 收进 `Base*` / `App*` 封装内部：`src/components/common` 下约 69 个 Vue 组件中，约 50 个已经直接使用 Element Plus 标签。
-   - 近期已继续收口 `AppImageUploader`、`AppPathSelector`、`BaseCopyButton`、`BaseCommandPalette`、`BaseToast`、`ConfirmDialog`、`BaseActionMenu`、`BaseAlert`、`BaseBadge`、`BaseBreadcrumb`、`BaseDateRange`、`BaseDialog`、`BaseDrawer`、`BaseMessage`、`BasePageHeader`、`BaseSelectionBar`、`BaseDetailCard`、`BaseInfoCard`、`BaseStatCard`、`BaseFilterBar`、`BaseStatusDot`、`BaseTooltip`、`BaseFieldGroup`、`BasePanel`、`BaseDataState`、`BaseStepper`、`BaseTimeline`、`BaseKeyValueList` 和 `BaseList` 等稳定 UI 面。
-   - `BaseList` 默认 loading / empty 状态已经复用 `BaseLoading` / `BaseEmpty`；`BaseKeyValueList` loading / empty 已接 `ElSkeleton` / `ElEmpty`；关闭、返回、筛选清空、选择清空、菜单触发等小型动作统一经 `BaseButton` 承接 Element Plus 按钮底座，且按钮尺寸已共享 `toElementPlusSize()`；`BaseConfirmAction` 已在 `ElPopconfirm` 上补齐 placement、width、icon、teleported、fallback placements 和确认/取消按钮语义透传；`BaseBreadcrumb` 折叠路径可选 `ElDropdown` 菜单承载隐藏层级；`BaseTree` 已在 `ElTree` 上补齐 showCheckbox、checkedKeys、filterNodeMethod、defaultExpandAll 和 accordion 等高频树能力；`BaseTab` 已在 `ElTabs` 上补齐 tabPosition、type、editable、closable、addable、beforeLeave 和 edit/add/remove 事件；`BaseAccordion` 已在 `ElCollapse` 上补齐 expandIconPosition、beforeCollapse 和 change 事件；`BaseInput`、`BaseSearchInput`、`BaseSelect`、`BaseNumberInput`、`BaseTextarea`、`BaseTagInput`、`BaseSegmented`、`BaseSlider`、`BaseCheckbox`、`BaseRadioGroup`、`BaseSwitch`、`BaseDateRange` 与 `BasePagination` 已共享项目尺寸到 Element Plus 尺寸的映射；`BasePagination` 已补齐原生 sizes 布局、page-size 下拉传送目标和 popper 样式透传；`BaseNumberInput` 已透传 `stepStrictly`、controls、右侧控制按钮、`valueOnClear`、对齐、inputmode 和 disabled-scientific；`BaseSelect` 已透传可创建、远程搜索、筛选方法、下拉定位和滚动事件等 Element Plus 高频能力；`BaseUpload` 已在 `ElUpload` 文件选择底座上补齐 `drag`、`showFileList`、`listType`、`fileList`、`limit`、`directory`、`preview/remove/exceed` 事件和实例方法，同时保留项目侧 FileList 校验、select/reject 语义和默认轻量模式；`BaseAvatar` 已透传 Element Plus `fit` / `srcSet` / error 能力；`BaseEmpty` 已透传 `image` / `imageSize` 图片空态能力，并保留项目图标空态默认外观；`BaseError` 已在 `ElResult` 上补齐 status / 原生图标复用，并扩展 success / primary tone；`BaseDescriptionList` 已透传 `ElDescriptions` 的 title / extra、direction、label width、label/value align、colon、item rowspan/width/minWidth；`BaseStepper` 已透传 `ElSteps` 的 simple、alignCenter、finish/process status，并补齐 `v-model:current` / change 事件；`BaseTimeline` 已透传 `ElTimelineItem` 原生 timestamp placement；`BaseProgress` 已在 `ElProgress` 基础上补齐 line / circle / dashboard 形态；`BaseTooltip` 已补齐 Element Plus Popper placement、click/contextmenu trigger、light effect、arrow / enterable / autoClose 等安全高频能力；`BaseTable` / `BaseDataTable` 已透传 Element Plus 排序、固定列和 `sort-change` 事件；`BaseForm` / `BaseFormItem` 已接通 `rules` / `prop` 和表单实例方法；容器类组件优先通过 `ElCard` 做外壳但保留项目侧 props、slot、键盘和暗色主题 API。
+   - 组件治理已经进入小步维护态：稳定控件优先通过 `Base*` / `App*` 吸收 Element Plus 能力，页面继续消费项目封装；不要把组件封装流水当作当前架构升级主线。
 2. 页面私有组件：`src/views/<module>/components/*`
    - 例如 `views/navigation/components/*`、`views/file-manager/components/*`、`views/system/components/*`。
    - 只服务单个页面，不跨模块扩散。
@@ -953,6 +952,46 @@ flowchart LR
 - 还不是完整远程 worker / Redis / 分布式队列。
 - 与项目规则一致：优先 SQLite-backed local queue。
 
+### 7.7 TaskService / BatchJobService 编排边界
+
+当前 Rust / Python 分工不是“Rust 过厚所以立即迁走”，而是“Rust 仍拥有可信状态、任务所有权和资产落库，Python 已承接 provider / prompt / image workflow 执行”：
+
+```mermaid
+flowchart TD
+  UI["Vue / Pinia / Frontend Service"] --> IPC["Tauri IPC Command"]
+  IPC --> TaskSvc["TaskService<br/>task / asset / event trusted entry"]
+  IPC --> BatchSvc["BatchJobService<br/>batch lifecycle + supervisor"]
+  BatchSvc --> Claim["creative_task_repo.claim_next_queued_task<br/>queued -> running"]
+  Claim --> WorkerShell["Rust prompt/image worker shell<br/>checkpoint + sidecar submit + fallback"]
+  TaskSvc --> SidecarSubmit["SidecarLifecycleService.submit /tasks"]
+  WorkerShell --> SidecarSubmit
+  SidecarSubmit --> Python["Python sidecar workflow<br/>provider / prompt builder / image generation"]
+  Python --> Result["Sidecar result<br/>outputs / modelRuns / events / file refs"]
+  Result --> RustSettle["Rust trusted settle<br/>protocol + taskId + path checks"]
+  RustSettle --> RepoWrite["assets / model_runs / task_events / task status"]
+  RepoWrite --> Events["Tauri events / frontend refresh"]
+```
+
+迁移到 Python worker loop 前必须先补齐的控制面：
+
+```mermaid
+flowchart LR
+  PyWorker["Python worker"] --> ControlApi["Rust-owned localhost control API"]
+  ControlApi --> LeaseClaim["claim with workerId / runtimeInstanceId / claimToken"]
+  LeaseClaim --> Heartbeat["heartbeat extends lease"]
+  Heartbeat --> Complete["complete with lease owner validation"]
+  Complete --> RustSettle["Rust trusted settle"]
+  ControlApi --> Recover["recover expired leases"]
+  Recover --> Repo["creative_tasks recovery"]
+```
+
+边界结论：
+
+- `TaskService` 当前不是优先拆分对象；它的重点是继续冻结 `run_review_asset_quality_stub`，不要把正式 review / revision / consistency 规则写回 Rust。
+- `BatchJobService::run_batch_supervisor_inner` 仍承担并发槽、claim、worker shell 派发和 completed 判定；在 worker identity、claim token、lease、heartbeat、lease-aware complete、expired lease recovery 前不能迁给 Python。
+- `WorkerQueueService` 当前只是 Tauri IPC / Rust service 首段骨架，`complete_creative_task` 缺 runtime token、worker identity 和 lease 校验，不能直接当成 sidecar worker-pool complete API。
+- `settle_batch_image_sidecar_response` 的授权输出目录 canonical 校验、thumbnail、asset、model_runs、task_events 和 task status 写入必须继续留在 Rust trusted settle。
+
 ---
 
 ## 8. 安全与权限边界
@@ -1148,41 +1187,11 @@ creative_model_run_repo.rs   model_runs repo behavior and tests
 
 建议继续把已有 `creative_projects` 从最小实体推进成项目事实源，再把现有 `project_id` 字符串引用逐步迁移到 FK 或稳定 ID 策略。
 
-### 10.8 公共组件封装已进入实现态
+### 10.8 公共组件封装不是当前升级主线
 
-公共组件层已经不只是原则约束，而是实际承担 Element Plus 与业务页面之间的缓冲层：
+公共组件层已经承担 Element Plus 与业务页面之间的缓冲层，新增页面仍应优先消费 `Base*` / `App*`，少量页面直用 `<el-*>` 的遗留点可在触碰对应页面时小步回收。
 
-- `BaseButton`、`BaseInput`、`BaseSelect`、`BaseTable`、`BaseUpload`、`BaseDialog`、`BaseDrawer`、`BaseDateRange` 等稳定控件已经直接封装 Element Plus。
-- `BasePanel`、`BaseFieldGroup`、`BaseDataState`、`BaseDetailCard`、`BaseInfoCard`、`BaseStatCard`、`BaseBadge` 等容器 / 展示组件已经逐步用 `ElCard` / `ElTag` / `ElBadge` 等做底座，但仍保留项目自有视觉、插槽和键盘交互约束。
-- `BaseActionMenu`、`BaseAlert`、`BaseDialog`、`BaseDrawer`、`BaseMessage`、`BasePageHeader`、`BaseFilterBar`、`BaseSelectionBar`、`BaseDateRange` 等组件内的关闭、返回、清空、菜单触发动作已进一步收敛到 `BaseButton`，减少组件内部原生 button / 零散 `ElButton` 的重复样式。
-- `BaseLoading`、`BaseEmpty`、`BaseSkeletonCard`、`BaseKeyValueList`、`BaseList` 等状态展示组件已经开始复用统一 loading / empty 语义，减少每个组件内重复拼装。
-- `BaseDescriptionList` 已保留项目 `items`、状态点、描述、换行和 loading / empty / disabled 语义，同时透传 Element Plus `ElDescriptions` 的 title / extra、纵横向布局、label width、label/value align、colon，以及 item 级 rowspan、width、minWidth 和 labelWidth；Playground 已覆盖原生描述能力示例。
-- `BaseBreadcrumb` 已在 `ElBreadcrumb` 基础上补齐 `ellipsisMode="dropdown"`，折叠路径可通过 `ElDropdown` 选择隐藏层级；默认点击展开行为保持兼容，Playground 已覆盖折叠菜单场景。
-- `BaseTree` 已保留项目节点模型、图标、badge、meta、active、插槽和展开事件，同时向下透传 Element Plus 的 `showCheckbox`、`checkedKeys`、`checkStrictly`、`checkOnClick`、`defaultExpandAll`、`accordion`、`emptyText`、`filterText` / `filterNodeMethod`，Playground 已覆盖可勾选与过滤场景。
-- `BaseButton` / `BaseInput` / `BaseSearchInput` / `BaseSelect` / `BaseNumberInput` / `BaseTextarea` / `BaseTagInput` / `BaseSegmented` / `BaseSlider` / `BaseCheckbox` / `BaseRadioGroup` / `BaseSwitch` / `BaseDateRange` 已共享 `toElementPlusSize()` 尺寸适配；`BaseSearchInput` 支持 `xs` 搜索尺寸，`BaseSelect` 已补齐可创建、远程搜索、筛选方法、下拉定位、滚动事件透传和 Playground 示例，`BaseNumberInput` 已补齐 `xs` 表单输入密度，并透传 `stepStrictly`、controls、右侧控制按钮、`valueOnClear`、输入对齐、inputmode 与 disabled-scientific；`BaseTextarea`、`BaseTagInput` 已补齐 `xs` 表单输入密度，`BaseSegmented` 支持 `xs` 迷你分段并默认继续走 `ElSegmented`，`BaseCheckbox`、`BaseRadioGroup`、`BaseSwitch` 已补齐 `xs` 表单选择密度，`BaseSlider` 支持 `xs` / `lg` 滑块尺寸并校正 Element Plus 手柄与轨道中心对齐，`BaseDateRange` 支持 `presetMode`、`unlinkPanels`、`singlePanel` 等 Element Plus 日期面板能力，并在 playground 中补齐对应示例。
-- `BaseUpload` 已保留项目侧 FileList intake、accept / maxFiles / maxSize 校验、`select` / `reject` 事件和默认轻量清理模式，同时透传 Element Plus `drag`、`showFileList`、`listType`、`fileList`、`limit`、`directory`、`preview/remove/exceed` 和实例方法；Playground 已覆盖基础上传、状态反馈、文件列表与限制、非拖拽入口和窄容器场景。
-- `BaseAvatar` 已在 `ElAvatar` 上补齐 `fit`、`srcSet` 和 `error` 事件，继续保留项目状态点、加载、禁用、点击和姓名兜底渲染；`BaseEmpty` 已在 `ElEmpty` 上补齐 `image` / `imageSize` 图片空态能力，继续保留项目图标空态、surface、tone、actions 和禁用态；`BaseError` 已在 `ElResult` 上补齐 `status`、`useNativeIcon` 与 success / primary tone，并继续保留项目自定义图标、retry、extra slot、ARIA 和长文案换行语义。
-- `BaseTab` 已保留项目 tab item、图标、徽标、slot、自定义 pills/underline 外观和 `select` 语义，同时透传 Element Plus `tabPosition`、`type`、`closable`、`addable`、`editable`、`beforeLeave`、`add/remove/edit` 等动态标签能力；Playground 已覆盖动态标签、可关闭/新增、垂直标签和切换拦截场景。
-- `BaseAccordion` 已保留项目 item 模型、badge/meta/actions slot、单开/多开、allowCollapse、keepMounted、surface 和禁用态，同时透传 Element Plus `expandIconPosition`、`beforeCollapse` 和 `change`；Playground 已覆盖左侧展开图标、折叠前拦截和 change 事件反馈。
-- `BaseSlider` 继续以 `ElSlider` 为交互底座，手柄定位交还 Element Plus 原生 CSS 变量，项目侧只保留轨道、手柄、错误态和 mark 视觉；`BaseButton` 已复核 icon-only / circle 图标居中，避免圆形按钮在 Playground 与工具栏中出现视觉偏移。
-- `BaseStepper` 已保留项目 steps 模型、图标、线性可选、键盘导航、loading / empty 和描述截断语义，同时透传 Element Plus `simple`、`alignCenter`、`finishStatus`、`processStatus`，并补齐 `v-model:current` 与 `change` 事件；Playground 已覆盖 simple steps、状态映射和可点击切换。
-- `BaseTimeline` 已保留项目 marker、actions slot、selectedKey、reverse、长文案换行和点击选择语义，同时透传 Element Plus 原生 timestamp / placement；Playground 已覆盖顶部时间戳、长时间字符串和窄容器无横向溢出。
-- `BasePagination` 已共享 `toElementPlusSize()` 尺寸适配，并向下透传 `showJumper`、`background`、`hideOnSinglePage`、`pagerCount`、`layout`、原生 sizes、page-size 下拉传送目标和 popper 样式等 Element Plus 分页能力；playground 已覆盖跳页、背景页码、自定义 layout、原生页容量、单页隐藏和窄容器场景。
-- `BaseProgress` 已保留项目自有语义色、区间、缓冲条、loading / indeterminate 和 ARIA 文本，同时通过 `shape="circle"` / `shape="dashboard"` 复用 Element Plus 环形与仪表盘能力；playground 已补齐环形、仪表盘、自定义直径和端点样式示例。
-- `BaseTooltip` 已保留项目自有内容 slot、受控 `open`、视口避让和可访问描述，同时向下透传 Element Plus / Popper 的 `*-start/end` placement、`hover/focus/click/contextmenu` trigger、`effect="light"`、`showArrow`、`enterable`、`autoClose`、`fallbackPlacements` 和 `strategy`；playground 已覆盖触发方式、浅色提示、无箭头和自动关闭场景。
-- `BaseConfirmAction` 已保留项目确认输入、防重复弹层、loading/disabled 和按钮图标语义，同时透传 `ElPopconfirm` 的 placement、width、icon/showIcon、teleported、persistent、hideAfter、offset、fallbackPlacements、popperClass、effect 与确认/取消按钮类型；Playground 已覆盖底部对齐、无图标和紧凑宽度弹层策略。
-- `BaseTable` / `BaseDataTable` 已保留项目自有列配置、slot 与空态/loading 语义，同时向下透传 `defaultSort`、`sortable`、`fixed`、`sortMethod`、`sortBy`、`sortOrders`，并向上冒泡 `sort-change`。
-- `BaseForm` / `BaseFormItem` 已保留项目自有标题、分栏、footer 和消息展示，同时向下透传 `model` / `rules` / `prop` / item-level `rules`，并通过 ref 暴露 `validate`、`validateField`、`resetFields`、`clearValidate`、`scrollToField`。
-- `AppImageUploader` / `AppPathSelector` 是受控适配组件：外观可复用 Element Plus，但上传、路径选择和桌面能力仍通过 store/service/Rust 链路，不把底座能力暴露给页面。
-
-当前边界判定：
-
-| 区域 | 当前状态 | 下一步 |
-|---|---|---|
-| `src/components/common` | 大多数稳定组件已接 Element Plus 或 Base 状态组件 | 继续保留现有 props / emits / slots，不为换底座压缩项目 API |
-| 页面层直接 `<el-*>` | AI panels 与 `WorkspacePage` 仍有局部例外 | 后续触碰这些页面时，优先评估是否回收进 `Base*` / `App*`，不要扩大直用范围 |
-| 导航树体系 | `BaseTree` 已补齐 Element Plus 勾选、受控 checkedKeys、过滤、折叠和空态文本能力 | 继续保留项目自有节点渲染和业务插槽，不把树形导航改成页面内直接 `<el-tree>` |
-| `BaseForm` / 文本输入 / 搜索输入 / 选择控件 / 描述列表 / 确认动作 / 滑块 / 日期范围 / 分页 / 进度 / 时间线 / 步骤条 / 悬浮提示 / 表格体系 | `BaseSearchInput`、`BaseSelect`、`BaseNumberInput`、`BaseTextarea`、`BaseTagInput`、`BaseSegmented`、`BaseSlider`、`BaseCheckbox`、`BaseRadioGroup`、`BaseSwitch`、`BaseDateRange` 与 `BasePagination` 已完成尺寸映射小步收口；`BaseNumberInput` 已补严格步进、控制按钮位置、清空值、对齐和 inputmode；`BaseSelect` 已补可创建、远程搜索、下拉定位和滚动事件透传；`BaseDescriptionList` 已补 title / extra、纵向布局、label width、对齐、colon 和 item 级尺寸；`BaseConfirmAction` 已补 Popconfirm placement、宽度、图标、传送、回退位置和按钮语义；`BaseDateRange` 已补面板 shortcuts、联动面板和单面板透传；`BasePagination` 已补跳页、背景、单页隐藏、自定义 layout / pagerCount、原生 sizes 与 page-size 下拉透传；`BaseProgress` 已补 Element Plus line / circle / dashboard 形态；`BaseStepper` 已补 simple / alignCenter / 状态映射和 v-model；`BaseTimeline` 已补原生 timestamp placement；`BaseTooltip` 已补 Popper placement、触发方式、浅色提示、箭头和自动关闭透传；`BaseTable` / `BaseDataTable` 已补排序和固定列透传；`BaseForm` / `BaseFormItem` 已补校验规则绑定和实例方法 | 表单、搜索、选择、描述列表、确认动作、滑块、日期范围、分页、进度、时间线、步骤条、悬浮提示、表格体系的更高阶能力继续分批审计，不混在一次大改里 |
+但在当前架构升级评估里，组件治理不再作为主要待办。后续文档只保留稳定边界和红线，不继续把控件级透传、Playground 示例或视觉校正流水写入 `architecture-current-state.md` / `agent/open-loops.md`；这类细节应优先由组件代码、类型、Playground 和必要测试承载。
 
 ### 10.9 文档状态需要收敛
 
@@ -1220,12 +1229,13 @@ Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `
 
 建议：
 
-1. 继续产品化 `/creative` 三栏工作台：中间 `CreativeWorkflowDemo.vue` 已是 orchestration shell，后续重点转为左栏资产分类是否驱动中间 workspace、右栏 quick forms 是否保留，以及正式资产库 / Agent 监控台的产品深度。
-2. 继续约束 AI 前端 runtime 热区：`src/stores/ai.ts` façade 可保留为兼容入口，新逻辑不要回流；后续重点是拆 `AiImagePanel.vue` 的宽 UI 区块，并抽 `ai-image-runtime.ts` / `ai-provider-runtime.ts` 的 task polling、pending image recovery、cancel/result patch 等稳定 helper。
-3. 继续按 `workflow-runtime-boundary.md` 收敛 `TaskService` 与 `BatchJobService` 的 orchestration 边界：当前不以拆文件为首要目标，优先设计 worker identity、lease / claim token、heartbeat 和 Rust-owned localhost sidecar control API。
-4. 继续收口公共组件治理：新页面优先消费 `Base*` / `App*`，少量页面直用 Element Plus 的遗留点后续随页面改造逐步回收。
-5. 在现有 `schema_migrations` 基础上继续补齐旧库兼容回归、备份策略与更细粒度 migration 约束；repo 行为测试继续靠近对应 repo，`creative_db_tests.rs` 只保留 schema / migration 回归。
-6. 持续同步 `agent/open-loops.md` 与本文件，避免“代码已经推进、当前状态文档仍停留在旧阶段”。
+1. 继续按 `workflow-runtime-boundary.md` 收敛 `TaskService` 与 `BatchJobService` 的 orchestration 边界：当前不以拆文件为首要目标，优先设计 worker identity、lease / claim token、heartbeat 和 Rust-owned localhost sidecar control API。
+2. 在现有 `schema_migrations` 基础上继续补齐旧库兼容回归、备份策略与更细粒度 migration 约束；repo 行为测试继续靠近对应 repo，`creative_db_tests.rs` 只保留 schema / migration 回归。
+3. 继续推进 project / asset / provenance 正式化：把 `creative_projects` 从最小实体推进为项目事实源，并明确资产版本、来源、关系和归档传播策略。
+4. 继续产品化 `/creative` 三栏工作台：中间 `CreativeWorkflowDemo.vue` 已是 orchestration shell，后续重点转为左栏资产分类是否驱动中间 workspace、右栏 quick forms 是否保留，以及正式资产库 / Agent 监控台的产品深度。
+5. 继续约束 AI 前端 runtime 热区：`src/stores/ai.ts` façade 可保留为兼容入口，新逻辑不要回流；后续重点是稳定 task polling、pending image recovery、cancel/result patch 等 helper。
+6. 公共组件治理保持小步维护态，不作为本轮架构升级重心；新增页面继续消费 `Base*` / `App*`，遗留页面直用 Element Plus 的点随页面改造回收。
+7. 持续同步 `agent/open-loops.md` 与本文件，避免“代码已经推进、当前状态文档仍停留在旧阶段”。
 
 ### 阶段 B：正式项目与资产域
 
@@ -1298,9 +1308,9 @@ Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `
 
 当前架构已经具备较完整的“桌面控制面 + 前端工作台 + 本地 SQLite 状态 + Python AI 执行面”的雏形。它最适合的下一步不是继续堆功能，而是做一次 post-goal architecture hardening：
 
-1. 先继续收敛 `/creative` 中央 orchestration shell 与 AI runtime 热区，避免新逻辑回流到兼容 façade。
-2. 再固化 migration、project/asset/version/provenance 领域模型。
-3. 同步设计 worker-pool 控制协议和租约模型，让 `BatchJobService` 的 supervisor 迁移具备前置条件。
+1. 先固化 worker-pool 控制协议和租约模型，让 `BatchJobService` 的 supervisor 迁移具备前置条件。
+2. 同步硬化 migration、project/asset/version/provenance 领域模型，避免后续业务调整继续依赖字符串 `project_id`、`metadata_json` 和隐式资产关系。
+3. 再收敛 `/creative` 中央 orchestration shell 与 AI runtime 热区，避免新逻辑回流到兼容 façade。
 4. 最后引入真正的多 Agent 协作、审查返工和生产级批量生成。
 
 如果继续在现有 `CreativeWorkflowDemo.vue`、`src/stores/ai.ts`、Rust `TaskService` 和 `BatchJobService` 上无约束叠业务，短期会很快，长期会让任务状态、资产版本、批量恢复、多 Agent 合并和 provider 审计越来越难验证。
