@@ -193,7 +193,7 @@ sequenceDiagram
    - 负责一致的桌面 UI 原子能力：按钮、输入、表格、面板、时间线、分页、弹窗、状态、上传、布局等。
    - 在 `main.ts` 中集中注册高频基础组件。
    - 当前公共组件层已经大量把 Element Plus 收进 `Base*` / `App*` 封装内部：`src/components/common` 下约 69 个 Vue 组件中，约 51 个已经直接使用 Element Plus 标签。
-   - 近期已继续收口 `AppImageUploader`、`AppPathSelector`、`BaseCopyButton`、`BaseCommandPalette`、`BaseToast`、`ConfirmDialog`、`BaseActionMenu`、`BaseAlert`、`BaseBadge`、`BaseDateRange`、`BaseDialog`、`BaseDrawer`、`BaseMessage`、`BasePageHeader`、`BaseSelectionBar`、`BaseDetailCard`、`BaseInfoCard`、`BaseFilterBar`、`BaseStatusDot`、`BaseFieldGroup`、`BasePanel`、`BaseDataState`、`BaseKeyValueList` 和 `BaseList` 等稳定 UI 面。
+   - 近期已继续收口 `AppImageUploader`、`AppPathSelector`、`BaseCopyButton`、`BaseCommandPalette`、`BaseToast`、`ConfirmDialog`、`BaseActionMenu`、`BaseAlert`、`BaseBadge`、`BaseDateRange`、`BaseDialog`、`BaseDrawer`、`BaseMessage`、`BasePageHeader`、`BaseSelectionBar`、`BaseDetailCard`、`BaseInfoCard`、`BaseStatCard`、`BaseFilterBar`、`BaseStatusDot`、`BaseFieldGroup`、`BasePanel`、`BaseDataState`、`BaseKeyValueList` 和 `BaseList` 等稳定 UI 面。
    - `BaseList` 默认 loading / empty 状态已经复用 `BaseLoading` / `BaseEmpty`；`BaseKeyValueList` loading / empty 已接 `ElSkeleton` / `ElEmpty`；关闭、返回、筛选清空、选择清空、菜单触发等小型动作统一经 `BaseButton` 承接 Element Plus 按钮底座；容器类组件优先通过 `ElCard` 做外壳但保留项目侧 props、slot、键盘和暗色主题 API。
 2. 页面私有组件：`src/views/<module>/components/*`
    - 例如 `views/navigation/components/*`、`views/file-manager/components/*`、`views/system/components/*`。

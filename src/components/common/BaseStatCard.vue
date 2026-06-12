@@ -71,6 +71,25 @@ const hasDescription = computed(() => Boolean(props.description));
 const cardBodyStyle = { padding: "0" };
 const statisticPrefix = computed(() => props.prefix || undefined);
 const statisticSuffix = computed(() => `${props.unit}${props.suffix}` || undefined);
+const statisticValue = computed(() => {
+  if (typeof props.value === "number") {
+    return Number.isFinite(props.value) ? props.value : undefined;
+  }
+
+  const trimmedValue = props.value.trim();
+  if (!/^[+-]?(?:\d+|\d*\.\d+)$/.test(trimmedValue)) {
+    return undefined;
+  }
+
+  const numericValue = Number(trimmedValue);
+  return Number.isFinite(numericValue) ? numericValue : undefined;
+});
+const hasStatisticValue = computed(() => statisticValue.value !== undefined);
+const statisticPrecision = computed(() => {
+  const rawValue = typeof props.value === "number" ? String(props.value) : props.value.trim();
+  const decimalPart = rawValue.match(/^[+-]?(?:\d+|\d*)\.(\d+)$/)?.[1];
+  return decimalPart?.length ?? 0;
+});
 const trendTagType = computed(() => {
   if (props.trendDirection === "up") return "success";
   if (props.trendDirection === "down") return "danger";
@@ -166,14 +185,29 @@ const handleKeydown = (event: KeyboardEvent) => {
     <div class="base-stat-card__body">
       <span :id="labelId" class="base-stat-card__label">{{ label }}</span>
       <el-statistic
+        v-if="hasStatisticValue"
         :id="valueId"
         class="base-stat-card__value"
-        :value="value"
+        :value="statisticValue"
         :prefix="statisticPrefix"
         :suffix="statisticSuffix"
+        :precision="statisticPrecision"
         :aria-label="displayValue"
         aria-live="polite"
       />
+      <span
+        v-else
+        :id="valueId"
+        class="base-stat-card__value base-stat-card__value--text"
+        :aria-label="displayValue"
+        aria-live="polite"
+      >
+        <span class="base-stat-card__value-content">
+          <span v-if="prefix" class="base-stat-card__value-part">{{ prefix }}</span>
+          <span class="base-stat-card__value-part">{{ value }}</span>
+          <span v-if="statisticSuffix" class="base-stat-card__value-part">{{ statisticSuffix }}</span>
+        </span>
+      </span>
       <span v-if="description" :id="descriptionId" class="base-stat-card__description" :style="descriptionStyle">{{ description }}</span>
       <span v-if="loading && loadingText" :id="loadingId" class="sr-only">{{ loadingText }}</span>
     </div>
@@ -293,17 +327,23 @@ const handleKeydown = (event: KeyboardEvent) => {
   @apply mt-1 block min-w-0 truncate;
 }
 
-.base-stat-card__value :deep(.el-statistic__content) {
+.base-stat-card__value :deep(.el-statistic__content),
+.base-stat-card__value-content {
   @apply min-w-0 overflow-hidden text-xl font-black leading-tight text-slate-800 dark:text-slate-100;
 }
 
 .base-stat-card__value :deep(.el-statistic__number),
 .base-stat-card__value :deep(.el-statistic__prefix),
-.base-stat-card__value :deep(.el-statistic__suffix) {
+.base-stat-card__value :deep(.el-statistic__suffix),
+.base-stat-card__value-part {
   @apply min-w-0 truncate text-current;
   font-size: inherit;
   font-weight: inherit;
   line-height: inherit;
+}
+
+.base-stat-card__value-content {
+  @apply flex items-baseline;
 }
 
 .base-stat-card--wrap-value .base-stat-card__value {
@@ -313,16 +353,25 @@ const handleKeydown = (event: KeyboardEvent) => {
 .base-stat-card--wrap-value .base-stat-card__value :deep(.el-statistic__content),
 .base-stat-card--wrap-value .base-stat-card__value :deep(.el-statistic__number),
 .base-stat-card--wrap-value .base-stat-card__value :deep(.el-statistic__prefix),
-.base-stat-card--wrap-value .base-stat-card__value :deep(.el-statistic__suffix) {
-  @apply whitespace-normal break-words;
+.base-stat-card--wrap-value .base-stat-card__value :deep(.el-statistic__suffix),
+.base-stat-card--wrap-value .base-stat-card__value-content,
+.base-stat-card--wrap-value .base-stat-card__value-part {
+  @apply whitespace-normal break-words overflow-visible;
+}
+
+.base-stat-card--wrap-value .base-stat-card__value-content {
+  @apply flex-wrap;
 }
 
 .base-stat-card--sm .base-stat-card__value :deep(.el-statistic__content),
-.base-stat-card--compact .base-stat-card__value :deep(.el-statistic__content) {
+.base-stat-card--sm .base-stat-card__value-content,
+.base-stat-card--compact .base-stat-card__value :deep(.el-statistic__content),
+.base-stat-card--compact .base-stat-card__value-content {
   @apply text-lg;
 }
 
-.base-stat-card--lg .base-stat-card__value :deep(.el-statistic__content) {
+.base-stat-card--lg .base-stat-card__value :deep(.el-statistic__content),
+.base-stat-card--lg .base-stat-card__value-content {
   @apply text-2xl;
 }
 
