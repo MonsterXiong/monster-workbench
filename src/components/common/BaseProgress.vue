@@ -6,6 +6,8 @@ import { clampNumber, createLineClampStyle, joinAriaIds, maxNumber, normalizeNum
 type ProgressType = "primary" | "success" | "warning" | "danger" | "neutral";
 type ProgressSize = "xs" | "sm" | "md" | "lg";
 type ProgressSurface = "plain" | "card" | "muted";
+type ProgressShape = "line" | "circle" | "dashboard";
+type ProgressStrokeLinecap = "butt" | "round" | "square" | "inherit";
 type ProgressValuePlacement = "header" | "track" | "both" | "none";
 
 export interface ProgressFormatPayload {
@@ -24,7 +26,10 @@ interface Props {
   label?: string;
   description?: string;
   type?: ProgressType;
+  shape?: ProgressShape;
   size?: ProgressSize;
+  width?: number;
+  strokeLinecap?: ProgressStrokeLinecap;
   showValue?: boolean;
   valuePlacement?: ProgressValuePlacement;
   striped?: boolean;
@@ -59,7 +64,10 @@ const props = withDefaults(defineProps<Props>(), {
   label: "",
   description: "",
   type: "primary",
+  shape: "line",
   size: "md",
+  width: 0,
+  strokeLinecap: "round",
   showValue: true,
   valuePlacement: "header",
   striped: false,
@@ -100,16 +108,35 @@ const percent = computed(() => {
 const bufferPercent = computed(() => {
   return toRangePercent(maxNumber([props.bufferValue, currentValue.value], currentValue.value), normalizedMin.value, normalizedMax.value, props.precision);
 });
+const isLineShape = computed(() => props.shape === "line");
 const isIndeterminate = computed(() => props.loading || props.indeterminate);
-const visualPercent = computed(() => (isIndeterminate.value ? 100 : percent.value));
-const elementIndeterminate = computed(() => isIndeterminate.value && props.animated);
-const elementStripedFlow = computed(() => props.striped && props.animated);
+const visualPercent = computed(() => (isLineShape.value && isIndeterminate.value ? 100 : percent.value));
+const elementIndeterminate = computed(() => isLineShape.value && isIndeterminate.value && props.animated);
+const elementStriped = computed(() => isLineShape.value && props.striped);
+const elementStripedFlow = computed(() => elementStriped.value && props.animated);
 const progressDuration = computed(() => (props.animated ? 3 : 0));
 const progressStrokeWidth = computed(() => {
-  if (props.size === "xs") return 4;
+  if (isLineShape.value) {
+    if (props.size === "xs") return 4;
+    if (props.size === "sm") return 6;
+    if (props.size === "lg") return 14;
+    return 10;
+  }
+  if (props.size === "xs") return 5;
   if (props.size === "sm") return 6;
-  if (props.size === "lg") return 14;
-  return 10;
+  if (props.size === "lg") return 10;
+  return 8;
+});
+const defaultRingWidth = computed(() => {
+  if (props.size === "xs") return 72;
+  if (props.size === "sm") return 88;
+  if (props.size === "lg") return 128;
+  return 108;
+});
+const progressWidth = computed(() => {
+  if (isLineShape.value) return 0;
+  if (props.width > 0) return clampNumber(props.width, 48, 240, defaultRingWidth.value, 0);
+  return defaultRingWidth.value;
 });
 const progressColor = computed(() => {
   if (props.type === "success") return "#10b981";
@@ -127,6 +154,7 @@ const elementStatus = computed<"" | "success" | "warning" | "exception">(() => {
 const resolvedValuePlacement = computed(() => (props.showValue ? props.valuePlacement : "none"));
 const showHeaderValue = computed(() => resolvedValuePlacement.value === "header" || resolvedValuePlacement.value === "both");
 const showTrackValue = computed(() => resolvedValuePlacement.value === "track" || resolvedValuePlacement.value === "both");
+const showBuffer = computed(() => isLineShape.value && props.bufferValue > 0 && !isIndeterminate.value);
 const resolvedValueText = computed(() => {
   if (props.valueText) return props.valueText;
   if (isIndeterminate.value) return props.statusText || t("common.loading");
@@ -158,6 +186,7 @@ const descriptionStyle = computed(() => {
     class="base-progress"
     :class="[
       `base-progress--${type}`,
+      `base-progress--shape-${shape}`,
       `base-progress--${size}`,
       `base-progress--${surface}`,
       `base-progress--value-${resolvedValuePlacement}`,
@@ -201,16 +230,18 @@ const descriptionStyle = computed(() => {
       :aria-disabled="disabled ? 'true' : undefined"
       :aria-busy="loading ? 'true' : undefined"
     >
-      <div v-if="bufferValue > 0 && !isIndeterminate" class="base-progress__buffer" :style="{ width: `${bufferPercent}%` }"></div>
+      <div v-if="showBuffer" class="base-progress__buffer" :style="{ width: `${bufferPercent}%` }"></div>
       <el-progress
         class="base-progress__element"
-        type="line"
+        :type="shape"
         :percentage="visualPercent"
         :stroke-width="progressStrokeWidth"
+        :stroke-linecap="strokeLinecap"
+        :width="progressWidth"
         :status="elementStatus"
         :color="progressColor"
         :show-text="false"
-        :striped="striped"
+        :striped="elementStriped"
         :striped-flow="elementStripedFlow"
         :indeterminate="elementIndeterminate"
         :duration="progressDuration"
@@ -312,8 +343,8 @@ const descriptionStyle = computed(() => {
   --base-progress-track-height: 14px;
 }
 
-.base-progress--value-track .base-progress__track,
-.base-progress--value-both .base-progress__track {
+.base-progress--shape-line.base-progress--value-track .base-progress__track,
+.base-progress--shape-line.base-progress--value-both .base-progress__track {
   min-height: 1.25rem;
 }
 
@@ -329,6 +360,7 @@ const descriptionStyle = computed(() => {
   position: relative;
   z-index: 1;
   width: 100%;
+  --el-fill-color-light: #e2e8f0;
 }
 
 .base-progress__element :deep(.el-progress-bar) {
@@ -351,13 +383,63 @@ const descriptionStyle = computed(() => {
   width: 33% !important;
 }
 
+.base-progress--shape-circle .base-progress__track,
+.base-progress--shape-dashboard .base-progress__track {
+  @apply inline-flex items-center justify-center overflow-visible rounded-none bg-transparent;
+  min-height: auto;
+}
+
+.base-progress--shape-circle .base-progress__element,
+.base-progress--shape-dashboard .base-progress__element {
+  width: auto;
+}
+
+.base-progress--shape-circle .base-progress__element :deep(.el-progress),
+.base-progress--shape-dashboard .base-progress__element :deep(.el-progress) {
+  display: inline-block;
+}
+
+.base-progress--shape-circle .base-progress__element :deep(.el-progress-circle__track),
+.base-progress--shape-dashboard .base-progress__element :deep(.el-progress-circle__track) {
+  stroke: #e2e8f0;
+}
+
+.base-progress--shape-circle .base-progress__element :deep(.el-progress-circle__path),
+.base-progress--shape-dashboard .base-progress__element :deep(.el-progress-circle__path) {
+  transition:
+    stroke-dasharray 0.5s ease,
+    stroke 0.2s ease,
+    opacity 0.2s ease;
+}
+
 .base-progress__track-value {
   @apply pointer-events-none absolute inset-0 z-10 flex min-w-0 items-center justify-center truncate px-2 text-[10px] font-black text-slate-700 dark:text-slate-100;
   text-shadow: 0 1px 2px rgba(255, 255, 255, 0.56);
 }
 
+.base-progress--shape-circle .base-progress__track-value,
+.base-progress--shape-dashboard .base-progress__track-value {
+  @apply px-3 text-center text-xs leading-tight text-slate-700 dark:text-slate-100;
+  white-space: normal;
+  text-shadow: none;
+}
+
 :global(.dark) .base-progress__track-value {
   text-shadow: 0 1px 2px rgba(15, 23, 42, 0.56);
+}
+
+:global(.dark) .base-progress--shape-circle .base-progress__track-value,
+:global(.dark) .base-progress--shape-dashboard .base-progress__track-value {
+  text-shadow: none;
+}
+
+:global(.dark) .base-progress__element {
+  --el-fill-color-light: #334155;
+}
+
+:global(.dark) .base-progress--shape-circle .base-progress__element :deep(.el-progress-circle__track),
+:global(.dark) .base-progress--shape-dashboard .base-progress__element :deep(.el-progress-circle__track) {
+  stroke: #334155;
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -34,6 +34,50 @@ const formatShardProgress = ({ value, percent }: { value: number; percent: numbe
             <BaseProgress label="容量占用" description="缓存目录已接近上限。" :value="86" type="warning" size="lg" surface="card" bordered />
           </div>
         </BasePanel>
+        <BasePanel title="环形与仪表盘" subtitle="复用 Element Plus circle / dashboard，保留统一语义色和尺寸。" divided>
+          <div class="progress-ring-grid">
+            <BaseProgress
+              class="progress-ring-item"
+              label="资产同步"
+              description="圆形进度适合仪表摘要。"
+              shape="circle"
+              :value="76"
+              value-placement="track"
+              type="primary"
+            />
+            <BaseProgress
+              class="progress-ring-item"
+              label="健康度"
+              description="仪表盘用于容量、质量分或健康分。"
+              shape="dashboard"
+              :value="88"
+              value-placement="track"
+              type="success"
+              status-text="良好"
+            />
+            <BaseProgress
+              class="progress-ring-item"
+              label="发布窗口"
+              description="支持自定义直径和端点样式。"
+              shape="circle"
+              :value="42"
+              :width="96"
+              stroke-linecap="butt"
+              value-placement="both"
+              type="warning"
+            />
+            <BaseProgress
+              class="progress-ring-item"
+              label="风险占比"
+              description="危险态仍走统一色板。"
+              shape="dashboard"
+              :value="18"
+              size="sm"
+              value-placement="track"
+              type="danger"
+            />
+          </div>
+        </BasePanel>
         <BasePanel title="尺寸与禁用" subtitle="紧凑条适合列表，禁用态适合锁定流程。" divided>
           <div class="progress-stack">
             <BaseProgress label="XS 细条" :value="35" size="xs" :show-value="false" aria-label="XS 细条进度" />
@@ -143,6 +187,14 @@ const formatShardProgress = ({ value, percent }: { value: number; percent: numbe
 
 .progress-demo-grid {
   @apply grid min-w-0 gap-4 xl:grid-cols-2;
+}
+
+.progress-ring-grid {
+  @apply grid min-w-0 gap-4 sm:grid-cols-2;
+}
+
+.progress-ring-item {
+  @apply min-w-0 rounded-lg border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900;
 }
 
 .progress-narrow-demo {
