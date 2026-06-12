@@ -18,7 +18,6 @@
 
 - [ ] 以代码事实为准继续同步 `docs/architecture-current-state.md`：AI façade、`/creative` 三栏壳层、Rust 编排边界、migration / project / asset provenance、model_runs / provider 观测边界均已在 2026-06-13 复核；后续文档更新只记录会影响实现顺序的事实，不继续堆组件流水或历史 Goal 执行包。
 - [ ] 基于当前 `/creative` 三栏工作台的实际代码边界，继续评审“正式业务核心”和“原型/展示壳层”的分界：`CreativeTabBatch.vue` / `CreativeTabAssets.vue` 已是主要宽区块；正式化前先决定左栏分类/tag 是否过滤 assets tab 或切 workspace，以及右栏 quick launcher 是否保留。
-- [ ] 继续补齐 Creative repo 测试缺口：2026-06-13 复核确认 `creative_db_tests.rs` 只保留 schema / migration 回归，task / asset / batch / project / model_run repo 行为测试已在对应 repo 内；生产侧 repo API 正在继续收窄，`model_runs` / task_events 等查询 helper 主要留给 `#[cfg(test)]` 验证。后续如补 `creative_goal_repo` 行为回归，应放在该 repo 的 test module，不回流到 `creative_db_tests.rs`，也不要为了测试便利扩大生产 API 面。
 
 ## 2026-06-11 公共组件治理待跟进
 

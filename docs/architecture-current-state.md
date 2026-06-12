@@ -1137,14 +1137,14 @@ creative_db_tests.rs         schema / migration regression only
 creative_task_repo.rs        task + task_events repo behavior and tests
 creative_asset_repo.rs       asset + asset_links repo behavior and tests
 creative_project_repo.rs     creative_projects repo behavior and tests
-creative_goal_repo.rs        goal / role / goal task query repo
+creative_goal_repo.rs        goal / role / goal task query repo behavior and tests
 creative_batch_repo.rs       batch repo behavior and snapshot tests
 creative_model_run_repo.rs   model_runs repo behavior and tests
 ```
 
 当前生产 API 面还在继续收窄：`TaskService` 暴露的是 `run_generate_image_prompt_workflow_with_endpoint_provider`，command 负责从 `SidecarLifecycleService` state 取 endpoint；`creative_batch_repo` 不再保留 `list_batch_job_tasks` / cancel wrapper，batch service 直接调用 `creative_task_repo`；`creative_model_run_repo::list_model_runs`、`creative_task_repo::list_task_events` 和 `ListModelRunsFilter` 主要服务测试验证，尚未形成正式查询 command。
 
-因此下一步不是继续把 repo 行为测试塞回 `creative_db_tests.rs`，也不是为了目录名再拆一层 `infra/creative/*`。更实际的边界是：schema/migration 回归继续留在 `creative_db_tests.rs`；领域行为回归继续靠近对应 repo；生产侧只保留真实 service/command 需要的 repo API，测试查询 helper 可以留在 `#[cfg(test)]` 范围内；若补 `creative_goal_repo` 行为测试，应直接放在该 repo 的 test module。
+因此下一步不是继续把 repo 行为测试塞回 `creative_db_tests.rs`，也不是为了目录名再拆一层 `infra/creative/*`。更实际的边界是：schema/migration 回归继续留在 `creative_db_tests.rs`；领域行为回归继续靠近对应 repo；生产侧只保留真实 service/command 需要的 repo API，测试查询 helper 可以留在 `#[cfg(test)]` 范围内。`creative_goal_repo` 行为回归已补在该 repo 的 test module 中，没有回流到 `creative_db_tests.rs`，也没有扩大生产 API 面。
 
 ### 10.5 正式 migration 体系仍需继续硬化
 
