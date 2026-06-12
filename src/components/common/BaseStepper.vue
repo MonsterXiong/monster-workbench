@@ -44,6 +44,10 @@ interface Props {
   loadingText?: string;
   emptyText?: string;
   showConnector?: boolean;
+  alignCenter?: boolean;
+  simple?: boolean;
+  finishStatus?: ElementStepStatus;
+  processStatus?: ElementStepStatus;
   wrapTitle?: boolean;
   wrapDescription?: boolean;
   maxDescriptionLines?: number;
@@ -62,12 +66,18 @@ const props = withDefaults(defineProps<Props>(), {
   loadingText: "",
   emptyText: "",
   showConnector: true,
+  alignCenter: false,
+  simple: false,
+  finishStatus: "success",
+  processStatus: "process",
   wrapTitle: false,
   wrapDescription: false,
   maxDescriptionLines: 2,
 });
 
 const emit = defineEmits<{
+  (e: "update:current", value: number): void;
+  (e: "change", payload: { step: StepperItem; index: number }): void;
   (e: "select", payload: { step: StepperItem; index: number }): void;
 }>();
 
@@ -77,8 +87,9 @@ const normalizedCurrent = computed(() => (hasSteps.value ? clampNumber(props.cur
 const resolvedLoadingText = computed(() => props.loadingText || t("common.loading"));
 const resolvedEmptyText = computed(() => props.emptyText || t("common.noData"));
 const elementDirection = computed(() => (props.vertical ? "vertical" : "horizontal"));
+const isSimpleLayout = computed(() => props.simple && !props.vertical);
 const stepSpace = computed(() => {
-  if (props.vertical || !props.columns) return "";
+  if (props.vertical || isSimpleLayout.value || !props.columns) return "";
   return `${100 / clampNumber(props.columns, 1, 6, 1, 0)}%`;
 });
 const descriptionStyle = computed(() => {
@@ -97,8 +108,8 @@ const stepState = (step: StepperItem, index: number): StepperState => {
 
 const stepStatus = (step: StepperItem, index: number): ElementStepStatus => {
   const state = stepState(step, index);
-  if (state === "done") return "success";
-  if (state === "current") return "process";
+  if (state === "done") return props.finishStatus;
+  if (state === "current") return props.processStatus;
   if (state === "error") return "error";
   return "wait";
 };
@@ -120,9 +131,16 @@ const canSelect = (step: StepperItem, index: number) => {
   return index <= normalizedCurrent.value + 1;
 };
 
+const commitSelect = (step: StepperItem, index: number) => {
+  const payload = { step, index };
+  emit("update:current", index);
+  emit("change", payload);
+  emit("select", payload);
+};
+
 const handleSelect = (step: StepperItem, index: number) => {
   if (!canSelect(step, index)) return;
-  emit("select", { step, index });
+  commitSelect(step, index);
 };
 
 const moveStep = (direction: 1 | -1) => {
@@ -130,7 +148,7 @@ const moveStep = (direction: 1 | -1) => {
   const enabledSteps = compactMap(props.steps, (step, index) => (canSelect(step, index) ? { step, index } : undefined));
   if (isEmptyArray(enabledSteps)) return;
   const nextStep = findNextCircularItem(enabledSteps, (item) => item.index === normalizedCurrent.value, direction);
-  if (nextStep) emit("select", nextStep);
+  if (nextStep) commitSelect(nextStep.step, nextStep.index);
 };
 
 const handleStepKeydown = (event: KeyboardEvent, step: StepperItem, index: number) => {
@@ -158,6 +176,8 @@ const handleStepKeydown = (event: KeyboardEvent, step: StepperItem, index: numbe
         'base-stepper--vertical': vertical,
         'base-stepper--bordered': bordered,
         'base-stepper--linear': linear,
+        'base-stepper--align-center': alignCenter,
+        'base-stepper--simple': isSimpleLayout,
         'base-stepper--with-connector': showConnector && !loading,
         'base-stepper--hide-connector': !showConnector,
         'base-stepper--wrap-title': wrapTitle,
@@ -181,8 +201,10 @@ const handleStepKeydown = (event: KeyboardEvent, step: StepperItem, index: numbe
       :active="normalizedCurrent"
       :direction="elementDirection"
       :space="stepSpace"
-      finish-status="success"
-      process-status="process"
+      :align-center="alignCenter || isSimpleLayout"
+      :simple="isSimpleLayout"
+      :finish-status="finishStatus"
+      :process-status="processStatus"
       role="list"
     >
       <el-step
@@ -390,6 +412,14 @@ const handleStepKeydown = (event: KeyboardEvent, step: StepperItem, index: numbe
 
 .base-stepper--plain.base-stepper--bordered :deep(.el-step__main) {
   @apply border-0;
+}
+
+.base-stepper--simple :deep(.el-step__main) {
+  @apply rounded-none border-0 bg-transparent p-0 shadow-none dark:bg-transparent;
+}
+
+.base-stepper--simple :deep(.el-step__icon) {
+  @apply shadow-none;
 }
 
 .base-stepper--sm :deep(.el-step__main) {

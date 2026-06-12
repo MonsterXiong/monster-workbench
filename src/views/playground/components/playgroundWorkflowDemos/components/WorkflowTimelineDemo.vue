@@ -71,6 +71,39 @@ const longTimelineItems = [
     disabled: true,
   },
 ];
+
+const releaseTimelineItems = [
+  {
+    key: "api",
+    title: "API 补齐",
+    time: "2026-06-13 09:20",
+    description: "公共组件保留项目 API，同时把稳定交互交给 Element Plus。",
+    type: "success" as const,
+    icon: "Braces",
+    meta: "Base*",
+    tag: "done",
+  },
+  {
+    key: "sandbox",
+    title: "沙箱展示",
+    time: "2026-06-13 10:05",
+    description: "组件列表下展示完整能力，不展示主题 token。",
+    type: "primary" as const,
+    icon: "MonitorCheck",
+    meta: "Playground",
+    tag: "review",
+  },
+  {
+    key: "verify",
+    title: "验证",
+    time: "2026-06-13 10:40",
+    description: "类型、架构和视觉 smoke 通过后再同步文档。",
+    type: "warning" as const,
+    icon: "ShieldCheck",
+    meta: "verify",
+    tag: "pending",
+  },
+];
 </script>
 
 <template>
@@ -93,6 +126,16 @@ const longTimelineItems = [
       </BasePanel>
       <BasePanel title="Long items" subtitle="Wrap long labels safely in narrow containers.">
         <BaseTimeline :items="longTimelineItems" wrap-title wrap-description :max-description-lines="4" marker="number" surface="plain" :bordered="false" />
+      </BasePanel>
+      <BasePanel title="Native timestamps" subtitle="Use Element Plus timestamp placement without losing project styling.">
+        <BaseTimeline
+          :items="releaseTimelineItems"
+          dense
+          show-timestamp
+          timestamp-placement="top"
+          marker="dot"
+          surface="muted"
+        />
       </BasePanel>
     </PlaygroundDemoSection>
   </section>

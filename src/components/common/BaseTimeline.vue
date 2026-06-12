@@ -16,6 +16,7 @@ type TimelineType = "primary" | "success" | "warning" | "danger" | "neutral";
 type TimelineSize = "sm" | "md" | "lg";
 type TimelineSurface = "card" | "muted" | "plain";
 type TimelineMarker = "dot" | "icon" | "number";
+type TimelineTimestampPlacement = "top" | "bottom";
 
 export interface TimelineItem {
   key: string;
@@ -38,6 +39,8 @@ interface Props {
   clickable?: boolean;
   reverse?: boolean;
   marker?: TimelineMarker;
+  showTimestamp?: boolean;
+  timestampPlacement?: TimelineTimestampPlacement;
   selectedKey?: string;
   disabled?: boolean;
   loading?: boolean;
@@ -60,6 +63,8 @@ const props = withDefaults(defineProps<Props>(), {
   clickable: false,
   reverse: false,
   marker: "icon",
+  showTimestamp: false,
+  timestampPlacement: "bottom",
   selectedKey: "",
   disabled: false,
   loading: false,
@@ -122,6 +127,7 @@ const descriptionStyle = computed(() => {
 const isItemDisabled = (item: TimelineItem) => props.disabled || props.loading || Boolean(item.disabled);
 const canSelect = (item: TimelineItem) => props.clickable && !isItemDisabled(item);
 const isItemSelected = (item: TimelineItem) => props.selectedKey === item.key;
+const shouldShowNativeTimestamp = (item: TimelineItem) => props.showTimestamp && Boolean(item.time);
 
 const handleSelect = (item: TimelineItem, index: number) => {
   if (!canSelect(item)) return;
@@ -147,7 +153,7 @@ const getItemMetaId = (item: TimelineItem, index: number) => createDomIdFromPart
 const getItemTagId = (item: TimelineItem, index: number) => createDomIdFromParts([getItemBaseId(item, index), "tag"]);
 const getItemDescribedBy = (item: TimelineItem, index: number) =>
   joinAriaIds([
-    item.time ? getItemTimeId(item, index) : undefined,
+    item.time && !shouldShowNativeTimestamp(item) ? getItemTimeId(item, index) : undefined,
     item.description ? getItemDescriptionId(item, index) : undefined,
     item.meta ? getItemMetaId(item, index) : undefined,
     item.tag ? getItemTagId(item, index) : undefined,
@@ -174,6 +180,7 @@ const getSlotState = (item: TimelineItem, index: number): TimelineSlotState => (
         'base-timeline--dense': dense,
         'base-timeline--bordered': bordered,
         'base-timeline--clickable': clickable,
+        'base-timeline--with-native-time': showTimestamp,
         'base-timeline--wrap-title': wrapTitle,
         'base-timeline--wrap-description': wrapDescription,
         'is-disabled': disabled,
@@ -222,7 +229,9 @@ const getSlotState = (item: TimelineItem, index: number): TimelineSlotState => (
             'is-selected': isItemSelected(entry.item),
           },
         ]"
-        :hide-timestamp="true"
+        :timestamp="shouldShowNativeTimestamp(entry.item) ? entry.item.time : ''"
+        :placement="timestampPlacement"
+        :hide-timestamp="!shouldShowNativeTimestamp(entry.item)"
         :aria-disabled="isItemDisabled(entry.item) ? 'true' : undefined"
         :aria-current="isItemSelected(entry.item) ? 'step' : undefined"
       >
@@ -249,7 +258,7 @@ const getSlotState = (item: TimelineItem, index: number): TimelineSlotState => (
                   <strong :id="getItemTitleId(entry.item, entry.index)">{{ entry.item.title }}</strong>
                   <span v-if="entry.item.meta" :id="getItemMetaId(entry.item, entry.index)" class="base-timeline__meta">{{ entry.item.meta }}</span>
                 </div>
-                <time v-if="entry.item.time" :id="getItemTimeId(entry.item, entry.index)">{{ entry.item.time }}</time>
+                <time v-if="entry.item.time && !shouldShowNativeTimestamp(entry.item)" :id="getItemTimeId(entry.item, entry.index)">{{ entry.item.time }}</time>
               </div>
               <p v-if="entry.item.description" :id="getItemDescriptionId(entry.item, entry.index)" :style="descriptionStyle">{{ entry.item.description }}</p>
               <div v-if="entry.item.tag" class="base-timeline__footer">
@@ -332,6 +341,19 @@ const getSlotState = (item: TimelineItem, index: number): TimelineSlotState => (
 .base-timeline__item :deep(.el-timeline-item__dot) {
   left: 0;
   top: 0;
+}
+
+.base-timeline--with-native-time .base-timeline__item :deep(.el-timeline-item__timestamp) {
+  @apply max-w-full text-[10px] font-bold leading-4 text-slate-400 dark:text-slate-500;
+  overflow-wrap: anywhere;
+}
+
+.base-timeline--with-native-time .base-timeline__item :deep(.el-timeline-item__timestamp.is-top) {
+  @apply mb-1;
+}
+
+.base-timeline--with-native-time .base-timeline__item :deep(.el-timeline-item__timestamp.is-bottom) {
+  @apply mt-1;
 }
 
 .base-timeline__marker {
