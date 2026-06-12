@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { ref } from "vue";
+import type { BaseTableColumn } from "../../../../../components/common/BaseTable.vue";
 import PlaygroundDemoSection from "../../PlaygroundDemoSection.vue";
 
 const simpleTableColumns = [
@@ -51,6 +53,19 @@ const nestedTableRows = [
     },
   },
 ];
+
+const interactiveTableColumns: BaseTableColumn[] = [
+  { key: "name", title: "组件", width: "190px", fixed: true, sortable: true },
+  { key: "usage", title: "用途", width: "220px", sortable: true },
+  { key: "status", title: "状态", width: "150px", sortable: true, sortOrders: ["ascending", "descending", null] },
+  { key: "owner", title: "维护", width: "140px", align: "right" as const, fixed: "right" as const },
+];
+
+const lastSortText = ref("默认按组件名升序");
+
+const handleSortChange = ({ prop, order }: { prop: string; order: "ascending" | "descending" | null }) => {
+  lastSortText.value = order ? `${prop} / ${order}` : "已清除排序";
+};
 </script>
 
 <template>
@@ -76,24 +91,35 @@ const nestedTableRows = [
             </template>
           </BaseTable>
         </BasePanel>
-        <BasePanel title="审计表格" subtitle="caption、列对齐、muted 表面和选中行适合确认页。">
+        <BasePanel title="排序与固定列" subtitle="透传 Element Plus 的 defaultSort、sortable、fixed 和 sort-change。">
           <BaseTable
-            caption="组件审计表格"
-            :columns="simpleTableColumns"
+            caption="可排序固定列轻量表格"
+            :columns="interactiveTableColumns"
             :data="simpleTableRows"
             row-key="name"
             :selected-keys="['BaseButton', 'BaseSearchInput']"
+            :default-sort="{ prop: 'name', order: 'ascending' }"
             surface="muted"
             size="lg"
             empty-icon="SearchX"
+            min-width="700px"
+            @sort-change="handleSortChange"
           >
             <template #name="{ row }">
               <strong class="simple-table-name">{{ row.name }}</strong>
+            </template>
+            <template #status="{ row }">
+              <BaseBadge :type="row.status === '稳定' ? 'success' : row.status === '待增强' ? 'warning' : 'primary'" variant="outline">
+                {{ row.status }}
+              </BaseBadge>
             </template>
             <template #owner="{ row }">
               <BaseStatusDot type="primary" :label="row.owner" orientation="horizontal" />
             </template>
           </BaseTable>
+          <div class="table-sort-summary">
+            <BaseStatusDot type="primary" :label="lastSortText" orientation="horizontal" />
+          </div>
         </BasePanel>
         <BasePanel title="长字段表格" subtitle="支持嵌套 key、列级换行和自定义最小宽度。">
           <BaseTable
@@ -154,5 +180,9 @@ const nestedTableRows = [
 
 .table-state-stack {
   @apply flex min-w-0 flex-col gap-3;
+}
+
+.table-sort-summary {
+  @apply mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-950;
 }
 </style>

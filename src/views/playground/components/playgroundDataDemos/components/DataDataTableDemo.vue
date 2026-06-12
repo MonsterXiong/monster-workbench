@@ -9,11 +9,11 @@ const tablePage = ref(1);
 const tablePageSize = ref(10);
 
 const dataTableColumns = [
-  { key: "name", title: "组件", width: "30%" },
-  { key: "category", title: "分类", width: "20%" },
+  { key: "name", title: "组件", width: "220px", fixed: true, sortable: true },
+  { key: "category", title: "分类", width: "160px", sortable: true },
   { key: "status", title: "状态", width: "18%" },
-  { key: "updatedAt", title: "更新时间", width: "18%" },
-  { key: "rowActions", title: "操作", width: "14%", align: "right" as const },
+  { key: "updatedAt", title: "更新时间", width: "160px", sortable: true },
+  { key: "rowActions", title: "操作", width: "120px", align: "right" as const, fixed: "right" as const },
 ];
 
 const dataTableRows = [
@@ -63,12 +63,15 @@ const handlePageChange = (payload: { page: number; pageSize: number }) => {
         row-key="name"
         :selected-keys="['BaseDataTable']"
         table-caption="组件清单数据表格"
+        table-min-width="820px"
+        :default-sort="{ prop: 'updatedAt', order: 'descending' }"
         actions-label="组件清单操作"
         filters-label="组件清单筛选"
         body-label="组件清单表格内容"
         pagination-label="组件清单分页"
         loading-text="组件清单加载中"
         @page-change="handlePageChange"
+        @sort-change="triggerToast($event.order ? `排序：${$event.prop} / ${$event.order}` : '已清除排序', 'info')"
       >
         <template #meta="{ interactiveDisabled }">
           <BaseBadge type="success" dot :disabled="interactiveDisabled">运行中</BaseBadge>

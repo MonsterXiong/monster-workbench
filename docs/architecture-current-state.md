@@ -194,7 +194,7 @@ sequenceDiagram
    - 在 `main.ts` 中集中注册高频基础组件。
    - 当前公共组件层已经大量把 Element Plus 收进 `Base*` / `App*` 封装内部：`src/components/common` 下约 69 个 Vue 组件中，约 51 个已经直接使用 Element Plus 标签。
    - 近期已继续收口 `AppImageUploader`、`AppPathSelector`、`BaseCopyButton`、`BaseCommandPalette`、`BaseToast`、`ConfirmDialog`、`BaseActionMenu`、`BaseAlert`、`BaseBadge`、`BaseDateRange`、`BaseDialog`、`BaseDrawer`、`BaseMessage`、`BasePageHeader`、`BaseSelectionBar`、`BaseDetailCard`、`BaseInfoCard`、`BaseStatCard`、`BaseFilterBar`、`BaseStatusDot`、`BaseFieldGroup`、`BasePanel`、`BaseDataState`、`BaseKeyValueList` 和 `BaseList` 等稳定 UI 面。
-   - `BaseList` 默认 loading / empty 状态已经复用 `BaseLoading` / `BaseEmpty`；`BaseKeyValueList` loading / empty 已接 `ElSkeleton` / `ElEmpty`；关闭、返回、筛选清空、选择清空、菜单触发等小型动作统一经 `BaseButton` 承接 Element Plus 按钮底座；`BaseInput`、`BaseSearchInput` 与 `BaseSlider` 已共享项目尺寸到 Element Plus 尺寸的映射；容器类组件优先通过 `ElCard` 做外壳但保留项目侧 props、slot、键盘和暗色主题 API。
+   - `BaseList` 默认 loading / empty 状态已经复用 `BaseLoading` / `BaseEmpty`；`BaseKeyValueList` loading / empty 已接 `ElSkeleton` / `ElEmpty`；关闭、返回、筛选清空、选择清空、菜单触发等小型动作统一经 `BaseButton` 承接 Element Plus 按钮底座；`BaseInput`、`BaseSearchInput` 与 `BaseSlider` 已共享项目尺寸到 Element Plus 尺寸的映射；`BaseTable` / `BaseDataTable` 已透传 Element Plus 排序、固定列和 `sort-change` 事件；容器类组件优先通过 `ElCard` 做外壳但保留项目侧 props、slot、键盘和暗色主题 API。
 2. 页面私有组件：`src/views/<module>/components/*`
    - 例如 `views/navigation/components/*`、`views/file-manager/components/*`、`views/system/components/*`。
    - 只服务单个页面，不跨模块扩散。
@@ -202,7 +202,7 @@ sequenceDiagram
 组件层当前仍有两个注意点：
 
 - 少量页面级直接 Element Plus 用法仍存在，主要在 `AiProviderPanel.vue`、`AiChatPanel.vue`、`AiImagePanel.vue` 和 `WorkspacePage.vue`。它们应视为遗留或局部例外；新增业务页面继续优先使用 `Base*` / `App*` 封装。
-- 公共组件治理的下一步不是把所有 `Base*` 文件机械改成 Element Plus，而是继续按“高频稳定控件优先封装，复杂容器/业务形态保留项目 API”的原则审查 `BaseForm`、`BaseTable` / `BaseDataTable` 等边界；`BaseSearchInput` 后续只在真实重复样式或状态语义出现时继续小步收口。
+- 公共组件治理的下一步不是把所有 `Base*` 文件机械改成 Element Plus，而是继续按“高频稳定控件优先封装，复杂容器/业务形态保留项目 API”的原则审查 `BaseForm` 与表格体系的更高阶边界；`BaseSearchInput` 后续只在真实重复样式或状态语义出现时继续小步收口。
 
 ### 3.4 Store 层
 
@@ -1155,6 +1155,7 @@ creative_model_run_repo.rs   model_runs repo behavior and tests
 - `BaseActionMenu`、`BaseAlert`、`BaseDialog`、`BaseDrawer`、`BaseMessage`、`BasePageHeader`、`BaseFilterBar`、`BaseSelectionBar`、`BaseDateRange` 等组件内的关闭、返回、清空、菜单触发动作已进一步收敛到 `BaseButton`，减少组件内部原生 button / 零散 `ElButton` 的重复样式。
 - `BaseLoading`、`BaseEmpty`、`BaseSkeletonCard`、`BaseKeyValueList`、`BaseList` 等状态展示组件已经开始复用统一 loading / empty 语义，减少每个组件内重复拼装。
 - `BaseInput` / `BaseSearchInput` / `BaseSlider` 已共享 `toElementPlusSize()` 尺寸适配；`BaseSearchInput` 支持 `xs` 搜索尺寸，`BaseSlider` 支持 `xs` / `lg` 滑块尺寸，并在 playground 中补齐对应示例。
+- `BaseTable` / `BaseDataTable` 已保留项目自有列配置、slot 与空态/loading 语义，同时向下透传 `defaultSort`、`sortable`、`fixed`、`sortMethod`、`sortBy`、`sortOrders`，并向上冒泡 `sort-change`。
 - `AppImageUploader` / `AppPathSelector` 是受控适配组件：外观可复用 Element Plus，但上传、路径选择和桌面能力仍通过 store/service/Rust 链路，不把底座能力暴露给页面。
 
 当前边界判定：
@@ -1163,7 +1164,7 @@ creative_model_run_repo.rs   model_runs repo behavior and tests
 |---|---|---|
 | `src/components/common` | 大多数稳定组件已接 Element Plus 或 Base 状态组件 | 继续保留现有 props / emits / slots，不为换底座压缩项目 API |
 | 页面层直接 `<el-*>` | AI panels 与 `WorkspacePage` 仍有局部例外 | 后续触碰这些页面时，优先评估是否回收进 `Base*` / `App*`，不要扩大直用范围 |
-| `BaseForm` / 搜索输入 / 滑块 / 表格体系 | `BaseSearchInput` 与 `BaseSlider` 已完成尺寸映射小步收口，`BaseForm` 与表格体系仍需继续审计边界 | 表单、搜索、滑块、`BaseTable` / `BaseDataTable` 的职责不要混在一次大改里 |
+| `BaseForm` / 搜索输入 / 滑块 / 表格体系 | `BaseSearchInput` 与 `BaseSlider` 已完成尺寸映射小步收口；`BaseTable` / `BaseDataTable` 已补排序和固定列透传 | 表单、搜索、滑块、表格体系的更高阶能力继续分批审计，不混在一次大改里 |
 
 ### 10.9 文档状态需要收敛
 

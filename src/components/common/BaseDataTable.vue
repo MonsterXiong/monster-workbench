@@ -2,16 +2,9 @@
 import { computed, useId } from "vue";
 import { useI18n } from "../../composables/useI18n";
 import { joinAriaIds } from "../../utils";
+import type { BaseTableColumn, BaseTableSort, BaseTableSortChangePayload } from "./BaseTable.vue";
 
-export interface DataTableColumn {
-  key: string;
-  title: string;
-  width?: string;
-  align?: "left" | "center" | "right";
-  headerAlign?: "left" | "center" | "right";
-  wrap?: boolean;
-  ariaLabel?: string;
-}
+export type DataTableColumn = BaseTableColumn;
 
 interface Props {
   title: string;
@@ -55,6 +48,7 @@ interface Props {
   wrapDescription?: boolean;
   wrapCells?: boolean;
   tableMinWidth?: string;
+  defaultSort?: BaseTableSort;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -96,6 +90,7 @@ const props = withDefaults(defineProps<Props>(), {
   wrapDescription: false,
   wrapCells: false,
   tableMinWidth: "100%",
+  defaultSort: undefined,
 });
 
 const { t } = useI18n();
@@ -121,10 +116,15 @@ const emit = defineEmits<{
   (e: "update:page", value: number): void;
   (e: "update:pageSize", value: number): void;
   (e: "page-change", payload: { page: number; pageSize: number }): void;
+  (e: "sort-change", payload: BaseTableSortChangePayload): void;
 }>();
 
 const handlePageChange = (payload: { page: number; pageSize: number }) => {
   emit("page-change", payload);
+};
+
+const handleSortChange = (payload: BaseTableSortChangePayload) => {
+  emit("sort-change", payload);
 };
 </script>
 
@@ -196,6 +196,8 @@ const handlePageChange = (payload: { page: number; pageSize: number }) => {
         :loading-text="resolvedLoadingText"
         :wrap-cells="wrapCells"
         :min-width="tableMinWidth"
+        :default-sort="defaultSort"
+        @sort-change="handleSortChange"
       >
         <template v-for="column in columns" :key="column.key" #[column.key]="slotProps">
           <slot :name="column.key" v-bind="slotProps">

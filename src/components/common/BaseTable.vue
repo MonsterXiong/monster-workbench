@@ -4,6 +4,10 @@ import BaseIcon from "./BaseIcon.vue";
 import { useI18n } from "../../composables/useI18n";
 import { getByPath, hasSelectionKey, toIntegerAtLeast } from "../../utils";
 
+export type BaseTableSortOrder = "ascending" | "descending" | null;
+export type BaseTableFixedColumn = boolean | "left" | "right";
+export type BaseTableSortable = boolean | "custom";
+
 export interface BaseTableColumn {
   key: string;
   title: string;
@@ -12,6 +16,22 @@ export interface BaseTableColumn {
   headerAlign?: "left" | "center" | "right";
   wrap?: boolean;
   ariaLabel?: string;
+  fixed?: BaseTableFixedColumn;
+  sortable?: BaseTableSortable;
+  sortMethod?: (a: any, b: any) => number;
+  sortBy?: string | string[];
+  sortOrders?: BaseTableSortOrder[];
+}
+
+export interface BaseTableSort {
+  prop: string;
+  order: Exclude<BaseTableSortOrder, null>;
+}
+
+export interface BaseTableSortChangePayload {
+  column: unknown;
+  prop: string;
+  order: BaseTableSortOrder;
 }
 
 interface Props {
@@ -35,6 +55,7 @@ interface Props {
   loadingText?: string;
   wrapCells?: boolean;
   minWidth?: string;
+  defaultSort?: BaseTableSort;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -56,7 +77,12 @@ const props = withDefaults(defineProps<Props>(), {
   loadingText: "",
   wrapCells: false,
   minWidth: "520px",
+  defaultSort: undefined,
 });
+
+const emit = defineEmits<{
+  (e: "sort-change", payload: BaseTableSortChangePayload): void;
+}>();
 
 const { t } = useI18n();
 
@@ -160,6 +186,15 @@ const getColumnHeaderClass = (column: BaseTableColumn) => {
     .filter(Boolean)
     .join(" ");
 };
+
+const getColumnSortable = (column: BaseTableColumn) => {
+  if (column.sortable === "custom") return "custom";
+  return Boolean(column.sortable);
+};
+
+const handleSortChange = (payload: BaseTableSortChangePayload) => {
+  emit("sort-change", payload);
+};
 </script>
 
 <template>
@@ -200,7 +235,9 @@ const getColumnHeaderClass = (column: BaseTableColumn) => {
       :scrollbar-always-on="true"
       table-layout="fixed"
       :highlight-current-row="false"
+      :default-sort="defaultSort"
       :aria-label="tableLabel"
+      @sort-change="handleSortChange"
     >
       <el-table-column
         v-for="column in columns"
@@ -213,6 +250,11 @@ const getColumnHeaderClass = (column: BaseTableColumn) => {
         :header-align="column.headerAlign || column.align || 'left'"
         :class-name="getColumnCellClass(column)"
         :label-class-name="getColumnHeaderClass(column)"
+        :fixed="column.fixed"
+        :sortable="getColumnSortable(column)"
+        :sort-method="column.sortMethod"
+        :sort-by="column.sortBy"
+        :sort-orders="column.sortOrders"
         :show-overflow-tooltip="!wrapCells && !column.wrap"
       >
         <template #header>
