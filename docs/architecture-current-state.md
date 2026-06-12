@@ -1425,4 +1425,4 @@ Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `
 
 结论：`TaskService` 当前不是优先拆分对象；`BatchJobService` 的业务执行已经明显收窄，但 supervisor 仍不能迁移。下一刀应落在 worker-pool 控制协议与租约模型设计，而不是继续抽 image success settle 或新增 Python 拉队列实现。
 
-本轮继续复核后的执行口径见 `docs/ai/workflow-runtime-boundary.md` 12.8：后续 Rust 后端推进应先产出 `creative_tasks` worker ownership / lease migration 草案，以及 Rust-owned localhost sidecar control API contract。只有 claim token、heartbeat、lease-aware complete 和 result settle contract 都稳定后，才重新评估 `BatchJobService::run_batch_supervisor_inner` 或 prompt/image worker shell 是否迁给 Python worker loop。
+本轮继续复核后的执行口径见 `docs/ai/workflow-runtime-boundary.md` 12.8-12.10：后续 Rust 后端推进已先落文档化草案，包括 `creative_tasks` worker ownership / lease migration 字段建议、旧库兼容回归矩阵，以及 Rust-owned localhost sidecar control API contract。只有 claim token、heartbeat、lease-aware complete、过期 lease recovery 和 result settle contract 都实现并通过旧库兼容回归后，才重新评估 `BatchJobService::run_batch_supervisor_inner` 或 prompt/image worker shell 是否迁给 Python worker loop。
