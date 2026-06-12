@@ -192,9 +192,17 @@ sequenceDiagram
 1. 全局基础组件：`src/components/common/Base*.vue`
    - 负责一致的桌面 UI 原子能力：按钮、输入、表格、面板、时间线、分页、弹窗、状态、上传、布局等。
    - 在 `main.ts` 中集中注册高频基础组件。
+   - 当前公共组件层已经大量把 Element Plus 收进 `Base*` / `App*` 封装内部：`src/components/common` 下约 69 个 Vue 组件中，约 51 个已经直接使用 Element Plus 标签。
+   - 近期已继续收口 `AppImageUploader`、`AppPathSelector`、`BaseCopyButton`、`BaseDetailCard`、`BaseInfoCard`、`BaseFilterBar`、`BaseStatusDot`、`BaseFieldGroup`、`BasePanel`、`BaseDataState`、`BaseKeyValueList` 和 `BaseList` 等稳定 UI 面。
+   - `BaseList` 默认 loading / empty 状态已经复用 `BaseLoading` / `BaseEmpty`；`BaseKeyValueList` loading / empty 已接 `ElSkeleton` / `ElEmpty`；容器类组件优先通过 `ElCard` 做外壳但保留项目侧 props、slot、键盘和暗色主题 API。
 2. 页面私有组件：`src/views/<module>/components/*`
    - 例如 `views/navigation/components/*`、`views/file-manager/components/*`、`views/system/components/*`。
    - 只服务单个页面，不跨模块扩散。
+
+组件层当前仍有两个注意点：
+
+- 少量页面级直接 Element Plus 用法仍存在，主要在 `AiProviderPanel.vue`、`AiChatPanel.vue`、`AiImagePanel.vue` 和 `WorkspacePage.vue`。它们应视为遗留或局部例外；新增业务页面继续优先使用 `Base*` / `App*` 封装。
+- 公共组件治理的下一步不是把所有 `Base*` 文件机械改成 Element Plus，而是继续按“高频稳定控件优先封装，复杂容器/业务形态保留项目 API”的原则审查 `BaseForm`、`BaseSearchInput`、`BaseTable` / `BaseDataTable` 等边界。
 
 ### 3.4 Store 层
 
@@ -1138,7 +1146,24 @@ creative_model_run_repo.rs   model_runs repo behavior and tests
 
 建议新增正式 `creative_projects`，再把现有 `project_id` 逐步迁移到 FK 或稳定 ID 策略。
 
-### 10.8 文档状态需要收敛
+### 10.8 公共组件封装已进入实现态
+
+公共组件层已经不只是原则约束，而是实际承担 Element Plus 与业务页面之间的缓冲层：
+
+- `BaseButton`、`BaseInput`、`BaseSelect`、`BaseTable`、`BaseUpload`、`BaseDialog`、`BaseDrawer`、`BaseDateRange` 等稳定控件已经直接封装 Element Plus。
+- `BasePanel`、`BaseFieldGroup`、`BaseDataState`、`BaseDetailCard`、`BaseInfoCard`、`BaseStatCard` 等容器 / 展示组件已经逐步用 `ElCard` / `ElTag` / `ElBadge` 等做底座，但仍保留项目自有视觉、插槽和键盘交互约束。
+- `BaseLoading`、`BaseEmpty`、`BaseSkeletonCard`、`BaseKeyValueList`、`BaseList` 等状态展示组件已经开始复用统一 loading / empty 语义，减少每个组件内重复拼装。
+- `AppImageUploader` / `AppPathSelector` 是受控适配组件：外观可复用 Element Plus，但上传、路径选择和桌面能力仍通过 store/service/Rust 链路，不把底座能力暴露给页面。
+
+当前边界判定：
+
+| 区域 | 当前状态 | 下一步 |
+|---|---|---|
+| `src/components/common` | 大多数稳定组件已接 Element Plus 或 Base 状态组件 | 继续保留现有 props / emits / slots，不为换底座压缩项目 API |
+| 页面层直接 `<el-*>` | AI panels 与 `WorkspacePage` 仍有局部例外 | 后续触碰这些页面时，优先评估是否回收进 `Base*` / `App*`，不要扩大直用范围 |
+| `BaseForm` / `BaseSearchInput` / 表格体系 | 仍需继续审计边界 | 表单、搜索、`BaseTable` / `BaseDataTable` 的职责不要混在一次大改里 |
+
+### 10.9 文档状态需要收敛
 
 Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `agent/open-loops.md` 与真实回归缺口，不再重新打开已完成 Goal 的收口条目。
 
@@ -1171,8 +1196,9 @@ Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `
 1. 继续产品化 `/creative` 三栏工作台：中间 `CreativeWorkflowDemo.vue` 已是 orchestration shell，后续重点转为左栏资产分类是否驱动中间 workspace、右栏 quick forms 是否保留，以及正式资产库 / Agent 监控台的产品深度。
 2. 继续约束 AI 前端 runtime 热区：`src/stores/ai.ts` façade 可保留为兼容入口，新逻辑不要回流；后续重点是拆 `AiImagePanel.vue` 的宽 UI 区块，并抽 `ai-image-runtime.ts` / `ai-provider-runtime.ts` 的 task polling、pending image recovery、cancel/result patch 等稳定 helper。
 3. 继续收敛 `TaskService` 与 `BatchJobService` 的 orchestration 边界，尽量让 asset CRUD、goal CRUD、batch snapshot 等稳定职责停留在对应 repo/service。
-4. 在现有 `schema_migrations` 基础上继续补齐旧库兼容回归、备份策略与更细粒度 migration 约束；repo 行为测试继续靠近对应 repo，`creative_db_tests.rs` 只保留 schema / migration 回归。
-5. 持续同步 `agent/open-loops.md` 与本文件，避免“代码已经推进、当前状态文档仍停留在旧阶段”。
+4. 继续收口公共组件治理：新页面优先消费 `Base*` / `App*`，少量页面直用 Element Plus 的遗留点后续随页面改造逐步回收。
+5. 在现有 `schema_migrations` 基础上继续补齐旧库兼容回归、备份策略与更细粒度 migration 约束；repo 行为测试继续靠近对应 repo，`creative_db_tests.rs` 只保留 schema / migration 回归。
+6. 持续同步 `agent/open-loops.md` 与本文件，避免“代码已经推进、当前状态文档仍停留在旧阶段”。
 
 ### 阶段 B：正式项目与资产域
 
