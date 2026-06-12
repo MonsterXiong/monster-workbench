@@ -507,7 +507,7 @@ onBeforeUnmount(() => {
         </nav>
       </aside>
 
-      <main class="min-h-0 flex-1 overflow-y-auto bg-slate-50 dark:bg-slate-950">
+      <main class="min-h-0 flex-1 overflow-hidden bg-slate-50 dark:bg-slate-950">
         <div v-if="filteredDocs.length === 0" class="flex h-full min-h-[360px] flex-col items-center justify-center p-8 text-center">
           <Search class="mb-3 h-8 w-8 text-slate-300 dark:text-slate-600" />
           <div class="text-sm font-black text-slate-600 dark:text-slate-300">没有匹配的工具函数模块</div>
@@ -515,7 +515,7 @@ onBeforeUnmount(() => {
         </div>
 
         <Transition name="fade" mode="out-in">
-          <div v-if="activeDocKey === 'overview'" key="overview" class="w-full space-y-5 p-4 lg:p-6">
+          <div v-if="activeDocKey === 'overview'" key="overview" class="h-full w-full space-y-5 overflow-y-auto p-4 lg:p-6">
             <section class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
               <div class="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
                 <div class="min-w-0">
@@ -600,7 +600,7 @@ onBeforeUnmount(() => {
             </section>
           </div>
 
-          <div v-else-if="activeDoc && !selectedFuncName" :key="`module-${activeDoc.key}`" class="w-full space-y-5 p-4 lg:p-6">
+          <div v-else-if="activeDoc && !selectedFuncName" :key="`module-${activeDoc.key}`" class="h-full w-full space-y-5 overflow-y-auto p-4 lg:p-6">
             <div class="flex flex-wrap items-center gap-2 text-sm font-semibold text-slate-500">
               <button type="button" class="hover:text-primary" @click="activeDocKey = 'overview'">工具库</button>
               <ChevronRight class="h-4 w-4" />
@@ -723,14 +723,19 @@ onBeforeUnmount(() => {
             </section>
           </div>
 
-          <div v-else-if="activeDoc && activeFunctionObj" :key="`fn-${activeFunctionObj.name}`" class="w-full space-y-5 p-4 lg:p-6">
-            <div class="flex flex-wrap items-center gap-2 text-sm font-semibold text-slate-500">
-              <button type="button" class="hover:text-primary" @click="activeDocKey = 'overview'">工具库</button>
-              <ChevronRight class="h-4 w-4" />
-              <button type="button" class="hover:text-primary" @click="selectedFuncName = ''">{{ activeDoc.title }}</button>
-              <ChevronRight class="h-4 w-4" />
-              <span class="font-mono font-black text-slate-800 dark:text-slate-200">{{ activeFunctionObj.name }}</span>
-            </div>
+          <div
+            v-else-if="activeDoc && activeFunctionObj"
+            :key="`fn-${activeFunctionObj.name}`"
+            class="grid h-full min-h-0 w-full grid-cols-1 overflow-y-auto xl:grid-cols-[minmax(0,1fr)_420px] xl:overflow-hidden 2xl:grid-cols-[minmax(0,1fr)_460px]"
+          >
+            <div class="min-w-0 space-y-5 p-4 lg:p-6 xl:min-h-0 xl:overflow-y-auto">
+              <div class="flex flex-wrap items-center gap-2 text-sm font-semibold text-slate-500">
+                <button type="button" class="hover:text-primary" @click="activeDocKey = 'overview'">工具库</button>
+                <ChevronRight class="h-4 w-4" />
+                <button type="button" class="hover:text-primary" @click="selectedFuncName = ''">{{ activeDoc.title }}</button>
+                <ChevronRight class="h-4 w-4" />
+                <span class="font-mono font-black text-slate-800 dark:text-slate-200">{{ activeFunctionObj.name }}</span>
+              </div>
 
             <section class="rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
               <header class="border-b border-slate-100 p-5 dark:border-slate-800">
@@ -768,8 +773,7 @@ onBeforeUnmount(() => {
                 />
               </header>
 
-              <div class="grid gap-0 2xl:grid-cols-[minmax(0,1fr)_420px]">
-                <div class="min-w-0 space-y-6 p-5">
+              <div class="min-w-0 space-y-6 p-5">
                   <section v-if="activeFunctionParams.length > 0">
                     <h2 class="mb-3 flex items-center gap-2 text-sm font-black text-slate-800 dark:text-slate-200">
                       <Layers3 class="h-4 w-4 text-primary" />
@@ -883,9 +887,11 @@ onBeforeUnmount(() => {
                     </div>
                   </section>
                 </div>
+              </section>
+            </div>
 
-                <aside class="border-t border-slate-100 bg-slate-50 dark:border-slate-800 dark:bg-slate-950/60 2xl:border-l 2xl:border-t-0">
-                  <div class="sticky top-0 flex max-h-none flex-col 2xl:max-h-[calc(100vh-120px)]">
+            <aside class="flex min-h-[520px] flex-col border-t border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900 xl:h-full xl:min-h-0 xl:border-l xl:border-t-0">
+              <div class="flex min-h-0 flex-1 flex-col">
                     <div class="flex items-center justify-between border-b border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
                       <h2 class="flex items-center gap-2 text-sm font-black text-indigo-900 dark:text-indigo-100">
                         <Terminal class="h-4 w-4" />
@@ -940,7 +946,7 @@ onBeforeUnmount(() => {
                       </div>
                     </div>
 
-                    <div class="border-t border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+                    <div class="flex min-h-0 basis-[42%] flex-col border-t border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
                       <div class="flex items-center justify-between border-b border-slate-100 px-4 py-2 dark:border-slate-800">
                         <span class="text-xs font-black text-slate-500">执行结果</span>
                         <div class="flex items-center gap-2">
@@ -948,16 +954,14 @@ onBeforeUnmount(() => {
                           <button v-if="sandboxResult || sandboxError" type="button" class="text-[10px] font-black text-slate-400 transition hover:text-slate-600 dark:hover:text-slate-200" @click="resetSandboxState">清空</button>
                         </div>
                       </div>
-                      <div class="h-56 overflow-y-auto p-4 font-mono text-xs">
+                      <div class="min-h-0 flex-1 overflow-y-auto p-4 font-mono text-xs">
                         <div v-if="sandboxError" class="break-words text-rose-600 dark:text-rose-300">{{ sandboxError }}</div>
                         <pre v-else-if="sandboxResult" class="whitespace-pre-wrap break-words text-emerald-600 dark:text-emerald-300">{{ sandboxResult }}</pre>
                         <div v-else class="mt-8 text-center font-sans text-xs font-semibold text-slate-400">等待执行</div>
                       </div>
                     </div>
-                  </div>
-                </aside>
               </div>
-            </section>
+            </aside>
           </div>
         </Transition>
       </main>
