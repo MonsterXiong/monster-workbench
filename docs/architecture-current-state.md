@@ -1438,3 +1438,15 @@ Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `
 结论：`TaskService` 当前不是优先拆分对象；`BatchJobService` 的业务执行已经明显收窄，但 supervisor 仍不能迁移。下一刀应落在 worker-pool 控制协议与租约模型设计，而不是继续抽 image success settle 或新增 Python 拉队列实现。
 
 本轮继续复核后的执行口径见 `docs/ai/workflow-runtime-boundary.md` 12.8-12.12：后续 Rust 后端推进已先落文档化草案，包括 `creative_tasks` worker ownership / lease migration 字段建议、旧库兼容回归矩阵，以及 Rust-owned localhost sidecar control API contract。只有 claim token、heartbeat、lease-aware complete、过期 lease recovery 和 result settle contract 都实现并通过旧库兼容回归后，才重新评估 `BatchJobService::run_batch_supervisor_inner` 或 prompt/image worker shell 是否迁给 Python worker loop。
+
+### 2026-06-13 复核补充
+
+再次对照 `src-tauri/src/services/task_service.rs`、`src-tauri/src/services/batch_job_service.rs`、`src-tauri/src/services/worker_queue_service.rs`、`src-tauri/src/infra/creative_task_repo.rs` 与 `src-tauri/src/infra/creative_db_schema.rs` 后，当前代码没有出现新的 Rust 业务编排回流：
+
+- `TaskService::run_generate_image_prompt_workflow_after_task` 仍只负责创建运行态、启动 cancel checkpoint、提交 sidecar、校验 result，并通过 Rust 写入 asset、model_runs、task_events 和 task status；真实 prompt 生成逻辑不在 Rust。
+- `BatchJobService::run_batch_supervisor_inner` 仍是 Rust supervisor，负责 snapshot 轮询、concurrency slot、queued task claim、worker shell 派发和 completed 收敛。
+- `run_prompt_task_worker` / `run_generate_task_worker` 仍是过渡壳层：取消兜底、checkpoint server、sidecar submit、transport failure fallback 与 settle 分派留在 Rust，provider 调用、prompt builder 和图片生成仍在 Python workflow。
+- `settle_batch_image_sidecar_response` 的 success 分支仍需要 Rust 校验授权输出目录、复制 thumbnail、创建 image asset、绑定 model_runs 并写 task_events/status，不应迁给 Python 直接写库。
+- `creative_tasks` schema 仍没有 worker identity、claim token、lease deadline、heartbeat 字段；`claim_next_queued_task` 仍只是事务内 `queued -> running`；`complete_creative_task` 仍不校验 runtime token、worker identity 或 lease。
+
+因此本轮评估结论保持不变：`TaskService` 不是优先拆分对象，`BatchJobService` 的 supervisor 也不能直接迁移。下一批后端实现若启动，应先做 worker ownership / lease migration、lease-aware repo/service 测试和 Rust-owned localhost sidecar control API，而不是新增 Rust 生产 worker 分支或让 Python 直接拉 SQLite 队列。
