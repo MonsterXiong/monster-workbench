@@ -739,6 +739,7 @@ sequenceDiagram
 - Rust 侧有全局队列、运行槽、配置级串行/并发、取消 token。
 - 生图测试输出文件落到 `~/.monster-tools/ai/generated`，前端通过 `convertFileSrc()` 展示。
 - Python sidecar 对响应体大小、图片 base64、图片 URL 安全、敏感信息脱敏有防护。
+- 最小回归入口已沉淀到 `docs/ai/creative-regression-checklist.md`：脚本级用 `npm run test:ai-sidecar` / `npm run test:ai-sidecar:stress`，Rust 队列和配置边界用 `cargo test --manifest-path .\src-tauri\Cargo.toml ai_service`，前端分层改动继续跑 `npm run check:architecture` / `npm run typecheck`。
 
 ### 6.7 持续型 AI 创作系统
 
