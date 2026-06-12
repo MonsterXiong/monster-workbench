@@ -8,17 +8,25 @@
 - migration 必须幂等或可检测已执行状态。
 - 不得破坏现有 AI Provider、导航、日志、设置等已有数据库能力。
 
-## 2. 命名建议
+## 2. 当前实现与命名
 
-如项目已有规范，必须沿用。
+当前 creative 主库迁移不是独立 SQL 文件目录，而是在 Rust 内维护：
 
-若无明确规范，建议：
+- `src-tauri/src/infra/creative_db_schema.rs` 定义 `MIGRATIONS` 列表。
+- 每个迁移包含递增 `version`、稳定 `name` 和 `apply_*` 函数。
+- `schema_migrations(version, name, applied_at)` 记录已执行版本。
+- 兼容旧库字段补齐通过 `creative_db_support::ensure_column()` 完成。
+- `src-tauri/src/infra/creative_db_tests.rs` 只承载 schema / migration 回归。
 
-```text
-YYYYMMDDHHMM_add_creative_tasks.sql
-YYYYMMDDHHMM_add_assets.sql
-YYYYMMDDHHMM_add_batch_jobs.sql
-```
+新增 migration 时沿用当前 Rust 内联机制；只有在明确重构迁移框架时，才新增独立 SQL migration 文件目录。
+
+当前已落地迁移：
+
+| version | name |
+|---|---|
+| 1 | `bootstrap_creative_schema` |
+| 2 | `add_creative_task_goal_batch_columns` |
+| 3 | `add_creative_projects` |
 
 ## 3. 破坏性操作
 
@@ -60,3 +68,11 @@ created_at
 ## 6. Codex 要求
 
 执行任何 DB Goal 前，必须先阅读现有 migration 机制并给出最小迁移计划。
+
+涉及 worker ownership / lease、project FK 或 asset provenance 的 schema 变更时，必须同时给出旧库兼容矩阵，至少覆盖：
+
+- 新库首次初始化。
+- 只有早期 `creative_tasks` 的旧库。
+- 当前完整 schema 但缺少新增字段的旧库。
+- 已存在 `running` / `cancelling` task 的旧库。
+- 已存在 project / asset / batch / goal 数据且 `project_id` 仍为字符串的旧库。

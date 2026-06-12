@@ -1473,3 +1473,28 @@ Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `
 - `creative_tasks` schema 仍没有 worker identity、claim token、lease deadline、heartbeat 字段；`claim_next_queued_task` 仍只是事务内 `queued -> running`；`complete_creative_task` 仍不校验 runtime token、worker identity 或 lease。
 
 因此本轮评估结论保持不变：`TaskService` 不是优先拆分对象，`BatchJobService` 的 supervisor 也不能直接迁移。下一批后端实现若启动，应先做 worker ownership / lease migration、lease-aware repo/service 测试和 Rust-owned localhost sidecar control API，而不是新增 Rust 生产 worker 分支或让 Python 直接拉 SQLite 队列。
+
+## 2026-06-13 补充：migration / project / asset provenance 复核
+
+本轮继续对照 `creative_db_schema.rs`、`creative_db_tests.rs`、`creative_project_repo.rs`、`creative_asset_repo.rs`、`creative_types.rs`、`creative_project_service.rs` 和 `commands/creative_project.rs`，结论是数据模型主线也应先硬化协议与迁移边界，不要直接堆业务字段。
+
+代码事实：
+
+- creative schema 当前只有 3 个 Rust 内联 migration：`bootstrap_creative_schema`、`add_creative_task_goal_batch_columns`、`add_creative_projects`；`schema_migrations` 记录版本和 name。
+- `creative_db_tests.rs` 只覆盖幂等初始化、早期 `creative_tasks` 缺 goal/batch/sequence 字段的兼容迁移，以及当前完整 schema 的 migration history 回填。
+- `creative_projects` 已有 `id/title/description/status/settings_json/budget_json/archived_at`，但 Rust command/service/repo 只有 `upsert/get/list`，没有专门 archive command，也没有归档传播。
+- `creative_tasks`、`assets`、`batch_jobs`、`creative_goals`、`model_runs` 仍以可空字符串 `project_id` 表达项目维度，没有指向 `creative_projects(id)` 的 DB-level FK。
+- `assets` 当前只有 `metadata_json`、`file_path`、`thumbnail_path` 和通用 `asset_links(source_asset_id,target_asset_id,link_type)`；没有结构化 `asset_version`、`parent_asset_id`、`source_task_id` 或 `provenance_json` 字段。
+- `asset_links.link_type` 没有 DB-level enum/check 约束，当前合法语义仍靠 service/UI 约定和文档维护。
+
+边界判定：
+
+| 领域 | 当前状态 | 下一步 |
+|---|---|---|
+| migration | 最小版本化框架成立，但历史 fixture 矩阵偏窄 | 下一批 schema 变更前先补旧库兼容矩阵，尤其是 worker lease、project FK/provenance 字段缺失库 |
+| project | 有最小实体和 upsert/list/get | 先定义归档语义、只读策略、传播范围和失败回滚，再新增 archive command |
+| project relation | 多表仍是字符串 `project_id` | 不直接加 FK；先决定稳定项目键、旧数据补齐策略和 orphan 处理 |
+| asset provenance | 主要靠 `metadata_json` 和 `asset_links` | 正式化前先定字段/表方案与 link_type 枚举，再做 migration |
+| physical assets | Creative batch 与 AI Provider 共用 `ai/generated` | 项目级目录、保留期、导入导出和归档移动策略未定前，不放宽 asset scope |
+
+这意味着下一批数据模型编码的顺序应是：先写 migration plan 与旧库 fixture，再补 repo/service 行为测试，最后才加 command/UI 入口。尤其不要在没有归档传播契约时只加一个“archive project”按钮，也不要在没有 provenance 字段方案时继续把长期资产关系塞进自由 JSON。
