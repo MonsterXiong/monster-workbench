@@ -255,16 +255,6 @@ impl<R: Runtime> TaskService<R> {
         Ok(event)
     }
 
-    pub fn run_generate_image_prompt_workflow(
-        &self,
-        input: GenerateImagePromptWorkflowInput,
-        sidecar_service: &mut SidecarLifecycleService<R>,
-    ) -> AppResult<GenerateImagePromptWorkflowResult> {
-        self.run_generate_image_prompt_workflow_with_endpoint_provider(input, || {
-            sidecar_service.ensure_runtime_endpoint()
-        })
-    }
-
     pub fn run_generate_image_prompt_workflow_with_endpoint_provider(
         &self,
         input: GenerateImagePromptWorkflowInput,
@@ -897,11 +887,14 @@ mod tests {
     use crate::infra::creative_types::{ListCreativeTasksFilter, ListModelRunsFilter};
     use crate::infra::path::PathProvider;
     use crate::services::sidecar_lifecycle_service::{
-        SidecarLifecycleService, SidecarWorkflowRetry, SidecarWorkflowTaskResult,
+        SidecarWorkflowEvent, SidecarWorkflowModelRun, SidecarWorkflowOutput, SidecarWorkflowRetry,
+        SidecarWorkflowTaskResult,
     };
     use std::io::{Read, Write};
-    use std::net::TcpStream;
+    use std::net::{TcpListener, TcpStream};
     use std::path::PathBuf;
+    use std::thread::JoinHandle;
+    use std::time::Duration;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn temp_root(name: &str) -> PathBuf {
@@ -955,6 +948,197 @@ mod tests {
         }
     }
 
+    fn start_generate_prompt_sidecar_server(
+        status: &'static str,
+    ) -> (SidecarRuntimeEndpoint, JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("sidecar listener should bind");
+        let port = listener
+            .local_addr()
+            .expect("sidecar listener addr should exist")
+            .port();
+        let token = "task-service-test-token".to_string();
+        let expected_token = token.clone();
+        let handle = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("sidecar request should arrive");
+            let request = read_http_request(&mut stream);
+            assert!(request.starts_with("POST /tasks "));
+            assert!(request.contains(&format!("X-Monster-Token: {expected_token}")));
+            let payload = parse_http_json_body(&request);
+            let task_id = payload
+                .get("taskId")
+                .and_then(serde_json::Value::as_i64)
+                .expect("request should include taskId");
+            let brief = payload
+                .get("input")
+                .and_then(|input| input.get("brief"))
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .to_string();
+
+            let response = if status == "succeeded" {
+                SidecarWorkflowTaskResult {
+                    protocol_version: 1,
+                    task_id,
+                    status: "succeeded".to_string(),
+                    message: Some("sidecar succeeded".to_string()),
+                    outputs: vec![SidecarWorkflowOutput {
+                        asset_type: "image_prompt".to_string(),
+                        title: Some("Generated image prompt".to_string()),
+                        content: Some(format!("Prompt for {brief}")),
+                        file_path: None,
+                        thumbnail_path: None,
+                        metadata: Some(json!({ "source": "test-sidecar" })),
+                    }],
+                    model_runs: vec![SidecarWorkflowModelRun {
+                        provider_id: Some("test-sidecar".to_string()),
+                        provider_type: Some("python-sidecar".to_string()),
+                        model: Some("test-model".to_string()),
+                        request_type: "image_prompt".to_string(),
+                        status: "succeeded".to_string(),
+                        duration_ms: Some(25),
+                        prompt_hash: None,
+                        prompt_version_id: None,
+                        input_token_count: Some(10),
+                        output_token_count: Some(20),
+                        cost_estimate: Some(0.0),
+                        error_code: None,
+                        error_message: None,
+                        metadata: Some(json!({ "source": "test-sidecar" })),
+                    }],
+                    events: vec![SidecarWorkflowEvent {
+                        event_type: "sidecar_test_event".to_string(),
+                        message: Some("sidecar emitted test event".to_string()),
+                        payload: None,
+                    }],
+                    retry: Some(SidecarWorkflowRetry {
+                        should_retry: false,
+                        reason: None,
+                    }),
+                }
+            } else {
+                SidecarWorkflowTaskResult {
+                    protocol_version: 1,
+                    task_id,
+                    status: "failed".to_string(),
+                    message: Some("forced sidecar failed".to_string()),
+                    outputs: Vec::new(),
+                    model_runs: vec![SidecarWorkflowModelRun {
+                        provider_id: Some("test-sidecar".to_string()),
+                        provider_type: Some("python-sidecar".to_string()),
+                        model: Some("test-model".to_string()),
+                        request_type: "image_prompt".to_string(),
+                        status: "failed".to_string(),
+                        duration_ms: Some(10),
+                        prompt_hash: None,
+                        prompt_version_id: None,
+                        input_token_count: Some(10),
+                        output_token_count: Some(0),
+                        cost_estimate: Some(0.0),
+                        error_code: Some("forced_failure".to_string()),
+                        error_message: Some("forced sidecar failed".to_string()),
+                        metadata: Some(json!({ "source": "test-sidecar" })),
+                    }],
+                    events: vec![SidecarWorkflowEvent {
+                        event_type: "sidecar_test_failure".to_string(),
+                        message: Some("sidecar emitted failure event".to_string()),
+                        payload: None,
+                    }],
+                    retry: Some(SidecarWorkflowRetry {
+                        should_retry: false,
+                        reason: Some("forced".to_string()),
+                    }),
+                }
+            };
+
+            let body = serde_json::to_string(&response).expect("response should encode");
+            write_json_response(&mut stream, 200, &body);
+        });
+        (SidecarRuntimeEndpoint { port, token }, handle)
+    }
+
+    fn read_http_request(stream: &mut TcpStream) -> String {
+        stream
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .expect("read timeout should set");
+        let mut buffer = [0_u8; 8192];
+        let mut data = Vec::new();
+        let mut header_end = None;
+        let mut content_length = 0usize;
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            match stream.read(&mut buffer) {
+                Ok(0) => break,
+                Ok(size) => {
+                    data.extend_from_slice(&buffer[..size]);
+                    if header_end.is_none() {
+                        if let Some(position) =
+                            data.windows(4).position(|window| window == b"\r\n\r\n")
+                        {
+                            let end = position + 4;
+                            header_end = Some(end);
+                            let headers = String::from_utf8_lossy(&data[..end]).into_owned();
+                            content_length = headers
+                                .lines()
+                                .find_map(|line| {
+                                    let (name, value) = line.split_once(':')?;
+                                    if name.trim().eq_ignore_ascii_case("content-length") {
+                                        value.trim().parse::<usize>().ok()
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .unwrap_or(0);
+                            if data.len() >= end + content_length {
+                                break;
+                            }
+                        }
+                    } else if let Some(end) = header_end {
+                        if data.len() >= end + content_length {
+                            break;
+                        }
+                    }
+                }
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                    ) =>
+                {
+                    if let Some(end) = header_end {
+                        if data.len() >= end + content_length {
+                            break;
+                        }
+                    }
+                    if std::time::Instant::now() >= deadline {
+                        break;
+                    }
+                }
+                Err(error) => panic!("request read failed: {error}"),
+            }
+        }
+        String::from_utf8_lossy(&data).into_owned()
+    }
+
+    fn parse_http_json_body(request: &str) -> serde_json::Value {
+        let body = request
+            .split_once("\r\n\r\n")
+            .map(|(_, body)| body)
+            .unwrap_or_default();
+        serde_json::from_str(body).expect("request body should be JSON")
+    }
+
+    fn write_json_response(stream: &mut TcpStream, status: u16, body: &str) {
+        let response = format!(
+            "HTTP/1.1 {status} OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        stream
+            .write_all(response.as_bytes())
+            .expect("response should write");
+        stream.flush().expect("response should flush");
+    }
+
     fn read_checkpoint_cancel_requested(url: &str, token: &str) -> bool {
         let endpoint = url.trim_start_matches("http://");
         let (host, path) = endpoint
@@ -981,12 +1165,12 @@ mod tests {
         let db_path = root.join("monster_workbench.db");
         let path_provider = PathProvider::new_for_test(root.clone(), db_path.clone());
         let task_service = TaskService::new(app.handle().clone(), path_provider.clone());
-        let mut sidecar_service = SidecarLifecycleService::new(app.handle().clone());
+        let (endpoint, sidecar_handle) = start_generate_prompt_sidecar_server("succeeded");
 
         init_schema(&db_path).expect("schema should init");
 
         let result = task_service
-            .run_generate_image_prompt_workflow(
+            .run_generate_image_prompt_workflow_with_endpoint_provider(
                 GenerateImagePromptWorkflowInput {
                     project_id: Some("project-test".to_string()),
                     brief: "A clean cinematic product poster".to_string(),
@@ -994,9 +1178,12 @@ mod tests {
                     mood: Some("focused".to_string()),
                     aspect_ratio: Some("16:9".to_string()),
                 },
-                &mut sidecar_service,
+                || Ok(endpoint),
             )
             .expect("workflow should complete");
+        sidecar_handle
+            .join()
+            .expect("sidecar test server should finish");
 
         assert_eq!(result.task.task_type, "generate_image_prompt");
         assert_eq!(result.task.status, "succeeded");
@@ -1161,11 +1348,11 @@ mod tests {
         let db_path = root.join("monster_workbench.db");
         let path_provider = PathProvider::new_for_test(root.clone(), db_path.clone());
         let task_service = TaskService::new(app.handle().clone(), path_provider.clone());
-        let mut sidecar_service = SidecarLifecycleService::new(app.handle().clone());
+        let (endpoint, sidecar_handle) = start_generate_prompt_sidecar_server("failed");
 
         init_schema(&db_path).expect("schema should init");
 
-        let result = task_service.run_generate_image_prompt_workflow(
+        let result = task_service.run_generate_image_prompt_workflow_with_endpoint_provider(
             GenerateImagePromptWorkflowInput {
                 project_id: Some("project-failure".to_string()),
                 brief: "__sidecar_status:failed".to_string(),
@@ -1173,8 +1360,11 @@ mod tests {
                 mood: Some("test".to_string()),
                 aspect_ratio: Some("1:1".to_string()),
             },
-            &mut sidecar_service,
+            || Ok(endpoint),
         );
+        sidecar_handle
+            .join()
+            .expect("sidecar test server should finish");
         assert!(
             result.is_err(),
             "forced sidecar failure should return an error"

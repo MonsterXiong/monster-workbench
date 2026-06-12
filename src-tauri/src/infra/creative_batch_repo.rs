@@ -1,10 +1,8 @@
 use crate::infra::creative_db_schema::init_schema;
 use crate::infra::creative_db_support::{connect, map_creative_batch_job};
-use crate::infra::creative_task_repo;
 use crate::infra::creative_types::{
     CreateCreativeBatchJobInput, CreativeBatchJob, CreativeBatchJobSnapshot, CreativeBatchJobStats,
-    CreativeTask, ListCreativeBatchJobsFilter, ListCreativeTasksFilter,
-    UpdateCreativeBatchJobInput,
+    ListCreativeBatchJobsFilter, UpdateCreativeBatchJobInput,
 };
 use crate::infra::{AppError, AppResult};
 use rusqlite::{params, params_from_iter, types::Value, Connection, OptionalExtension};
@@ -142,21 +140,6 @@ pub(crate) fn update_batch_job(
     })
 }
 
-pub(crate) fn list_batch_job_tasks(
-    db_path: &Path,
-    batch_job_id: i64,
-) -> AppResult<Vec<CreativeTask>> {
-    creative_task_repo::list_tasks(
-        db_path,
-        ListCreativeTasksFilter {
-            batch_job_id: Some(batch_job_id),
-            limit: Some(200),
-            offset: Some(0),
-            ..Default::default()
-        },
-    )
-}
-
 pub(crate) fn count_batch_job_tasks_by_status(
     db_path: &Path,
     batch_job_id: i64,
@@ -222,17 +205,6 @@ pub(crate) fn get_batch_job_snapshot(
     Ok(Some(CreativeBatchJobSnapshot { job, stats }))
 }
 
-pub(crate) fn cancel_queued_batch_tasks(db_path: &Path, batch_job_id: i64) -> AppResult<Vec<i64>> {
-    creative_task_repo::cancel_queued_batch_tasks(db_path, batch_job_id)
-}
-
-pub(crate) fn mark_running_batch_tasks_cancelling(
-    db_path: &Path,
-    batch_job_id: i64,
-) -> AppResult<Vec<i64>> {
-    creative_task_repo::mark_running_batch_tasks_cancelling(db_path, batch_job_id)
-}
-
 fn get_batch_job_with_conn(conn: &Connection, id: i64) -> AppResult<Option<CreativeBatchJob>> {
     conn.query_row(
         "SELECT id, project_id, name, batch_type, status, total_count, concurrency,
@@ -262,7 +234,7 @@ fn non_empty_filter(value: Option<String>) -> Option<String> {
 mod tests {
     use super::*;
     use crate::infra::creative_task_repo;
-    use crate::infra::creative_types::CreateCreativeTaskInput;
+    use crate::infra::creative_types::{CreateCreativeTaskInput, ListCreativeTasksFilter};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn temp_db_path(name: &str) -> std::path::PathBuf {
@@ -401,7 +373,16 @@ mod tests {
         assert_eq!(listed_jobs.len(), 1);
         assert_eq!(listed_jobs[0].id, job.id);
 
-        let listed_tasks = list_batch_job_tasks(&db_path, job.id).expect("batch tasks should list");
+        let listed_tasks = creative_task_repo::list_tasks(
+            &db_path,
+            ListCreativeTasksFilter {
+                batch_job_id: Some(job.id),
+                limit: Some(200),
+                offset: Some(0),
+                ..Default::default()
+            },
+        )
+        .expect("batch tasks should list");
         assert_eq!(listed_tasks.len(), 3);
         assert!(listed_tasks.iter().any(|task| task.id == task_1.id));
         assert!(listed_tasks.iter().any(|task| task.id == task_2.id));

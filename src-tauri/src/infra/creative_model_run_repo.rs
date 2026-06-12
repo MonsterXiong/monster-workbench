@@ -1,8 +1,12 @@
 use crate::infra::creative_db_schema::init_schema;
 use crate::infra::creative_db_support::{connect, map_model_run};
-use crate::infra::creative_types::{CreateModelRunInput, ListModelRunsFilter, ModelRun};
+#[cfg(test)]
+use crate::infra::creative_types::ListModelRunsFilter;
+use crate::infra::creative_types::{CreateModelRunInput, ModelRun};
 use crate::infra::{AppError, AppResult};
-use rusqlite::{params, params_from_iter, types::Value, Connection, OptionalExtension};
+use rusqlite::{params, Connection, OptionalExtension};
+#[cfg(test)]
+use rusqlite::{params_from_iter, types::Value};
 use std::path::Path;
 
 pub(crate) fn create_model_run(db_path: &Path, input: CreateModelRunInput) -> AppResult<ModelRun> {
@@ -42,6 +46,7 @@ pub(crate) fn create_model_run(db_path: &Path, input: CreateModelRunInput) -> Ap
     })
 }
 
+#[cfg(test)]
 pub(crate) fn list_model_runs(
     db_path: &Path,
     filter: ListModelRunsFilter,
@@ -107,6 +112,7 @@ fn get_model_run_with_conn(conn: &Connection, id: i64) -> AppResult<Option<Model
     .map_err(Into::into)
 }
 
+#[cfg(test)]
 fn non_empty_filter(value: Option<String>) -> Option<String> {
     value.and_then(|item| {
         let trimmed = item.trim().to_string();

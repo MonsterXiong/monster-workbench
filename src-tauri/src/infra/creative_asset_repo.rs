@@ -102,12 +102,6 @@ pub(crate) fn create_asset_link(
         .ok_or_else(|| AppError::Database("璧勪骇鍏崇郴宸插啓鍏ヤ絾鏃犳硶绔嬪嵆璇诲彇".to_string()))
 }
 
-pub(crate) fn get_asset_link(db_path: &Path, id: i64) -> AppResult<Option<AssetLink>> {
-    init_schema(db_path)?;
-    let conn = connect(db_path)?;
-    get_asset_link_with_conn(&conn, id)
-}
-
 pub(crate) fn list_asset_links(
     db_path: &Path,
     filter: ListAssetLinksFilter,
@@ -279,11 +273,6 @@ mod tests {
             },
         )
         .expect("character link should create");
-
-        let loaded_link = get_asset_link(&db_path, derived_link.id)
-            .expect("link query should pass")
-            .expect("link should exist");
-        assert_eq!(loaded_link.link_type, "derived_from");
 
         let image_links = list_asset_links(
             &db_path,

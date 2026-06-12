@@ -198,6 +198,7 @@ pub struct CreateModelRunInput {
     pub finished_at: Option<String>,
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ListModelRunsFilter {

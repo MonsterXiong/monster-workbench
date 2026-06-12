@@ -229,6 +229,7 @@ pub(crate) fn append_task_event(
         .ok_or_else(|| AppError::Database("浠诲姟浜嬩欢宸插啓鍏ヤ絾鏃犳硶绔嬪嵆璇诲彇".to_string()))
 }
 
+#[cfg(test)]
 pub(crate) fn list_task_events(db_path: &Path, task_id: i64) -> AppResult<Vec<TaskEvent>> {
     init_schema(db_path)?;
     let conn = connect(db_path)?;
