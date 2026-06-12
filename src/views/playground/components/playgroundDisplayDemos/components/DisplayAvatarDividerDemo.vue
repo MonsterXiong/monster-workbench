@@ -6,6 +6,8 @@ const { triggerToast } = useToast();
 
 const avatarImageSrc =
   "data:image/svg+xml;utf8,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2064%2064'%3E%3Crect%20width='64'%20height='64'%20rx='18'%20fill='%232563eb'/%3E%3Ccircle%20cx='32'%20cy='25'%20r='12'%20fill='white'%20opacity='.92'/%3E%3Cpath%20d='M13%2058c3-15%2013-23%2019-23s16%208%2019%2023'%20fill='white'%20opacity='.78'/%3E%3C/svg%3E";
+const avatarWideSrc =
+  "data:image/svg+xml;utf8,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20120%2064'%3E%3Crect%20width='120'%20height='64'%20rx='16'%20fill='%23f8fafc'/%3E%3Crect%20x='10'%20y='12'%20width='100'%20height='40'%20rx='12'%20fill='%232563eb'/%3E%3Ccircle%20cx='34'%20cy='32'%20r='11'%20fill='white'/%3E%3Cpath%20d='M55%2025h35v6H55zm0%2011h25v5H55z'%20fill='white'%20opacity='.85'/%3E%3C/svg%3E";
 </script>
 
 <template>
@@ -23,6 +25,7 @@ const avatarImageSrc =
           <BaseDivider label="图片与兜底" />
           <div class="avatar-row">
             <BaseAvatar name="组件平台" :src="avatarImageSrc" alt="组件平台头像" status="online" size="lg" shape="rounded" />
+            <BaseAvatar name="Contain Fit" :src="avatarWideSrc" alt="Contain fit 头像" fit="contain" status="online" size="lg" shape="rounded" />
             <BaseAvatar name="Broken Image" src="data:image/png;base64,broken" status="busy" fallback="BI" />
             <BaseAvatar name="加载头像" loading status="online" />
             <BaseAvatar name="禁用头像" disabled status="offline" />

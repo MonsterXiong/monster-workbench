@@ -3,12 +3,16 @@ import { computed } from "vue";
 import { useI18n } from "../../composables/useI18n";
 import { getInitials, joinNonEmptyStrings } from "../../utils";
 
+type AvatarFit = "fill" | "contain" | "cover" | "none" | "scale-down";
+
 interface Props {
   name?: string;
   src?: string;
+  srcSet?: string;
   size?: "xs" | "sm" | "md" | "lg" | "xl";
   status?: "online" | "busy" | "offline" | "none";
   shape?: "circle" | "rounded";
+  fit?: AvatarFit;
   fallback?: string;
   icon?: string;
   alt?: string;
@@ -22,9 +26,11 @@ interface Props {
 const props = withDefaults(defineProps<Props>(), {
   name: "",
   src: "",
+  srcSet: "",
   size: "md",
   status: "none",
   shape: "circle",
+  fit: "cover",
   fallback: "?",
   icon: "",
   alt: "",
@@ -37,6 +43,7 @@ const props = withDefaults(defineProps<Props>(), {
 
 const emit = defineEmits<{
   (e: "click", event: MouseEvent): void;
+  (e: "error", event: Event): void;
 }>();
 
 const { t } = useI18n();
@@ -92,10 +99,12 @@ const handleClick = (event: MouseEvent) => {
       class="base-avatar__core"
       :src="avatarSrc"
       :alt="alt"
+      :src-set="srcSet || undefined"
       :size="avatarSize"
       :shape="avatarShape"
-      fit="cover"
+      :fit="fit"
       aria-hidden="true"
+      @error="emit('error', $event)"
     >
       <span v-if="loading" class="base-avatar__spinner" aria-hidden="true">
         <BaseIcon name="LoaderCircle" size="14" />
@@ -155,7 +164,7 @@ button.base-avatar:hover .base-avatar__core {
 }
 
 .base-avatar__core :deep(img) {
-  @apply h-full w-full object-cover;
+  @apply h-full w-full;
 }
 
 .base-avatar__initials {

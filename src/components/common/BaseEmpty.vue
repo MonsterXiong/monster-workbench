@@ -11,6 +11,8 @@ type EmptyIconTone = "neutral" | "primary" | "success" | "warning" | "danger";
 interface Props {
   title?: string;
   description?: string;
+  image?: string;
+  imageSize?: number;
   icon?: string;
   size?: EmptySize;
   compact?: boolean;
@@ -27,6 +29,8 @@ interface Props {
 const props = withDefaults(defineProps<Props>(), {
   title: "",
   description: "",
+  image: "",
+  imageSize: 0,
   icon: "FolderOpen",
   size: "md",
   compact: false,
@@ -52,6 +56,7 @@ const iconSize = computed(() => {
   return 30;
 });
 const imageSize = computed(() => {
+  if (props.imageSize > 0) return props.imageSize;
   if (resolvedSize.value === "sm") return 44;
   if (resolvedSize.value === "lg") return 80;
   return 56;
@@ -75,6 +80,7 @@ const resolvedActionsLabel = computed(() => props.actionsLabel || `${props.title
       },
     ]"
     :description="resolvedDescription"
+    :image="image || undefined"
     :image-size="imageSize"
     :style="{ minHeight: minHeight || undefined }"
     role="status"
@@ -84,9 +90,11 @@ const resolvedActionsLabel = computed(() => props.actionsLabel || `${props.title
     :aria-describedby="descriptionId"
     :aria-disabled="disabled ? 'true' : undefined"
   >
-    <template #image>
+    <template v-if="$slots.image || !image" #image>
       <div class="base-empty__icon" aria-hidden="true">
-        <BaseIcon :name="icon" :size="iconSize" aria-hidden="true" />
+        <slot name="image">
+          <BaseIcon :name="icon" :size="iconSize" aria-hidden="true" />
+        </slot>
       </div>
     </template>
 
@@ -116,6 +124,10 @@ const resolvedActionsLabel = computed(() => props.actionsLabel || `${props.title
 .base-empty :deep(.el-empty__image) {
   display: flex;
   justify-content: center;
+}
+
+.base-empty :deep(.el-empty__image img) {
+  @apply h-full w-full object-contain;
 }
 
 .base-empty :deep(.el-empty__description) {

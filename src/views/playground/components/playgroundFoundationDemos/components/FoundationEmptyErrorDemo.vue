@@ -3,6 +3,8 @@ import { useToast } from "../../../../../composables/useToast";
 import PlaygroundDemoSection from "../../PlaygroundDemoSection.vue";
 
 const { triggerToast } = useToast();
+const emptyImageSrc =
+  "data:image/svg+xml;utf8,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20160%20120'%3E%3Crect%20width='160'%20height='120'%20rx='24'%20fill='%23f8fafc'/%3E%3Cpath%20d='M35%2078h90l-12%2020H47z'%20fill='%23dbeafe'/%3E%3Crect%20x='46'%2030%20width='68'%20height='50'%20rx='10'%20fill='%23fff'%20stroke='%2393c5fd'%20stroke-width='3'/%3E%3Cpath%20d='M58%2048h44M58%2062h28'%20stroke='%232563eb'%20stroke-width='6'%20stroke-linecap='round'/%3E%3Ccircle%20cx='116'%20cy='36'%20r='11'%20fill='%2310b981'/%3E%3Cpath%20d='M111%2036l4%204%207-9'%20fill='none'%20stroke='white'%20stroke-width='3'%20stroke-linecap='round'%20stroke-linejoin='round'/%3E%3C/svg%3E";
 </script>
 
 <template>
@@ -38,6 +40,21 @@ const { triggerToast } = useToast();
           >
             <BaseButton type="success" size="sm">继续审查</BaseButton>
             <BaseButton type="neutral" size="sm" outline>查看记录</BaseButton>
+          </BaseEmpty>
+        </BasePanel>
+        <BasePanel title="图片空态" subtitle="复用 Element Plus image / imageSize 能力，适合品牌插画和更明确的结果页。">
+          <BaseEmpty
+            title="素材库暂未接入"
+            description="图片空态适合结果页、引导页和低频说明场景；常规列表仍优先使用轻量图标空态。"
+            :image="emptyImageSrc"
+            :image-size="108"
+            surface="muted"
+            bordered
+            min-height="260px"
+            actions-label="素材库空态操作"
+          >
+            <BaseButton type="primary" size="sm">导入素材</BaseButton>
+            <BaseButton type="neutral" size="sm" outline>查看规范</BaseButton>
           </BaseEmpty>
         </BasePanel>
         <BasePanel title="嵌入空态" subtitle="紧凑尺寸可放入表格、详情卡、抽屉和局部面板。">

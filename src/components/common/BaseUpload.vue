@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, useId, useSlots, watchEffect } from "vue";
-import type { UploadFile, UploadFiles, UploadInstance } from "element-plus";
+import type { ListType, UploadFile, UploadFiles, UploadInstance, UploadStatus, UploadUserFile } from "element-plus";
 import { useI18n } from "../../composables/useI18n";
 import BaseIcon from "./BaseIcon.vue";
 import {
@@ -46,6 +46,13 @@ interface Props {
   size?: UploadSize;
   maxFiles?: number;
   maxSize?: number;
+  drag?: boolean;
+  showFileList?: boolean;
+  listType?: ListType;
+  fileList?: UploadUserFile[];
+  limit?: number;
+  directory?: boolean;
+  clearAfterSelect?: boolean;
   showHelper?: boolean;
   ariaLabel?: string;
   ariaLabelledby?: string;
@@ -73,6 +80,12 @@ const props = withDefaults(defineProps<Props>(), {
   size: "md",
   maxFiles: 0,
   maxSize: 0,
+  drag: true,
+  showFileList: false,
+  listType: "text",
+  fileList: () => [],
+  limit: 0,
+  directory: false,
   showHelper: true,
   ariaLabel: "",
   ariaLabelledby: "",
@@ -80,8 +93,13 @@ const props = withDefaults(defineProps<Props>(), {
 });
 
 const emit = defineEmits<{
+  (e: "update:fileList", files: UploadUserFile[]): void;
   (e: "select", files: FileList): void;
   (e: "reject", payload: UploadRejectPayload): void;
+  (e: "change", file: UploadFile, files: UploadFiles): void;
+  (e: "preview", file: UploadFile): void;
+  (e: "remove", file: UploadFile, files: UploadFiles): void;
+  (e: "exceed", files: File[], uploadFiles: UploadUserFile[]): void;
 }>();
 
 type UploadRef = (UploadInstance & { $el?: Element | null }) | null;
@@ -109,7 +127,13 @@ const statusText = computed(() => {
   return "";
 });
 const acceptText = computed(() => buildAcceptString(props.accept));
-const effectiveMaxFiles = computed(() => (props.multiple ? props.maxFiles : 1));
+const effectiveMaxFiles = computed(() => {
+  if (!props.multiple) return 1;
+  if (props.maxFiles > 0) return props.maxFiles;
+  return props.limit > 0 ? props.limit : 0;
+});
+const elementLimit = computed(() => (props.limit > 0 ? props.limit : effectiveMaxFiles.value));
+const shouldClearFiles = computed(() => props.clearAfterSelect ?? !props.showFileList);
 const visibleMaxFiles = computed(() => (props.multiple || props.maxFiles > 0 ? effectiveMaxFiles.value : 0));
 const constraintsText = computed(() => {
   const constraints: string[] = [];
@@ -143,7 +167,9 @@ const iconSize = computed(() => {
 });
 
 let pendingFiles: File[] = [];
+let pendingUploadFiles: UploadFiles = [];
 let pendingFlushTimer: number | null = null;
+const transientUploadStates: UploadStatus[] = ["ready", "fail"];
 
 const setOptionalAttribute = (element: HTMLElement, name: string, value?: string | null) => {
   if (value) {
@@ -193,8 +219,9 @@ const validateFiles = (files: FileList) => {
 };
 
 const handleFiles = (files: FileList) => {
-  if (isLocked.value || !validateFiles(files)) return;
+  if (isLocked.value || !validateFiles(files)) return false;
   emit("select", files);
+  return true;
 };
 
 const createFileList = (files: File[]) => {
@@ -210,18 +237,33 @@ const createFileList = (files: File[]) => {
 const flushPendingFiles = () => {
   pendingFlushTimer = null;
   const files = createFileList(pendingFiles);
+  const uploadFiles = pendingUploadFiles;
   pendingFiles = [];
+  pendingUploadFiles = [];
   isDragActive.value = false;
 
+  let accepted = false;
   if (hasFiles(files)) {
-    handleFiles(files);
+    accepted = handleFiles(files);
   }
 
-  uploadRef.value?.clearFiles();
+  if (!accepted) {
+    uploadRef.value?.clearFiles(transientUploadStates);
+    return;
+  }
+
+  if (shouldClearFiles.value) {
+    uploadRef.value?.clearFiles();
+    emit("update:fileList", []);
+    return;
+  }
+
+  emit("update:fileList", uploadFiles);
 };
 
-const scheduleFileFlush = (files: File[]) => {
+const scheduleFileFlush = (files: File[], uploadFiles: UploadFiles) => {
   pendingFiles = files;
+  pendingUploadFiles = uploadFiles;
   if (pendingFlushTimer !== null) {
     window.clearTimeout(pendingFlushTimer);
   }
@@ -236,7 +278,22 @@ const onUploadChange = (_file: UploadFile, uploadFiles: UploadFiles) => {
     return;
   }
 
-  scheduleFileFlush(getRawFiles(uploadFiles));
+  emit("change", _file, uploadFiles);
+  scheduleFileFlush(getRawFiles(uploadFiles), uploadFiles);
+};
+
+const onUploadPreview = (file: UploadFile) => {
+  emit("preview", file);
+};
+
+const onUploadRemove = (file: UploadFile, uploadFiles: UploadFiles) => {
+  emit("update:fileList", uploadFiles);
+  emit("remove", file, uploadFiles);
+};
+
+const onUploadExceed = (files: File[], uploadFiles: UploadUserFile[]) => {
+  rejectFiles("max-files", files);
+  emit("exceed", files, uploadFiles);
 };
 
 const onDragOver = (e: DragEvent) => {
@@ -297,6 +354,12 @@ onBeforeUnmount(() => {
     pendingFlushTimer = null;
   }
 });
+
+defineExpose({
+  abort: (file?: UploadFile) => uploadRef.value?.abort(file),
+  clearFiles: () => uploadRef.value?.clearFiles(),
+  submit: () => uploadRef.value?.submit(),
+});
 </script>
 
 <template>
@@ -311,15 +374,21 @@ onBeforeUnmount(() => {
       'base-upload--error': error,
       'base-upload--success': success && !error,
       'base-upload--compact': compact,
+      'base-upload--with-list': showFileList,
+      'base-upload--dragless': !drag,
       [`base-upload--${size}`]: true,
     }"
     action="#"
     :auto-upload="false"
-    :show-file-list="false"
-    :drag="true"
+    :show-file-list="showFileList"
+    :drag="drag"
     :accept="inputAccept"
     :multiple="multiple"
     :name="uploadName"
+    :list-type="listType"
+    :file-list="fileList"
+    :limit="elementLimit || undefined"
+    :directory="directory"
     :disabled="isLocked"
     :aria-disabled="isLocked ? 'true' : undefined"
     :aria-busy="loading ? 'true' : undefined"
@@ -328,6 +397,9 @@ onBeforeUnmount(() => {
     :aria-labelledby="rootLabelledby || undefined"
     :aria-describedby="describedBy || undefined"
     :on-change="onUploadChange"
+    :on-preview="onUploadPreview"
+    :on-remove="onUploadRemove"
+    :on-exceed="onUploadExceed"
     @dragenter="onDragEnter"
     @dragover="onDragOver"
     @dragleave="onDragLeave"
@@ -372,6 +444,12 @@ onBeforeUnmount(() => {
         </slot>
       </span>
     </div>
+    <template v-if="$slots.file" #file="{ file, index }">
+      <slot name="file" :file="file" :index="index"></slot>
+    </template>
+    <template v-if="$slots.tip" #tip>
+      <slot name="tip"></slot>
+    </template>
   </el-upload>
 </template>
 
@@ -386,6 +464,10 @@ onBeforeUnmount(() => {
 
 .base-upload :deep(.el-upload-dragger) {
   @apply w-full rounded-2xl border-0 bg-transparent p-0;
+}
+
+.base-upload--with-list {
+  @apply rounded-2xl;
 }
 
 .base-upload__surface {
@@ -409,6 +491,10 @@ onBeforeUnmount(() => {
 
 .base-upload--compact .base-upload__surface {
   @apply px-4 py-4;
+}
+
+.base-upload--dragless .base-upload__surface {
+  @apply border-solid bg-white dark:bg-slate-950;
 }
 
 .base-upload--sm :deep(.el-upload),
@@ -519,6 +605,54 @@ onBeforeUnmount(() => {
 
 .base-upload__status--loading {
   color: rgb(var(--color-primary));
+}
+
+.base-upload :deep(.el-upload-list) {
+  @apply mt-3 grid gap-2;
+}
+
+.base-upload :deep(.el-upload-list__item) {
+  @apply m-0 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 shadow-sm transition dark:border-slate-800 dark:bg-slate-950 dark:text-slate-300;
+}
+
+.base-upload :deep(.el-upload-list__item:hover) {
+  @apply border-slate-300 bg-slate-50 dark:border-slate-700 dark:bg-slate-900;
+}
+
+.base-upload :deep(.el-upload-list__item-name) {
+  @apply min-w-0 text-xs font-bold text-slate-600 dark:text-slate-300;
+}
+
+.base-upload :deep(.el-upload-list__item-name .el-icon) {
+  color: rgb(var(--color-primary));
+}
+
+.base-upload :deep(.el-upload-list__item-status-label) {
+  @apply text-emerald-500;
+}
+
+.base-upload :deep(.el-upload-list__item-delete) {
+  @apply rounded-md text-slate-400 transition hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-950 dark:hover:text-red-300;
+}
+
+.base-upload :deep(.el-upload-list--picture .el-upload-list__item) {
+  @apply min-h-16 p-2;
+}
+
+.base-upload :deep(.el-upload-list--picture .el-upload-list__item-thumbnail) {
+  @apply h-12 w-12 rounded-lg border border-slate-200 object-cover dark:border-slate-800;
+}
+
+.base-upload :deep(.el-upload-list--picture-card) {
+  @apply flex flex-wrap gap-2;
+}
+
+.base-upload :deep(.el-upload-list--picture-card .el-upload-list__item) {
+  @apply h-24 w-24 rounded-xl p-0;
+}
+
+.base-upload :deep(.el-upload-list--picture-card .el-upload-list__item-thumbnail) {
+  @apply h-full w-full rounded-xl object-cover;
 }
 
 @media (prefers-reduced-motion: reduce) {

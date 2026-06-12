@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { UploadFile, UploadUserFile } from "element-plus";
 import { ref } from "vue";
 import { useToast } from "../../../../../composables/useToast";
 import { joinFileNames } from "../../../../../utils";
@@ -8,6 +9,14 @@ const { triggerToast } = useToast();
 
 const uploadSummary = ref("尚未选择文件");
 const uploadRejectSummary = ref("暂无拒绝记录");
+const uploadListSummary = ref("列表模式等待选择");
+const uploadListFiles = ref<UploadUserFile[]>([
+  {
+    name: "component-spec.md",
+    status: "success",
+    url: "component-spec.md",
+  },
+]);
 
 const handleUploadSelect = (files: FileList) => {
   uploadSummary.value = joinFileNames(files);
@@ -22,6 +31,24 @@ const handleUploadReject = (payload: { reason: string; files: File[] }) => {
   };
   uploadRejectSummary.value = `${reasonMap[payload.reason] ?? "未通过"}：${joinFileNames(payload.files) || "无文件名"}`;
   triggerToast(uploadRejectSummary.value, "warning");
+};
+
+const handleUploadListSelect = (files: FileList) => {
+  uploadListSummary.value = `列表模式已接收 ${files.length} 个文件：${joinFileNames(files)}`;
+  triggerToast(uploadListSummary.value, "success");
+};
+
+const handleUploadPreview = (file: UploadFile) => {
+  triggerToast(`预览：${file.name}`, "info");
+};
+
+const handleUploadRemove = (file: UploadFile, files: UploadFile[]) => {
+  uploadListSummary.value = `已移除 ${file.name}，剩余 ${files.length} 个文件`;
+};
+
+const handleUploadExceed = (files: File[]) => {
+  uploadListSummary.value = `最多保留 2 个文件，已拦截：${joinFileNames(files)}`;
+  triggerToast(uploadListSummary.value, "warning");
 };
 </script>
 
@@ -87,6 +114,44 @@ const handleUploadReject = (payload: { reason: string; files: File[] }) => {
               disabled
               accept=".zip"
               :max-files="1"
+            />
+          </div>
+        </BasePanel>
+
+        <BasePanel title="文件列表与限制" subtitle="基于 Element Plus 文件列表能力，补齐预览、移除、超限和非拖拽入口。">
+          <div class="upload-demo-stack">
+            <BaseUpload
+              v-model:file-list="uploadListFiles"
+              title="选择规范附件"
+              description="展示已选文件列表，适合表单附件、素材包和配置清单。"
+              helper="最多 2 个文件，支持 .md、.json 和图片"
+              accept=".md,.json,image/*"
+              :limit="2"
+              :max-size="1048576"
+              multiple
+              show-file-list
+              :clear-after-select="false"
+              @select="handleUploadListSelect"
+              @preview="handleUploadPreview"
+              @remove="handleUploadRemove"
+              @exceed="handleUploadExceed"
+              @reject="handleUploadReject"
+            />
+            <BaseAlert type="info" :title="uploadListSummary" description="showFileList 模式保留 Element Plus 列表交互，同时继续输出 select/reject 事件。" compact />
+            <BaseUpload
+              title="点击选择图标"
+              description="关闭拖拽后，保持同一套校验、状态和可访问性语义。"
+              accept="image/*"
+              :limit="1"
+              :show-helper="false"
+              :drag="false"
+              compact
+              show-file-list
+              list-type="picture"
+              :clear-after-select="false"
+              @preview="handleUploadPreview"
+              @remove="handleUploadRemove"
+              @exceed="handleUploadExceed"
             />
           </div>
         </BasePanel>
