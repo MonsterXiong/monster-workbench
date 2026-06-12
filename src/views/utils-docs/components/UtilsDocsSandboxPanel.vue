@@ -36,7 +36,7 @@ function updateParamValue(index: number, event: Event) {
 </script>
 
 <template>
-  <aside class="utils-docs-sandbox-panel flex min-h-[520px] flex-col border-t border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900 xl:h-full xl:min-h-0 xl:border-l xl:border-t-0">
+  <aside class="utils-docs-sandbox-panel flex min-h-[520px] flex-col border-t border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900 xl:h-full xl:min-h-0 xl:border-t-0">
     <div class="flex min-h-0 flex-1 flex-col">
       <header class="flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
         <h2 class="flex items-center gap-2 text-sm font-black text-indigo-900 dark:text-indigo-100">
