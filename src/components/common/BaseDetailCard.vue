@@ -92,6 +92,8 @@ const hasDescription = computed(() => Boolean(props.description));
 const hasStatus = computed(() => Boolean(props.status));
 const hasMeta = computed(() => Boolean(props.meta));
 const headingTag = computed(() => `h${props.level}`);
+const cardBodyStyle = { padding: "0" };
+const statusTagType = computed(() => (props.statusType === "neutral" ? "info" : props.statusType));
 const labelledBy = computed(() => (props.ariaLabel ? undefined : titleId));
 const describedBy = computed(() =>
   joinAriaIds([
@@ -124,8 +126,10 @@ const handleKeydown = (event: KeyboardEvent) => {
 </script>
 
 <template>
-  <article
+  <el-card
     class="base-detail-card"
+    shadow="never"
+    :body-style="cardBodyStyle"
     :class="[
       `base-detail-card--${size}`,
       {
@@ -140,7 +144,7 @@ const handleKeydown = (event: KeyboardEvent) => {
         'is-clickable': clickable
       }
     ]"
-    :role="clickable ? 'button' : undefined"
+    :role="clickable ? 'button' : 'article'"
     :tabindex="isInteractive ? 0 : undefined"
     :aria-label="ariaLabel || undefined"
     :aria-labelledby="labelledBy"
@@ -158,7 +162,18 @@ const handleKeydown = (event: KeyboardEvent) => {
         <div class="base-detail-card__text">
           <div class="base-detail-card__title-row">
             <component :is="headingTag" :id="titleId">{{ title }}</component>
-            <BaseBadge v-if="status" :id="statusId" :type="statusType" variant="outline" :aria-label="statusLabel || undefined">{{ status }}</BaseBadge>
+            <el-tag
+              v-if="status"
+              :id="statusId"
+              class="base-detail-card__status"
+              :class="`base-detail-card__status--${statusType}`"
+              :type="statusTagType"
+              effect="light"
+              round
+              :aria-label="statusLabel || undefined"
+            >
+              {{ status }}
+            </el-tag>
           </div>
           <p v-if="description" :id="descriptionId" :style="descriptionStyle">{{ description }}</p>
           <span v-if="meta" :id="metaLabel ? metaId : undefined" class="base-detail-card__meta" :aria-label="metaLabel || undefined">{{ meta }}</span>
@@ -203,16 +218,30 @@ const handleKeydown = (event: KeyboardEvent) => {
     <footer v-if="$slots.footer" class="base-detail-card__footer" :aria-label="footerLabel || undefined">
       <slot name="footer"></slot>
     </footer>
-  </article>
+  </el-card>
 </template>
 
 <style scoped>
 .base-detail-card {
+  --el-card-border-color: rgb(226 232 240);
+  --el-card-border-radius: 1rem;
+  --el-card-bg-color: #ffffff;
+  --el-card-padding: 0;
   @apply min-w-0 max-w-full overflow-hidden rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition dark:border-slate-800 dark:bg-slate-900;
+}
+
+:global(.dark) .base-detail-card {
+  --el-card-border-color: rgb(30 41 59);
+  --el-card-bg-color: rgb(15 23 42);
+}
+
+.base-detail-card :deep(.el-card__body) {
+  @apply min-w-0;
 }
 
 .base-detail-card--compact,
 .base-detail-card--sm {
+  --el-card-border-radius: 0.75rem;
   @apply rounded-xl p-3;
 }
 
@@ -226,6 +255,10 @@ const handleKeydown = (event: KeyboardEvent) => {
 
 .base-detail-card--plain {
   @apply rounded-none border-0 bg-transparent p-0 shadow-none dark:bg-transparent;
+}
+
+.base-detail-card--plain :deep(.el-card__body) {
+  @apply bg-transparent;
 }
 
 .base-detail-card.is-loading,
@@ -290,6 +323,39 @@ const handleKeydown = (event: KeyboardEvent) => {
 
 .base-detail-card--wrap-title .base-detail-card__title-row :is(h2, h3, h4, h5, h6) {
   @apply whitespace-normal break-words;
+}
+
+.base-detail-card__status {
+  --el-tag-border-radius: 999px;
+  --el-tag-border-color: rgb(var(--detail-status-color) / 0.2);
+  --el-tag-bg-color: rgb(var(--detail-status-color) / 0.1);
+  --el-tag-text-color: rgb(var(--detail-status-color));
+  @apply h-auto min-w-0 shrink-0 rounded-full border px-2 py-1 text-[10px] font-black;
+  max-width: 100%;
+}
+
+.base-detail-card__status :deep(.el-tag__content) {
+  @apply min-w-0 truncate;
+}
+
+.base-detail-card__status--primary {
+  --detail-status-color: var(--color-primary);
+}
+
+.base-detail-card__status--success {
+  --detail-status-color: 5 150 105;
+}
+
+.base-detail-card__status--warning {
+  --detail-status-color: 217 119 6;
+}
+
+.base-detail-card__status--danger {
+  --detail-status-color: 220 38 38;
+}
+
+.base-detail-card__status--neutral {
+  --detail-status-color: 100 116 139;
 }
 
 .base-detail-card__text p {

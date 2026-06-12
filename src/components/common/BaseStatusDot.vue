@@ -25,6 +25,7 @@ const props = withDefaults(defineProps<Props>(), {
 
 const accessibleLabel = computed(() => props.ariaLabel || props.label || props.description || "");
 const hasVisibleText = computed(() => Boolean(props.label || props.description));
+const badgeType = computed(() => (props.type === "neutral" ? "info" : props.type));
 </script>
 
 <template>
@@ -44,7 +45,11 @@ const hasVisibleText = computed(() => Boolean(props.label || props.description))
     :aria-disabled="disabled ? 'true' : undefined"
     :title="accessibleLabel || undefined"
   >
-    <span class="base-status-dot__mark" :class="{ 'base-status-dot__mark--pulse': pulse }" aria-hidden="true"></span>
+    <span class="base-status-dot__mark" :class="{ 'base-status-dot__mark--pulse': pulse }" aria-hidden="true">
+      <el-badge class="base-status-dot__badge" is-dot :type="badgeType">
+        <span class="base-status-dot__badge-anchor"></span>
+      </el-badge>
+    </span>
     <span v-if="label || description" class="base-status-dot__text">
       <span v-if="label" class="base-status-dot__label">{{ label }}</span>
       <span v-if="description" class="base-status-dot__description">{{ description }}</span>
@@ -70,7 +75,23 @@ const hasVisibleText = computed(() => Boolean(props.label || props.description))
 }
 
 .base-status-dot__mark {
-  @apply relative shrink-0 rounded-full;
+  @apply relative inline-flex shrink-0 items-center justify-center rounded-full;
+}
+
+.base-status-dot__badge {
+  @apply inline-flex h-full w-full items-center justify-center;
+}
+
+.base-status-dot__badge-anchor {
+  @apply hidden;
+}
+
+.base-status-dot__badge :deep(.el-badge__content.is-dot) {
+  @apply m-0 block rounded-full border-0 p-0;
+  position: static;
+  width: 100%;
+  height: 100%;
+  transform: none;
   background-color: var(--status-dot-color);
 }
 

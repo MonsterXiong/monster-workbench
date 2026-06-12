@@ -35,6 +35,8 @@ const labelId = `app-image-uploader-label-${uploaderId}`;
 const imageLabel = computed(() => props.label || t("common.uploader.previewImage"));
 const uploadLabel = computed(() => props.label ? `${t("common.uploader.clickUpload")}：${props.label}` : t("common.uploader.uploadImage"));
 const clearLabel = computed(() => props.label ? `${t("common.uploader.clearImage")}：${props.label}` : t("common.uploader.clearImage"));
+const previewFit = computed(() => (props.aspectRatio === "cover" ? "cover" : "contain"));
+const uploadIcon = computed(() => (props.aspectRatio === "cover" ? ImageIcon : UploadCloud));
 
 // WebView 转换本地路径预览
 function getImgUrl(relPath: string) {
@@ -65,51 +67,152 @@ function handleClear() {
 </script>
 
 <template>
-  <div class="flex flex-col gap-1.5 w-full">
-    <label v-if="label" :id="labelId" class="text-[11px] font-bold text-slate-500 dark:text-slate-400">{{ label }}</label>
-    
+  <div class="app-image-uploader">
+    <label v-if="label" :id="labelId" class="app-image-uploader__label">{{ label }}</label>
+
     <div
       v-if="modelValue"
-      class="relative h-16 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 flex items-center justify-center overflow-hidden group/upload"
+      class="app-image-uploader__preview"
       role="group"
       :aria-labelledby="label ? labelId : undefined"
     >
-      <img
+      <el-image
         :src="getImgUrl(modelValue)"
         :alt="imageLabel"
-        class="h-full w-full"
-        :class="aspectRatio === 'cover' ? 'object-cover' : 'object-contain p-2'"
-      />
-      <button
-        type="button"
-        class="absolute top-1 right-1 h-5 w-5 rounded-full bg-red-500 text-white flex items-center justify-center opacity-0 group-hover/upload:opacity-100 focus-visible:opacity-100 cursor-pointer shadow-sm hover:bg-red-600 hover:scale-110 active:scale-95 hover:rotate-90 transition-all duration-200"
+        class="app-image-uploader__image"
+        :fit="previewFit"
+      >
+        <template #error>
+          <div class="app-image-uploader__image-fallback">
+            <ImageIcon class="h-5 w-5" aria-hidden="true" />
+          </div>
+        </template>
+      </el-image>
+      <el-button
+        class="app-image-uploader__clear"
+        type="danger"
+        circle
+        size="small"
+        :icon="X"
         :aria-label="clearLabel"
         :title="clearLabel"
         @click="handleClear"
-      >
-        <X class="h-3 w-3" aria-hidden="true" />
-      </button>
+      />
     </div>
-    
-    <button
+
+    <el-button
       v-else
-      type="button"
-      class="h-16 rounded-xl border-2 border-dashed border-slate-200 dark:border-slate-800 hover:border-primary bg-slate-50/30 dark:bg-slate-900/20 hover:bg-primary/5 flex flex-col items-center justify-center gap-1 transition-all duration-300 cursor-pointer disabled:opacity-50 group/uploader hover:shadow-sm"
+      class="app-image-uploader__trigger"
       :disabled="uploading"
       :aria-busy="uploading"
       :aria-label="uploadLabel"
       :title="uploadLabel"
       @click="handleUpload"
     >
-      <component
-        :is="aspectRatio === 'cover' ? ImageIcon : UploadCloud"
-        class="h-4 w-4 text-slate-400 dark:text-slate-500 group-hover/uploader:text-primary group-hover/uploader:-translate-y-0.5 transition-all duration-300"
-        :class="{ 'animate-pulse': uploading }"
-        aria-hidden="true"
-      />
-      <span class="text-[9px] font-bold text-slate-400 dark:text-slate-500 group-hover/uploader:text-primary transition-colors duration-300">
-        {{ uploading ? t('common.uploader.uploading') : t('common.uploader.clickUpload') }}
+      <span class="app-image-uploader__trigger-inner">
+        <span class="app-image-uploader__icon">
+          <component
+            :is="uploadIcon"
+            class="h-5 w-5"
+            :class="{ 'animate-pulse': uploading }"
+            aria-hidden="true"
+          />
+        </span>
+        <span class="app-image-uploader__text">
+          {{ uploading ? t('common.uploader.uploading') : t('common.uploader.clickUpload') }}
+        </span>
       </span>
-    </button>
+    </el-button>
   </div>
 </template>
+
+<style scoped>
+.app-image-uploader {
+  @apply flex w-full min-w-0 flex-col gap-1.5;
+}
+
+.app-image-uploader__label {
+  @apply text-[11px] font-bold leading-4 text-slate-500 dark:text-slate-400;
+}
+
+.app-image-uploader__preview {
+  @apply relative flex h-20 w-full min-w-0 items-center justify-center overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition duration-200 dark:border-slate-800 dark:bg-slate-950;
+}
+
+.app-image-uploader__preview:hover,
+.app-image-uploader__preview:focus-within {
+  @apply border-slate-300 shadow-md dark:border-slate-700;
+}
+
+.app-image-uploader__image {
+  @apply h-full w-full bg-slate-50 dark:bg-slate-900;
+}
+
+.app-image-uploader__image :deep(.el-image__inner) {
+  @apply h-full w-full;
+}
+
+.app-image-uploader__image :deep(.el-image__inner[style*="contain"]) {
+  @apply p-2;
+}
+
+.app-image-uploader__image-fallback {
+  @apply flex h-full w-full items-center justify-center text-slate-300 dark:text-slate-600;
+}
+
+.app-image-uploader__clear {
+  @apply absolute right-2 top-2 opacity-0 shadow-sm transition duration-200;
+}
+
+.app-image-uploader__preview:hover .app-image-uploader__clear,
+.app-image-uploader__preview:focus-within .app-image-uploader__clear {
+  @apply opacity-100;
+}
+
+.app-image-uploader__trigger {
+  @apply h-20 w-full rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50 px-0 py-0 text-slate-500 shadow-sm transition duration-200 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400;
+}
+
+.app-image-uploader__trigger:not(.is-disabled):hover,
+.app-image-uploader__trigger:not(.is-disabled):focus-visible {
+  border-color: rgb(var(--color-primary) / 0.45);
+  background-color: rgb(var(--color-primary) / 0.04);
+  color: rgb(var(--color-primary));
+  @apply shadow-md;
+}
+
+.app-image-uploader__trigger.is-disabled {
+  @apply opacity-60;
+}
+
+.app-image-uploader__trigger :deep(span) {
+  @apply flex;
+}
+
+.app-image-uploader__trigger-inner {
+  @apply h-full w-full flex-col items-center justify-center gap-1.5;
+}
+
+.app-image-uploader__icon {
+  @apply h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-400 shadow-sm transition duration-200 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-500;
+}
+
+.app-image-uploader__trigger:not(.is-disabled):hover .app-image-uploader__icon,
+.app-image-uploader__trigger:not(.is-disabled):focus-visible .app-image-uploader__icon {
+  border-color: rgb(var(--color-primary) / 0.28);
+  color: rgb(var(--color-primary));
+}
+
+.app-image-uploader__text {
+  @apply max-w-full text-[11px] font-black leading-4;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-image-uploader__preview,
+  .app-image-uploader__clear,
+  .app-image-uploader__trigger,
+  .app-image-uploader__icon {
+    transition: none !important;
+  }
+}
+</style>

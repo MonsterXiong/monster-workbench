@@ -65,6 +65,7 @@ const resolvedSize = computed(() => (props.compact ? "sm" : props.size));
 const resolvedColumns = computed(() => clampNumber(props.columns, 1, 3, 2, 0) as 1 | 2 | 3);
 const isEmpty = computed(() => !props.loading && isEmptyArray(props.items));
 const skeletonCount = computed(() => toIntegerAtLeast(props.skeletonRows, 1, 3));
+const emptyImageSize = computed(() => (resolvedSize.value === "lg" ? 44 : 36));
 const resolvedLoadingText = computed(() => props.loadingText || t("common.loading"));
 const statusLabels: Record<KeyValueStatus, string> = {
   primary: "重点",
@@ -110,17 +111,31 @@ const getItemStatusLabel = (item: KeyValueItem) => {
   >
     <template v-if="loading">
       <div class="sr-only" role="status" aria-live="polite">{{ resolvedLoadingText }}</div>
-      <div v-for="index in skeletonCount" :key="index" class="base-key-value-list__item base-key-value-list__item--skeleton" aria-hidden="true">
-        <span></span>
-        <strong></strong>
-        <em></em>
-      </div>
+      <el-skeleton
+        v-for="index in skeletonCount"
+        :key="index"
+        class="base-key-value-list__item base-key-value-list__item--skeleton"
+        :loading="true"
+        :animated="true"
+        :rows="0"
+        aria-hidden="true"
+      >
+        <template #template>
+          <el-skeleton-item variant="text" class="base-key-value-list__skeleton-label" />
+          <el-skeleton-item variant="h3" class="base-key-value-list__skeleton-value" />
+          <el-skeleton-item variant="text" class="base-key-value-list__skeleton-description" />
+        </template>
+      </el-skeleton>
     </template>
 
-    <div v-else-if="isEmpty" class="base-key-value-list__empty" role="status">
-      <BaseIcon :name="emptyIcon" size="18" aria-hidden="true" />
-      <span>{{ emptyText || t("common.noData") }}</span>
-    </div>
+    <el-empty v-else-if="isEmpty" class="base-key-value-list__empty" :image-size="emptyImageSize" role="status">
+      <template #image>
+        <BaseIcon :name="emptyIcon" size="22" aria-hidden="true" />
+      </template>
+      <template #description>
+        <span>{{ emptyText || t("common.noData") }}</span>
+      </template>
+    </el-empty>
 
     <div
       v-else
@@ -262,7 +277,7 @@ const getItemStatusLabel = (item: KeyValueItem) => {
 }
 
 .base-key-value-list__empty {
-  @apply col-span-full flex min-h-[96px] min-w-0 flex-col items-center justify-center gap-2 rounded-2xl bg-slate-50 p-6 text-center text-xs font-bold text-slate-400 dark:bg-slate-950 dark:text-slate-500;
+  @apply col-span-full min-h-[96px] min-w-0 rounded-2xl bg-slate-50 p-4 text-center text-xs font-bold text-slate-400 dark:bg-slate-950 dark:text-slate-500;
 }
 
 .base-key-value-list.is-bordered .base-key-value-list__empty {
@@ -273,6 +288,14 @@ const getItemStatusLabel = (item: KeyValueItem) => {
   @apply rounded-none border-0 bg-transparent p-0 dark:bg-transparent;
 }
 
+.base-key-value-list__empty :deep(.el-empty__image) {
+  @apply flex items-center justify-center;
+}
+
+.base-key-value-list__empty :deep(.el-empty__description) {
+  @apply m-0 text-xs font-bold text-slate-400 dark:text-slate-500;
+}
+
 .base-key-value-list__empty :deep(.base-icon) {
   @apply text-slate-300 dark:text-slate-600;
 }
@@ -281,21 +304,19 @@ const getItemStatusLabel = (item: KeyValueItem) => {
   @apply space-y-2;
 }
 
-.base-key-value-list__item--skeleton span,
-.base-key-value-list__item--skeleton strong,
-.base-key-value-list__item--skeleton em {
-  @apply block rounded-full bg-slate-100 dark:bg-slate-800;
+.base-key-value-list__item--skeleton :deep(.el-skeleton__item) {
+  @apply rounded-full bg-slate-100 dark:bg-slate-800;
 }
 
-.base-key-value-list__item--skeleton span {
+.base-key-value-list__skeleton-label {
   @apply h-3 w-16;
 }
 
-.base-key-value-list__item--skeleton strong {
+.base-key-value-list__skeleton-value {
   @apply h-4 w-24;
 }
 
-.base-key-value-list__item--skeleton em {
+.base-key-value-list__skeleton-description {
   @apply h-3 w-20;
 }
 

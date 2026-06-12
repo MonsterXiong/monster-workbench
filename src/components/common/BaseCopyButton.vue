@@ -53,6 +53,17 @@ const resolvedLabel = computed(() => {
   return props.label || t("common.copy");
 });
 const resolvedAriaLabel = computed(() => props.ariaLabel || resolvedLabel.value);
+const elementType = computed(() => {
+  if (failed.value) return "danger";
+  if (copied.value) return "success";
+  if (copying.value) return "primary";
+  return "info";
+});
+const elementSize = computed(() => {
+  if (props.size === "xs") return "small";
+  if (props.size === "md") return "default";
+  return "small";
+});
 
 const scheduleStateReset = () => {
   resetTimer = resetTimeoutHandle(resetTimer, () => {
@@ -96,8 +107,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <button
-    type="button"
+  <el-button
     class="base-copy-button"
     :class="[
       `base-copy-button--${size}`,
@@ -108,6 +118,9 @@ onBeforeUnmount(() => {
         'is-error': failed,
       },
     ]"
+    :type="elementType"
+    :size="elementSize"
+    native-type="button"
     :disabled="!canCopy"
     :aria-label="resolvedAriaLabel"
     :aria-live="copied || failed ? 'polite' : undefined"
@@ -119,12 +132,48 @@ onBeforeUnmount(() => {
     <XCircle v-else-if="failed" class="base-copy-button__icon" aria-hidden="true" />
     <Copy v-else class="base-copy-button__icon" aria-hidden="true" />
     <span v-if="showText" class="base-copy-button__label">{{ resolvedLabel }}</span>
-  </button>
+  </el-button>
 </template>
 
 <style scoped>
 .base-copy-button {
-  @apply inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white font-black text-slate-600 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-opacity-20 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-slate-700 dark:hover:bg-slate-950 dark:hover:text-slate-100;
+  @apply shrink-0 rounded-lg font-black shadow-sm transition;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 0.375rem;
+  border-color: #e2e8f0 !important;
+  background-color: #ffffff !important;
+  color: #475569 !important;
+  white-space: nowrap;
+}
+
+.base-copy-button:hover:not(.is-disabled) {
+  border-color: #cbd5e1 !important;
+  background-color: #f8fafc !important;
+  color: #0f172a !important;
+}
+
+.base-copy-button:focus-visible {
+  outline: none !important;
+  box-shadow: 0 0 0 3px rgb(var(--color-primary) / 0.16) !important;
+}
+
+.base-copy-button :deep(> span) {
+  @apply inline-flex min-w-0 items-center justify-center gap-1.5;
+  line-height: 1;
+}
+
+:global(.dark) .base-copy-button {
+  border-color: #1e293b !important;
+  background-color: #0f172a !important;
+  color: #cbd5e1 !important;
+}
+
+:global(.dark) .base-copy-button:hover:not(.is-disabled) {
+  border-color: #334155 !important;
+  background-color: #020617 !important;
+  color: #f8fafc !important;
 }
 
 .base-copy-button__icon {
@@ -166,11 +215,15 @@ onBeforeUnmount(() => {
 }
 
 .base-copy-button.is-copied {
-  @apply border-emerald-200 bg-emerald-50 text-emerald-600 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-300;
+  border-color: #a7f3d0 !important;
+  background-color: #ecfdf5 !important;
+  color: #059669 !important;
 }
 
 .base-copy-button.is-copying {
-  @apply border-blue-200 bg-blue-50 text-primary dark:border-blue-900 dark:bg-blue-950;
+  border-color: #bfdbfe !important;
+  background-color: #eff6ff !important;
+  color: rgb(var(--color-primary)) !important;
 }
 
 .base-copy-button.is-copying .base-copy-button__icon {
@@ -178,7 +231,27 @@ onBeforeUnmount(() => {
 }
 
 .base-copy-button.is-error {
-  @apply border-red-200 bg-red-50 text-red-600 dark:border-red-900 dark:bg-red-950 dark:text-red-300;
+  border-color: #fecaca !important;
+  background-color: #fef2f2 !important;
+  color: #dc2626 !important;
+}
+
+:global(.dark) .base-copy-button.is-copied {
+  border-color: #064e3b !important;
+  background-color: #052e16 !important;
+  color: #6ee7b7 !important;
+}
+
+:global(.dark) .base-copy-button.is-copying {
+  border-color: #1e3a8a !important;
+  background-color: #172554 !important;
+  color: #93c5fd !important;
+}
+
+:global(.dark) .base-copy-button.is-error {
+  border-color: #7f1d1d !important;
+  background-color: #450a0a !important;
+  color: #fca5a5 !important;
 }
 
 @media (prefers-reduced-motion: reduce) {

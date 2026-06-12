@@ -4,7 +4,7 @@ import { FolderSearch2, FileSearch } from "lucide-vue-next";
 import { useSystemStore } from "../../stores/system";
 import { useToast } from "../../composables/useToast";
 import { useI18n } from "../../composables/useI18n";
-import { getErrorMessage, getEventTargetValue } from "../../utils";
+import { getErrorMessage } from "../../utils";
 
 const props = withDefaults(
   defineProps<{
@@ -27,6 +27,7 @@ const { t } = useI18n();
 const systemStore = useSystemStore();
 const inputLabel = computed(() => props.placeholder || t("common.pathSelector.placeholder"));
 const selectLabel = computed(() => props.type === "folder" ? t("common.pathSelector.selectFolder") : t("common.pathSelector.selectFile"));
+const resolvedPlaceholder = computed(() => props.placeholder || t("common.pathSelector.placeholder"));
 
 async function handleSelect() {
   if (!systemStore.isDesktopRuntime) {
@@ -49,25 +50,62 @@ async function handleSelect() {
 </script>
 
 <template>
-  <div class="flex gap-2 w-full">
-    <input
-      :value="modelValue"
-      type="text"
-      :placeholder="placeholder || t('common.pathSelector.placeholder')"
+  <div class="app-path-selector">
+    <el-input
+      class="app-path-selector__input"
+      :model-value="modelValue"
+      :placeholder="resolvedPlaceholder"
       :aria-label="inputLabel"
-      class="workbench-input h-10 flex-1 text-xs font-mono"
-      @input="emit('update:modelValue', getEventTargetValue($event))"
-    />
-    <button
-      class="workbench-btn border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700/50 text-slate-700 dark:text-slate-300 h-10 px-3.5 text-xs font-bold shrink-0 shadow-sm flex items-center gap-1.5"
-      type="button"
-      :aria-label="selectLabel"
-      :title="selectLabel"
-      @click="handleSelect"
+      clearable
+      @update:model-value="emit('update:modelValue', String($event))"
     >
-      <FolderSearch2 v-if="type === 'folder'" class="h-4 w-4 text-slate-500 dark:text-slate-400" aria-hidden="true" />
-      <FileSearch v-else class="h-4 w-4 text-slate-500 dark:text-slate-400" aria-hidden="true" />
-      <span>{{ t('common.pathSelector.select') }}</span>
-    </button>
+      <template #append>
+        <el-button
+          class="app-path-selector__button"
+          type="default"
+          :aria-label="selectLabel"
+          :title="selectLabel"
+          @click="handleSelect"
+        >
+          <FolderSearch2 v-if="type === 'folder'" class="app-path-selector__icon" aria-hidden="true" />
+          <FileSearch v-else class="app-path-selector__icon" aria-hidden="true" />
+          <span>{{ t('common.pathSelector.select') }}</span>
+        </el-button>
+      </template>
+    </el-input>
   </div>
 </template>
+
+<style scoped>
+.app-path-selector {
+  @apply w-full min-w-0;
+}
+
+.app-path-selector__input {
+  @apply w-full min-w-0 font-mono text-xs;
+}
+
+.app-path-selector__input :deep(.el-input__wrapper) {
+  @apply min-w-0 bg-white shadow-sm transition dark:bg-slate-900;
+}
+
+.app-path-selector__input :deep(.el-input__inner) {
+  @apply min-w-0 font-mono text-xs;
+}
+
+.app-path-selector__input :deep(.el-input-group__append) {
+  @apply bg-white p-0 shadow-sm dark:bg-slate-800;
+}
+
+.app-path-selector__button {
+  @apply h-10 shrink-0 rounded-none border-0 px-3.5 text-xs font-bold text-slate-700 shadow-none dark:text-slate-300;
+}
+
+.app-path-selector__button :deep(span) {
+  @apply flex min-w-0 items-center gap-1.5;
+}
+
+.app-path-selector__icon {
+  @apply h-4 w-4 shrink-0 text-slate-500 dark:text-slate-400;
+}
+</style>

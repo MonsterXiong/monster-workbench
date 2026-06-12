@@ -64,6 +64,11 @@ const loadingId = `${infoId}-loading`;
 const hasDescription = computed(() => Boolean(props.description));
 const hasMeta = computed(() => Boolean(props.meta));
 const headingTag = computed(() => `h${props.level}`);
+const cardBodyStyle = { padding: "0" };
+const metaTagType = computed(() => {
+  if (props.type === "neutral") return "info";
+  return props.type;
+});
 const labelledBy = computed(() => (props.ariaLabel ? undefined : props.ariaLabelledby || titleId));
 const describedBy = computed(() =>
   joinAriaIds([
@@ -110,8 +115,10 @@ const handleKeydown = (event: KeyboardEvent) => {
 </script>
 
 <template>
-  <article
+  <el-card
     class="base-info-card"
+    shadow="never"
+    :body-style="cardBodyStyle"
     :class="[
       `base-info-card--${type}`,
       `base-info-card--${size}`,
@@ -132,55 +139,87 @@ const handleKeydown = (event: KeyboardEvent) => {
     :aria-describedby="articleDescribedBy"
     :aria-busy="loading ? 'true' : undefined"
     :aria-disabled="isAriaDisabled ? 'true' : undefined"
+    role="article"
   >
-    <div
-      class="base-info-card__main"
-      :role="clickable ? 'button' : undefined"
-      :tabindex="isInteractive ? 0 : undefined"
-      :aria-label="clickable ? ariaLabel || undefined : undefined"
-      :aria-labelledby="clickable ? labelledBy : undefined"
-      :aria-describedby="clickable ? describedBy : undefined"
-      :aria-disabled="clickable && isAriaDisabled ? 'true' : undefined"
-      @click="handleClick"
-      @keydown="handleKeydown"
-    >
-      <div v-if="icon" class="base-info-card__icon" aria-hidden="true">
-        <BaseIcon :name="icon" size="18" aria-hidden="true" />
+    <div class="base-info-card__inner">
+      <div
+        class="base-info-card__main"
+        :role="clickable ? 'button' : undefined"
+        :tabindex="isInteractive ? 0 : undefined"
+        :aria-label="clickable ? ariaLabel || undefined : undefined"
+        :aria-labelledby="clickable ? labelledBy : undefined"
+        :aria-describedby="clickable ? describedBy : undefined"
+        :aria-disabled="clickable && isAriaDisabled ? 'true' : undefined"
+        @click="handleClick"
+        @keydown="handleKeydown"
+      >
+        <div v-if="icon" class="base-info-card__icon" aria-hidden="true">
+          <BaseIcon :name="icon" size="18" aria-hidden="true" />
+        </div>
+        <div class="base-info-card__content">
+          <div class="base-info-card__heading">
+            <component :is="headingTag" :id="titleId">{{ title }}</component>
+            <el-tag
+              v-if="meta"
+              :id="metaLabel ? metaId : undefined"
+              class="base-info-card__meta"
+              :type="metaTagType"
+              effect="light"
+              round
+              :aria-label="metaLabel || undefined"
+            >
+              {{ meta }}
+            </el-tag>
+          </div>
+          <p v-if="description" :id="descriptionId" :style="descriptionStyle">{{ description }}</p>
+          <div v-if="$slots.default" class="base-info-card__body" :role="contentLabel ? 'group' : undefined" :aria-label="contentLabel || undefined">
+            <slot v-bind="slotState"></slot>
+          </div>
+          <span v-if="loading && loadingText" :id="loadingId" class="sr-only">{{ loadingText }}</span>
+        </div>
       </div>
-      <div class="base-info-card__content">
-        <div class="base-info-card__heading">
-          <component :is="headingTag" :id="titleId">{{ title }}</component>
-          <span v-if="meta" :id="metaLabel ? metaId : undefined" :aria-label="metaLabel || undefined">{{ meta }}</span>
-        </div>
-        <p v-if="description" :id="descriptionId" :style="descriptionStyle">{{ description }}</p>
-        <div v-if="$slots.default" class="base-info-card__body" :role="contentLabel ? 'group' : undefined" :aria-label="contentLabel || undefined">
-          <slot v-bind="slotState"></slot>
-        </div>
-        <span v-if="loading && loadingText" :id="loadingId" class="sr-only">{{ loadingText }}</span>
+      <div
+        v-if="$slots.actions"
+        class="base-info-card__actions"
+        :role="actionsLabel ? 'group' : undefined"
+        :aria-label="actionsLabel || undefined"
+      >
+        <slot name="actions" v-bind="slotState"></slot>
       </div>
     </div>
-    <div
-      v-if="$slots.actions"
-      class="base-info-card__actions"
-      :role="actionsLabel ? 'group' : undefined"
-      :aria-label="actionsLabel || undefined"
-    >
-      <slot name="actions" v-bind="slotState"></slot>
-    </div>
-  </article>
+  </el-card>
 </template>
 
 <style scoped>
 .base-info-card {
-  @apply flex min-w-0 max-w-full flex-wrap items-start gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition dark:border-slate-800 dark:bg-slate-900;
+  --el-card-border-color: rgb(226 232 240);
+  --el-card-border-radius: 1rem;
+  --el-card-bg-color: #fff;
+  --el-card-padding: 0;
+  @apply min-w-0 max-w-full rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition dark:border-slate-800 dark:bg-slate-900;
   container-type: inline-size;
 }
 
+:global(.dark) .base-info-card {
+  --el-card-border-color: rgb(30 41 59);
+  --el-card-bg-color: rgb(15 23 42);
+}
+
+.base-info-card :deep(.el-card__body) {
+  @apply min-w-0;
+}
+
+.base-info-card__inner {
+  @apply flex min-w-0 max-w-full flex-wrap items-start gap-3;
+}
+
 .base-info-card--compact {
+  --el-card-border-radius: 0.75rem;
   @apply rounded-xl p-3;
 }
 
 .base-info-card--sm {
+  --el-card-border-radius: 0.75rem;
   @apply rounded-xl p-3;
 }
 
@@ -192,12 +231,20 @@ const handleKeydown = (event: KeyboardEvent) => {
   @apply flex-col;
 }
 
+.base-info-card--vertical .base-info-card__inner {
+  @apply flex-col;
+}
+
 .base-info-card--muted {
   @apply bg-slate-50 dark:bg-slate-950;
 }
 
 .base-info-card--plain {
   @apply rounded-none border-0 bg-transparent p-0 shadow-none dark:bg-transparent;
+}
+
+.base-info-card--plain :deep(.el-card__body) {
+  @apply bg-transparent;
 }
 
 .base-info-card.is-disabled,
@@ -278,11 +325,19 @@ const handleKeydown = (event: KeyboardEvent) => {
   @apply whitespace-normal break-words;
 }
 
-.base-info-card__heading span {
-  @apply min-w-0 shrink-0 overflow-hidden truncate rounded-full px-2 py-1 text-[10px] font-black;
+.base-info-card__meta {
+  --el-tag-border-color: rgb(var(--info-tag-color) / 0.18);
+  --el-tag-bg-color: rgb(var(--info-tag-color) / 0.1);
+  --el-tag-text-color: rgb(var(--info-tag-color));
+  --el-tag-border-radius: 999px;
+  @apply h-auto min-w-0 shrink-0 overflow-hidden rounded-full border-0 px-2 py-1 text-[10px] font-black;
   background-color: var(--info-soft-bg);
   color: var(--info-color);
   max-width: 100%;
+}
+
+.base-info-card__meta :deep(.el-tag__content) {
+  @apply min-w-0 truncate;
 }
 
 .base-info-card p {
@@ -341,26 +396,31 @@ const handleKeydown = (event: KeyboardEvent) => {
 .base-info-card--primary {
   --info-color: rgb(var(--color-primary));
   --info-soft-bg: rgba(var(--color-primary), 0.1);
+  --info-tag-color: var(--color-primary);
 }
 
 .base-info-card--success {
   --info-color: #059669;
   --info-soft-bg: #ecfdf5;
+  --info-tag-color: 5 150 105;
 }
 
 .base-info-card--warning {
   --info-color: #d97706;
   --info-soft-bg: #fffbeb;
+  --info-tag-color: 217 119 6;
 }
 
 .base-info-card--danger {
   --info-color: #dc2626;
   --info-soft-bg: #fef2f2;
+  --info-tag-color: 220 38 38;
 }
 
 .base-info-card--neutral {
   --info-color: #64748b;
   --info-soft-bg: #f1f5f9;
+  --info-tag-color: 100 116 139;
 }
 
 :global(.dark) .base-info-card--success {

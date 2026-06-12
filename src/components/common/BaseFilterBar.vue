@@ -122,6 +122,18 @@ const handleClear = () => {
   if (isInteractiveDisabled.value) return;
   emit("clear");
 };
+
+const getFilterText = (filter: FilterBarItem) => `${filter.label}: ${filter.value}`;
+
+const getFilterAriaLabel = (filter: FilterBarItem) => {
+  if (filter.removable === false || isInteractiveDisabled.value) return getFilterText(filter);
+  return `${t("common.removeFilter")}: ${getFilterText(filter)}`;
+};
+
+const getFilterTagType = (type?: FilterBarItem["type"]) => {
+  if (type === "neutral" || !type) return "info";
+  return type;
+};
 </script>
 
 <template>
@@ -146,9 +158,9 @@ const handleClear = () => {
       <div class="base-filter-bar__title-wrap">
         <div class="base-filter-bar__title-row">
           <h3 v-if="title" :id="titleId">{{ title }}</h3>
-          <span v-if="count !== null && count !== undefined" class="base-filter-bar__count">
+          <el-tag v-if="count !== null && count !== undefined" class="base-filter-bar__count" type="primary" effect="light" round>
             {{ count }} {{ countLabel || t('common.filterCount') }}
-          </span>
+          </el-tag>
         </div>
         <p v-if="description" :id="descriptionId">{{ description }}</p>
       </div>
@@ -190,40 +202,34 @@ const handleClear = () => {
     <div v-if="filters.length" class="base-filter-bar__summary" aria-live="polite">
       <span class="base-filter-bar__summary-label">{{ selectedText || t('common.selectedFilters') }}</span>
       <template v-for="filter in filters" :key="filter.key">
-        <button
-          v-if="filter.removable !== false"
-          type="button"
+        <el-tag
           class="base-filter-bar__chip"
           :class="`base-filter-bar__chip--${filter.type || 'neutral'}`"
-          :disabled="isInteractiveDisabled"
-          :aria-label="`${t('common.removeFilter')}: ${filter.label} ${filter.value}`"
-          :title="`${t('common.removeFilter')}: ${filter.label} ${filter.value}`"
-          @click="handleRemoveFilter(filter)"
+          :type="getFilterTagType(filter.type)"
+          effect="light"
+          round
+          :closable="filter.removable !== false && !isInteractiveDisabled"
+          :aria-label="getFilterAriaLabel(filter)"
+          :title="getFilterText(filter)"
+          @close="handleRemoveFilter(filter)"
         >
-          <span>{{ filter.label }}: {{ filter.value }}</span>
-          <BaseIcon name="X" size="12" aria-hidden="true" />
-        </button>
-        <span
-          v-else
-          class="base-filter-bar__chip base-filter-bar__chip--readonly"
-          :class="`base-filter-bar__chip--${filter.type || 'neutral'}`"
-          :aria-label="`${filter.label}: ${filter.value}`"
-          :title="`${filter.label}: ${filter.value}`"
-        >
-          <span>{{ filter.label }}: {{ filter.value }}</span>
-        </span>
+          <span class="base-filter-bar__chip-text">{{ getFilterText(filter) }}</span>
+        </el-tag>
       </template>
-      <button
+      <el-button
         v-if="showClear"
-        type="button"
         class="base-filter-bar__clear"
+        type="info"
+        text
+        round
+        size="small"
         :disabled="isInteractiveDisabled"
         :aria-label="resolvedClearText"
         :title="resolvedClearText"
         @click="handleClear"
       >
         {{ resolvedClearText }}
-      </button>
+      </el-button>
     </div>
 
     <div v-else-if="showSummaryWhenEmpty" class="base-filter-bar__summary base-filter-bar__summary--empty" aria-live="polite">
@@ -287,8 +293,15 @@ const handleClear = () => {
 }
 
 .base-filter-bar__count {
+  --el-tag-border-color: rgb(var(--color-primary) / 0.16);
+  --el-tag-bg-color: rgb(var(--color-primary) / 0.1);
+  --el-tag-text-color: rgb(var(--color-primary));
+  @apply h-auto shrink-0 border px-2 py-1 text-[11px] font-bold leading-none;
   background-color: rgb(var(--color-primary) / 0.1);
-  @apply inline-flex shrink-0 items-center rounded-full px-2 py-1 text-[11px] font-bold text-primary;
+}
+
+.base-filter-bar__count :deep(.el-tag__content) {
+  @apply min-w-0 truncate;
 }
 
 .base-filter-bar__actions {
@@ -346,7 +359,11 @@ const handleClear = () => {
 }
 
 .base-filter-bar__chip {
-  @apply inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-full border px-2 py-1 text-[10px] font-black transition disabled:cursor-default;
+  --el-tag-border-radius: 999px;
+  --el-tag-border-color: rgb(var(--chip-color) / 0.18);
+  --el-tag-bg-color: rgb(var(--chip-color) / 0.1);
+  --el-tag-text-color: rgb(var(--chip-color));
+  @apply h-auto min-w-0 max-w-full items-center rounded-full border px-2 py-1 text-[10px] font-black transition;
   max-width: min(100%, 18rem);
   color: rgb(var(--chip-color));
   background-color: rgb(var(--chip-color) / 0.1);
@@ -366,7 +383,15 @@ const handleClear = () => {
   @apply cursor-default;
 }
 
-.base-filter-bar__chip span {
+.base-filter-bar__chip :deep(.el-tag__content) {
+  @apply flex min-w-0 items-center overflow-hidden;
+}
+
+.base-filter-bar__chip :deep(.el-tag__close) {
+  @apply ml-1 shrink-0;
+}
+
+.base-filter-bar__chip-text {
   @apply min-w-0 truncate;
 }
 
@@ -391,7 +416,11 @@ const handleClear = () => {
 }
 
 .base-filter-bar__clear {
-  @apply min-w-0 max-w-full truncate rounded-full px-2 py-1 text-[10px] font-black text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-opacity-20 disabled:cursor-not-allowed disabled:opacity-45 dark:hover:bg-slate-800 dark:hover:text-slate-100;
+  @apply min-w-0 max-w-full rounded-full px-2 py-1 text-[10px] font-black text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-opacity-20 disabled:cursor-not-allowed disabled:opacity-45 dark:hover:bg-slate-800 dark:hover:text-slate-100;
+}
+
+.base-filter-bar__clear :deep(span) {
+  @apply min-w-0 truncate;
 }
 
 @media (prefers-reduced-motion: reduce) {

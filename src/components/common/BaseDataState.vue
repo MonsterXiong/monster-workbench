@@ -69,6 +69,7 @@ const titleId = `base-data-state-title-${stateId}`;
 const descriptionId = `base-data-state-description-${stateId}`;
 const loadingId = `base-data-state-loading-${stateId}`;
 const errorMessageId = `base-data-state-error-${stateId}`;
+const cardBodyStyle = { padding: "0" };
 const labelledBy = computed(() => (props.ariaLabel ? undefined : props.ariaLabelledby || (props.title ? titleId : undefined)));
 const describedBy = computed(() =>
   joinAriaIds([
@@ -108,8 +109,10 @@ const emit = defineEmits<{
 </script>
 
 <template>
-  <section
+  <el-card
     class="base-data-state"
+    shadow="never"
+    :body-style="cardBodyStyle"
     :class="[
       `base-data-state--${resolvedSize}`,
       `base-data-state--${surface}`,
@@ -184,16 +187,33 @@ const emit = defineEmits<{
       icon="Inbox"
       :compact="compact"
     />
-  </section>
+  </el-card>
 </template>
 
 <style scoped>
 .base-data-state {
-  @apply min-w-0 max-w-full rounded-xl bg-white p-4 shadow-sm transition dark:bg-slate-900;
+  --el-card-border-color: transparent;
+  --el-card-border-radius: 0.75rem;
+  --el-card-bg-color: #ffffff;
+  --el-card-padding: 0;
+  @apply min-w-0 max-w-full rounded-xl border-0 bg-white p-4 shadow-sm transition dark:bg-slate-900;
+}
+
+:global(.dark) .base-data-state {
+  --el-card-bg-color: rgb(15 23 42);
+}
+
+.base-data-state :deep(.el-card__body) {
+  @apply min-w-0;
 }
 
 .base-data-state--bordered {
+  --el-card-border-color: rgb(226 232 240);
   @apply border border-slate-200 dark:border-slate-800;
+}
+
+:global(.dark) .base-data-state--bordered {
+  --el-card-border-color: rgb(30 41 59);
 }
 
 .base-data-state--sm {

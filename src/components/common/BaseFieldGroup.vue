@@ -78,6 +78,7 @@ const groupId = useId();
 const titleId = `${groupId}-title`;
 const descriptionId = `${groupId}-description`;
 const bodyId = `${groupId}-body`;
+const cardBodyStyle = { padding: "0" };
 const localCollapsed = ref(props.collapsed);
 const isDisabled = computed(() => props.disabled || props.loading);
 const isContentLocked = computed(() => props.lockContent && isDisabled.value);
@@ -106,8 +107,10 @@ watch(
 </script>
 
 <template>
-  <section
+  <el-card
     class="base-field-group"
+    shadow="never"
+    :body-style="cardBodyStyle"
     :class="[
       `base-field-group--cols-${columns}`,
       `base-field-group--${size}`,
@@ -127,6 +130,7 @@ watch(
         'is-collapsed': isCollapsed,
       },
     ]"
+    role="group"
     :aria-label="ariaLabel || undefined"
     :aria-labelledby="title ? titleId : undefined"
     :aria-describedby="describedBy"
@@ -163,10 +167,13 @@ watch(
         <div v-if="$slots.actions" class="base-field-group__actions" :aria-label="resolvedActionsLabel">
           <slot name="actions"></slot>
         </div>
-        <button
+        <el-button
           v-if="collapsible"
-          type="button"
           class="base-field-group__toggle"
+          type="info"
+          text
+          circle
+          size="small"
           :disabled="isDisabled"
           :aria-expanded="!isCollapsed"
           :aria-controls="bodyId"
@@ -175,7 +182,7 @@ watch(
           @click="toggleCollapsed"
         >
           <BaseIcon name="ChevronDown" size="15" aria-hidden="true" />
-        </button>
+        </el-button>
       </div>
     </header>
 
@@ -196,16 +203,30 @@ watch(
         <slot name="footer"></slot>
       </footer>
     </fieldset>
-  </section>
+  </el-card>
 </template>
 
 <style scoped>
 .base-field-group {
+  --el-card-border-color: rgb(226 232 240);
+  --el-card-border-radius: 1rem;
+  --el-card-bg-color: #ffffff;
+  --el-card-padding: 0;
   @apply min-w-0 max-w-full rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900;
+}
+
+:global(.dark) .base-field-group {
+  --el-card-border-color: rgb(30 41 59);
+  --el-card-bg-color: rgb(15 23 42);
+}
+
+.base-field-group :deep(.el-card__body) {
+  @apply min-w-0;
 }
 
 .base-field-group--sm,
 .base-field-group--compact {
+  --el-card-border-radius: 0.75rem;
   @apply rounded-xl p-3;
 }
 
@@ -219,6 +240,10 @@ watch(
 
 .base-field-group--plain {
   @apply rounded-none border-0 bg-transparent p-0 shadow-none dark:bg-transparent;
+}
+
+.base-field-group--plain :deep(.el-card__body) {
+  @apply bg-transparent;
 }
 
 .base-field-group--unpadded {
@@ -313,7 +338,11 @@ watch(
 }
 
 .base-field-group__toggle {
-  @apply flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-slate-800 dark:hover:text-slate-100;
+  @apply h-7 w-7 shrink-0 rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-slate-800 dark:hover:text-slate-100;
+}
+
+.base-field-group__toggle :deep(span) {
+  @apply flex items-center justify-center;
 }
 
 .base-field-group__toggle :deep(svg) {

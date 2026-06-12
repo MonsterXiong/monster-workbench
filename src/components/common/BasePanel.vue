@@ -70,6 +70,7 @@ const emit = defineEmits<{
 const panelId = useId();
 const titleId = `${panelId}-title`;
 const subtitleId = `${panelId}-subtitle`;
+const cardBodyStyle = { padding: "0" };
 const labelledBy = computed(() => (props.title ? titleId : undefined));
 const resolvedSubtitle = computed(() => props.subtitle || props.description);
 const describedBy = computed(() => (resolvedSubtitle.value ? subtitleId : undefined));
@@ -96,8 +97,10 @@ const handleKeydown = (event: KeyboardEvent) => {
 </script>
 
 <template>
-  <section
+  <el-card
     class="base-panel"
+    shadow="never"
+    :body-style="cardBodyStyle"
     :class="[
       `base-panel--${props.size}`,
       `base-panel--body-gap-${props.bodyGap}`,
@@ -171,12 +174,25 @@ const handleKeydown = (event: KeyboardEvent) => {
         <slot name="footer"></slot>
       </footer>
     </fieldset>
-  </section>
+  </el-card>
 </template>
 
 <style scoped>
 .base-panel {
+  --el-card-border-color: rgb(226 232 240);
+  --el-card-border-radius: 1rem;
+  --el-card-bg-color: #ffffff;
+  --el-card-padding: 0;
   @apply min-w-0 max-w-full overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition-colors dark:border-slate-800 dark:bg-slate-900;
+}
+
+:global(.dark) .base-panel {
+  --el-card-border-color: rgb(30 41 59);
+  --el-card-bg-color: rgb(15 23 42);
+}
+
+.base-panel :deep(.el-card__body) {
+  @apply min-w-0;
 }
 
 .base-panel--muted {
@@ -185,6 +201,10 @@ const handleKeydown = (event: KeyboardEvent) => {
 
 .base-panel--plain {
   @apply rounded-none border-0 bg-transparent shadow-none dark:bg-transparent;
+}
+
+.base-panel--plain :deep(.el-card__body) {
+  @apply bg-transparent;
 }
 
 .base-panel--padded {
