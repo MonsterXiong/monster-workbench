@@ -193,8 +193,8 @@ sequenceDiagram
    - 负责一致的桌面 UI 原子能力：按钮、输入、表格、面板、时间线、分页、弹窗、状态、上传、布局等。
    - 在 `main.ts` 中集中注册高频基础组件。
    - 当前公共组件层已经大量把 Element Plus 收进 `Base*` / `App*` 封装内部：`src/components/common` 下约 69 个 Vue 组件中，约 51 个已经直接使用 Element Plus 标签。
-   - 近期已继续收口 `AppImageUploader`、`AppPathSelector`、`BaseCopyButton`、`BaseCommandPalette`、`BaseToast`、`ConfirmDialog`、`BaseActionMenu`、`BaseAlert`、`BaseBadge`、`BaseDateRange`、`BaseDialog`、`BaseDrawer`、`BaseMessage`、`BasePageHeader`、`BaseSelectionBar`、`BaseDetailCard`、`BaseInfoCard`、`BaseStatCard`、`BaseFilterBar`、`BaseStatusDot`、`BaseFieldGroup`、`BasePanel`、`BaseDataState`、`BaseKeyValueList` 和 `BaseList` 等稳定 UI 面。
-   - `BaseList` 默认 loading / empty 状态已经复用 `BaseLoading` / `BaseEmpty`；`BaseKeyValueList` loading / empty 已接 `ElSkeleton` / `ElEmpty`；关闭、返回、筛选清空、选择清空、菜单触发等小型动作统一经 `BaseButton` 承接 Element Plus 按钮底座；`BaseInput`、`BaseSearchInput`、`BaseSlider`、`BaseDateRange` 与 `BasePagination` 已共享项目尺寸到 Element Plus 尺寸的映射；`BaseTable` / `BaseDataTable` 已透传 Element Plus 排序、固定列和 `sort-change` 事件；`BaseForm` / `BaseFormItem` 已接通 `rules` / `prop` 和表单实例方法；容器类组件优先通过 `ElCard` 做外壳但保留项目侧 props、slot、键盘和暗色主题 API。
+   - 近期已继续收口 `AppImageUploader`、`AppPathSelector`、`BaseCopyButton`、`BaseCommandPalette`、`BaseToast`、`ConfirmDialog`、`BaseActionMenu`、`BaseAlert`、`BaseBadge`、`BaseBreadcrumb`、`BaseDateRange`、`BaseDialog`、`BaseDrawer`、`BaseMessage`、`BasePageHeader`、`BaseSelectionBar`、`BaseDetailCard`、`BaseInfoCard`、`BaseStatCard`、`BaseFilterBar`、`BaseStatusDot`、`BaseFieldGroup`、`BasePanel`、`BaseDataState`、`BaseKeyValueList` 和 `BaseList` 等稳定 UI 面。
+   - `BaseList` 默认 loading / empty 状态已经复用 `BaseLoading` / `BaseEmpty`；`BaseKeyValueList` loading / empty 已接 `ElSkeleton` / `ElEmpty`；关闭、返回、筛选清空、选择清空、菜单触发等小型动作统一经 `BaseButton` 承接 Element Plus 按钮底座，且按钮尺寸已共享 `toElementPlusSize()`；`BaseBreadcrumb` 折叠路径可选 `ElDropdown` 菜单承载隐藏层级；`BaseInput`、`BaseSearchInput`、`BaseSegmented`、`BaseSlider`、`BaseCheckbox`、`BaseRadioGroup`、`BaseSwitch`、`BaseDateRange` 与 `BasePagination` 已共享项目尺寸到 Element Plus 尺寸的映射；`BaseTable` / `BaseDataTable` 已透传 Element Plus 排序、固定列和 `sort-change` 事件；`BaseForm` / `BaseFormItem` 已接通 `rules` / `prop` 和表单实例方法；容器类组件优先通过 `ElCard` 做外壳但保留项目侧 props、slot、键盘和暗色主题 API。
 2. 页面私有组件：`src/views/<module>/components/*`
    - 例如 `views/navigation/components/*`、`views/file-manager/components/*`、`views/system/components/*`。
    - 只服务单个页面，不跨模块扩散。
@@ -1154,7 +1154,8 @@ creative_model_run_repo.rs   model_runs repo behavior and tests
 - `BasePanel`、`BaseFieldGroup`、`BaseDataState`、`BaseDetailCard`、`BaseInfoCard`、`BaseStatCard`、`BaseBadge` 等容器 / 展示组件已经逐步用 `ElCard` / `ElTag` / `ElBadge` 等做底座，但仍保留项目自有视觉、插槽和键盘交互约束。
 - `BaseActionMenu`、`BaseAlert`、`BaseDialog`、`BaseDrawer`、`BaseMessage`、`BasePageHeader`、`BaseFilterBar`、`BaseSelectionBar`、`BaseDateRange` 等组件内的关闭、返回、清空、菜单触发动作已进一步收敛到 `BaseButton`，减少组件内部原生 button / 零散 `ElButton` 的重复样式。
 - `BaseLoading`、`BaseEmpty`、`BaseSkeletonCard`、`BaseKeyValueList`、`BaseList` 等状态展示组件已经开始复用统一 loading / empty 语义，减少每个组件内重复拼装。
-- `BaseInput` / `BaseSearchInput` / `BaseSlider` / `BaseDateRange` 已共享 `toElementPlusSize()` 尺寸适配；`BaseSearchInput` 支持 `xs` 搜索尺寸，`BaseSlider` 支持 `xs` / `lg` 滑块尺寸，`BaseDateRange` 支持 `presetMode`、`unlinkPanels`、`singlePanel` 等 Element Plus 日期面板能力，并在 playground 中补齐对应示例。
+- `BaseBreadcrumb` 已在 `ElBreadcrumb` 基础上补齐 `ellipsisMode="dropdown"`，折叠路径可通过 `ElDropdown` 选择隐藏层级；默认点击展开行为保持兼容，Playground 已覆盖折叠菜单场景。
+- `BaseButton` / `BaseInput` / `BaseSearchInput` / `BaseSegmented` / `BaseSlider` / `BaseCheckbox` / `BaseRadioGroup` / `BaseSwitch` / `BaseDateRange` 已共享 `toElementPlusSize()` 尺寸适配；`BaseSearchInput` 支持 `xs` 搜索尺寸，`BaseSegmented` 支持 `xs` 迷你分段并默认继续走 `ElSegmented`，`BaseCheckbox`、`BaseRadioGroup`、`BaseSwitch` 已补齐 `xs` 表单密度，`BaseSlider` 支持 `xs` / `lg` 滑块尺寸并校正 Element Plus 手柄与轨道中心对齐，`BaseDateRange` 支持 `presetMode`、`unlinkPanels`、`singlePanel` 等 Element Plus 日期面板能力，并在 playground 中补齐对应示例。
 - `BasePagination` 已共享 `toElementPlusSize()` 尺寸适配，并向下透传 `showJumper`、`background`、`hideOnSinglePage`、`pagerCount`、`layout` 等 Element Plus 分页能力；playground 已覆盖跳页、背景页码、自定义 layout、单页隐藏和窄容器场景。
 - `BaseTable` / `BaseDataTable` 已保留项目自有列配置、slot 与空态/loading 语义，同时向下透传 `defaultSort`、`sortable`、`fixed`、`sortMethod`、`sortBy`、`sortOrders`，并向上冒泡 `sort-change`。
 - `BaseForm` / `BaseFormItem` 已保留项目自有标题、分栏、footer 和消息展示，同时向下透传 `model` / `rules` / `prop` / item-level `rules`，并通过 ref 暴露 `validate`、`validateField`、`resetFields`、`clearValidate`、`scrollToField`。
@@ -1166,7 +1167,7 @@ creative_model_run_repo.rs   model_runs repo behavior and tests
 |---|---|---|
 | `src/components/common` | 大多数稳定组件已接 Element Plus 或 Base 状态组件 | 继续保留现有 props / emits / slots，不为换底座压缩项目 API |
 | 页面层直接 `<el-*>` | AI panels 与 `WorkspacePage` 仍有局部例外 | 后续触碰这些页面时，优先评估是否回收进 `Base*` / `App*`，不要扩大直用范围 |
-| `BaseForm` / 搜索输入 / 滑块 / 日期范围 / 分页 / 表格体系 | `BaseSearchInput`、`BaseSlider`、`BaseDateRange` 与 `BasePagination` 已完成尺寸映射小步收口；`BaseDateRange` 已补面板 shortcuts、联动面板和单面板透传；`BasePagination` 已补跳页、背景、单页隐藏、自定义 layout / pagerCount；`BaseTable` / `BaseDataTable` 已补排序和固定列透传；`BaseForm` / `BaseFormItem` 已补校验规则绑定和实例方法 | 表单、搜索、滑块、日期范围、分页、表格体系的更高阶能力继续分批审计，不混在一次大改里 |
+| `BaseForm` / 搜索输入 / 选择控件 / 滑块 / 日期范围 / 分页 / 表格体系 | `BaseSearchInput`、`BaseSegmented`、`BaseSlider`、`BaseCheckbox`、`BaseRadioGroup`、`BaseSwitch`、`BaseDateRange` 与 `BasePagination` 已完成尺寸映射小步收口；`BaseDateRange` 已补面板 shortcuts、联动面板和单面板透传；`BasePagination` 已补跳页、背景、单页隐藏、自定义 layout / pagerCount；`BaseTable` / `BaseDataTable` 已补排序和固定列透传；`BaseForm` / `BaseFormItem` 已补校验规则绑定和实例方法 | 表单、搜索、选择、滑块、日期范围、分页、表格体系的更高阶能力继续分批审计，不混在一次大改里 |
 
 ### 10.9 文档状态需要收敛
 

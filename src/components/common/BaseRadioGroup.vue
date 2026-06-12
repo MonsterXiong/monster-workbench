@@ -12,6 +12,7 @@ import {
   preventAndStopDomEvent,
   preventDomEventDefault,
 } from "../../utils";
+import { toElementPlusSize, type ProjectControlSize } from "./elementPlusDom";
 
 export interface RadioOption {
   label: string;
@@ -32,7 +33,7 @@ interface Props {
   compact?: boolean;
   inline?: boolean;
   columns?: 1 | 2 | 3;
-  size?: "sm" | "md" | "lg";
+  size?: ProjectControlSize;
   error?: boolean;
   success?: boolean;
   ariaLabel?: string;
@@ -68,11 +69,7 @@ const groupId = useId();
 const optionRefs = ref<Array<HTMLElement | null>>([]);
 const isReadonly = computed(() => props.disabled || props.readonly);
 const enabledOptions = computed(() => filterByFalsyValue(props.options, (option) => option.disabled));
-const elementSize = computed(() => {
-  if (props.size === "sm") return "small";
-  if (props.size === "lg") return "large";
-  return "default";
-});
+const elementSize = computed(() => toElementPlusSize(props.size));
 
 const currentValue = computed(() => props.modelValue);
 
@@ -232,6 +229,8 @@ const optionButtonId = (index: number) => `${groupId}-option-${index}`;
 .base-radio-group {
   @apply grid grid-cols-1 gap-2;
   align-items: stretch;
+  --base-radio-size: 16px;
+  --base-radio-dot-size: 6px;
 }
 
 .base-radio-group--cols-2 {
@@ -265,10 +264,20 @@ const optionButtonId = (index: number) => `${groupId}-option-${index}`;
 
 .base-radio-group--sm .base-radio-group__option {
   @apply gap-2 rounded-xl p-2;
+  --base-radio-size: 15px;
+  --base-radio-dot-size: 5px;
+}
+
+.base-radio-group--xs .base-radio-group__option {
+  @apply gap-2 rounded-xl p-2;
+  --base-radio-size: 14px;
+  --base-radio-dot-size: 5px;
 }
 
 .base-radio-group--lg .base-radio-group__option {
   @apply p-4;
+  --base-radio-size: 18px;
+  --base-radio-dot-size: 7px;
 }
 
 .base-radio-group__option:hover:not(.is-disabled):not(.is-readonly) {
@@ -312,17 +321,23 @@ const optionButtonId = (index: number) => `${groupId}-option-${index}`;
 }
 
 .base-radio-group__option :deep(.el-radio__input) {
-  @apply mt-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center;
+  @apply mt-0.5 inline-flex shrink-0 items-center justify-center;
+  width: var(--base-radio-size);
+  height: var(--base-radio-size);
   cursor: inherit;
 }
 
 .base-radio-group__option :deep(.el-radio__inner) {
-  @apply h-4 w-4 rounded-full border border-slate-300 bg-white transition-colors dark:border-slate-700 dark:bg-slate-950;
+  @apply rounded-full border border-slate-300 bg-white transition-colors dark:border-slate-700 dark:bg-slate-950;
+  width: var(--base-radio-size);
+  height: var(--base-radio-size);
   cursor: inherit;
 }
 
 .base-radio-group__option :deep(.el-radio__inner::after) {
-  @apply h-1.5 w-1.5 rounded-full bg-white;
+  @apply rounded-full bg-white;
+  width: var(--base-radio-dot-size);
+  height: var(--base-radio-dot-size);
 }
 
 .base-radio-group__option:hover:not(.is-disabled):not(.is-readonly) :deep(.el-radio__inner) {

@@ -2,6 +2,7 @@
 import { computed, useId } from "vue";
 import { LoaderCircle } from "lucide-vue-next";
 import { isActivationKey, isKeyboardKey, joinAriaIds, preventDomEventDefault } from "../../utils";
+import { toElementPlusSize, type ProjectControlSize } from "./elementPlusDom";
 
 interface Props {
   modelValue: boolean;
@@ -20,7 +21,7 @@ interface Props {
   ariaLabel?: string;
   ariaLabelledby?: string;
   ariaDescribedby?: string;
-  size?: "sm" | "md" | "lg";
+  size?: ProjectControlSize;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -59,6 +60,7 @@ const labelledBy = computed(() => props.ariaLabelledby || (props.label ? labelId
 const describedBy = computed(() => joinAriaIds([props.description ? descriptionId : undefined, props.ariaDescribedby]));
 
 const checked = computed(() => props.modelValue);
+const elementSize = computed(() => toElementPlusSize(props.size));
 
 const commitChecked = (value: boolean) => {
   if (isReadonly.value) return;
@@ -146,6 +148,7 @@ const handleFocusOut = (event: FocusEvent) => {
         :value="value === '' ? undefined : value"
         :disabled="disabled || loading"
         :indeterminate="indeterminate"
+        :size="elementSize"
         :aria-label="labelledBy ? undefined : resolvedAriaLabel"
         :aria-labelledby="labelledBy"
         :aria-describedby="describedBy"
@@ -169,6 +172,13 @@ const handleFocusOut = (event: FocusEvent) => {
 <style scoped>
 .base-checkbox {
   @apply flex cursor-pointer items-start gap-3 rounded-2xl border border-slate-200 bg-white p-3 transition-colors dark:border-slate-800 dark:bg-slate-900;
+  --base-checkbox-size: 16px;
+  --base-checkbox-radius: 6px;
+  --base-checkbox-check-width: 4px;
+  --base-checkbox-check-height: 8px;
+  --base-checkbox-check-left: 5px;
+  --base-checkbox-check-top: 1px;
+  --base-checkbox-indeterminate-top: 6px;
 }
 
 .base-checkbox:hover:not(.base-checkbox--disabled):not(.base-checkbox--readonly):not(.base-checkbox--loading):not(.base-checkbox--checked):not(.base-checkbox--indeterminate):not(.base-checkbox--success):not(.base-checkbox--error) {
@@ -221,41 +231,75 @@ const handleFocusOut = (event: FocusEvent) => {
 .base-checkbox--sm,
 .base-checkbox--compact {
   @apply gap-2 rounded-xl p-2;
+  --base-checkbox-size: 15px;
+  --base-checkbox-radius: 5px;
+  --base-checkbox-check-width: 4px;
+  --base-checkbox-check-height: 7px;
+  --base-checkbox-check-left: 5px;
+  --base-checkbox-check-top: 1px;
+  --base-checkbox-indeterminate-top: 6px;
+}
+
+.base-checkbox--xs {
+  @apply gap-2 rounded-xl p-2;
+  --base-checkbox-size: 14px;
+  --base-checkbox-radius: 5px;
+  --base-checkbox-check-width: 3px;
+  --base-checkbox-check-height: 7px;
+  --base-checkbox-check-left: 5px;
+  --base-checkbox-check-top: 1px;
+  --base-checkbox-indeterminate-top: 5px;
 }
 
 .base-checkbox--lg {
   @apply p-4;
+  --base-checkbox-size: 18px;
+  --base-checkbox-radius: 7px;
+  --base-checkbox-check-width: 5px;
+  --base-checkbox-check-height: 9px;
+  --base-checkbox-check-left: 6px;
+  --base-checkbox-check-top: 2px;
+  --base-checkbox-indeterminate-top: 7px;
 }
 
 .base-checkbox__box {
-  @apply relative mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center;
+  @apply relative mt-0.5 flex shrink-0 items-center justify-center;
+  width: var(--base-checkbox-size);
+  height: var(--base-checkbox-size);
 }
 
 :deep(.base-checkbox__control) {
-  @apply m-0 inline-flex h-4 w-4 items-center justify-center;
+  @apply m-0 inline-flex items-center justify-center;
+  width: var(--base-checkbox-size);
+  height: var(--base-checkbox-size);
 }
 
 :deep(.el-checkbox__input) {
-  @apply inline-flex h-4 w-4 items-center justify-center;
+  @apply inline-flex items-center justify-center;
+  width: var(--base-checkbox-size);
+  height: var(--base-checkbox-size);
 }
 
 :deep(.el-checkbox__inner) {
-  @apply h-4 w-4 rounded-md border border-slate-300 bg-white transition-colors dark:border-slate-700 dark:bg-slate-950;
+  @apply border border-slate-300 bg-white transition-colors dark:border-slate-700 dark:bg-slate-950;
+  width: var(--base-checkbox-size);
+  height: var(--base-checkbox-size);
+  border-radius: var(--base-checkbox-radius);
 }
 
 :deep(.el-checkbox__inner::after) {
   border-color: #ffffff;
   border-width: 2px;
-  height: 8px;
-  left: 5px;
-  top: 1px;
-  width: 4px;
+  height: var(--base-checkbox-check-height);
+  left: var(--base-checkbox-check-left);
+  top: var(--base-checkbox-check-top);
+  width: var(--base-checkbox-check-width);
 }
 
 :deep(.el-checkbox__input.is-indeterminate .el-checkbox__inner::before) {
   @apply bg-white;
   height: 2px;
-  top: 6px;
+  top: var(--base-checkbox-indeterminate-top);
 }
 
 .base-checkbox:hover:not(.base-checkbox--disabled):not(.base-checkbox--readonly):not(.base-checkbox--loading) :deep(.el-checkbox__inner) {

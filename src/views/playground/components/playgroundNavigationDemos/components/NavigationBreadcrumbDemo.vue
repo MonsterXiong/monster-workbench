@@ -91,6 +91,18 @@ const handleBreadcrumbExpand = (count: number) => {
             @back="triggerToast('触发返回入口', 'info')"
           />
         </BasePanel>
+
+        <BasePanel title="折叠菜单" subtitle="折叠项可用下拉菜单承载隐藏层级，避免深路径展开后挤占空间。">
+          <BaseBreadcrumb
+            :items="longBreadcrumbItems"
+            surface="card"
+            :max-items="4"
+            ellipsis-mode="dropdown"
+            aria-label="折叠菜单面包屑"
+            @select="handleBreadcrumbSelect"
+            @expand="handleBreadcrumbExpand"
+          />
+        </BasePanel>
       </div>
 
       <div class="demo-grid">

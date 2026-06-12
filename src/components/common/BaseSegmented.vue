@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUpdate, ref, useId } from "vue";
 import type { ComponentPublicInstance } from "vue";
 import { filterByFalsyValue, findByValue, findIndexByValue, findNextCircularItem, firstItem, getBoundaryItem, getKeyboardBoundaryPosition, getKeyboardNavigationDirection } from "../../utils";
 import BaseIcon from "./BaseIcon.vue";
+import { toElementPlusSize, type ProjectControlSize } from "./elementPlusDom";
 
 export interface SegmentedOption {
   label: string;
@@ -17,7 +18,7 @@ interface Props {
   modelValue: string | number;
   options: SegmentedOption[];
   id?: string;
-  size?: "sm" | "md" | "lg";
+  size?: ProjectControlSize;
   disabled?: boolean;
   readonly?: boolean;
   loading?: boolean;
@@ -150,13 +151,10 @@ const handleNativeChange = (value: unknown) => {
   emit("change", value);
 };
 
-const elementSize = computed(() => {
-  if (props.size === "sm") return "small";
-  if (props.size === "lg") return "large";
-  return "default";
-});
+const elementSize = computed(() => toElementPlusSize(props.size));
 
 const iconSize = computed(() => {
+  if (props.size === "xs") return 12;
   if (props.size === "sm") return 13;
   if (props.size === "lg") return 16;
   return 15;
@@ -388,6 +386,10 @@ const optionButtonId = (index: number) => `${groupId}-option-${index}`;
 
 .base-segmented--sm .base-segmented__item {
   @apply px-2.5 py-1.5 text-[10px];
+}
+
+.base-segmented--xs .base-segmented__item {
+  @apply rounded-lg px-2 py-1 text-[10px];
 }
 
 .base-segmented--compact .base-segmented__item {

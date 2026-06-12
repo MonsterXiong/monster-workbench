@@ -2,6 +2,7 @@
 import { computed, useId } from "vue";
 import { useI18n } from "../../composables/useI18n";
 import { joinAriaIds, joinNonEmptyStrings } from "../../utils";
+import { toElementPlusSize, type ProjectControlSize } from "./elementPlusDom";
 
 interface Props {
   modelValue: boolean;
@@ -17,7 +18,7 @@ interface Props {
   inactiveText?: string;
   ariaLabel?: string;
   ariaDescribedby?: string;
-  size?: "sm" | "md" | "lg";
+  size?: ProjectControlSize;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -71,11 +72,7 @@ const computedValue = computed({
   },
 });
 
-const elSize = computed(() => {
-  if (props.size === "sm") return "small";
-  if (props.size === "lg") return "large";
-  return "default";
-});
+const elSize = computed(() => toElementPlusSize(props.size));
 
 const handleBeforeChange = () => !isReadonly.value;
 </script>
@@ -181,6 +178,10 @@ const handleBeforeChange = () => !isReadonly.value;
 }
 
 .base-switch--sm {
+  @apply rounded-xl px-3 py-2;
+}
+
+.base-switch--xs {
   @apply rounded-xl px-3 py-2;
 }
 

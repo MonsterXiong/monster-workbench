@@ -280,6 +280,14 @@ const longSegmentedOptions = [
             />
             <BaseSegmented
               v-model="segmentedValue"
+              :options="segmentedOptions.slice(0, 3)"
+              size="xs"
+              compact
+              aria-label="迷你密度分段"
+              aria-describedby="segmented-keyboard-hint"
+            />
+            <BaseSegmented
+              v-model="segmentedValue"
               :options="segmentedOptions"
               block
               detailed
@@ -356,6 +364,7 @@ const longSegmentedOptions = [
             <BaseCheckbox model-value error label="存在冲突" description="用于权限、依赖或互斥配置提示。" />
             <BaseCheckbox model-value label="只读选项" description="展示当前配置，不允许在此处修改。" readonly />
             <BaseCheckbox v-model="disabledCheckboxValue" label="受限选项" description="权限不足时不可操作。" disabled />
+            <BaseCheckbox v-model="checkboxValue" label="迷你勾选" compact size="xs" />
             <BaseCheckbox v-model="checkboxValue" label="紧凑勾选" compact size="sm" />
             <BaseCheckbox
               v-model="checkboxValue"
@@ -378,6 +387,7 @@ const longSegmentedOptions = [
             <BaseSwitch model-value label="只读开关" description="当前继承自系统策略，不能在此处修改。" readonly />
             <BaseSwitch v-model="switchValue" label="同步中" description="加载态会阻止切换。" loading />
             <BaseSwitch v-model="disabledSwitchValue" label="禁用开关" description="等待管理员开放。" disabled />
+            <BaseSwitch v-model="switchValue" label="迷你开关" compact size="xs" />
             <BaseSwitch v-model="switchValue" label="紧凑开关" compact size="sm" />
             <BaseSwitch
               v-model="switchValue"
@@ -413,6 +423,7 @@ const longSegmentedOptions = [
             aria-describedby="radio-keyboard-hint"
           />
           <BaseRadioGroup v-model="radioValue" :options="radioOptions" inline compact aria-label="横向密度选择" />
+          <BaseRadioGroup v-model="radioValue" :options="radioOptions.slice(0, 3)" size="xs" inline compact aria-label="迷你密度选择" />
           <BaseRadioGroup
             v-model="radioValue"
             :options="radioOptions"

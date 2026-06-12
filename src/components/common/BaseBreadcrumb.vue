@@ -8,6 +8,7 @@ import { getElementPlusControlRoot, type ElementPlusControlRef } from "./element
 type BreadcrumbSize = "sm" | "md" | "lg";
 type BreadcrumbSurface = "plain" | "muted" | "card";
 type BreadcrumbSeparator = "chevron" | "slash";
+type BreadcrumbEllipsisMode = "expand" | "dropdown";
 type BadgeType = "primary" | "success" | "warning" | "danger" | "neutral";
 
 export interface BreadcrumbItem {
@@ -34,6 +35,7 @@ interface Props {
   wrap?: boolean;
   disabled?: boolean;
   expandableEllipsis?: boolean;
+  ellipsisMode?: BreadcrumbEllipsisMode;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -49,6 +51,7 @@ const props = withDefaults(defineProps<Props>(), {
   wrap: true,
   disabled: false,
   expandableEllipsis: true,
+  ellipsisMode: "expand",
 });
 
 const { t } = useI18n();
@@ -86,10 +89,18 @@ const renderedItems = computed<RenderedCrumb[]>(() => (expanded.value ? fullItem
 const lastSelectableItem = computed(() => {
   return findLastItem(dropRight(props.items, 1), (item) => !item.disabled);
 });
+const hiddenItems = computed(() => {
+  if (props.maxItems < 3 || props.items.length <= props.maxItems) return [];
+  const tailCount = props.maxItems - 2;
+  const tailStart = props.items.length - tailCount;
+  return props.items.slice(1, tailStart).map((item, offset) => ({ item, index: offset + 1 }));
+});
 
 const separatorText = computed(() => (props.separator === "slash" ? "/" : ""));
 const separatorIcon = computed(() => (props.separator === "chevron" ? ChevronRight : undefined));
 const resolvedAriaLabel = computed(() => props.ariaLabel || t("common.breadcrumb"));
+const resolvedEllipsisMode = computed(() => (props.expandableEllipsis ? props.ellipsisMode : "expand"));
+const breadcrumbPopperClass = computed(() => `base-breadcrumb-popper base-breadcrumb-popper--${props.size}`);
 
 const itemsFingerprint = computed(() => joinBy(props.items, (item) => item.key, "|"));
 
@@ -124,6 +135,17 @@ const handleEllipsisClick = (hiddenCount: number) => {
 
   expanded.value = true;
   emit("expand", hiddenCount);
+};
+
+const handleHiddenItemSelect = (command: unknown) => {
+  const payload = command as { item?: BreadcrumbItem };
+  const item = payload.item;
+  if (!item || props.disabled || item.disabled) return;
+  emit("select", item);
+};
+
+const handleDropdownVisibleChange = (visible: boolean, hiddenCount: number) => {
+  if (visible) emit("expand", hiddenCount);
 };
 
 const handleBack = () => {
@@ -195,8 +217,45 @@ watchEffect(() => {
       v-for="crumb in renderedItems"
       :key="crumb.type === 'item' ? crumb.item.key : crumb.key"
     >
+      <el-dropdown
+        v-if="crumb.type === 'ellipsis' && resolvedEllipsisMode === 'dropdown' && !disabled"
+        trigger="click"
+        placement="bottom-start"
+        :disabled="!hiddenItems.length"
+        :hide-on-click="true"
+        :show-arrow="false"
+        :teleported="true"
+        :popper-class="breadcrumbPopperClass"
+        @command="handleHiddenItemSelect"
+        @visible-change="handleDropdownVisibleChange($event, crumb.hiddenCount)"
+      >
+        <button
+          type="button"
+          class="base-breadcrumb__ellipsis"
+          :aria-label="getEllipsisLabel(crumb.hiddenCount)"
+          :title="getEllipsisLabel(crumb.hiddenCount)"
+        >
+          <MoreHorizontal class="base-breadcrumb__ellipsis-icon" aria-hidden="true" />
+        </button>
+        <template #dropdown>
+          <el-dropdown-menu class="base-breadcrumb__hidden-menu" :aria-label="getEllipsisLabel(crumb.hiddenCount)">
+            <el-dropdown-item
+              v-for="{ item, index } in hiddenItems"
+              :key="item.key"
+              class="base-breadcrumb__hidden-item"
+              :command="{ item, index }"
+              :disabled="item.disabled"
+              :text-value="item.label"
+            >
+              <BaseIcon v-if="item.icon" :name="item.icon" size="14" aria-hidden="true" />
+              <span class="base-breadcrumb__hidden-label">{{ item.label }}</span>
+              <BaseBadge v-if="item.badge" :type="item.badgeType || 'neutral'" size="xs">{{ item.badge }}</BaseBadge>
+            </el-dropdown-item>
+          </el-dropdown-menu>
+        </template>
+      </el-dropdown>
       <button
-        v-if="crumb.type === 'ellipsis' && expandableEllipsis && !disabled"
+        v-else-if="crumb.type === 'ellipsis' && expandableEllipsis && !disabled"
         type="button"
         class="base-breadcrumb__ellipsis"
         :aria-label="getEllipsisLabel(crumb.hiddenCount)"
@@ -357,6 +416,87 @@ watchEffect(() => {
 
 .base-breadcrumb__ellipsis-icon {
   @apply h-3.5 w-3.5;
+}
+
+:global(.base-breadcrumb-popper.el-popper) {
+  --el-dropdown-menuItem-hover-fill: #f1f5f9;
+  --el-dropdown-menuItem-hover-color: #0f172a;
+  --el-color-primary: rgb(var(--color-primary));
+}
+
+:global(.base-breadcrumb-popper .el-popper__arrow) {
+  display: none;
+}
+
+:global(.base-breadcrumb-popper .el-dropdown-menu) {
+  min-width: 164px;
+  max-width: min(280px, calc(100vw - 24px));
+  overflow: hidden;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #ffffff;
+  padding: 6px;
+  box-shadow:
+    0 18px 42px rgba(15, 23, 42, 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 0.84);
+}
+
+:global(.base-breadcrumb-popper .base-breadcrumb__hidden-item.el-dropdown-menu__item) {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  border-radius: 8px;
+  padding: 8px 10px;
+  color: #475569;
+  font-size: 11px;
+  font-weight: 900;
+  line-height: 1.2;
+}
+
+:global(.base-breadcrumb-popper .base-breadcrumb__hidden-item.el-dropdown-menu__item:not(.is-disabled):hover),
+:global(.base-breadcrumb-popper .base-breadcrumb__hidden-item.el-dropdown-menu__item:not(.is-disabled):focus) {
+  background: #f1f5f9;
+  color: #0f172a;
+}
+
+:global(.base-breadcrumb-popper .base-breadcrumb__hidden-label) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:global(.base-breadcrumb-popper .base-breadcrumb__hidden-item svg) {
+  flex-shrink: 0;
+  color: #94a3b8;
+}
+
+:global(.dark .base-breadcrumb-popper.el-popper) {
+  --el-dropdown-menuItem-hover-fill: #1e293b;
+  --el-dropdown-menuItem-hover-color: #f8fafc;
+}
+
+:global(.dark .base-breadcrumb-popper .el-dropdown-menu) {
+  border-color: #1e293b;
+  background: #0f172a;
+  box-shadow:
+    0 18px 42px rgba(0, 0, 0, 0.34),
+    inset 0 1px 0 rgba(148, 163, 184, 0.08);
+}
+
+:global(.dark .base-breadcrumb-popper .base-breadcrumb__hidden-item.el-dropdown-menu__item) {
+  color: #cbd5e1;
+}
+
+:global(.dark .base-breadcrumb-popper .base-breadcrumb__hidden-item.el-dropdown-menu__item:not(.is-disabled):hover),
+:global(.dark .base-breadcrumb-popper .base-breadcrumb__hidden-item.el-dropdown-menu__item:not(.is-disabled):focus) {
+  background: #1e293b;
+  color: #f8fafc;
+}
+
+:global(.dark .base-breadcrumb-popper .base-breadcrumb__hidden-item svg) {
+  color: #64748b;
 }
 
 .base-breadcrumb :deep(.el-breadcrumb__separator) {

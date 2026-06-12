@@ -408,7 +408,9 @@ onUpdated(() => {
 
 .base-slider__control {
   @apply w-full;
-  height: var(--base-slider-control-height);
+  display: flex;
+  align-items: center;
+  height: var(--base-slider-control-height) !important;
   --el-slider-main-bg-color: rgb(var(--color-primary));
   --el-slider-runway-bg-color: var(--base-slider-track-bg);
   --el-slider-height: var(--base-slider-track-height);
@@ -422,9 +424,11 @@ onUpdated(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  top: 50% !important;
   cursor: pointer;
   line-height: normal;
   outline: none;
+  transform: translate(-50%, -50%) !important;
 }
 
 .base-slider__control :deep(.el-slider__button-wrapper::after) {
@@ -432,7 +436,7 @@ onUpdated(() => {
 }
 
 .base-slider__control :deep(.el-slider__runway) {
-  margin: calc((var(--base-slider-control-height) - var(--base-slider-track-height)) / 2) 0;
+  margin: 0;
   @apply transition-colors;
   cursor: pointer;
   box-shadow:
@@ -455,6 +459,7 @@ onUpdated(() => {
   position: relative;
   display: inline-grid;
   place-items: center;
+  box-sizing: border-box;
   width: var(--base-slider-thumb-size);
   height: var(--base-slider-thumb-size);
   margin: 0;

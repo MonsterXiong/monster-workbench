@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Comment, computed, useAttrs, useSlots } from "vue";
 import { omit } from "../../utils";
+import { toElementPlusSize, type ProjectControlSize } from "./elementPlusDom";
 
 defineOptions({
   inheritAttrs: false,
@@ -8,7 +9,7 @@ defineOptions({
 
 interface Props {
   type?: "primary" | "secondary" | "danger" | "warning" | "success" | "neutral" | "ghost" | "link";
-  size?: "xs" | "sm" | "md" | "lg";
+  size?: ProjectControlSize;
   nativeType?: "button" | "submit" | "reset";
   loading?: boolean;
   disabled?: boolean;
@@ -52,12 +53,7 @@ const elType = computed(() => {
   return props.type;
 });
 
-const elSize = computed(() => {
-  if (props.size === "xs") return "small";
-  if (props.size === "sm") return "small";
-  if (props.size === "lg") return "large";
-  return "default";
-});
+const elSize = computed(() => toElementPlusSize(props.size));
 
 const isPlain = computed(() => props.outline);
 const isText = computed(() => props.type === "ghost");
@@ -144,8 +140,8 @@ const accessibleLabel = computed(() => props.ariaLabel || props.title || "");
 .el-button.is-icon-only :deep(.el-icon) {
   display: inline-grid !important;
   place-items: center !important;
-  width: 100%;
-  height: 100%;
+  width: 100% !important;
+  height: 100% !important;
   line-height: 0;
 }
 
@@ -158,12 +154,20 @@ const accessibleLabel = computed(() => props.ariaLabel || props.title || "");
 
 .el-button.is-icon-only :deep(.el-icon) {
   margin: 0 !important;
+  transform: translate(0, 0);
 }
 
 .el-button.is-icon-only :deep(svg) {
   display: block;
   flex-shrink: 0;
   margin: 0;
+  transform: translate(0, 0);
+}
+
+.el-button.is-icon-only :deep(.el-icon > svg),
+.el-button.is-icon-only :deep(> span > svg) {
+  align-self: center;
+  justify-self: center;
 }
 
 .el-button :deep(.el-icon + span),
