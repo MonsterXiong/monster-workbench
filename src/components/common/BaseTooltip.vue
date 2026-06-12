@@ -2,32 +2,69 @@
 import { computed, getCurrentInstance, ref, useSlots, watch } from "vue";
 import { clampNumberToBounds, createDomId, formatCssPixelValue, toNonNegativeNumber } from "../../utils";
 
-type TooltipPlacement = "top" | "bottom" | "left" | "right";
-type TooltipTrigger = "hover" | "focus";
+type TooltipPlacement =
+  | "auto"
+  | "auto-start"
+  | "auto-end"
+  | "top"
+  | "top-start"
+  | "top-end"
+  | "bottom"
+  | "bottom-start"
+  | "bottom-end"
+  | "left"
+  | "left-start"
+  | "left-end"
+  | "right"
+  | "right-start"
+  | "right-end";
+type TooltipTrigger = "hover" | "focus" | "click" | "contextmenu";
+type TooltipEffect = "dark" | "light";
+type TooltipStrategy = "absolute" | "fixed";
 
 interface Props {
   content?: string;
   placement?: TooltipPlacement;
+  fallbackPlacements?: TooltipPlacement[];
+  trigger?: TooltipTrigger | TooltipTrigger[];
   disabled?: boolean;
   multiline?: boolean;
   open?: boolean;
+  effect?: TooltipEffect;
   maxWidth?: number;
   offset?: number;
+  arrowOffset?: number;
   viewportPadding?: number;
   showDelay?: number;
   hideDelay?: number;
+  autoClose?: number;
+  showArrow?: boolean;
+  enterable?: boolean;
+  teleported?: boolean;
+  persistent?: boolean;
+  strategy?: TooltipStrategy;
 }
 
 const props = withDefaults(defineProps<Props>(), {
   content: "",
   placement: "top",
+  fallbackPlacements: () => [],
+  trigger: () => ["hover", "focus"],
   disabled: false,
   multiline: false,
+  effect: "dark",
   maxWidth: 224,
   offset: 8,
+  arrowOffset: 5,
   viewportPadding: 10,
   showDelay: 80,
   hideDelay: 80,
+  autoClose: 0,
+  showArrow: true,
+  enterable: true,
+  teleported: true,
+  persistent: false,
+  strategy: "absolute",
 });
 
 const emit = defineEmits<{
@@ -40,18 +77,28 @@ const instance = getCurrentInstance();
 const slots = useSlots();
 const localOpen = ref(false);
 const tooltipId = createDomId("base-tooltip");
-const tooltipTrigger: TooltipTrigger[] = ["hover", "focus"];
 const isControlled = computed(() => Boolean(instance?.vnode.props && "open" in instance.vnode.props));
 const hasContent = computed(() => Boolean(props.content || slots.content));
 const canRender = computed(() => !props.disabled && hasContent.value);
 const normalizedMaxWidth = computed(() => clampNumberToBounds(props.maxWidth, 120, 520, 224));
 const normalizedOffset = computed(() => Math.max(0, toNonNegativeNumber(props.offset)));
+const normalizedArrowOffset = computed(() => Math.max(0, toNonNegativeNumber(props.arrowOffset)));
 const normalizedViewportPadding = computed(() => Math.max(4, toNonNegativeNumber(props.viewportPadding)));
 const normalizedShowDelay = computed(() => Math.max(0, toNonNegativeNumber(props.showDelay)));
 const normalizedHideDelay = computed(() => Math.max(0, toNonNegativeNumber(props.hideDelay)));
-const resolvedPlacement = computed(() => (props.placement === "top" ? "top" : props.placement));
+const normalizedAutoClose = computed(() => Math.max(0, toNonNegativeNumber(props.autoClose)));
+const normalizedTrigger = computed(() => props.trigger);
+const resolvedFallbackPlacements = computed(() => (props.fallbackPlacements.length ? props.fallbackPlacements : undefined));
+const resolvedPlacement = computed(() => props.placement);
 const resolvedPopperClass = computed(() =>
-  ["base-tooltip-popper", props.multiline ? "base-tooltip-popper--multiline" : ""].filter(Boolean).join(" ")
+  [
+    "base-tooltip-popper",
+    `base-tooltip-popper--${props.effect}`,
+    props.multiline ? "base-tooltip-popper--multiline" : "",
+    props.showArrow ? "" : "base-tooltip-popper--no-arrow",
+  ]
+    .filter(Boolean)
+    .join(" ")
 );
 const popperStyle = computed(() => ({
   maxWidth: formatCssPixelValue(normalizedMaxWidth.value),
@@ -59,7 +106,13 @@ const popperStyle = computed(() => ({
 const popperOptions = computed(() => ({
   modifiers: [
     { name: "preventOverflow", options: { padding: normalizedViewportPadding.value } },
-    { name: "flip", options: { padding: normalizedViewportPadding.value } },
+    {
+      name: "flip",
+      options: {
+        padding: normalizedViewportPadding.value,
+        fallbackPlacements: resolvedFallbackPlacements.value,
+      },
+    },
   ],
 }));
 
@@ -86,18 +139,23 @@ watch(canRender, (enabled) => {
     :visible="isOpen"
     :content="content"
     :placement="resolvedPlacement"
+    :fallback-placements="resolvedFallbackPlacements"
     :disabled="!canRender"
     :show-after="normalizedShowDelay"
     :hide-after="normalizedHideDelay"
+    :auto-close="normalizedAutoClose"
     :offset="normalizedOffset"
+    :arrow-offset="normalizedArrowOffset"
     :popper-class="resolvedPopperClass"
     :popper-style="popperStyle"
     :popper-options="popperOptions"
-    :teleported="true"
-    :persistent="false"
-    :show-arrow="true"
-    effect="dark"
-    :trigger="tooltipTrigger"
+    :teleported="teleported"
+    :persistent="persistent"
+    :show-arrow="showArrow"
+    :effect="effect"
+    :enterable="enterable"
+    :strategy="strategy"
+    :trigger="normalizedTrigger"
     @update:visible="setOpen"
     @show="emit('show')"
     @hide="emit('hide')"
@@ -138,6 +196,18 @@ watch(canRender, (enabled) => {
   background: #0f172a;
 }
 
+:global(.base-tooltip-popper--light.el-popper) {
+  border-color: #e2e8f0;
+  background: #ffffff;
+  color: #334155;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.12);
+}
+
+:global(.base-tooltip-popper--light .el-popper__arrow::before) {
+  border-color: #e2e8f0;
+  background: #ffffff;
+}
+
 :global(.base-tooltip-popper .base-tooltip__content) {
   display: block;
   min-width: 0;
@@ -153,15 +223,27 @@ watch(canRender, (enabled) => {
   white-space: normal;
 }
 
-:global(.dark .base-tooltip-popper.el-popper) {
+:global(.dark .base-tooltip-popper--dark.el-popper) {
   border-color: #e2e8f0;
   background: #f8fafc;
   color: #0f172a;
 }
 
-:global(.dark .base-tooltip-popper .el-popper__arrow::before) {
+:global(.dark .base-tooltip-popper--dark .el-popper__arrow::before) {
   border-color: #e2e8f0;
   background: #f8fafc;
+}
+
+:global(.dark .base-tooltip-popper--light.el-popper) {
+  border-color: #334155;
+  background: #0f172a;
+  color: #e2e8f0;
+  box-shadow: 0 16px 32px rgba(0, 0, 0, 0.34);
+}
+
+:global(.dark .base-tooltip-popper--light .el-popper__arrow::before) {
+  border-color: #334155;
+  background: #0f172a;
 }
 
 @media (prefers-reduced-motion: reduce) {

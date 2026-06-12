@@ -46,6 +46,32 @@ const controlledTooltipOpen = ref(true);
           </div>
         </BasePanel>
 
+        <BasePanel title="触发与外观" subtitle="复用 Element Plus 触发、对齐、箭头和浅色提示能力。">
+          <div class="tooltip-row">
+            <BaseTooltip content="点击触发，再次点击或点击外部关闭。" trigger="click" placement="top-start" :show-delay="0">
+              <BaseButton type="neutral" size="sm">Click</BaseButton>
+            </BaseTooltip>
+            <BaseTooltip content="右键菜单提示适合高级操作说明。" trigger="contextmenu" placement="right-start" multiline>
+              <BaseButton type="neutral" size="sm">Context</BaseButton>
+            </BaseTooltip>
+            <BaseTooltip content="浅色提示用于低干扰说明。" effect="light" placement="bottom-end">
+              <BaseButton type="neutral" size="sm">Light</BaseButton>
+            </BaseTooltip>
+            <BaseTooltip content="无箭头提示适合贴近图标按钮的紧凑场景。" placement="bottom-start" :show-arrow="false">
+              <BaseButton type="neutral" size="sm">No arrow</BaseButton>
+            </BaseTooltip>
+            <BaseTooltip
+              content="自动关闭提示适合临时引导，不需要业务侧手动收起。"
+              trigger="click"
+              placement="top-end"
+              :show-delay="0"
+              :auto-close="1800"
+            >
+              <BaseButton type="primary" size="sm">Auto close</BaseButton>
+            </BaseTooltip>
+          </div>
+        </BasePanel>
+
         <BasePanel title="受控状态" subtitle="业务侧可以通过 v-model:open 驱动提示显隐。">
           <div class="tooltip-row">
             <BaseButton type="neutral" size="sm" @click="controlledTooltipOpen = !controlledTooltipOpen">
