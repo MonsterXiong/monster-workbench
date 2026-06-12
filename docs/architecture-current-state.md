@@ -1498,3 +1498,27 @@ Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `
 | physical assets | Creative batch 与 AI Provider 共用 `ai/generated` | 项目级目录、保留期、导入导出和归档移动策略未定前，不放宽 asset scope |
 
 这意味着下一批数据模型编码的顺序应是：先写 migration plan 与旧库 fixture，再补 repo/service 行为测试，最后才加 command/UI 入口。尤其不要在没有归档传播契约时只加一个“archive project”按钮，也不要在没有 provenance 字段方案时继续把长期资产关系塞进自由 JSON。
+
+## 2026-06-13 补充：model_runs / Provider 观测边界复核
+
+本轮继续对照 `docs/ai/model-provider-observability.md`、`creative_model_run_repo.rs`、`workflow_settle_service.rs`、`task_service.rs`、`batch_job_service.rs`、`ai_service.rs` 和 `db_nav.rs`，结论是：`model_runs` 已经是正式 creative workflow 的审计入口，但还不是 AI Provider 工作台诊断链路的统一日志表。
+
+代码事实：
+
+- `model_runs` 表已在 creative schema 中，字段覆盖 provider、model、request_type、status、duration、prompt_hash、token、cost、error 和 metadata。
+- `creative_model_run_repo.rs` 只提供 create/list；行为测试覆盖 task 绑定后的创建与列表查询。
+- `workflow_settle_service::persist_sidecar_model_runs` 是 sidecar workflow 结果写入 `model_runs` 的公共入口，写入时绑定 `project_id`、`task_id`、可选 `asset_id`，并可补 prompt hash。
+- `TaskService::run_generate_image_prompt_workflow_after_task` 在成功和失败/取消/blocked settle 中都会持久化 sidecar 返回的 `modelRuns`。
+- `BatchJobService` 的 prompt/image sidecar settle 在 succeeded、failed、cancelled 分支都会持久化 `modelRuns`，并把 `modelRunIds` 放回 task result。
+- `AiProviderService` 仍通过 `ai_provider_tester.py`、内存队列任务和 `AiProviderTestResult` 做 provider 连接/聊天/生图诊断；当前没有调用 `creative_model_run_repo`，也不把这类诊断写进 `model_runs`。`test_logs` 仍只是系统诊断/日志相关表，不等同于 provider audit。
+
+边界判定：
+
+| 区域 | 当前状态 | 下一步 |
+|---|---|---|
+| creative workflow provider 调用 | 已通过 Rust trusted settle 写 `model_runs` | 保持所有正式 workflow 必须写 model_runs，不让 Python 直接写库 |
+| AI Provider 工作台 | 诊断链路，不写 `model_runs` | 可保留；若升级为正式创作任务，必须补 task/model_runs/task_events 归档 |
+| request_type | 当前实际有 `chat` / `image` 等短值 | 新增语义值前先兼容已有数据，不机械改名 |
+| provider profile | batch workflow 复用 provider config 适配为 sidecar DTO | 暂不建立独立 creative provider profile，除非业务配置与测试工作台明显分叉 |
+
+因此，架构问题“model_runs 是否作为所有 AI 调用的强制审计点”的当前答案应更精确：所有正式 creative workflow 的模型调用必须写 `model_runs`；AI Provider 工作台的测试调用暂时是诊断能力，不作为生产审计闭环。后续如果把测试链路产物纳入创作资产或任务历史，必须同步落 `creative_tasks`、`model_runs` 和 `task_events`，不能只复用现有内存队列结果。
