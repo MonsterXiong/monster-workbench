@@ -192,7 +192,7 @@ sequenceDiagram
 1. 全局基础组件：`src/components/common/Base*.vue`
    - 负责一致的桌面 UI 原子能力：按钮、输入、表格、面板、时间线、分页、弹窗、状态、上传、布局等。
    - 在 `main.ts` 中集中注册高频基础组件。
-   - 当前公共组件层已经大量把 Element Plus 收进 `Base*` / `App*` 封装内部：`src/components/common` 下约 69 个 Vue 组件中，约 51 个已经直接使用 Element Plus 标签。
+   - 当前公共组件层已经大量把 Element Plus 收进 `Base*` / `App*` 封装内部：`src/components/common` 下约 69 个 Vue 组件中，约 50 个已经直接使用 Element Plus 标签。
    - 近期已继续收口 `AppImageUploader`、`AppPathSelector`、`BaseCopyButton`、`BaseCommandPalette`、`BaseToast`、`ConfirmDialog`、`BaseActionMenu`、`BaseAlert`、`BaseBadge`、`BaseBreadcrumb`、`BaseDateRange`、`BaseDialog`、`BaseDrawer`、`BaseMessage`、`BasePageHeader`、`BaseSelectionBar`、`BaseDetailCard`、`BaseInfoCard`、`BaseStatCard`、`BaseFilterBar`、`BaseStatusDot`、`BaseTooltip`、`BaseFieldGroup`、`BasePanel`、`BaseDataState`、`BaseKeyValueList` 和 `BaseList` 等稳定 UI 面。
    - `BaseList` 默认 loading / empty 状态已经复用 `BaseLoading` / `BaseEmpty`；`BaseKeyValueList` loading / empty 已接 `ElSkeleton` / `ElEmpty`；关闭、返回、筛选清空、选择清空、菜单触发等小型动作统一经 `BaseButton` 承接 Element Plus 按钮底座，且按钮尺寸已共享 `toElementPlusSize()`；`BaseBreadcrumb` 折叠路径可选 `ElDropdown` 菜单承载隐藏层级；`BaseInput`、`BaseSearchInput`、`BaseNumberInput`、`BaseTextarea`、`BaseTagInput`、`BaseSegmented`、`BaseSlider`、`BaseCheckbox`、`BaseRadioGroup`、`BaseSwitch`、`BaseDateRange` 与 `BasePagination` 已共享项目尺寸到 Element Plus 尺寸的映射；`BaseProgress` 已在 `ElProgress` 基础上补齐 line / circle / dashboard 形态；`BaseTooltip` 已补齐 Element Plus Popper placement、click/contextmenu trigger、light effect、arrow / enterable / autoClose 等安全高频能力；`BaseTable` / `BaseDataTable` 已透传 Element Plus 排序、固定列和 `sort-change` 事件；`BaseForm` / `BaseFormItem` 已接通 `rules` / `prop` 和表单实例方法；容器类组件优先通过 `ElCard` 做外壳但保留项目侧 props、slot、键盘和暗色主题 API。
 2. 页面私有组件：`src/views/<module>/components/*`
@@ -1437,4 +1437,4 @@ Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `
 
 结论：`TaskService` 当前不是优先拆分对象；`BatchJobService` 的业务执行已经明显收窄，但 supervisor 仍不能迁移。下一刀应落在 worker-pool 控制协议与租约模型设计，而不是继续抽 image success settle 或新增 Python 拉队列实现。
 
-本轮继续复核后的执行口径见 `docs/ai/workflow-runtime-boundary.md` 12.8-12.10：后续 Rust 后端推进已先落文档化草案，包括 `creative_tasks` worker ownership / lease migration 字段建议、旧库兼容回归矩阵，以及 Rust-owned localhost sidecar control API contract。只有 claim token、heartbeat、lease-aware complete、过期 lease recovery 和 result settle contract 都实现并通过旧库兼容回归后，才重新评估 `BatchJobService::run_batch_supervisor_inner` 或 prompt/image worker shell 是否迁给 Python worker loop。
+本轮继续复核后的执行口径见 `docs/ai/workflow-runtime-boundary.md` 12.8-12.12：后续 Rust 后端推进已先落文档化草案，包括 `creative_tasks` worker ownership / lease migration 字段建议、旧库兼容回归矩阵，以及 Rust-owned localhost sidecar control API contract。只有 claim token、heartbeat、lease-aware complete、过期 lease recovery 和 result settle contract 都实现并通过旧库兼容回归后，才重新评估 `BatchJobService::run_batch_supervisor_inner` 或 prompt/image worker shell 是否迁给 Python worker loop。
