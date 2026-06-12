@@ -123,7 +123,7 @@ Vue
 | batch supervisor / concurrency slots | 短期是 | 在正式 worker pool、恢复协议、熔断和生命周期复用稳定前，先由 Rust 保留 |
 | prompt builder / review / revision / consistency | 否 | 正式业务逻辑应进入 Python workflow runtime |
 | provider 调用和图片处理 | 否 | prompt/image provider 执行已经迁到 Python；后续不要回流到 Rust worker |
-| batch sidecar lifecycle | 首段可保留 | batch worker 已优先复用 app-managed lifecycle，并已把 endpoint 获取和 HTTP task request 分离；当前已有 recovery backoff、graceful shutdown、恢复可观测字段、节流后的 Tauri 生命周期事件、`sidecar-runtime.log` 和 `sidecar-lifecycle.log` 摘要日志；WorkerQueue Rust IPC 已有 claim/checkpoint/complete 首段，下一步再评估是否需要 localhost sidecar control API |
+| batch sidecar lifecycle | 首段可保留 | batch worker 已优先复用 app-managed lifecycle，并已把 endpoint 获取和 HTTP task request 分离；当前已有 recovery backoff、graceful shutdown、恢复可观测字段、节流后的 Tauri 生命周期事件、`sidecar-runtime.log` 和 `sidecar-lifecycle.log` 摘要日志；WorkerQueue Rust IPC 已有 claim/checkpoint/complete 首段，但下一步仍需先设计带 runtime token、worker identity、lease 和 heartbeat 的 localhost sidecar control API |
 
 中期才评估 Python 拉队列模式：
 
@@ -315,8 +315,8 @@ Python step boundary
 
 1. UI / browser mock 的 prompt/generate batch type 提交值已切到 `image.prompt.batch` / `image.generate.batch`；旧 `demo.image.prompt/generate` 只作为历史兼容保留。
 2. 共享 `SidecarLifecycleService` 已具备首段 recovery circuit / backoff、graceful shutdown、恢复可观测字段、节流后的 Tauri 生命周期事件、`sidecar-lifecycle.log` 摘要持久化、Python `/events` polling 入口、runtime instance 字段、设置诊断页只读消费和 `sidecar-runtime.log` 摘要持久化；继续观察物理日志是否足够，必要时再设计正式 Rust-owned diagnostics 表/导出策略。
-3. 再抽象 Rust workflow submit/settle 公共路径，减少 `TaskService` 和 `BatchJobService` 内重复的 sidecar 状态映射；当前已先落地 sidecar 协议校验、事件落库、model_runs 持久化、普通 ready asset 创建和 batch failure/cancelled 状态映射 helper，下一步再评估 image success settle。
-4. 最后才评估 supervisor 是否迁给 Python worker pool；当前已有 Rust IPC 形态的 claim/checkpoint/complete/recover 首段，`complete_creative_task` 与 `recover_interrupted_creative_tasks` 也已注册为 Tauri command，但它们没有 runtime token、lease 校验和 sidecar HTTP 暴露，不能直接当作 Python worker-pool API。迁移前还需要明确 localhost sidecar control API、鉴权、租约/心跳和结果入库协议，不允许 Python 任意写主库。
+3. 再抽象 Rust workflow submit/settle 公共路径，减少 `TaskService` 和 `BatchJobService` 内重复的 sidecar 状态映射；当前已先落地 sidecar 协议校验、事件落库、model_runs 持久化、普通 ready asset 创建和 batch failure/cancelled 状态映射 helper，image success settle 只在不削弱路径授权和缩略图生成边界的前提下继续拆小 helper。
+4. 最后才评估 supervisor 是否迁给 Python worker pool；当前已有 Rust IPC 形态的 claim/checkpoint/complete/recover 首段，`complete_creative_task` 与 `recover_interrupted_creative_tasks` 也已注册为 Tauri command，但它们没有 runtime token、lease 校验和 sidecar HTTP 暴露，不能直接当作 Python worker-pool API。迁移前必须先明确 localhost sidecar control API、鉴权、租约/心跳和结果入库协议，不允许 Python 任意写主库。
 
 ### 12.4 当前边界结论
 
@@ -327,7 +327,7 @@ Python step boundary
 - 不再为新的正式 batch workflow 增加 Rust worker 分支；新增 workflow 应走统一 sidecar request/result 协议，Rust 只做控制、校验、授权路径和可信落库。
 - `build_prompt_request` 已替换为 Rust 侧 `read_batch_prompt_template` + Python 侧 `build_batch_prompt_request`；`AiProviderConfig` 适配也已收口为 `BatchWorkflowProviderConfig`；WorkerQueue 已补 Rust IPC `complete_creative_task` 首段，当前剩余重点是 localhost sidecar control API、租约/心跳和稳定 submit/settle 边界。
 - `settle_sidecar_non_success`、`settle_batch_prompt_sidecar_response`、`settle_batch_image_sidecar_response` 代表同一类 Rust 可信 settle 逻辑；当前已先抽出 sidecar 协议校验、事件落库、model_runs 持久化、普通 ready asset 创建和 batch failure/cancelled 状态映射 helper，后续再评估 image success settle 或 Python `/events` polling，而不是把落库职责迁到 Python。
-- `SidecarLifecycleService` 已有恢复冷却、受控 shutdown、恢复失败指标、节流后的 Tauri 生命周期事件、`sidecar-lifecycle.log` 摘要持久化、Python `/events` polling、runtime instance 字段、设置诊断页只读消费和 `sidecar-runtime.log` 摘要持久化，下一步不要急着上 Python worker pool；先观察物理诊断日志是否足够，再评估正式 diagnostics 表/导出策略或 Rust submit/settle 公共路径。
+- `SidecarLifecycleService` 已有恢复冷却、受控 shutdown、恢复失败指标、节流后的 Tauri 生命周期事件、`sidecar-lifecycle.log` 摘要持久化、Python `/events` polling、runtime instance 字段、设置诊断页只读消费和 `sidecar-runtime.log` 摘要持久化，下一步不要急着上 Python worker pool；先设计 control API 与租约/心跳，再按观察结果评估正式 diagnostics 表/导出策略或 Rust submit/settle 公共路径。
 
 ### 12.5 2026-06-12 再评估：编排边界排序
 

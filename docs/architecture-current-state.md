@@ -1144,7 +1144,7 @@ creative_model_run_repo.rs   model_runs repo behavior and tests
 
 后续仍需要把 `creative_projects` 从“已有实体”继续推进成“真正的项目中心事实源”。
 
-建议新增正式 `creative_projects`，再把现有 `project_id` 逐步迁移到 FK 或稳定 ID 策略。
+建议继续把已有 `creative_projects` 从最小实体推进成项目事实源，再把现有 `project_id` 字符串引用逐步迁移到 FK 或稳定 ID 策略。
 
 ### 10.8 公共组件封装已进入实现态
 
@@ -1195,7 +1195,7 @@ Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `
 
 1. 继续产品化 `/creative` 三栏工作台：中间 `CreativeWorkflowDemo.vue` 已是 orchestration shell，后续重点转为左栏资产分类是否驱动中间 workspace、右栏 quick forms 是否保留，以及正式资产库 / Agent 监控台的产品深度。
 2. 继续约束 AI 前端 runtime 热区：`src/stores/ai.ts` façade 可保留为兼容入口，新逻辑不要回流；后续重点是拆 `AiImagePanel.vue` 的宽 UI 区块，并抽 `ai-image-runtime.ts` / `ai-provider-runtime.ts` 的 task polling、pending image recovery、cancel/result patch 等稳定 helper。
-3. 继续收敛 `TaskService` 与 `BatchJobService` 的 orchestration 边界，尽量让 asset CRUD、goal CRUD、batch snapshot 等稳定职责停留在对应 repo/service。
+3. 继续按 `workflow-runtime-boundary.md` 收敛 `TaskService` 与 `BatchJobService` 的 orchestration 边界：当前不以拆文件为首要目标，优先设计 worker identity、lease / claim token、heartbeat 和 Rust-owned localhost sidecar control API。
 4. 继续收口公共组件治理：新页面优先消费 `Base*` / `App*`，少量页面直用 Element Plus 的遗留点后续随页面改造逐步回收。
 5. 在现有 `schema_migrations` 基础上继续补齐旧库兼容回归、备份策略与更细粒度 migration 约束；repo 行为测试继续靠近对应 repo，`creative_db_tests.rs` 只保留 schema / migration 回归。
 6. 持续同步 `agent/open-loops.md` 与本文件，避免“代码已经推进、当前状态文档仍停留在旧阶段”。
@@ -1242,7 +1242,7 @@ Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `
 
 建议：
 
-1. supervisor 与 worker loop 解耦。
+1. 先设计 Rust-owned localhost sidecar control API、worker identity、lease / claim token、heartbeat 和 lease-aware complete，再评估 supervisor 与 worker loop 解耦。
 2. batch stats 增量更新。
 3. 大图缩略图懒加载。
 4. 预算、熔断、限流、重试策略配置化。
@@ -1271,9 +1271,9 @@ Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `
 
 当前架构已经具备较完整的“桌面控制面 + 前端工作台 + 本地 SQLite 状态 + Python AI 执行面”的雏形。它最适合的下一步不是继续堆功能，而是做一次 post-goal architecture hardening：
 
-1. 先继续收敛 `/creative` 中央 orchestration shell 与 `ai.ts` façade。
+1. 先继续收敛 `/creative` 中央 orchestration shell 与 AI runtime 热区，避免新逻辑回流到兼容 façade。
 2. 再固化 migration、project/asset/version/provenance 领域模型。
-3. 再把 Python sidecar 从 health stub 升级为正式 workflow runtime。
+3. 同步设计 worker-pool 控制协议和租约模型，让 `BatchJobService` 的 supervisor 迁移具备前置条件。
 4. 最后引入真正的多 Agent 协作、审查返工和生产级批量生成。
 
 如果继续在现有 `CreativeWorkflowDemo.vue`、`src/stores/ai.ts`、Rust `TaskService` 和 `BatchJobService` 上无约束叠业务，短期会很快，长期会让任务状态、资产版本、批量恢复、多 Agent 合并和 provider 审计越来越难验证。
