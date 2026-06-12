@@ -396,6 +396,42 @@ Python worker
 4. Python workflow 只返回受控结果摘要、modelRuns、events 和授权输出目录内的文件引用；asset、model_runs、task_events、task status 仍由 Rust 可信写入。
 5. 在 control API 和 migration 通过旧库兼容回归前，`BatchJobService` 的 supervisor / worker shell 只做收窄和复用，不做所有权迁移。
 
+### 12.8 2026-06-12 继续评估：编排边界执行口径
+
+本轮继续按当前代码复核后，`TaskService` / `BatchJobService` 的边界应按“控制面、过渡壳层、可信 settle、未来 worker pool”四层理解，而不是按文件长度或函数数量简单拆分：
+
+```mermaid
+flowchart TD
+  TaskSvc["TaskService<br/>task / asset / event 可信入口"] --> TaskWorkflow["generate_image_prompt 过渡 workflow"]
+  BatchSvc["BatchJobService<br/>batch 生命周期与 supervisor"] --> Claim["claim_next_queued_task<br/>queued -> running"]
+  Claim --> WorkerShell["Rust worker shell<br/>mock / prompt / image"]
+  WorkerShell --> Checkpoint["cancel checkpoint<br/>localhost 临时查询"]
+  WorkerShell --> SidecarSubmit["Sidecar /tasks<br/>Python 执行业务 workflow"]
+  SidecarSubmit --> RustSettle["Rust trusted settle"]
+  TaskWorkflow --> RustSettle
+  RustSettle --> CommonSettle["workflow_settle_service<br/>protocol / taskId / events / model_runs / ready asset"]
+  RustSettle --> ImageSettle["image success settle<br/>canonical path / thumbnail / image asset"]
+  CommonSettle --> Repo["creative_*_repo<br/>SQLite 可信写入"]
+  ImageSettle --> Repo
+```
+
+执行口径：
+
+| 层级 | 当前落点 | 可以继续做 | 不能提前做 |
+|---|---|---|---|
+| Rust 控制面 | `TaskService` 常规 task/asset/event 方法、`BatchJobService` 生命周期方法 | 保持输入校验、状态变更、事件广播和 repo 写入 | 不把真实 prompt/review/revision 策略写回 Rust |
+| 过渡 worker shell | `run_prompt_task_worker`、`run_generate_task_worker`、`submit_with_batch_sidecar` | 继续复用 checkpoint、sidecar endpoint 获取、transport fallback 和 settle 分派 | 不为正式业务新增第四、第五个 Rust worker 分支 |
+| Rust trusted settle | `settle_sidecar_non_success`、`settle_batch_prompt_sidecar_response`、`settle_batch_image_sidecar_response`、`workflow_settle_service.rs` | 继续抽小型公共 helper，减少协议校验、events、model_runs、普通 ready asset 的重复 | 不把 asset/model_runs/task_events/status 的最终写入交给 Python |
+| 文件与权限边界 | `validate_sidecar_output_file`、`copy_sidecar_thumbnail`、image asset 创建 | 保留 canonical path 校验、授权输出目录和缩略图生成 | 不信任 Python 返回的任意绝对路径 |
+| 未来 worker pool | 尚未具备，当前只有 Tauri IPC 形态的 claim/checkpoint/complete/recover 首段 | 先设计 localhost control API、worker identity、claim token、lease deadline、heartbeat、lease-aware complete | 不让 Python 直接拉 SQLite 队列，不把当前 `complete_creative_task` 当 sidecar complete 协议 |
+
+因此，下一批如果继续推进 Rust 后端，应优先产出两个可验证产物：
+
+1. `creative_tasks` worker ownership / lease 字段的 migration 草案和旧库兼容回归矩阵。
+2. Rust-owned localhost sidecar control API contract，至少覆盖 `claim`、`checkpoint`、`heartbeat`、`complete`、`recover_expired_leases`，并明确 runtime token、worker identity、claim token 和 result settle 责任。
+
+只有这两项稳定后，才重新评估 `BatchJobService::run_batch_supervisor_inner` 是否迁出 Rust，或是否把 prompt/image worker shell 替换为 Python worker loop。
+
 ## 13. 不变量
 
 - Vue 永远不知道 Python 端口和 token。
