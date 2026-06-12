@@ -13,6 +13,11 @@ import {
 } from "../../utils";
 import { toElementPlusSize, type ProjectControlSize } from "./elementPlusDom";
 
+type NumberInputAlign = "left" | "center" | "right";
+type NumberInputControlsPosition = "" | "right";
+type NumberInputInputMode = "none" | "text" | "decimal" | "numeric" | "tel" | "search" | "email" | "url";
+type NumberInputValueOnClear = "min" | "max" | number | null;
+
 interface Props {
   modelValue: number;
   id?: string;
@@ -21,6 +26,11 @@ interface Props {
   max?: number;
   step?: number;
   precision?: number;
+  stepStrictly?: boolean;
+  controls?: boolean;
+  controlsPosition?: NumberInputControlsPosition;
+  valueOnClear?: NumberInputValueOnClear;
+  align?: NumberInputAlign;
   disabled?: boolean;
   readonly?: boolean;
   loading?: boolean;
@@ -31,6 +41,8 @@ interface Props {
   unit?: string;
   formatValue?: boolean;
   autocomplete?: string;
+  inputmode?: NumberInputInputMode;
+  disabledScientific?: boolean;
   ariaLabel?: string;
   ariaLabelledby?: string;
   ariaDescribedby?: string;
@@ -47,6 +59,11 @@ const props = withDefaults(defineProps<Props>(), {
   max: Number.POSITIVE_INFINITY,
   step: 1,
   precision: 0,
+  stepStrictly: false,
+  controls: true,
+  controlsPosition: "",
+  valueOnClear: null,
+  align: "center",
   disabled: false,
   readonly: false,
   loading: false,
@@ -57,6 +74,8 @@ const props = withDefaults(defineProps<Props>(), {
   unit: "",
   formatValue: false,
   autocomplete: "off",
+  inputmode: "decimal",
+  disabledScientific: true,
   ariaLabel: "",
   ariaLabelledby: "",
   ariaDescribedby: "",
@@ -220,6 +239,7 @@ onUpdated(() => {
     class="base-number-input"
     :class="[
       `base-number-input--${size}`,
+      `base-number-input--align-${align}`,
       {
         'is-disabled': disabled,
         'is-readonly': readonly,
@@ -227,7 +247,9 @@ onUpdated(() => {
         'is-error': error,
         'is-success': success,
         'has-unit': unit,
-        'base-number-input--block': block
+        'base-number-input--block': block,
+        'base-number-input--no-controls': !controls,
+        'base-number-input--controls-right': controls && controlsPosition === 'right'
       }
     ]"
     role="group"
@@ -244,15 +266,17 @@ onUpdated(() => {
       :min="normalizedMin"
       :max="normalizedMax"
       :step="normalizedStep"
+      :step-strictly="stepStrictly"
       :precision="normalizedPrecision"
       :disabled="disabled || loading"
       :readonly="readonly"
       :size="elementSize"
-      :controls="true"
-      controls-position=""
-      align="center"
-      inputmode="decimal"
-      disabled-scientific
+      :controls="controls"
+      :controls-position="controlsPosition"
+      :value-on-clear="valueOnClear"
+      :align="align"
+      :inputmode="inputmode"
+      :disabled-scientific="disabledScientific"
       :formatter="formatText"
       :parser="parseInput"
       :placeholder="placeholder || t('common.inputPlaceholder')"
@@ -374,6 +398,14 @@ onUpdated(() => {
   box-shadow: none !important;
 }
 
+.base-number-input--no-controls :deep(.el-input-number .el-input__wrapper) {
+  @apply px-3;
+}
+
+.base-number-input--controls-right :deep(.el-input-number .el-input__wrapper) {
+  @apply pl-3 pr-10;
+}
+
 :deep(.el-input-number .el-input__wrapper:hover),
 :deep(.el-input-number .el-input__wrapper.is-focus),
 :deep(.el-input-number .el-input__wrapper:focus-within),
@@ -386,6 +418,14 @@ onUpdated(() => {
   @apply h-full min-w-0 bg-transparent px-0 text-center text-xs font-black text-slate-700 outline-none dark:text-slate-100;
   font-variant-numeric: tabular-nums;
   line-height: 1;
+}
+
+.base-number-input--align-left :deep(.el-input-number .el-input__inner) {
+  @apply text-left;
+}
+
+.base-number-input--align-right :deep(.el-input-number .el-input__inner) {
+  @apply text-right;
 }
 
 :deep(.el-input-number .el-input__inner::placeholder) {
@@ -413,6 +453,20 @@ onUpdated(() => {
   @apply right-0 border-l border-slate-200 dark:border-slate-800;
 }
 
+.base-number-input--controls-right :deep(.el-input-number__decrease),
+.base-number-input--controls-right :deep(.el-input-number__increase) {
+  @apply left-auto right-0 h-1/2 w-8 border-l border-slate-200 dark:border-slate-800;
+}
+
+.base-number-input--controls-right :deep(.el-input-number__increase) {
+  @apply top-0 border-b;
+}
+
+.base-number-input--controls-right :deep(.el-input-number__decrease) {
+  top: 50%;
+  border-right: 0;
+}
+
 :deep(.el-input-number__decrease.is-disabled),
 :deep(.el-input-number__increase.is-disabled),
 .base-number-input.is-readonly :deep(.el-input-number__decrease),
@@ -426,8 +480,24 @@ onUpdated(() => {
   @apply px-7;
 }
 
+.base-number-input--sm.base-number-input--no-controls :deep(.el-input-number .el-input__wrapper) {
+  @apply px-2.5;
+}
+
+.base-number-input--sm.base-number-input--controls-right :deep(.el-input-number .el-input__wrapper) {
+  @apply pl-2.5 pr-9;
+}
+
 .base-number-input--xs :deep(.el-input-number .el-input__wrapper) {
   @apply px-6;
+}
+
+.base-number-input--xs.base-number-input--no-controls :deep(.el-input-number .el-input__wrapper) {
+  @apply px-2;
+}
+
+.base-number-input--xs.base-number-input--controls-right :deep(.el-input-number .el-input__wrapper) {
+  @apply pl-2 pr-8;
 }
 
 .base-number-input--sm :deep(.el-input-number__decrease),
@@ -440,12 +510,35 @@ onUpdated(() => {
   @apply w-6;
 }
 
+.base-number-input--sm.base-number-input--controls-right :deep(.el-input-number__decrease),
+.base-number-input--sm.base-number-input--controls-right :deep(.el-input-number__increase) {
+  @apply w-7;
+}
+
+.base-number-input--xs.base-number-input--controls-right :deep(.el-input-number__decrease),
+.base-number-input--xs.base-number-input--controls-right :deep(.el-input-number__increase) {
+  @apply w-6;
+}
+
 .base-number-input--lg :deep(.el-input-number .el-input__wrapper) {
   @apply px-9;
 }
 
+.base-number-input--lg.base-number-input--no-controls :deep(.el-input-number .el-input__wrapper) {
+  @apply px-3.5;
+}
+
+.base-number-input--lg.base-number-input--controls-right :deep(.el-input-number .el-input__wrapper) {
+  @apply pl-3.5 pr-11;
+}
+
 .base-number-input--lg :deep(.el-input-number__decrease),
 .base-number-input--lg :deep(.el-input-number__increase) {
+  @apply w-9;
+}
+
+.base-number-input--lg.base-number-input--controls-right :deep(.el-input-number__decrease),
+.base-number-input--lg.base-number-input--controls-right :deep(.el-input-number__increase) {
   @apply w-9;
 }
 

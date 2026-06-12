@@ -7,6 +7,24 @@ import { addDomEventListener, createRandomId, type DomEventCleanup } from "../..
 
 type ButtonType = "primary" | "secondary" | "danger" | "warning" | "success" | "neutral" | "ghost" | "link";
 type ButtonSize = "xs" | "sm" | "md" | "lg";
+type PopconfirmButtonType = "" | "text" | "default" | "info" | "primary" | "success" | "warning" | "danger";
+type PopconfirmEffect = "dark" | "light";
+type PopconfirmPlacement =
+  | "auto"
+  | "auto-start"
+  | "auto-end"
+  | "top"
+  | "top-start"
+  | "top-end"
+  | "bottom"
+  | "bottom-start"
+  | "bottom-end"
+  | "left"
+  | "left-start"
+  | "left-end"
+  | "right"
+  | "right-start"
+  | "right-end";
 
 interface Props {
   label?: string;
@@ -29,6 +47,19 @@ interface Props {
   confirmInputPlaceholder?: string;
   confirmInputHint?: string;
   confirmMismatchText?: string;
+  placement?: PopconfirmPlacement;
+  width?: string | number;
+  showIcon?: boolean;
+  iconColor?: string;
+  confirmButtonType?: PopconfirmButtonType;
+  cancelButtonType?: PopconfirmButtonType;
+  teleported?: boolean;
+  persistent?: boolean;
+  hideAfter?: number;
+  offset?: number;
+  fallbackPlacements?: PopconfirmPlacement[];
+  popperClass?: string;
+  effect?: PopconfirmEffect;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -50,6 +81,19 @@ const props = withDefaults(defineProps<Props>(), {
   confirmInputPlaceholder: "",
   confirmInputHint: "",
   confirmMismatchText: "",
+  placement: "top",
+  width: 320,
+  showIcon: true,
+  iconColor: "",
+  confirmButtonType: "",
+  cancelButtonType: "default",
+  teleported: true,
+  persistent: false,
+  hideAfter: 80,
+  offset: 8,
+  fallbackPlacements: () => ["top", "bottom", "right", "left"],
+  popperClass: "",
+  effect: "light",
 });
 
 const emit = defineEmits<{
@@ -75,30 +119,38 @@ const buttonLabel = computed(() => props.label || resolvedConfirmText.value);
 const buttonLoading = computed(() => props.loading || pending.value);
 const buttonAriaLabel = computed(() => props.ariaLabel || buttonLabel.value);
 const buttonTitle = computed(() => props.buttonTitle || buttonAriaLabel.value);
-const popconfirmButtonType = computed(() => {
+const inferredPopconfirmButtonType = computed<PopconfirmButtonType>(() => {
   if (isDanger.value) return "danger";
   if (props.type === "warning") return "warning";
   if (props.type === "success") return "success";
   return "primary";
 });
+const popconfirmButtonType = computed<PopconfirmButtonType>(() => props.confirmButtonType || inferredPopconfirmButtonType.value);
+const getBaseButtonType = (type: PopconfirmButtonType, fallback: ButtonType): ButtonType => {
+  if (type === "primary" || type === "success" || type === "warning" || type === "danger") return type;
+  return fallback;
+};
+const confirmActionButtonType = computed(() => getBaseButtonType(popconfirmButtonType.value, isDanger.value ? "danger" : "primary"));
+const cancelActionButtonType = computed(() => getBaseButtonType(props.cancelButtonType, "neutral"));
 const popconfirmIcon = computed(() => (isDanger.value || props.type === "warning" ? WarningFilled : CircleCheckFilled));
 const popconfirmIconColor = computed(() => {
+  if (props.iconColor) return props.iconColor;
   if (isDanger.value) return "#ef4444";
   if (props.type === "warning") return "#f59e0b";
   if (props.type === "success") return "#10b981";
   return "rgb(var(--color-primary))";
 });
 const popconfirmClass = computed(() =>
-  ["base-confirm-action-popper", isDanger.value ? "base-confirm-action-popper--danger" : ""].filter(Boolean).join(" ")
+  ["base-confirm-action-popper", isDanger.value ? "base-confirm-action-popper--danger" : "", props.popperClass].filter(Boolean).join(" ")
 );
-const popconfirmOptions = {
+const popconfirmOptions = computed(() => ({
   strategy: "fixed",
   modifiers: [
-    { name: "offset", options: { offset: [0, 8] } },
+    { name: "offset", options: { offset: [0, props.offset] } },
     { name: "preventOverflow", options: { padding: 12 } },
-    { name: "flip", options: { padding: 12 } },
+    { name: "flip", options: { padding: 12, fallbackPlacements: props.fallbackPlacements } },
   ],
-};
+}));
 
 const closeOtherPopconfirms = () => {
   if (props.disabled || buttonLoading.value) return;
@@ -191,17 +243,18 @@ onBeforeUnmount(() => {
     :confirm-button-text="resolvedConfirmText"
     :cancel-button-text="resolvedCancelText"
     :confirm-button-type="popconfirmButtonType"
-    cancel-button-type="default"
+    :cancel-button-type="cancelButtonType"
     :icon="popconfirmIcon"
     :icon-color="popconfirmIconColor"
-    :width="320"
-    :hide-after="80"
-    :teleported="true"
-    :persistent="false"
+    :hide-icon="!showIcon"
+    :width="width"
+    :hide-after="hideAfter"
+    :teleported="teleported"
+    :persistent="persistent"
     :popper-class="popconfirmClass"
     :popper-options="popconfirmOptions"
-    effect="light"
-    placement="top"
+    :effect="effect"
+    :placement="placement"
     @confirm="handlePopconfirmConfirm"
     @cancel="handlePopconfirmCancel"
   >
@@ -230,8 +283,8 @@ onBeforeUnmount(() => {
       <div class="base-confirm-action__popper-body">
         <p v-if="resolvedMessage" class="base-confirm-action__message">{{ resolvedMessage }}</p>
         <div class="base-confirm-action__popper-actions">
-          <BaseButton type="neutral" size="xs" outline @click="cancelPopper">{{ resolvedCancelText }}</BaseButton>
-          <BaseButton :type="isDanger ? 'danger' : 'primary'" size="xs" @click="confirmPopper">{{ resolvedConfirmText }}</BaseButton>
+          <BaseButton :type="cancelActionButtonType" size="xs" outline @click="cancelPopper">{{ resolvedCancelText }}</BaseButton>
+          <BaseButton :type="confirmActionButtonType" size="xs" @click="confirmPopper">{{ resolvedConfirmText }}</BaseButton>
         </div>
       </div>
     </template>

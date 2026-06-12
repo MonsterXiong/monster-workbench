@@ -94,6 +94,45 @@ const handleConfirmAction = (label: string) => {
             />
           </div>
         </BasePanel>
+
+        <BasePanel title="弹层策略" subtitle="Popconfirm 的原生位置、宽度、图标、传送和按钮语义由封装层统一透出。">
+          <div class="action-row">
+            <BaseConfirmAction
+              label="底部对齐"
+              title="确认发布？"
+              message="弹层位置设置为 bottom-start，并预留 flip 回退策略。"
+              type="success"
+              icon="Rocket"
+              placement="bottom-start"
+              :width="360"
+              :offset="10"
+              confirm-button-type="success"
+              :fallback-placements="['bottom-start', 'top-start', 'right', 'left']"
+              @confirm="handleConfirmAction('底部对齐发布')"
+            />
+            <BaseConfirmAction
+              label="无图标确认"
+              title="确认重置视图？"
+              message="showIcon=false 可用于轻量确认，保持统一的按钮和弹层样式。"
+              type="neutral"
+              :show-icon="false"
+              placement="right"
+              :width="300"
+              confirm-button-type="primary"
+              @confirm="handleConfirmAction('无图标确认')"
+            />
+            <BaseConfirmAction
+              label="小宽度"
+              title="立即执行？"
+              message="width 可按场景调整，短确认保持紧凑。"
+              type="primary"
+              placement="top-end"
+              :width="240"
+              :hide-after="120"
+              @confirm="handleConfirmAction('小宽度确认')"
+            />
+          </div>
+        </BasePanel>
       </div>
     </PlaygroundDemoSection>
   </section>

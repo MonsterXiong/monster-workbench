@@ -161,6 +161,39 @@ const decimalNumberValue = ref(3.5);
               increment-label="增加 0.25 秒"
               aria-label="小数秒数"
             />
+            <div class="number-demo-row">
+              <BaseNumberInput
+                v-model="numberValue"
+                :min="0"
+                :max="100"
+                :step="10"
+                step-strictly
+                controls-position="right"
+                unit="%"
+                aria-label="右侧按钮严格步进"
+              />
+              <BaseNumberInput
+                v-model="numberValue"
+                :min="0"
+                :max="100"
+                :controls="false"
+                align="left"
+                value-on-clear="min"
+                aria-label="无按钮左对齐数值"
+              />
+              <BaseNumberInput
+                v-model="latencyValue"
+                :min="0"
+                :max="10000"
+                :step="250"
+                controls-position="right"
+                align="right"
+                format-value
+                unit="ms"
+                value-on-clear="max"
+                aria-label="右对齐延迟配置"
+              />
+            </div>
           </div>
         </BaseFormItem>
       </BaseForm>

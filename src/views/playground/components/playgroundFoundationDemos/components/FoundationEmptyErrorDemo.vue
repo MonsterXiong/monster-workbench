@@ -113,6 +113,36 @@ const emptyImageSrc =
             >
               <BaseBadge type="danger" variant="outline">ERR_COMPONENT_LOAD</BaseBadge>
             </BaseError>
+            <div class="error-demo-native-grid">
+              <BaseError
+                title="校验已恢复"
+                message="useNativeIcon 会直接复用 Element Plus Result 的成功图标。"
+                status="success"
+                tone="success"
+                use-native-icon
+                surface="card"
+                bordered
+                compact
+              />
+              <BaseError
+                title="等待处理"
+                message="status 可独立控制 Result 原生图标，tone 保持项目色彩语义。"
+                status="warning"
+                tone="warning"
+                use-native-icon
+                surface="muted"
+                compact
+              />
+              <BaseError
+                title="信息结果"
+                message="primary / info / error 均可通过 BaseError 统一承接。"
+                status="primary"
+                tone="primary"
+                use-native-icon
+                surface="plain"
+                compact
+              />
+            </div>
             <div class="error-demo-inline-grid">
               <BaseError
                 title="配置暂不可用"
@@ -181,7 +211,13 @@ const emptyImageSrc =
   @apply grid min-w-0 gap-3;
 }
 
+.error-demo-native-grid {
+  @apply grid min-w-0 gap-3;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
+}
+
 .error-demo-inline-grid {
-  @apply grid min-w-0 gap-3 lg:grid-cols-2;
+  @apply grid min-w-0 gap-3;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
 }
 </style>

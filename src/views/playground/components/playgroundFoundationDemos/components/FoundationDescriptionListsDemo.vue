@@ -17,6 +17,13 @@ const auditDescriptionItems = [
   { key: "updated", label: "最近更新", value: "2026-06-08", description: "通过类型与架构检查" },
 ];
 
+const elementDescriptionItems = [
+  { key: "direction", label: "布局方向", value: "vertical", description: "复用 Element Plus direction 能力。", status: "primary" as const },
+  { key: "labelWidth", label: "标签宽度", value: "112px", description: "统一复杂表单确认页的标签列。", labelWidth: "112px" },
+  { key: "align", label: "对齐方式", value: "右对齐数值", align: "right" as const, labelAlign: "right" as const },
+  { key: "extra", label: "顶部区域", value: "title / extra", description: "标题、说明和右侧状态不需要页面自组装。" },
+];
+
 const longDescriptionItems = [
   {
     key: "resource",
@@ -122,6 +129,26 @@ const narrowKeyValueItems = [
         </BasePanel>
         <BasePanel title="审计摘要" subtitle="三列布局适合配置确认、审计结果和发布检查。">
           <BaseDescriptionList aria-label="审计摘要" :items="auditDescriptionItems" :columns="3" surface="muted" size="lg" />
+        </BasePanel>
+        <BasePanel title="原生描述能力" subtitle="标题、extra、纵向布局、labelWidth、对齐和冒号都由 BaseDescriptionList 统一透出。">
+          <BaseDescriptionList
+            title="发布检查"
+            description="适合发布确认、资源详情和配置审计。"
+            extra-text="Element Plus"
+            aria-label="Element Plus 原生描述能力"
+            :items="elementDescriptionItems"
+            :columns="2"
+            direction="vertical"
+            label-width="112px"
+            label-align="right"
+            value-align="left"
+            colon
+            surface="card"
+          >
+            <template #extra>
+              <BaseBadge type="primary" variant="outline">Descriptions</BaseBadge>
+            </template>
+          </BaseDescriptionList>
         </BasePanel>
         <BasePanel title="嵌套形态" subtitle="plain 表面适合放入详情卡、抽屉和面板正文。">
           <BaseDescriptionList aria-label="嵌套描述列表" :items="auditDescriptionItems.slice(0, 4)" :columns="2" surface="plain" :bordered="false" />

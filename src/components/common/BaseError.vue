@@ -1,12 +1,13 @@
 <script setup lang="ts">
-import { computed, useId } from "vue";
+import { computed, useId, useSlots } from "vue";
 import { useI18n } from "../../composables/useI18n";
 import BaseIcon from "./BaseIcon.vue";
 
 type ErrorSurface = "card" | "muted" | "plain";
 type ErrorSize = "sm" | "md" | "lg";
 type ErrorAlign = "center" | "start";
-type ErrorTone = "danger" | "warning" | "neutral";
+type ErrorTone = "danger" | "warning" | "neutral" | "success" | "primary";
+type ErrorStatus = "primary" | "success" | "warning" | "info" | "error";
 
 interface Props {
   title?: string;
@@ -14,6 +15,8 @@ interface Props {
   showRetry?: boolean;
   retryText?: string;
   icon?: string;
+  status?: ErrorStatus;
+  useNativeIcon?: boolean;
   compact?: boolean;
   size?: ErrorSize;
   surface?: ErrorSurface;
@@ -33,6 +36,8 @@ const props = withDefaults(defineProps<Props>(), {
   showRetry: false,
   retryText: "",
   icon: "AlertTriangle",
+  status: undefined,
+  useNativeIcon: false,
   compact: false,
   size: "md",
   surface: "plain",
@@ -47,16 +52,21 @@ const props = withDefaults(defineProps<Props>(), {
 });
 
 const { t } = useI18n();
+const slots = useSlots();
 const errorId = useId();
 const titleId = computed(() => `${errorId}-title`);
 const messageId = computed(() => `${errorId}-message`);
 const resolvedTitle = computed(() => props.title || t("common.error"));
 const resolvedSize = computed(() => (props.compact ? "sm" : props.size));
-const elementIconType = computed(() => {
+const elementIconType = computed<ErrorStatus>(() => {
+  if (props.status) return props.status;
+  if (props.tone === "primary") return "primary";
+  if (props.tone === "success") return "success";
   if (props.tone === "warning") return "warning";
   if (props.tone === "neutral") return "info";
   return "error";
 });
+const shouldRenderCustomIcon = computed(() => !props.useNativeIcon || Boolean(slots.icon));
 const iconSize = computed(() => {
   if (resolvedSize.value === "sm") return 24;
   if (resolvedSize.value === "lg") return 40;
@@ -66,6 +76,8 @@ const labelledBy = computed(() => (!props.ariaLabel ? titleId.value : undefined)
 const isRetryDisabled = computed(() => props.disabled || props.retryDisabled);
 const resolvedExtraLabel = computed(() => props.extraLabel || `${props.title || props.ariaLabel || "错误反馈"} 附加信息`);
 const retryButtonType = computed(() => {
+  if (props.tone === "primary") return "primary";
+  if (props.tone === "success") return "success";
   if (props.tone === "warning") return "warning";
   if (props.tone === "neutral") return "neutral";
   return "danger";
@@ -92,6 +104,7 @@ const handleRetry = () => {
       {
         'base-error--bordered': bordered,
         'base-error--compact': compact,
+        'base-error--native-icon': useNativeIcon && !$slots.icon,
         'is-disabled': disabled,
       },
     ]"
@@ -103,7 +116,7 @@ const handleRetry = () => {
     :aria-disabled="disabled ? 'true' : undefined"
   >
     <el-result class="base-error__result" :icon="elementIconType">
-      <template #icon>
+      <template v-if="shouldRenderCustomIcon" #icon>
         <div class="base-error__icon" aria-hidden="true">
           <BaseIcon :name="icon" :size="iconSize" aria-hidden="true" />
         </div>
@@ -184,6 +197,25 @@ const handleRetry = () => {
   @apply mb-0 flex justify-center;
 }
 
+.base-error--native-icon :deep(.el-result__icon) {
+  @apply mb-3;
+}
+
+.base-error--native-icon :deep(.el-result__icon svg) {
+  width: 32px;
+  height: 32px;
+}
+
+.base-error--native-icon.base-error--sm :deep(.el-result__icon svg) {
+  width: 24px;
+  height: 24px;
+}
+
+.base-error--native-icon.base-error--lg :deep(.el-result__icon svg) {
+  width: 40px;
+  height: 40px;
+}
+
 .base-error--start :deep(.el-result__icon) {
   @apply justify-start;
 }
@@ -218,6 +250,36 @@ const handleRetry = () => {
 
 .base-error--tone-neutral .base-error__icon {
   @apply border-slate-200 bg-slate-50 text-slate-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-400;
+}
+
+.base-error--tone-success .base-error__icon {
+  @apply border-emerald-200 bg-emerald-50 text-emerald-600 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-300;
+}
+
+.base-error--tone-primary .base-error__icon {
+  border-color: rgba(var(--color-primary), 0.22);
+  background-color: rgba(var(--color-primary), 0.08);
+  color: rgb(var(--color-primary));
+}
+
+.base-error--tone-danger.base-error--native-icon :deep(.el-result__icon svg) {
+  @apply text-red-600 dark:text-red-300;
+}
+
+.base-error--tone-warning.base-error--native-icon :deep(.el-result__icon svg) {
+  @apply text-amber-600 dark:text-amber-300;
+}
+
+.base-error--tone-neutral.base-error--native-icon :deep(.el-result__icon svg) {
+  @apply text-slate-500 dark:text-slate-400;
+}
+
+.base-error--tone-success.base-error--native-icon :deep(.el-result__icon svg) {
+  @apply text-emerald-600 dark:text-emerald-300;
+}
+
+.base-error--tone-primary.base-error--native-icon :deep(.el-result__icon svg) {
+  color: rgb(var(--color-primary));
 }
 
 .base-error--sm .base-error__icon {
