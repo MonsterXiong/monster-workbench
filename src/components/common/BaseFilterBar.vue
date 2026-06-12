@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, useId } from "vue";
+import { computed, nextTick, onMounted, onUpdated, ref, useId } from "vue";
 import { useI18n } from "../../composables/useI18n";
 import { joinAriaIds } from "../../utils";
 
@@ -85,6 +85,7 @@ const props = withDefaults(defineProps<Props>(), {
 
 const { t } = useI18n();
 const filterId = useId();
+const rootRef = ref<HTMLElement | null>(null);
 const titleId = `base-filter-bar-title-${filterId}`;
 const descriptionId = `base-filter-bar-description-${filterId}`;
 const labelledBy = computed(() => (props.ariaLabel ? undefined : props.ariaLabelledby || (props.title ? titleId : undefined)));
@@ -134,10 +135,30 @@ const getFilterTagType = (type?: FilterBarItem["type"]) => {
   if (type === "neutral" || !type) return "info";
   return type;
 };
+
+const syncChipCloseLabels = async () => {
+  await nextTick();
+  rootRef.value?.querySelectorAll<HTMLElement>(".base-filter-bar__chip.is-closable").forEach((chip) => {
+    const closeButton = chip.querySelector<HTMLElement>(".el-tag__close");
+    const label = chip.getAttribute("aria-label");
+    if (!closeButton || !label) return;
+    closeButton.setAttribute("aria-label", label);
+    closeButton.setAttribute("title", label);
+  });
+};
+
+onMounted(() => {
+  void syncChipCloseLabels();
+});
+
+onUpdated(() => {
+  void syncChipCloseLabels();
+});
 </script>
 
 <template>
   <section
+    ref="rootRef"
     class="base-filter-bar"
     :class="[
       `base-filter-bar--${resolvedSize}`,
@@ -216,20 +237,19 @@ const getFilterTagType = (type?: FilterBarItem["type"]) => {
           <span class="base-filter-bar__chip-text">{{ getFilterText(filter) }}</span>
         </el-tag>
       </template>
-      <el-button
+      <BaseButton
         v-if="showClear"
         class="base-filter-bar__clear"
-        type="info"
-        text
-        round
-        size="small"
+        type="ghost"
+        size="sm"
+        native-type="button"
         :disabled="isInteractiveDisabled"
         :aria-label="resolvedClearText"
         :title="resolvedClearText"
         @click="handleClear"
       >
         {{ resolvedClearText }}
-      </el-button>
+      </BaseButton>
     </div>
 
     <div v-else-if="showSummaryWhenEmpty" class="base-filter-bar__summary base-filter-bar__summary--empty" aria-live="polite">
@@ -416,10 +436,18 @@ const getFilterTagType = (type?: FilterBarItem["type"]) => {
 }
 
 .base-filter-bar__clear {
-  @apply min-w-0 max-w-full rounded-full px-2 py-1 text-[10px] font-black text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-opacity-20 disabled:cursor-not-allowed disabled:opacity-45 dark:hover:bg-slate-800 dark:hover:text-slate-100;
+  @apply min-w-0 max-w-full rounded-full text-[10px] font-black text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-opacity-20 dark:hover:bg-slate-800 dark:hover:text-slate-100;
+  height: 1.5rem !important;
+  padding: 0 0.5rem !important;
+  border-color: transparent !important;
+  background: transparent !important;
 }
 
-.base-filter-bar__clear :deep(span) {
+.base-filter-bar__clear.is-disabled {
+  @apply cursor-not-allowed opacity-45;
+}
+
+.base-filter-bar__clear :deep(> span) {
   @apply min-w-0 truncate;
 }
 

@@ -193,8 +193,8 @@ sequenceDiagram
    - 负责一致的桌面 UI 原子能力：按钮、输入、表格、面板、时间线、分页、弹窗、状态、上传、布局等。
    - 在 `main.ts` 中集中注册高频基础组件。
    - 当前公共组件层已经大量把 Element Plus 收进 `Base*` / `App*` 封装内部：`src/components/common` 下约 69 个 Vue 组件中，约 51 个已经直接使用 Element Plus 标签。
-   - 近期已继续收口 `AppImageUploader`、`AppPathSelector`、`BaseCopyButton`、`BaseDetailCard`、`BaseInfoCard`、`BaseFilterBar`、`BaseStatusDot`、`BaseFieldGroup`、`BasePanel`、`BaseDataState`、`BaseKeyValueList` 和 `BaseList` 等稳定 UI 面。
-   - `BaseList` 默认 loading / empty 状态已经复用 `BaseLoading` / `BaseEmpty`；`BaseKeyValueList` loading / empty 已接 `ElSkeleton` / `ElEmpty`；容器类组件优先通过 `ElCard` 做外壳但保留项目侧 props、slot、键盘和暗色主题 API。
+   - 近期已继续收口 `AppImageUploader`、`AppPathSelector`、`BaseCopyButton`、`BaseActionMenu`、`BaseAlert`、`BaseBadge`、`BaseDateRange`、`BaseDialog`、`BaseDrawer`、`BaseMessage`、`BasePageHeader`、`BaseSelectionBar`、`BaseDetailCard`、`BaseInfoCard`、`BaseFilterBar`、`BaseStatusDot`、`BaseFieldGroup`、`BasePanel`、`BaseDataState`、`BaseKeyValueList` 和 `BaseList` 等稳定 UI 面。
+   - `BaseList` 默认 loading / empty 状态已经复用 `BaseLoading` / `BaseEmpty`；`BaseKeyValueList` loading / empty 已接 `ElSkeleton` / `ElEmpty`；关闭、返回、筛选清空、选择清空、菜单触发等小型动作统一经 `BaseButton` 承接 Element Plus 按钮底座；容器类组件优先通过 `ElCard` 做外壳但保留项目侧 props、slot、键盘和暗色主题 API。
 2. 页面私有组件：`src/views/<module>/components/*`
    - 例如 `views/navigation/components/*`、`views/file-manager/components/*`、`views/system/components/*`。
    - 只服务单个页面，不跨模块扩散。
@@ -1151,7 +1151,8 @@ creative_model_run_repo.rs   model_runs repo behavior and tests
 公共组件层已经不只是原则约束，而是实际承担 Element Plus 与业务页面之间的缓冲层：
 
 - `BaseButton`、`BaseInput`、`BaseSelect`、`BaseTable`、`BaseUpload`、`BaseDialog`、`BaseDrawer`、`BaseDateRange` 等稳定控件已经直接封装 Element Plus。
-- `BasePanel`、`BaseFieldGroup`、`BaseDataState`、`BaseDetailCard`、`BaseInfoCard`、`BaseStatCard` 等容器 / 展示组件已经逐步用 `ElCard` / `ElTag` / `ElBadge` 等做底座，但仍保留项目自有视觉、插槽和键盘交互约束。
+- `BasePanel`、`BaseFieldGroup`、`BaseDataState`、`BaseDetailCard`、`BaseInfoCard`、`BaseStatCard`、`BaseBadge` 等容器 / 展示组件已经逐步用 `ElCard` / `ElTag` / `ElBadge` 等做底座，但仍保留项目自有视觉、插槽和键盘交互约束。
+- `BaseActionMenu`、`BaseAlert`、`BaseDialog`、`BaseDrawer`、`BaseMessage`、`BasePageHeader`、`BaseFilterBar`、`BaseSelectionBar`、`BaseDateRange` 等组件内的关闭、返回、清空、菜单触发动作已进一步收敛到 `BaseButton`，减少组件内部原生 button / 零散 `ElButton` 的重复样式。
 - `BaseLoading`、`BaseEmpty`、`BaseSkeletonCard`、`BaseKeyValueList`、`BaseList` 等状态展示组件已经开始复用统一 loading / empty 语义，减少每个组件内重复拼装。
 - `AppImageUploader` / `AppPathSelector` 是受控适配组件：外观可复用 Element Plus，但上传、路径选择和桌面能力仍通过 store/service/Rust 链路，不把底座能力暴露给页面。
 

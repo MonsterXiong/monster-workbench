@@ -359,18 +359,22 @@ watchEffect(() => {
   >
     <div v-if="label || (clearable && !showCalendar)" class="base-date-range__header">
       <span v-if="label" :id="labelId">{{ label }}</span>
-      <button
+      <BaseButton
         v-if="clearable && !showCalendar && (inputValue.start || inputValue.end)"
-        type="button"
+        type="ghost"
+        size="sm"
+        native-type="button"
         :disabled="isReadonly"
         :aria-label="clearLabel"
         :title="clearLabel"
         class="base-date-range__clear"
         @click="clear"
       >
-        <BaseIcon name="X" size="12" aria-hidden="true" />
+        <template #icon>
+          <BaseIcon name="X" size="12" aria-hidden="true" />
+        </template>
         <span>{{ t("common.clear") }}</span>
-      </button>
+      </BaseButton>
     </div>
 
     <el-config-provider v-if="showCalendar" :locale="elementLocale">
@@ -456,10 +460,14 @@ watchEffect(() => {
     </p>
 
     <div v-if="presets.length" class="base-date-range__presets">
-      <button
+      <BaseButton
         v-for="preset in presets"
         :key="preset.key"
-        type="button"
+        class="base-date-range__preset"
+        type="neutral"
+        size="sm"
+        native-type="button"
+        outline
         :disabled="isReadonly || !isPresetAllowed(preset)"
         :title="preset.label"
         :aria-pressed="isPresetActive(preset)"
@@ -467,7 +475,7 @@ watchEffect(() => {
         @click="applyPreset(preset)"
       >
         {{ preset.label }}
-      </button>
+      </BaseButton>
     </div>
 
     <p v-if="resolvedError" :id="errorId" class="base-date-range__error" role="alert">{{ resolvedError }}</p>
@@ -529,12 +537,14 @@ watchEffect(() => {
   @apply truncate text-xs font-black text-slate-800 dark:text-slate-100;
 }
 
-.base-date-range__header button {
-  @apply shrink-0 disabled:cursor-not-allowed;
+.base-date-range__clear {
+  @apply shrink-0 rounded-lg border border-slate-200 bg-white text-[10px] font-black text-slate-500 shadow-sm transition hover:border-red-200 hover:bg-red-50 hover:text-red-600 disabled:opacity-60 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-400 dark:hover:border-red-900 dark:hover:bg-red-950 dark:hover:text-red-300;
+  height: 1.75rem !important;
+  padding: 0 0.5rem !important;
 }
 
-.base-date-range__clear {
-  @apply inline-flex h-7 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 text-[10px] font-black text-slate-500 shadow-sm transition hover:border-red-200 hover:bg-red-50 hover:text-red-600 disabled:opacity-60 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-400 dark:hover:border-red-900 dark:hover:bg-red-950 dark:hover:text-red-300;
+.base-date-range__clear :deep(> span) {
+  gap: 0.25rem;
 }
 
 .base-date-range__picker {
@@ -631,15 +641,17 @@ watchEffect(() => {
   @apply mt-3 flex flex-wrap gap-2;
 }
 
-.base-date-range__presets button {
-  @apply rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[10px] font-black text-slate-500 shadow-sm transition hover:border-primary hover:text-primary disabled:cursor-not-allowed dark:border-slate-800 dark:bg-slate-950 dark:text-slate-400;
+.base-date-range__preset {
+  @apply rounded-full border border-slate-200 bg-white text-[10px] font-black text-slate-500 shadow-sm transition hover:border-primary hover:text-primary disabled:cursor-not-allowed dark:border-slate-800 dark:bg-slate-950 dark:text-slate-400;
+  height: 1.5rem !important;
+  padding: 0 0.625rem !important;
 }
 
-.base-date-range__presets button:hover {
+.base-date-range__preset:hover:not(.is-disabled) {
   background-color: rgb(var(--color-primary) / 0.05);
 }
 
-.base-date-range__presets button.is-active {
+.base-date-range__preset.is-active {
   border-color: rgb(var(--color-primary));
   background-color: rgb(var(--color-primary) / 0.1);
   @apply text-primary;
@@ -820,7 +832,7 @@ watchEffect(() => {
   .base-date-range__clear,
   .base-date-range__picker,
   .base-date-range__inputs label,
-  .base-date-range__presets button {
+  .base-date-range__preset {
     transition: none !important;
   }
 }

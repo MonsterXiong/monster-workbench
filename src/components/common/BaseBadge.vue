@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref, watchEffect } from "vue";
 import { handleActivationKeydown, stopDomEventPropagation } from "../../utils";
+import { syncElementPlusClearButtonLabel, type ElementPlusControlRef } from "./elementPlusDom";
 
 interface Props {
   type?: "primary" | "success" | "warning" | "danger" | "neutral";
@@ -35,6 +36,8 @@ const emit = defineEmits<{
 
 const isInteractive = computed(() => props.clickable && !props.disabled);
 const accessibleLabel = computed(() => props.ariaLabel || props.title || "");
+const badgeRef = ref<ElementPlusControlRef>(null);
+const resolvedCloseLabel = computed(() => props.closeLabel || "移除标签");
 const elementTagType = computed(() => (props.type === "neutral" ? "info" : props.type));
 const elementTagEffect = computed(() => {
   if (props.variant === "solid") return "dark";
@@ -62,10 +65,16 @@ const handleClose = (event: MouseEvent) => {
   if (props.disabled) return;
   emit("close", event);
 };
+
+watchEffect(() => {
+  if (!props.closable) return;
+  void syncElementPlusClearButtonLabel(badgeRef.value, ".el-tag__close", resolvedCloseLabel.value);
+});
 </script>
 
 <template>
   <el-tag
+    ref="badgeRef"
     class="base-badge"
     :class="[
       `base-badge--${type}`,
@@ -81,7 +90,7 @@ const handleClose = (event: MouseEvent) => {
     :effect="elementTagEffect"
     :size="elementTagSize"
     :round="true"
-    :closable="false"
+    :closable="closable"
     :disable-transitions="false"
     :role="clickable ? 'button' : undefined"
     :tabindex="clickable && !disabled ? 0 : undefined"
@@ -90,20 +99,10 @@ const handleClose = (event: MouseEvent) => {
     :title="title || accessibleLabel || undefined"
     @click="handleClick"
     @keydown="handleKeydown"
+    @close="handleClose"
   >
     <span v-if="dot" class="base-badge__dot" aria-hidden="true"></span>
     <slot></slot>
-    <button
-      v-if="closable"
-      type="button"
-      class="base-badge__close"
-      :disabled="disabled"
-      :aria-label="closeLabel || '移除标签'"
-      :title="closeLabel || '移除标签'"
-      @click="handleClose"
-    >
-      <BaseIcon name="X" size="10" aria-hidden="true" />
-    </button>
   </el-tag>
 </template>
 
@@ -191,17 +190,23 @@ const handleClose = (event: MouseEvent) => {
   background-color: #ffffff;
 }
 
-.base-badge__close {
-  @apply -mr-0.5 inline-flex h-3.5 w-3.5 items-center justify-center rounded-full transition hover:bg-black/10 disabled:cursor-not-allowed disabled:opacity-50;
+.base-badge :deep(.el-tag__close) {
+  @apply -mr-0.5 ml-0.5 inline-flex h-3.5 w-3.5 items-center justify-center rounded-full transition hover:bg-black/10;
+  color: currentColor;
 }
 
-.base-badge--lg .base-badge__close {
+.base-badge--lg :deep(.el-tag__close) {
   @apply h-4 w-4;
+}
+
+.base-badge.is-disabled :deep(.el-tag__close) {
+  @apply cursor-not-allowed opacity-50;
+  pointer-events: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
   .base-badge,
-  .base-badge__close {
+  .base-badge :deep(.el-tag__close) {
     transition: none !important;
   }
 }

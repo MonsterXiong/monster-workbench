@@ -189,10 +189,13 @@ const close = () => {
         >
           <slot name="actions"></slot>
         </span>
-        <button
+        <BaseButton
           v-if="closable"
-          type="button"
           class="base-alert__close"
+          type="ghost"
+          size="sm"
+          native-type="button"
+          circle
           :aria-label="resolvedCloseLabel"
           :title="resolvedCloseLabel"
           :disabled="disabled"
@@ -200,8 +203,10 @@ const close = () => {
           @click.stop="close"
           @keydown.stop
         >
-          <BaseIcon name="X" size="14" aria-hidden="true" />
-        </button>
+          <template #icon>
+            <BaseIcon name="X" size="14" aria-hidden="true" />
+          </template>
+        </BaseButton>
       </span>
     </el-alert>
   </Transition>
@@ -346,6 +351,10 @@ const close = () => {
 
 .base-alert__close {
   @apply flex h-6 w-6 shrink-0 items-center justify-center rounded-lg transition;
+  --el-button-size: 1.5rem;
+  border-color: transparent !important;
+  background: transparent !important;
+  padding: 0 !important;
 }
 
 .base-alert__close:hover {

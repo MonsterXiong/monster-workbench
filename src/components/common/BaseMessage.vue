@@ -52,24 +52,31 @@ const handleAction = (item: { id: string; onAction?: () => void }) => {
           <span class="base-message__text">{{ item.msg }}</span>
           <span v-if="item.description" class="base-message__description">{{ item.description }}</span>
         </div>
-        <button
+        <BaseButton
           v-if="item.actionText"
           class="base-message__action"
-          type="button"
+          type="ghost"
+          size="sm"
+          native-type="button"
           @click="handleAction(item)"
         >
           {{ item.actionText }}
-        </button>
-        <button
+        </BaseButton>
+        <BaseButton
           v-if="item.closable"
-          @click="removeMessage(item.id)"
           class="base-message__close"
-          type="button"
+          type="ghost"
+          size="sm"
+          native-type="button"
+          circle
           :aria-label="closeLabel"
           :title="closeLabel"
+          @click="removeMessage(item.id)"
         >
-          <BaseIcon name="X" :size="14" aria-hidden="true" />
-        </button>
+          <template #icon>
+            <BaseIcon name="X" :size="14" aria-hidden="true" />
+          </template>
+        </BaseButton>
         <span
           v-if="item.showProgress && item.duration > 0"
           class="base-message__progress"
@@ -124,17 +131,24 @@ const handleAction = (item: { id: string; onAction?: () => void }) => {
 }
 
 .base-message__action {
-  @apply shrink-0 rounded-lg px-2 py-1 text-[11px] font-black transition;
-  color: var(--message-fg);
-  background-color: var(--message-action-bg);
+  @apply shrink-0 rounded-lg text-[11px] font-black transition;
+  height: 1.5rem !important;
+  padding: 0 0.5rem !important;
+  border-color: transparent !important;
+  color: var(--message-fg) !important;
+  background-color: var(--message-action-bg) !important;
 }
 
-.base-message__action:hover {
-  background-color: var(--message-action-hover);
+.base-message__action:hover:not(.is-disabled) {
+  background-color: var(--message-action-hover) !important;
 }
 
 .base-message__close {
   @apply flex h-6 w-6 shrink-0 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 dark:text-slate-500 dark:hover:bg-slate-800 dark:hover:text-slate-300;
+  --el-button-size: 1.5rem;
+  border-color: transparent !important;
+  background: transparent !important;
+  padding: 0 !important;
 }
 
 .base-message__progress {

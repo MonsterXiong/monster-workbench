@@ -149,7 +149,7 @@ const handleBeforeClose = (done: () => void) => {
     :width="resolvedWidth"
     :close-on-click-modal="closeOnClickModal"
     :close-on-press-escape="closeOnPressEscape"
-    :show-close="showClose"
+    :show-close="false"
     :destroy-on-close="destroyOnClose"
     :fullscreen="fullscreen"
     :top="top"
@@ -179,18 +179,23 @@ const handleBeforeClose = (done: () => void) => {
         </div>
         <div v-if="$slots.actions || showClose" class="base-dialog__header-actions" role="group" :aria-label="resolvedActionsLabel">
           <slot name="actions"></slot>
-          <button
+          <BaseButton
             v-if="showClose"
-            type="button"
             class="base-dialog__close"
+            type="ghost"
+            size="sm"
+            native-type="button"
+            circle
             :disabled="isCloseDisabled"
             :aria-label="resolvedCloseLabel"
             :title="resolvedCloseLabel"
             data-ignore-container-click
             @click.stop="close"
           >
-            <BaseIcon name="X" size="16" aria-hidden="true" />
-          </button>
+            <template #icon>
+              <BaseIcon name="X" size="16" aria-hidden="true" />
+            </template>
+          </BaseButton>
         </div>
       </header>
     </template>
@@ -257,6 +262,10 @@ const handleBeforeClose = (done: () => void) => {
 
 .base-dialog__close {
   @apply flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200;
+  --el-button-size: 2rem;
+  border-color: transparent !important;
+  background: transparent !important;
+  padding: 0 !important;
 }
 
 .base-dialog__close:focus-visible {

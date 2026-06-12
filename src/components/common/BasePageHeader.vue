@@ -92,17 +92,23 @@ const resolvedActionsLabel = computed(() => props.actionsLabel || `${props.title
       />
 
       <div class="base-page-header__title-line">
-        <button
+        <BaseButton
           v-if="backable"
-          type="button"
           class="base-page-header__back"
+          type="neutral"
+          size="md"
+          native-type="button"
+          circle
+          outline
           :disabled="isInteractiveDisabled"
           :aria-label="backLabel"
           :title="backLabel"
           @click="emit('back')"
         >
-          <BaseIcon name="ArrowLeft" size="16" aria-hidden="true" />
-        </button>
+          <template #icon>
+            <BaseIcon name="ArrowLeft" size="16" aria-hidden="true" />
+          </template>
+        </BaseButton>
         <div v-if="icon" class="base-page-header__icon" aria-hidden="true">
           <BaseIcon :name="icon" size="18" aria-hidden="true" />
         </div>
@@ -167,15 +173,40 @@ const resolvedActionsLabel = computed(() => props.actionsLabel || `${props.title
 }
 
 .base-page-header__back {
-  @apply mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 shadow-sm transition-colors hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100;
+  @apply mt-0.5 flex shrink-0 items-center justify-center rounded-xl border text-slate-500 shadow-sm transition-colors dark:text-slate-400;
+  --el-button-size: 2.25rem;
+  border-color: #e2e8f0 !important;
+  background: #ffffff !important;
+  color: #64748b !important;
+}
+
+.base-page-header__back:hover:not(.is-disabled) {
+  border-color: #cbd5e1 !important;
+  background: #f8fafc !important;
+  color: #0f172a !important;
+}
+
+.base-page-header__back.is-disabled {
+  @apply cursor-not-allowed opacity-50;
+}
+
+:global(.dark) .base-page-header__back {
+  border-color: #334155 !important;
+  background: #0f172a !important;
+  color: #94a3b8 !important;
+}
+
+:global(.dark) .base-page-header__back:hover:not(.is-disabled) {
+  background: #1e293b !important;
+  color: #f8fafc !important;
 }
 
 .base-page-header--compact .base-page-header__back {
-  @apply h-8 w-8;
+  --el-button-size: 2rem;
 }
 
 .base-page-header--lg .base-page-header__back {
-  @apply h-10 w-10;
+  --el-button-size: 2.5rem;
 }
 
 .base-page-header__icon {

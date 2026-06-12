@@ -187,18 +187,23 @@ const handleClosed = () => {
         </div>
         <div v-if="$slots.actions || showClose" class="base-drawer__header-actions" role="group" :aria-label="resolvedActionsLabel">
           <slot name="actions"></slot>
-          <button
+          <BaseButton
             v-if="showClose"
-            type="button"
             class="base-drawer__close"
+            type="ghost"
+            size="sm"
+            native-type="button"
+            circle
             :disabled="isCloseDisabled"
             :aria-label="resolvedCloseLabel"
             :title="resolvedCloseLabel"
             data-ignore-container-click
             @click.stop="requestClose"
           >
-            <BaseIcon name="X" size="16" aria-hidden="true" />
-          </button>
+            <template #icon>
+              <BaseIcon name="X" size="16" aria-hidden="true" />
+            </template>
+          </BaseButton>
         </div>
       </header>
     </template>
@@ -296,6 +301,10 @@ const handleClosed = () => {
 
 .base-drawer__close {
   @apply flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 dark:text-slate-500 dark:hover:bg-slate-800 dark:hover:text-slate-200;
+  --el-button-size: 2rem;
+  border-color: transparent !important;
+  background: transparent !important;
+  padding: 0 !important;
 }
 
 .base-drawer__close:focus-visible {

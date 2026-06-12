@@ -185,20 +185,25 @@ onBeforeUnmount(() => {
     @command="handleCommand"
     @visible-change="handleVisibleChange"
   >
-    <button
+    <BaseButton
       :id="triggerId"
-      type="button"
       class="base-action-menu__trigger"
       :class="{ 'is-open': open }"
+      type="neutral"
+      size="sm"
+      native-type="button"
+      outline
       :disabled="disabled"
       aria-haspopup="menu"
       :aria-expanded="open"
       :aria-label="resolvedMenuLabel"
       @pointerdown="handleTriggerPointerdown"
     >
-      <BaseIcon :name="icon" size="15" aria-hidden="true" />
+      <template #icon>
+        <BaseIcon :name="icon" size="15" aria-hidden="true" />
+      </template>
       <span v-if="label">{{ label }}</span>
-    </button>
+    </BaseButton>
 
     <template #dropdown>
       <el-dropdown-menu
@@ -261,12 +266,40 @@ onBeforeUnmount(() => {
 }
 
 .base-action-menu__trigger {
-  @apply inline-flex h-8 min-w-0 items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-black text-slate-600 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-opacity-20 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-slate-700 dark:hover:bg-slate-950 dark:hover:text-slate-100;
+  @apply inline-flex min-w-0 items-center justify-center gap-1.5 rounded-lg border text-xs font-black shadow-sm transition focus:outline-none focus:ring-2 focus:ring-primary focus:ring-opacity-20;
+  height: 2rem !important;
+  padding: 0 0.625rem !important;
+  border-color: #e2e8f0 !important;
+  background: #ffffff !important;
+  color: #475569 !important;
+}
+
+.base-action-menu__trigger:hover:not(.is-disabled) {
+  border-color: #cbd5e1 !important;
+  background: #f8fafc !important;
+  color: #0f172a !important;
+}
+
+.base-action-menu__trigger.is-disabled {
+  @apply cursor-not-allowed opacity-60;
+}
+
+:global(.dark) .base-action-menu__trigger {
+  border-color: #1e293b !important;
+  background: #0f172a !important;
+  color: #cbd5e1 !important;
+}
+
+:global(.dark) .base-action-menu__trigger:hover:not(.is-disabled) {
+  border-color: #334155 !important;
+  background: #020617 !important;
+  color: #f8fafc !important;
 }
 
 .base-action-menu__trigger.is-open {
-  border-color: rgb(var(--color-primary) / 0.45);
-  @apply text-primary;
+  border-color: rgb(var(--color-primary) / 0.45) !important;
+  color: rgb(var(--color-primary)) !important;
+  background: rgb(var(--color-primary) / 0.06) !important;
 }
 
 :global(.base-action-menu-popper.el-popper) {

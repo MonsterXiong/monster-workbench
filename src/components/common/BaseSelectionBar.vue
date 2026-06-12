@@ -127,17 +127,19 @@ const handleClear = () => {
       <slot v-bind="slotState"></slot>
     </div>
 
-    <button
+    <BaseButton
       v-if="showClear"
-      type="button"
       class="base-selection-bar__clear"
+      type="ghost"
+      size="sm"
+      native-type="button"
       :disabled="isActionDisabled"
       :aria-label="resolvedClearText"
       :title="resolvedClearText"
       @click="handleClear"
     >
       {{ resolvedClearText }}
-    </button>
+    </BaseButton>
   </section>
 </template>
 
@@ -254,8 +256,16 @@ const handleClear = () => {
 }
 
 .base-selection-bar__clear {
-  @apply min-w-0 max-w-full truncate rounded-full px-2 py-1 text-[10px] font-black text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-opacity-20 disabled:cursor-not-allowed disabled:opacity-45 dark:hover:bg-slate-800 dark:hover:text-slate-100;
+  @apply min-w-0 max-w-full truncate rounded-full text-[10px] font-black text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-opacity-20 dark:hover:bg-slate-800 dark:hover:text-slate-100;
   max-width: min(100%, 14rem);
+  height: 1.5rem !important;
+  padding: 0 0.5rem !important;
+  border-color: transparent !important;
+  background: transparent !important;
+}
+
+.base-selection-bar__clear.is-disabled {
+  @apply cursor-not-allowed opacity-45;
 }
 
 @container (max-width: 26rem) {
