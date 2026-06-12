@@ -34,6 +34,6 @@
 ## 2026-06-11 公共组件治理待跟进
 
 - [ ] 继续按“高频稳定控件优先 Element Plus，复杂容器/业务形态自研补足”的原则评估剩余 `BaseForm` 壳层与未收口的稳定控件；迁移前需逐项确认现有 `Base*` API、slot、键盘交互与 Playground 示例不会被压缩。
-- [ ] 2026-06-12 已继续收口 `AppImageUploader`（`ElImage` / `ElButton` 外观，上传仍走 `fileManagerStore.uploadSelectedImage()`）、`AppPathSelector`（`ElInput` append 按钮）、`BaseCopyButton`（`ElButton` 底座）、`BaseDetailCard` / `BaseInfoCard` / `BaseFilterBar` / `BaseStatusDot`（`ElCard` / `ElTag` / `ElBadge` 等展示底座）、`BaseFieldGroup` / `BasePanel` / `BaseDataState`（`ElCard` 外壳）与 `BaseKeyValueList`（loading/empty 切到 `ElSkeleton` / `ElEmpty`）；后续继续审计展示、容器、表单组件，仍避免触碰 AI / Creative / `aiPage*` 页面。
+- [ ] 2026-06-12 已继续收口 `AppImageUploader`（`ElImage` / `ElButton` 外观，上传仍走 `fileManagerStore.uploadSelectedImage()`）、`AppPathSelector`（`ElInput` append 按钮）、`BaseCopyButton`（`ElButton` 底座）、`BaseDetailCard` / `BaseInfoCard` / `BaseFilterBar` / `BaseStatusDot`（`ElCard` / `ElTag` / `ElBadge` 等展示底座）、`BaseFieldGroup` / `BasePanel` / `BaseDataState`（`ElCard` 外壳）、`BaseKeyValueList`（loading/empty 切到 `ElSkeleton` / `ElEmpty`）与 `BaseList`（默认 loading/empty 复用 `BaseLoading` / `BaseEmpty`）；后续继续审计展示、容器、表单组件，仍避免触碰 AI / Creative / `aiPage*` 页面。
 - [ ] `BaseTable` 已接入 `el-table`，后续如继续增强可补充排序、选择列、固定列等数据表格能力，但应与 `BaseDataTable` 的职责边界分开。
 - [ ] `BaseSearchInput` 可继续评估与 `BaseInput` 共享 size 映射和状态样式工具，进一步收敛 Element Plus 输入封装的重复样式与尺寸映射逻辑。

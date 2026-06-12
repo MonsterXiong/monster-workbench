@@ -187,8 +187,15 @@ const handleItemKeydown = (event: KeyboardEvent, item: any, index: number) => {
       aria-live="polite"
     >
       <slot name="loading">
-        <BaseIcon name="LoaderCircle" size="15" class="base-list__loading-icon" aria-hidden="true" />
-        <span>{{ loadingText }}</span>
+        <BaseLoading
+          type="spinner"
+          size="sm"
+          :text="loadingText"
+          direction="horizontal"
+          align="center"
+          compact
+          surface="plain"
+        />
       </slot>
     </li>
     <li
@@ -197,7 +204,16 @@ const handleItemKeydown = (event: KeyboardEvent, item: any, index: number) => {
       class="base-list__empty"
       role="status"
     >
-      <slot name="empty">{{ emptyText }}</slot>
+      <slot name="empty">
+        <BaseEmpty
+          icon="Inbox"
+          size="sm"
+          compact
+          surface="plain"
+          :description="emptyText"
+          min-height="4.5rem"
+        />
+      </slot>
     </li>
     <template v-else>
       <li
