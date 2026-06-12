@@ -5,7 +5,7 @@
 ## 2026-06-11 架构硬化待跟进
 
 - [ ] 基于 `docs/architecture-current-state.md` 和实际代码，确认 post-goal architecture hardening 的拆分顺序与验收边界。
-- [ ] 继续收口 AI 域：2026-06-12 复核确认 `src/stores/ai.ts` 已是薄 façade 且不直接调用 service；后续重点改为约束 `ai-image-runtime.ts` / `ai-provider-runtime.ts` 膨胀，必要时抽 task polling、backend queue sync、pending message recovery 等稳定 helper，并在改 AI 页面时逐步减少对 `useAiStore()` 兼容入口的依赖。
+- [ ] 继续收口 AI 域：2026-06-12 复核确认 `src/stores/ai.ts` 已是薄 façade 且不直接调用 service；`syncAiProviderBackendQueue` 已是共享 service helper。后续重点改为约束 `AiImagePanel.vue`、`ai-image-runtime.ts`、`ai-provider-runtime.ts` 膨胀，必要时抽 image session list、size picker、preview/actions、task polling、pending image recovery、cancel/result patch 等稳定区块，并在改 AI 页面时逐步减少对 `useAiStore()` 兼容入口的依赖。
 - [ ] 继续收口 Creative 前端：2026-06-12 复核确认 `CreativeWorkflowDemo.vue` 已是项目中心 orchestration shell；后续不要为文件名盲拆，优先拆 `CreativeTabBatch.vue` / `CreativeTabAssets.vue` 内部表单、结果面板、任务表和图片墙等宽区块。
 - [ ] 继续产品化 `/creative` 三栏壳层：2026-06-12 复核确认左栏项目切换已接真实 store，但分类/tag 仍未驱动中间 workspace；右栏 `CreativeTaskForm` 是能力较窄的 quick launcher，与中间 Goal/Batch tabs 入口重叠但不等价。下一步先定义分类/tag -> workspace 的交互契约、quick forms 是否保留，再做真实窗口信息密度验收并决定是否扩展成正式资产库与 Agent 监控台。
 - [ ] 继续收口 Creative service / backend：2026-06-12 复核确认 Rust `TaskService` 短期可保留 task/asset/event 可信入口，先冻结 `run_review_asset_quality_stub` 的业务扩展；`BatchJobService` 的 supervisor / prompt worker shell / image worker shell 也短期保留在 Rust，不再新增正式生产 worker 分支。下一步先设计 worker identity、claim token、lease、heartbeat 和 Rust-owned localhost sidecar control API，正式 review/revision 与复杂业务策略迁入 Python workflow runtime。

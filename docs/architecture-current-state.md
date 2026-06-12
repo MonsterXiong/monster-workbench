@@ -1031,24 +1031,25 @@ ai-provider-runtime.ts
 
 代码事实：
 
-- `src/stores/ai.ts` 约 230 行，职责是聚合和转发分域 store，不直接调用 `ai.service`、`system.service`、`callTauri()` 或 `fetch()`。
+- `src/stores/ai.ts` 约 255 行，职责是聚合和转发分域 store，不直接调用 `ai.service`、`system.service`、`callTauri()` 或 `fetch()`。
 - `src/views/ai/components/AiProviderPanel.vue`、`AiChatPanel.vue`、`AiImagePanel.vue` 当前仍使用 `useAiStore()`，因此 façade 仍有兼容价值。
-- `src/stores/ai-provider-runtime.ts` 约 327 行，负责 provider 测试 runtime、后端队列同步、任务轮询、取消 queued task 和本地队列状态归并。
-- `src/stores/ai-image-runtime.ts` 约 597 行，负责生图会话消息、后端任务轮询、刷新恢复、取消、保存位置打开、尺寸白名单和 image result patch。
-- `src/stores/ai-chat-runtime.ts` 约 244 行，负责 chat session export、发送消息、typewriter 效果和 chat provider 调用。
-- `src/stores/ai-session-runtime.ts` 约 146 行，负责配置加载、session 选择/复制/删除/重命名、prompt library hydration 和 pending image recovery 触发。
+- `src/views/ai/components/AiImagePanel.vue` 约 3006 行，已经是 AI 前端最宽页面组件；它直接承载 image session 列表、筛选、尺寸选择、重试/取消、预览、文件定位和大量展示状态。
+- `src/stores/ai-provider-runtime.ts` 约 358 行，负责 provider 测试 runtime、任务轮询、取消 queued task 和本地队列状态归并；后端队列同步已抽到 `src/services/ai-provider-queue-sync.ts`。
+- `src/stores/ai-image-runtime.ts` 约 652 行，负责生图会话消息、后端任务轮询、刷新恢复、取消、保存位置打开、尺寸白名单和 image result patch。
+- `src/stores/ai-chat-runtime.ts` 约 267 行，负责 chat session export、发送消息、typewriter 效果和 chat provider 调用。
+- `src/stores/ai-session-runtime.ts` 约 163 行，负责配置加载、session 选择/复制/删除/重命名、prompt library hydration 和 pending image recovery 触发。
 
 边界判定：
 
 | 区域 | 当前状态 | 下一步 |
 |---|---|---|
 | `src/stores/ai.ts` | 薄 façade / 兼容入口 | 可保留；不要再把新 runtime 逻辑写回这里 |
-| AI 页面组件 | 仍统一消费 `useAiStore()` | 后续若改 AI 页面，可逐步改为直接消费分域 store，减少 façade 暴露面 |
-| `ai-provider-runtime.ts` | provider 测试与队列 runtime | 继续约束为前端 runtime 层；不要下沉 Tauri/HTTP 直连，复杂队列协议应沉到 service/Rust |
-| `ai-image-runtime.ts` | image session + backend task recovery runtime | 是当前 AI 前端最宽热区；后续优先抽稳定的 task polling/recovery helper 或 service adapter |
+| AI 页面组件 | 仍统一消费 `useAiStore()`；`AiImagePanel.vue` 已显著变宽 | 后续若改 AI 页面，可逐步直连分域 store；优先拆 image panel 的会话列表、尺寸选择、预览/操作区 |
+| `ai-provider-runtime.ts` | provider 测试与队列 runtime；backend queue sync 已有 service helper | 继续约束为前端 runtime 层；不要下沉 Tauri/HTTP 直连，后续可抽 provider task polling / cancel 结果归并 |
+| `ai-image-runtime.ts` | image session + backend task recovery runtime | 是当前 AI runtime 最宽热区；后续优先抽 image task polling、pending message recovery、image result patch helper |
 | `ai-chat-runtime.ts` | chat workflow 与导出 | 可保留；导出继续通过 `system.service`，模型调用继续通过 provider runtime |
 
-因此下一步不是继续拆 `src/stores/ai.ts` 文件名，而是：新功能尽量直接进入对应分域 store/runtime；若 `ai-image-runtime.ts` 或 `ai-provider-runtime.ts` 继续增长，优先抽 task polling、backend queue sync、pending message recovery 这类稳定小 helper。
+因此下一步不是继续拆 `src/stores/ai.ts` 文件名，而是：新功能尽量直接进入对应分域 store/runtime；若继续治理 AI 前端，优先处理 `AiImagePanel.vue` 组件拆分，以及 `ai-image-runtime.ts` / `ai-provider-runtime.ts` 中仍重复的 task polling、pending image recovery、cancel/result patch 逻辑。`syncAiProviderBackendQueue` 已经是共享 service helper，不再作为待抽事项重复推进。
 
 ### 10.3 `commands/database.rs` 已恢复为窄命名边界
 
@@ -1168,7 +1169,7 @@ Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `
 建议：
 
 1. 继续产品化 `/creative` 三栏工作台：中间 `CreativeWorkflowDemo.vue` 已是 orchestration shell，后续重点转为左栏资产分类是否驱动中间 workspace、右栏 quick forms 是否保留，以及正式资产库 / Agent 监控台的产品深度。
-2. 继续约束 AI 前端 runtime 热区：`src/stores/ai.ts` façade 可保留为兼容入口，新逻辑不要回流；后续重点是 `ai-image-runtime.ts` / `ai-provider-runtime.ts` 的 task polling、backend queue sync、pending message recovery 等稳定 helper。
+2. 继续约束 AI 前端 runtime 热区：`src/stores/ai.ts` façade 可保留为兼容入口，新逻辑不要回流；后续重点是拆 `AiImagePanel.vue` 的宽 UI 区块，并抽 `ai-image-runtime.ts` / `ai-provider-runtime.ts` 的 task polling、pending image recovery、cancel/result patch 等稳定 helper。
 3. 继续收敛 `TaskService` 与 `BatchJobService` 的 orchestration 边界，尽量让 asset CRUD、goal CRUD、batch snapshot 等稳定职责停留在对应 repo/service。
 4. 在现有 `schema_migrations` 基础上继续补齐旧库兼容回归、备份策略与更细粒度 migration 约束；repo 行为测试继续靠近对应 repo，`creative_db_tests.rs` 只保留 schema / migration 回归。
 5. 持续同步 `agent/open-loops.md` 与本文件，避免“代码已经推进、当前状态文档仍停留在旧阶段”。
