@@ -8,6 +8,9 @@ const { triggerToast } = useToast();
 const activeTreePath = ref("components/playground/PlaygroundNavigationDemos.vue");
 const treeEvent = ref("等待选择");
 const controlledTreeExpandedKeys = ref(["resources", "resources/layouts"]);
+const checkedTreeKeys = ref(["resources/layouts/three-column"]);
+const treeFilterText = ref("");
+const checkedTreeSummary = ref("已选 1 项");
 
 const treeData = ref([
   {
@@ -93,6 +96,21 @@ const handleTreeNodeClick = (node: { name: string; path: string; isDir: boolean 
 const handleTreeToggle = (payload: { node: { name: string; path: string }; expanded: boolean }) => {
   treeEvent.value = `${payload.node.name} ${payload.expanded ? "展开" : "收起"}`;
 };
+
+const filterResourceTreeNode = (query: string, node: { name: string; path: string; description?: string; meta?: string; badge?: string }) => {
+  const keyword = query.trim().toLowerCase();
+  if (!keyword) return true;
+
+  return [node.name, node.path, node.description, node.meta, node.badge]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase()
+    .includes(keyword);
+};
+
+const handleTreeCheck = (payload: { checkedKeys: string[]; halfCheckedKeys: string[] }) => {
+  checkedTreeSummary.value = `已选 ${payload.checkedKeys.length} 项，半选 ${payload.halfCheckedKeys.length} 项`;
+};
 </script>
 
 <template>
@@ -126,6 +144,36 @@ const handleTreeToggle = (payload: { node: { name: string; path: string }; expan
       </div>
 
       <div class="demo-grid">
+        <BasePanel title="勾选与过滤" subtitle="复用 Element Plus checkbox、checkedKeys 和 filterNodeMethod。">
+          <div class="tree-filter-stack">
+            <BaseSearchInput
+              v-model="treeFilterText"
+              placeholder="搜索布局、状态或资源路径"
+              size="sm"
+              search-on-input
+              aria-label="过滤资源树"
+            />
+            <BaseTree
+              v-model:checked-keys="checkedTreeKeys"
+              :data="resourceTreeData"
+              :filter-text="treeFilterText"
+              :filter-node-method="filterResourceTreeNode"
+              show-checkbox
+              check-on-click
+              default-expand-all
+              surface="muted"
+              size="sm"
+              empty-text="没有匹配的资源"
+              aria-label="可勾选资源树"
+              @node-click="handleTreeNodeClick"
+              @check="handleTreeCheck"
+            />
+          </div>
+          <template #footer>
+            <span class="navigation-result">{{ checkedTreeSummary }}</span>
+          </template>
+        </BasePanel>
+
         <BasePanel title="受控展开" subtitle="通过 expandedKeys 接管展开状态，适合与路由、搜索或偏好设置联动。">
           <BaseTree
             v-model:expanded-keys="controlledTreeExpandedKeys"
@@ -141,7 +189,9 @@ const handleTreeToggle = (payload: { node: { name: string; path: string }; expan
             <span class="navigation-result">展开节点：{{ controlledTreeExpandedKeys.join(" / ") }}</span>
           </template>
         </BasePanel>
+      </div>
 
+      <div class="demo-grid">
         <BasePanel title="整组禁用" subtitle="流程锁定或权限不足时禁用所有节点，同时保留展开内容可读。">
           <BaseTree
             :data="resourceTreeData"
@@ -196,6 +246,10 @@ const handleTreeToggle = (payload: { node: { name: string; path: string }; expan
 
 .navigation-result {
   @apply text-xs font-black text-slate-500 dark:text-slate-400;
+}
+
+.tree-filter-stack {
+  @apply grid gap-3;
 }
 
 .tree-custom-node {

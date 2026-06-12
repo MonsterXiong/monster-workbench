@@ -1,10 +1,20 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
 import { filterTreeNodeKeys, getFirstTruthyRecordValue, hasItem, setSelectionKey, uniqueArray } from "../../utils";
 
 type TreeSize = "sm" | "md" | "lg";
 type TreeSurface = "card" | "muted" | "plain";
 type BadgeType = "primary" | "success" | "warning" | "danger" | "neutral";
+type TreeKey = string | number;
+
+interface ElementTreeRef {
+  filter: (value: string) => void;
+  setCheckedKeys: (keys: TreeKey[], leafOnly?: boolean) => void;
+  getCheckedKeys: (leafOnly?: boolean) => TreeKey[];
+  getCheckedNodes: (leafOnly?: boolean, includeHalfChecked?: boolean) => TreeNode[];
+  getHalfCheckedKeys: () => TreeKey[];
+  getHalfCheckedNodes: () => TreeNode[];
+}
 
 export interface TreeNode {
   name: string;
@@ -24,6 +34,8 @@ interface Props {
   data: TreeNode[];
   expandedKeys?: string[];
   defaultExpandedKeys?: string[];
+  checkedKeys?: string[];
+  defaultCheckedKeys?: string[];
   indent?: number;
   indentStep?: number;
   ariaLabel?: string;
@@ -40,10 +52,20 @@ interface Props {
   folderOpenIcon?: string;
   disabled?: boolean;
   selectable?: boolean;
+  showCheckbox?: boolean;
+  checkStrictly?: boolean;
+  checkOnClick?: boolean;
+  checkOnClickLeaf?: boolean;
+  defaultExpandAll?: boolean;
+  accordion?: boolean;
+  emptyText?: string;
+  filterText?: string;
+  filterNodeMethod?: (query: string, node: TreeNode) => boolean;
 }
 
 const props = withDefaults(defineProps<Props>(), {
   defaultExpandedKeys: () => [],
+  defaultCheckedKeys: () => [],
   indent: 12,
   indentStep: 16,
   ariaLabel: "",
@@ -60,6 +82,15 @@ const props = withDefaults(defineProps<Props>(), {
   folderOpenIcon: "FolderOpen",
   disabled: false,
   selectable: true,
+  showCheckbox: false,
+  checkStrictly: false,
+  checkOnClick: false,
+  checkOnClickLeaf: true,
+  defaultExpandAll: false,
+  accordion: false,
+  emptyText: "",
+  filterText: "",
+  filterNodeMethod: undefined,
 });
 
 const emit = defineEmits<{
@@ -67,6 +98,9 @@ const emit = defineEmits<{
   (e: "node-toggle", payload: { node: TreeNode; expanded: boolean }): void;
   (e: "select", node: TreeNode): void;
   (e: "update:expandedKeys", keys: string[]): void;
+  (e: "update:checkedKeys", keys: string[]): void;
+  (e: "check", payload: { node: TreeNode; checkedKeys: string[]; checkedNodes: TreeNode[]; halfCheckedKeys: string[]; halfCheckedNodes: TreeNode[] }): void;
+  (e: "check-change", payload: { node: TreeNode; checked: boolean; indeterminate: boolean }): void;
 }>();
 
 defineSlots<{
@@ -81,7 +115,10 @@ const collectExpandedKeys = (nodes: TreeNode[]): string[] => {
 
 const initialExpandedKeys = () => uniqueArray([...collectExpandedKeys(props.data), ...props.defaultExpandedKeys]);
 const internalExpandedKeys = ref<string[]>(initialExpandedKeys());
+const internalCheckedKeys = ref<string[]>(uniqueArray(props.defaultCheckedKeys));
 const expandedKeysSource = computed(() => props.expandedKeys ?? internalExpandedKeys.value);
+const checkedKeysSource = computed(() => props.checkedKeys ?? internalCheckedKeys.value);
+const treeRef = ref<ElementTreeRef | null>(null);
 
 const rootClasses = computed(() => [
   `base-tree--${props.size}`,
@@ -104,6 +141,7 @@ const treeStyle = computed(() => ({
   "--base-tree-indent": `${props.indent}px`,
 }));
 
+const normalizeTreeKeys = (keys: TreeKey[]) => uniqueArray(keys.map(String));
 const isActive = (node: TreeNode) => Boolean(props.activeKey && getNodeKey(node) === props.activeKey);
 const isNodeDisabled = (node: TreeNode) => Boolean(props.disabled || node.disabled);
 const isNodeExpanded = (node: TreeNode) => hasItem(expandedKeysSource.value, getNodeKey(node));
@@ -111,6 +149,33 @@ const resolvedIcon = (node: TreeNode) => {
   if (node.icon) return node.icon;
   if (node.isDir) return isNodeExpanded(node) ? props.folderOpenIcon : props.folderIcon;
   return props.leafIcon;
+};
+
+const getNodeSearchText = (node: TreeNode) =>
+  [node.name, node.path, node.description, node.meta, node.badge]
+    .filter((value): value is string => Boolean(value))
+    .join(" ")
+    .toLowerCase();
+
+const resolvedFilterNodeMethod = (query: string, node: TreeNode) => {
+  if (props.filterNodeMethod) return props.filterNodeMethod(String(query ?? ""), node);
+
+  const normalizedQuery = String(query ?? "").trim().toLowerCase();
+  if (!normalizedQuery) return true;
+
+  return getNodeSearchText(node).includes(normalizedQuery);
+};
+
+const syncCheckedKeys = async (keys: string[]) => {
+  if (!props.showCheckbox) return;
+
+  await nextTick();
+  treeRef.value?.setCheckedKeys(keys);
+};
+
+const filterTree = async (query: string) => {
+  await nextTick();
+  treeRef.value?.filter(query);
 };
 
 watch(
@@ -122,6 +187,32 @@ watch(
   },
 );
 
+watch(
+  () => props.defaultCheckedKeys,
+  () => {
+    if (props.checkedKeys === undefined) {
+      internalCheckedKeys.value = uniqueArray(props.defaultCheckedKeys);
+      void syncCheckedKeys(internalCheckedKeys.value);
+    }
+  },
+);
+
+watch(
+  checkedKeysSource,
+  (keys) => {
+    void syncCheckedKeys(keys);
+  },
+  { immediate: true },
+);
+
+watch(
+  () => props.filterText,
+  (query) => {
+    void filterTree(query);
+  },
+  { immediate: true },
+);
+
 const commitExpandedKeys = (keys: string[]) => {
   const nextKeys = uniqueArray(keys);
   if (props.expandedKeys === undefined) {
@@ -129,6 +220,15 @@ const commitExpandedKeys = (keys: string[]) => {
   }
 
   emit("update:expandedKeys", nextKeys);
+};
+
+const commitCheckedKeys = (keys: string[]) => {
+  const nextKeys = uniqueArray(keys);
+  if (props.checkedKeys === undefined) {
+    internalCheckedKeys.value = nextKeys;
+  }
+
+  emit("update:checkedKeys", nextKeys);
 };
 
 const handleNodeClick = (node: TreeNode) => {
@@ -154,27 +254,60 @@ const handleNodeCollapse = (node: TreeNode) => {
   commitExpandedKeys(setSelectionKey(expandedKeysSource.value, getNodeKey(node), false));
   emit("node-toggle", { node, expanded: false });
 };
+
+const handleCheck = (
+  node: TreeNode,
+  payload: { checkedKeys: TreeKey[]; checkedNodes: TreeNode[]; halfCheckedKeys: TreeKey[]; halfCheckedNodes: TreeNode[] },
+) => {
+  const checkedKeys = normalizeTreeKeys(payload.checkedKeys);
+  const halfCheckedKeys = normalizeTreeKeys(payload.halfCheckedKeys);
+
+  commitCheckedKeys(checkedKeys);
+  emit("check", {
+    node,
+    checkedKeys,
+    checkedNodes: payload.checkedNodes,
+    halfCheckedKeys,
+    halfCheckedNodes: payload.halfCheckedNodes,
+  });
+};
+
+const handleCheckChange = (node: TreeNode, checked: boolean, indeterminate: boolean) => {
+  emit("check-change", { node, checked, indeterminate });
+};
 </script>
 
 <template>
   <el-tree
+    ref="treeRef"
     class="base-tree"
     :class="rootClasses"
     :style="treeStyle"
     :data="data"
+    :empty-text="emptyText"
     :props="treeProps"
     :node-key="nodeKey"
     :default-expanded-keys="expandedKeysSource"
+    :default-checked-keys="checkedKeysSource"
     :current-node-key="activeKey || undefined"
     :indent="indentStep"
     :expand-on-click-node="!disabled && expandOnClick"
+    :show-checkbox="showCheckbox"
+    :check-strictly="checkStrictly"
+    :check-on-click-node="!disabled && checkOnClick"
+    :check-on-click-leaf="!disabled && checkOnClickLeaf"
+    :default-expand-all="defaultExpandAll"
+    :accordion="accordion"
     :highlight-current="Boolean(activeKey)"
     :render-after-expand="false"
+    :filter-node-method="resolvedFilterNodeMethod"
     :aria-label="ariaLabel || undefined"
     :aria-disabled="disabled ? 'true' : undefined"
     @node-click="handleNodeClick"
     @node-expand="handleNodeExpand"
     @node-collapse="handleNodeCollapse"
+    @check="handleCheck"
+    @check-change="handleCheckChange"
   >
     <template #default="{ data: node }">
       <span
@@ -303,6 +436,24 @@ const handleNodeCollapse = (node: TreeNode) => {
 
 .base-tree :deep(.el-tree-node__expand-icon.is-leaf) {
   @apply opacity-0;
+}
+
+.base-tree :deep(.el-checkbox) {
+  @apply mr-0 shrink-0;
+}
+
+.base-tree :deep(.el-checkbox__inner) {
+  @apply h-4 w-4 rounded-md border-slate-300 bg-white transition dark:border-slate-700 dark:bg-slate-950;
+}
+
+.base-tree :deep(.el-checkbox__input.is-checked .el-checkbox__inner),
+.base-tree :deep(.el-checkbox__input.is-indeterminate .el-checkbox__inner) {
+  border-color: rgb(var(--color-primary));
+  background-color: rgb(var(--color-primary));
+}
+
+.base-tree :deep(.el-checkbox__input.is-focus .el-checkbox__inner) {
+  box-shadow: 0 0 0 3px rgb(var(--color-primary) / 0.14);
 }
 
 .base-tree--lines :deep(.el-tree-node) {

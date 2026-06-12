@@ -1,17 +1,22 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, onBeforeUnmount, ref } from "vue";
 import PlaygroundDemoSection from "../../PlaygroundDemoSection.vue";
 
 const selectValue = ref("design-system");
 const multiSelectValue = ref(["vue", "design-system"]);
 const limitedMultiSelectValue = ref(["vue", "design-system"]);
 const objectSelectValue = ref<Record<string, unknown>>({ id: "component", code: "BaseSelect" });
+const creatableSelectValue = ref("component-library");
+const remoteSelectValue = ref("");
+const remoteSelectKeyword = ref("");
+const remoteSelectLoading = ref(false);
 const segmentedValue = ref("balanced");
 const checkboxValue = ref(true);
 const disabledCheckboxValue = ref(false);
 const switchValue = ref(true);
 const disabledSwitchValue = ref(false);
 const radioValue = ref("balanced");
+let remoteSelectTimer: ReturnType<typeof setTimeout> | undefined;
 
 const selectOptions = [
   { value: "vue", label: "Vue 3", description: "前端交互框架。", icon: "PanelsTopLeft", meta: "前端" },
@@ -154,6 +159,93 @@ const objectSelectOptions = [
 
 const clearObjectSelectValue = () => ({ id: "", code: "" });
 
+const createSelectOptions = [
+  ...selectOptions,
+  {
+    value: "component-library",
+    label: "组件库",
+    selectedLabel: "组件库",
+    description: "允许输入后回车创建新标签。",
+    icon: "PackagePlus",
+    meta: "可创建",
+    filterText: "component library create",
+  },
+];
+
+const remoteSelectSourceOptions = [
+  {
+    value: "layout-kit",
+    label: "布局套件",
+    selectedLabel: "布局",
+    description: "三栏布局、分割面板和容器组合。",
+    icon: "LayoutTemplate",
+    meta: "Layout",
+    filterText: "layout panels container",
+  },
+  {
+    value: "filter-kit",
+    label: "筛选工具集",
+    selectedLabel: "筛选",
+    description: "筛选条、搜索输入和结果摘要。",
+    icon: "ListFilter",
+    meta: "Data",
+    filterText: "filter search result",
+  },
+  {
+    value: "form-kit",
+    label: "表单控件集",
+    selectedLabel: "表单",
+    description: "输入、选择、日期和校验状态。",
+    icon: "SquarePen",
+    meta: "Form",
+    filterText: "form input select date validation",
+  },
+  {
+    value: "feedback-kit",
+    label: "反馈浮层集",
+    selectedLabel: "反馈",
+    description: "提示、弹窗、抽屉和轻提示。",
+    icon: "MessagesSquare",
+    meta: "Feedback",
+    filterText: "tooltip dialog drawer toast",
+  },
+  {
+    value: "table-kit",
+    label: "数据表格集",
+    selectedLabel: "表格",
+    description: "固定列、排序、批量选择和空态。",
+    icon: "Table2",
+    meta: "Table",
+    filterText: "table sort fixed selection empty",
+  },
+];
+
+const remoteSelectOptions = computed(() => {
+  const keyword = remoteSelectKeyword.value.trim().toLowerCase();
+  if (!keyword) return remoteSelectSourceOptions.slice(0, 4);
+
+  return remoteSelectSourceOptions.filter((option) =>
+    [option.label, option.selectedLabel, option.description, option.meta, option.filterText]
+      .join(" ")
+      .toLowerCase()
+      .includes(keyword)
+  );
+});
+
+const handleRemoteSelectSearch = (query: string) => {
+  remoteSelectKeyword.value = query;
+  remoteSelectLoading.value = true;
+
+  if (remoteSelectTimer) clearTimeout(remoteSelectTimer);
+  remoteSelectTimer = setTimeout(() => {
+    remoteSelectLoading.value = false;
+  }, 260);
+};
+
+onBeforeUnmount(() => {
+  if (remoteSelectTimer) clearTimeout(remoteSelectTimer);
+});
+
 const radioOptions = [
   { value: "compact", label: "紧凑", description: "适合侧栏和抽屉。", icon: "Rows3", meta: "S" },
   { value: "balanced", label: "均衡", description: "默认密度，适合多数表单。", icon: "PanelTop", meta: "M" },
@@ -255,6 +347,32 @@ const longSegmentedOptions = [
               placeholder="对象值选择"
               aria-label="对象值选择"
               @update:model-value="objectSelectValue = $event as Record<string, unknown>"
+            />
+            <BaseSelect
+              v-model="creatableSelectValue"
+              :options="createSelectOptions"
+              clearable
+              filterable
+              allow-create
+              default-first-option
+              :reserve-keyword="false"
+              automatic-dropdown
+              placeholder="输入后回车创建能力"
+              aria-label="可创建能力选择"
+            />
+            <BaseSelect
+              v-model="remoteSelectValue"
+              :options="remoteSelectOptions"
+              clearable
+              filterable
+              remote
+              remote-show-suffix
+              :loading="remoteSelectLoading"
+              :remote-method="handleRemoteSelectSearch"
+              :debounce="180"
+              no-match-text="没有远程结果"
+              placeholder="远程搜索组件能力"
+              aria-label="远程搜索能力选择"
             />
             <div class="input-demo-row">
               <BaseSelect model-value="tauri" :options="selectOptions" size="xs" placeholder="迷你尺寸" />

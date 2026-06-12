@@ -2,10 +2,28 @@
 import { computed, nextTick, ref, useId, watchEffect } from "vue";
 import { useI18n } from "../../composables/useI18n";
 import { getValueIdentity, isSameValueIdentity, joinAriaIds, joinNonEmptyStrings, normalizeStringKey } from "../../utils";
+import { toElementPlusSize, type ProjectControlSize } from "./elementPlusDom";
 
 type SelectValue = string | number | boolean | Record<string, unknown> | null | undefined;
 type SelectClearValue = SelectValue | SelectValue[] | (() => SelectValue | SelectValue[]);
 type ElementSelectClearValue = string | number | boolean | (() => SelectValue | SelectValue[]) | undefined;
+type SelectPlacement =
+  | "auto"
+  | "auto-start"
+  | "auto-end"
+  | "top"
+  | "top-start"
+  | "top-end"
+  | "bottom"
+  | "bottom-start"
+  | "bottom-end"
+  | "left"
+  | "left-start"
+  | "left-end"
+  | "right"
+  | "right-start"
+  | "right-end";
+type SelectScrollDirection = "top" | "bottom" | "left" | "right";
 
 interface Option {
   label: string;
@@ -28,6 +46,15 @@ interface Props {
   disabled?: boolean;
   clearable?: boolean;
   filterable?: boolean;
+  allowCreate?: boolean;
+  defaultFirstOption?: boolean;
+  reserveKeyword?: boolean;
+  automaticDropdown?: boolean;
+  remote?: boolean;
+  debounce?: number;
+  remoteMethod?: (query: string) => void;
+  filterMethod?: (query: string) => void;
+  remoteShowSuffix?: boolean;
   multiple?: boolean;
   collapseTags?: boolean;
   collapseTagsTooltip?: boolean;
@@ -40,7 +67,11 @@ interface Props {
   teleported?: boolean;
   fitInputWidth?: boolean;
   popperClass?: string;
-  size?: "xs" | "sm" | "md" | "lg";
+  placement?: SelectPlacement;
+  fallbackPlacements?: SelectPlacement[];
+  offset?: number;
+  showArrow?: boolean;
+  size?: ProjectControlSize;
   error?: boolean;
   errorMessage?: string;
   valueKey?: string;
@@ -58,6 +89,15 @@ const props = withDefaults(defineProps<Props>(), {
   disabled: false,
   clearable: false,
   filterable: false,
+  allowCreate: false,
+  defaultFirstOption: false,
+  reserveKeyword: true,
+  automaticDropdown: false,
+  remote: false,
+  debounce: 300,
+  remoteMethod: undefined,
+  filterMethod: undefined,
+  remoteShowSuffix: false,
   multiple: false,
   collapseTags: true,
   collapseTagsTooltip: true,
@@ -70,6 +110,10 @@ const props = withDefaults(defineProps<Props>(), {
   teleported: true,
   fitInputWidth: true,
   popperClass: "",
+  placement: "bottom-start",
+  fallbackPlacements: () => ["bottom-start", "top-start", "right", "left"],
+  offset: 12,
+  showArrow: true,
   size: "md",
   error: false,
   errorMessage: "",
@@ -87,6 +131,8 @@ const emit = defineEmits<{
   (e: "clear"): void;
   (e: "visible-change", val: boolean): void;
   (e: "remove-tag", val: SelectValue): void;
+  (e: "popup-scroll", val: { scrollTop: number; scrollLeft: number }): void;
+  (e: "end-reached", val: SelectScrollDirection): void;
   (e: "focus", event: FocusEvent): void;
   (e: "blur", event: FocusEvent): void;
 }>();
@@ -139,12 +185,7 @@ const shouldOverrideClearValue = computed(() => {
   return Array.isArray(clearValue) ? clearValue.some(Boolean) : isObjectClearValue(clearValue);
 });
 
-const elSize = computed(() => {
-  if (props.size === "xs") return "small";
-  if (props.size === "sm") return "small";
-  if (props.size === "lg") return "large";
-  return "default";
-});
+const elSize = computed(() => toElementPlusSize(props.size));
 
 const computedValue = computed({
   get: () => props.modelValue,
@@ -244,6 +285,15 @@ watchEffect(() => {
       :placeholder="placeholder || t('common.selectPlaceholder')"
       :clearable="clearable"
       :filterable="filterable"
+      :allow-create="allowCreate"
+      :default-first-option="defaultFirstOption"
+      :reserve-keyword="reserveKeyword"
+      :automatic-dropdown="automaticDropdown"
+      :remote="remote"
+      :debounce="debounce"
+      :remote-method="remoteMethod"
+      :filter-method="filterMethod"
+      :remote-show-suffix="remoteShowSuffix"
       :multiple="multiple"
       :collapse-tags="collapseTags"
       :collapse-tags-tooltip="collapseTagsTooltip"
@@ -256,6 +306,10 @@ watchEffect(() => {
       :teleported="teleported"
       :fit-input-width="fitInputWidth"
       :popper-class="resolvedPopperClass"
+      :placement="placement"
+      :fallback-placements="fallbackPlacements"
+      :offset="offset"
+      :show-arrow="showArrow"
       :value-key="valueKey"
       :value-on-clear="resolvedValueOnClear"
       :empty-values="emptyValues"
@@ -273,6 +327,8 @@ watchEffect(() => {
       @clear="handleClear"
       @visible-change="emit('visible-change', $event); syncComboboxAria()"
       @remove-tag="emit('remove-tag', $event)"
+      @popup-scroll="emit('popup-scroll', $event)"
+      @end-reached="emit('end-reached', $event)"
       @focus="emit('focus', $event); syncComboboxAria()"
       @blur="emit('blur', $event)"
     >

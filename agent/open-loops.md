@@ -27,5 +27,7 @@
 ## 2026-06-11 公共组件治理待跟进
 
 - [ ] 继续按“高频稳定控件优先 Element Plus，复杂容器 / 业务形态自研补足”的原则评估剩余稳定控件；迁移前需逐项确认现有 `Base*` API、slot、键盘交互与 Playground 示例不会被压缩。
+- [ ] 2026-06-13 已继续收口 `BaseTree`：保留项目节点模型、图标、badge、meta、active 与插槽，同时补齐 Element Plus `showCheckbox`、受控 `checkedKeys`、`checkStrictly`、`checkOnClick`、`defaultExpandAll`、`accordion`、`filterText` / `filterNodeMethod` 和空态文本；Playground 已覆盖可勾选与过滤示例。
+- [ ] 2026-06-13 已继续收口 `BaseSelect`：共享 `toElementPlusSize()`，保留项目 option / selectedLabel / valueKey 语义，同时补齐 Element Plus 可创建、远程搜索、filterMethod、下拉定位、滚动事件等高频能力；Playground 已覆盖可创建与远程搜索示例。后续继续按控件族分批审计，不一次性机械替换。
 - [ ] 2026-06-12 已继续收口 `BaseTooltip`：保留项目内容 slot、受控 `open`、视口避让和可访问描述，同时补齐 Element Plus / Popper 的 `*-start/end` placement、`hover/focus/click/contextmenu` trigger、浅色提示、箭头、enterable、autoClose、fallbackPlacements 和 strategy；Playground 已覆盖触发方式、浅色提示、无箭头和自动关闭示例。
 - [ ] 后续触碰 AI panels 或 `WorkspacePage` 时，优先评估页面级 `<el-*>` 是否能回收到 `Base*` / `App*` 封装；不要扩大页面直用 Element Plus 范围。
