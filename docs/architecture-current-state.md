@@ -182,7 +182,7 @@ sequenceDiagram
 当前值得注意的页面：
 
 - `views/creative/CreativePage.vue` 当前已经是三栏工作台壳层，装配 `CreativeAssetSidebar`、`CreativeWorkspace`、`CreativeAgentMonitor`。
-- `CreativeWorkflowDemo.vue` 当前主要位于中间工作区内部，更准确的定位是“项目中心 orchestration shell”：承载项目卡片、workspace tab 装配、seed bootstrap、项目历史刷新与跨 store listener 初始化；prompt / assets / goal / batch / history 细节已进入 `tabs/*` 子组件。左右栏已首轮接入当前项目、资产分类计数、任务队列和执行活动，但仍属于轻量项目/监控壳层，不是完整资产库或正式 Agent 控制台。
+- `CreativeWorkflowDemo.vue` 当前主要位于中间工作区内部，更准确的定位是“项目中心 orchestration shell”：承载项目卡片、workspace tab 装配、seed bootstrap、项目历史刷新与 task/batch listener 初始化；prompt / assets / goal / batch / history 细节已进入 `tabs/*` 子组件。左栏项目切换已接真实 `creative-project` store，资产分类/tag 仍只是计数与 emit；右栏队列/日志接真实状态，但 properties 仍是 quick launcher，不是完整资产库或正式 Agent 控制台。
 - `views/ai/AiPage.vue` 是 AI 工作台壳层，按 tab 组合 `AiProviderPanel`、`AiChatPanel`、`AiImagePanel`、`AiPromptPanel`、`AiFeaturePanel`。
 
 ### 3.3 组件层
@@ -1265,11 +1265,6 @@ Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `
 - `/creative` 的项目中心当前已经从单纯的 seed project card 演示，过渡到“SQLite 真实项目记录 + task/asset/goal/batch 聚合统计”的混合态展示。
 - 这意味着项目域已经从 `projectId` 聚合，继续走向“项目实体 + 聚合视图”的过渡态；后续仍需把项目编辑、归档和导入导出补齐到完整生命周期。
 
-## 2026-06-11 补充：creative-asset.store 接线完成
-
-- 已新增并接通 `src/stores/creative-asset.ts`，把 domain asset draft、资产关系创建与 domain asset 运行状态从 `useTaskStore` 中抽离。
-- `src/views/creative/components/CreativeWorkflowDemo.vue` 当前通过 `useCreativeAssetStore + useCreativeTaskStore + useCreativeGoalStore + useCreativeBatchStore + useCreativeProjectStore` 协作，`/creative` 页面已不再依赖 `useTaskStore`。
-- `useTaskStore` 当前已基本收缩为 background task progress store，下一步更适合把这部分正式命名并独立为 `background-task.store.ts`。
 ## 2026-06-11 补充：creative-asset / background-task.store 完成
 
 - 已新增 `src/stores/creative-asset.ts`，把 domain asset draft、资产关系创建与运行状态从 `useTaskStore` 中抽离。
@@ -1289,20 +1284,21 @@ Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `
 
 - `CreativePage.vue` 仍是三栏 splitpanes 壳层，只负责左右栏折叠与装配 `CreativeAssetSidebar` / `CreativeWorkspace` / `CreativeAgentMonitor`，不直接访问 service、Tauri、Python 或原始 HTTP。
 - `CreativeWorkspace.vue` 只是中间栏标题、左右栏 toggle 按钮和 `CreativeWorkflowDemo` 容器。
-- `CreativeWorkflowDemo.vue` 约 336 行，当前职责是项目中心 orchestration shell：确保 seed project、初始化 task/batch listeners、加载项目 index/history、维护 active workspace tab、聚合项目卡片统计，并把 active project id 传给 prompt/assets/goal/batch/history tabs。
+- `CreativeWorkflowDemo.vue` 约 385 行，当前职责是项目中心 orchestration shell：确保 seed project、初始化 task/batch listeners、加载项目 index/history、维护 active workspace tab、聚合项目卡片统计，并把 active project id 传给 prompt/assets/goal/batch/history tabs；它当前直接使用 project/task/batch store，asset/goal 细节已经下沉到对应 tab。
 - workspace 细节已经拆到 `src/views/creative/components/tabs/*`：`CreativeTabPrompt`、`CreativeTabAssets`、`CreativeTabGoal`、`CreativeTabBatch`、`CreativeTabHistory` 和 `CreativeProjectList`。后续如果继续拆，应优先拆这些大 tab 的内部表单/结果/列表，而不是继续拆 `CreativeWorkflowDemo` 文件名。
 - `/creative` 页面私有组件没有直接导入 `src/services/*`；调用链保持为 Component -> Store -> Service -> callTauri/Rust。
-- `CreativeAssetSidebar.vue` 已读真实项目/资产/任务/Goal/Batch 索引并展示计数，但它的 `select` 事件当前没有在 `CreativePage.vue` 接线，因此资产分类按钮还没有驱动中间 workspace 过滤或跳转。
-- `CreativeAgentMonitor.vue` 的 monitor tab 聚合真实队列和执行日志；properties tab 内嵌 `CreativeTaskForm.vue`，可快速创建 Goal / Batch，但这与中间 `CreativeTabGoal` / `CreativeTabBatch` 存在功能入口重叠。
+- `CreativeAssetSidebar.vue` 已读真实项目/资产/任务/Goal/Batch 索引并展示计数；项目按钮会直接调用 `creativeProjectStore.setActiveCreativeProjectId()`，但资产分类 `select` 事件当前没有在 `CreativePage.vue` 接线，tag 按钮也没有过滤动作，因此分类/tag 还没有驱动中间 workspace 过滤或跳转。
+- `CreativeAgentMonitor.vue` 默认停在 properties tab，并内嵌 `CreativeTaskForm.vue`；该 quick form 可发起 goal stub 和创建 mock/prompt/real batch job，但不暴露中间 `CreativeTabBatch.vue` 的 promptTemplate、providerConfig、start/pause/resume/cancel、分页任务与结果表能力，因此它与中间 Goal/Batch tabs 是入口重叠而非功能等价。
+- `CreativeTabBatch.vue` 约 655 行，集中承载 batch 创建、provider 高级配置、状态卡、活动时间线、分页任务表、结果表和 image wall；`CreativeTabAssets.vue` 约 419 行，集中承载 review stub、revision instruction、domain asset draft、资产关系快照和状态面板。这两个 tab 是当前前端下一步拆分的主要宽区块。
 
 边界判定：
 
 | 区域 | 当前状态 | 下一步 |
 |---|---|---|
 | `CreativeWorkflowDemo.vue` | 已是项目中心 shell | 保留；不要为“文件名仍叫 Demo”盲目拆，后续可考虑重命名或迁移到正式 workspace 命名 |
-| `tabs/*` 组件 | 业务细节承载区，`CreativeTabBatch.vue` / `CreativeTabAssets.vue` 仍较宽 | 后续拆内部表单、结果面板、任务表和图片墙更有价值 |
-| 左栏资产库 | 真实计数 + 项目切换，分类选择未接线 | 产品化前先定义分类选择是否过滤 assets tab、切换 workspace 或进入正式资产库 |
-| 右栏 Agent 监控 | 队列/日志接真实状态，properties 是 quick launcher | 需要决定 quick forms 是否保留，或把创建入口收敛回中间 tabs |
+| `tabs/*` 组件 | 业务细节承载区，`CreativeTabBatch.vue` / `CreativeTabAssets.vue` 已是主要宽区块 | 后续拆内部表单、结果面板、任务表和图片墙更有价值 |
+| 左栏资产库 | 项目切换已接真实 store；分类/tag 只有计数与 emit | 产品化前先定义分类选择是否过滤 assets tab、切换 workspace 或进入正式资产库 |
+| 右栏 Agent 监控 | 队列/日志接真实状态；properties 是能力较窄的 quick launcher | 需要决定 quick forms 是否保留，或把创建入口收敛回中间 tabs |
 | 三栏整体 | 可作为持续型创作工作台雏形 | 还不是完整资产库 / Agent 控制台；正式化前先补交互契约和信息密度验收 |
 
 因此，本轮结论是：Creative 前端的下一刀不再是“继续确认 `CreativeWorkflowDemo` 是否是 shell”，而是围绕三件具体事推进：左栏分类到中间 workspace 的交互契约、右栏 quick forms 与中间 tabs 的职责去重、以及 `CreativeTabBatch` / `CreativeTabAssets` 内部再拆。
