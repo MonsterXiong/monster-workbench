@@ -424,11 +424,9 @@ onUpdated(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  top: 50% !important;
   cursor: pointer;
   line-height: normal;
   outline: none;
-  transform: translate(-50%, -50%) !important;
 }
 
 .base-slider__control :deep(.el-slider__button-wrapper::after) {

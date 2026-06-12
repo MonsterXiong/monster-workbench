@@ -140,9 +140,9 @@ const accessibleLabel = computed(() => props.ariaLabel || props.title || "");
 .el-button.is-icon-only :deep(.el-icon) {
   display: inline-grid !important;
   place-items: center !important;
-  width: 100% !important;
-  height: 100% !important;
-  line-height: 0;
+  width: auto !important;
+  height: auto !important;
+  line-height: 1;
 }
 
 .el-button.is-icon-only :deep(> span:empty) {
@@ -160,7 +160,7 @@ const accessibleLabel = computed(() => props.ariaLabel || props.title || "");
 .el-button.is-icon-only :deep(svg) {
   display: block;
   flex-shrink: 0;
-  margin: 0;
+  margin: auto;
   transform: translate(0, 0);
 }
 
