@@ -11,6 +11,7 @@ import {
   normalizeNumberStep,
   parseFormattedNumber,
 } from "../../utils";
+import { toElementPlusSize, type ProjectControlSize } from "./elementPlusDom";
 
 interface Props {
   modelValue: number;
@@ -35,7 +36,7 @@ interface Props {
   ariaDescribedby?: string;
   decrementLabel?: string;
   incrementLabel?: string;
-  size?: "sm" | "md" | "lg";
+  size?: ProjectControlSize;
   block?: boolean;
 }
 
@@ -90,11 +91,7 @@ const normalizedMin = computed(() => Math.min(rawMin.value, rawMax.value));
 const normalizedMax = computed(() => Math.max(rawMin.value, rawMax.value));
 const normalizedStep = computed(() => normalizeNumberStep(props.step));
 const normalizedPrecision = computed(() => Math.max(props.precision, getNumberPrecision(normalizedStep.value)));
-const elementSize = computed(() => {
-  if (props.size === "sm") return "small";
-  if (props.size === "lg") return "large";
-  return "default";
-});
+const elementSize = computed(() => toElementPlusSize(props.size));
 
 const clamp = (nextValue: number) => {
   return clampNumber(nextValue, normalizedMin.value, normalizedMax.value, 0, normalizedPrecision.value);
@@ -296,7 +293,15 @@ onUpdated(() => {
   @apply h-8 min-w-28;
 }
 
+.base-number-input--xs {
+  @apply h-7 min-w-24;
+}
+
 .base-number-input--sm.base-number-input--block {
+  @apply min-w-0;
+}
+
+.base-number-input--xs.base-number-input--block {
   @apply min-w-0;
 }
 
@@ -391,6 +396,10 @@ onUpdated(() => {
   @apply text-sm;
 }
 
+.base-number-input--xs :deep(.el-input-number .el-input__inner) {
+  @apply text-[11px];
+}
+
 :deep(.el-input-number__decrease),
 :deep(.el-input-number__increase) {
   @apply top-0 flex h-full w-8 items-center justify-center rounded-none border-0 bg-slate-50 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset focus-visible:ring-opacity-30 dark:bg-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100;
@@ -417,9 +426,18 @@ onUpdated(() => {
   @apply px-7;
 }
 
+.base-number-input--xs :deep(.el-input-number .el-input__wrapper) {
+  @apply px-6;
+}
+
 .base-number-input--sm :deep(.el-input-number__decrease),
 .base-number-input--sm :deep(.el-input-number__increase) {
   @apply w-7;
+}
+
+.base-number-input--xs :deep(.el-input-number__decrease),
+.base-number-input--xs :deep(.el-input-number__increase) {
+  @apply w-6;
 }
 
 .base-number-input--lg :deep(.el-input-number .el-input__wrapper) {

@@ -3,6 +3,7 @@ import { computed, useAttrs, useId } from "vue";
 import { useI18n } from "../../composables/useI18n";
 import { joinAriaIds, omit } from "../../utils";
 import BaseIcon from "./BaseIcon.vue";
+import { toElementPlusSize, type ProjectControlSize } from "./elementPlusDom";
 
 defineOptions({
   inheritAttrs: false,
@@ -15,7 +16,7 @@ interface Props {
   readonly?: boolean;
   error?: boolean;
   loading?: boolean;
-  size?: "sm" | "md" | "lg";
+  size?: ProjectControlSize;
   rows?: number;
   autosize?: boolean | { minRows?: number; maxRows?: number };
   maxlength?: number;
@@ -84,11 +85,7 @@ const filteredAttrs = computed(() => {
   return omit(attrs, ["size", "type", "rows", "autosize", "resize", "maxlength"]);
 });
 
-const elSize = computed(() => {
-  if (props.size === "sm") return "small";
-  if (props.size === "lg") return "large";
-  return "default";
-});
+const elSize = computed(() => toElementPlusSize(props.size));
 </script>
 
 <template>
@@ -190,6 +187,10 @@ const elSize = computed(() => {
   @apply px-2.5 py-2 text-[11px] leading-5;
 }
 
+.base-textarea--xs :deep(.el-textarea__inner) {
+  @apply px-2 py-1.5 text-[11px] leading-4;
+}
+
 .base-textarea--lg :deep(.el-textarea__inner) {
   @apply px-3.5 py-3 text-sm leading-6;
 }
@@ -200,6 +201,10 @@ const elSize = computed(() => {
 
 .base-textarea--sm.has-trailing-indicator :deep(.el-textarea__inner) {
   @apply pb-7;
+}
+
+.base-textarea--xs.has-trailing-indicator :deep(.el-textarea__inner) {
+  @apply pb-6;
 }
 
 .base-textarea--lg.has-trailing-indicator :deep(.el-textarea__inner) {

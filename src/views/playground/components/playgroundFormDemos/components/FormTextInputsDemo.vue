@@ -82,13 +82,16 @@ const decimalNumberValue = ref(3.5);
           <BaseTextarea v-model="textareaValue" size="lg" :rows="4" :maxlength="120" show-word-limit />
         </BaseFormItem>
         <BaseFormItem label="自动高度" description="内容变长时自动撑开，适合 Prompt、说明和配置片段。" :span="2">
-          <BaseTextarea
-            v-model="textareaValue"
-            size="sm"
-            :autosize="{ minRows: 2, maxRows: 6 }"
-            :maxlength="180"
-            placeholder="输入多行内容后自动调整高度"
-          />
+          <div class="field-stack">
+            <BaseTextarea
+              v-model="textareaValue"
+              size="sm"
+              :autosize="{ minRows: 2, maxRows: 6 }"
+              :maxlength="180"
+              placeholder="输入多行内容后自动调整高度"
+            />
+            <BaseTextarea v-model="textareaValue" size="xs" resize="none" :rows="2" :maxlength="80" show-word-limit />
+          </div>
         </BaseFormItem>
         <BaseFormItem label="只读、加载与错误" error="描述内容过短，请补充必要上下文。" :span="2">
           <div class="field-stack">
@@ -141,6 +144,7 @@ const decimalNumberValue = ref(3.5);
               <BaseNumberInput v-model="numberValue" error :min="1" :max="10" aria-label="错误数值" />
             </div>
             <div class="number-demo-row">
+              <BaseNumberInput :model-value="12" :min="1" :max="100" size="xs" aria-label="迷你数值" />
               <BaseNumberInput :model-value="1" :min="1" :max="100" size="sm" aria-label="最小边界" />
               <BaseNumberInput :model-value="100" :min="1" :max="100" size="sm" aria-label="最大边界" />
               <BaseNumberInput :model-value="48" disabled size="sm" aria-label="禁用数值" />

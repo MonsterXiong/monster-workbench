@@ -3,9 +3,7 @@ import { computed, ref, useId, watch, watchEffect } from "vue";
 import { LoaderCircle, Plus } from "lucide-vue-next";
 import { useI18n } from "../../composables/useI18n";
 import { escapeRegExp, mergeLimitedUniqueItems } from "../../utils";
-import { syncElementPlusClearButtonLabel } from "./elementPlusDom";
-
-type TagInputSize = "sm" | "md" | "lg";
+import { syncElementPlusClearButtonLabel, toElementPlusSize, type ProjectControlSize } from "./elementPlusDom";
 
 interface Props {
   modelValue: string[];
@@ -17,7 +15,7 @@ interface Props {
   loading?: boolean;
   loadingText?: string;
   compact?: boolean;
-  size?: TagInputSize;
+  size?: ProjectControlSize;
   max?: number;
   allowDuplicates?: boolean;
   addOnBlur?: boolean;
@@ -93,11 +91,7 @@ const countLabel = computed(() => `${t("common.tagCount")}: ${countText.value}`)
 const resolvedLoadingText = computed(() => props.loadingText || t("common.loading"));
 const resolvedClearLabel = computed(() => props.clearLabel || t("common.clear"));
 const describedBy = computed(() => (props.showCount ? countId : undefined));
-const elementSize = computed(() => {
-  if (props.compact || props.size === "sm") return "small";
-  if (props.size === "lg") return "large";
-  return "default";
-});
+const elementSize = computed(() => toElementPlusSize(props.compact ? "sm" : props.size));
 const delimiter = computed(() => {
   if (props.separators.length === 0) return "";
   return new RegExp(props.separators.map(escapeRegExp).join("|"));
@@ -285,6 +279,15 @@ function handleClear() {
   border-radius: 10px;
 }
 
+.base-tag-input--xs .base-tag-input__control {
+  --el-input-tag-mini-height: 28px;
+  --el-input-tag-gap: 5px;
+  --el-input-tag-padding: 4px 6px;
+  --el-input-tag-line-height: 18px;
+  --el-input-tag-font-size: 10px;
+  border-radius: 9px;
+}
+
 .base-tag-input--lg .base-tag-input__control {
   --el-input-tag-mini-height: 48px;
   --el-input-tag-padding: 9px 12px;
@@ -349,6 +352,10 @@ function handleClear() {
 
 .base-tag-input.is-compact .base-tag-input__control :deep(.el-tag) {
   @apply text-[10px];
+}
+
+.base-tag-input--xs .base-tag-input__control :deep(.el-tag) {
+  @apply rounded-md px-1.5 text-[10px];
 }
 
 .base-tag-input__control :deep(.el-tag__close) {

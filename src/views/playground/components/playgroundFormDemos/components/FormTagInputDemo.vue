@@ -33,6 +33,9 @@ const customSeparators = [",", "，", ";", "；", "|", "\n"];
               @clear="triggerToast('已清空标签', 'info')"
             />
           </BaseFormItem>
+          <BaseFormItem label="迷你标签" description="适合更紧凑的设置面板和侧栏表单。">
+            <BaseTagInput v-model="compactTagValues" size="xs" clearable :max="4" placeholder="迷你标签" />
+          </BaseFormItem>
           <BaseFormItem label="大尺寸成功态" description="适合更宽松的表单和详情页。">
             <BaseTagInput v-model="tagValues" size="lg" success clearable :max="8" placeholder="添加能力标签" />
           </BaseFormItem>
