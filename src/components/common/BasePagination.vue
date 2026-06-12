@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { CSSProperties } from "vue";
 import { computed } from "vue";
 import { useI18n } from "../../composables/useI18n";
 import BaseSelect from "./BaseSelect.vue";
@@ -13,6 +14,8 @@ import {
   toNonNegativeInteger,
 } from "../../utils";
 
+type PageSizeControl = "base" | "native";
+
 interface Props {
   page: number;
   pageSize: number;
@@ -24,6 +27,7 @@ interface Props {
   showSummary?: boolean;
   showEdges?: boolean;
   showJumper?: boolean;
+  pageSizeControl?: PageSizeControl;
   hideOnSinglePage?: boolean;
   background?: boolean;
   simple?: boolean;
@@ -33,6 +37,10 @@ interface Props {
   siblingCount?: number;
   pagerCount?: number;
   layout?: string;
+  teleported?: boolean;
+  appendSizeTo?: string;
+  popperClass?: string;
+  popperStyle?: string | CSSProperties;
   loadingText?: string;
   ariaLabel?: string;
 }
@@ -45,6 +53,7 @@ const props = withDefaults(defineProps<Props>(), {
   showSummary: true,
   showEdges: false,
   showJumper: false,
+  pageSizeControl: "base",
   hideOnSinglePage: false,
   background: false,
   simple: false,
@@ -54,6 +63,10 @@ const props = withDefaults(defineProps<Props>(), {
   siblingCount: 1,
   pagerCount: undefined,
   layout: "",
+  teleported: true,
+  appendSizeTo: "",
+  popperClass: "",
+  popperStyle: undefined,
   loadingText: "",
   ariaLabel: "",
 });
@@ -89,6 +102,7 @@ const summaryAriaText = computed(() =>
 );
 const elementCurrentPage = computed(() => (hasRecords.value ? currentPage.value : 1));
 const elementSize = computed(() => toElementPlusSize(resolvedSize.value));
+const shouldUseNativePageSize = computed(() => props.showPageSize && !props.simple && props.pageSizeControl === "native");
 const pagerCount = computed(() => {
   if (props.pagerCount !== undefined) {
     const oddCount = props.pagerCount % 2 === 0 ? props.pagerCount + 1 : props.pagerCount;
@@ -101,10 +115,16 @@ const pagerCount = computed(() => {
 const paginationLayout = computed(() => {
   if (props.layout) return props.layout;
   if (props.simple || !hasRecords.value) return "prev, next";
-  return props.showJumper ? "prev, pager, next, jumper" : "prev, pager, next";
+  const parts = [];
+  if (shouldUseNativePageSize.value) parts.push("sizes");
+  parts.push("prev", "pager", "next");
+  if (props.showJumper) parts.push("jumper");
+  return parts.join(", ");
 });
+const layoutUsesNativePageSize = computed(() => props.showPageSize && !props.simple && /\bsizes\b/.test(paginationLayout.value));
 const shouldShowPager = computed(() => !(props.hideOnSinglePage && isSinglePage.value));
-const shouldRenderRoot = computed(() => shouldShowPager.value || props.showSummary || (props.showPageSize && !props.simple));
+const shouldRenderBasePageSize = computed(() => props.showPageSize && !props.simple && !layoutUsesNativePageSize.value);
+const shouldRenderRoot = computed(() => shouldShowPager.value || props.showSummary || shouldRenderBasePageSize.value);
 
 const emitPage = (page: number) => {
   if (isDisabled.value || !hasRecords.value) return;
@@ -116,6 +136,10 @@ const emitPage = (page: number) => {
 
 const handleCurrentPageUpdate = (page: number) => {
   emitPage(page);
+};
+
+const handlePageSizeUpdate = (pageSize: number) => {
+  emitPageSize(pageSize);
 };
 
 const emitPageSize = (value: unknown) => {
@@ -138,6 +162,7 @@ const emitPageSize = (value: unknown) => {
       `base-pagination--${surface}`,
       {
         'base-pagination--simple': simple,
+        'base-pagination--native-sizes': layoutUsesNativePageSize,
         'is-loading': loading,
         'is-disabled': isDisabled,
       },
@@ -167,26 +192,32 @@ const emitPageSize = (value: unknown) => {
         :page-size="safePageSize"
         :total="safeTotal"
         :pager-count="pagerCount"
+        :page-sizes="normalizedPageSizeOptions"
         :layout="paginationLayout"
         :size="elementSize"
         :background="background"
         :disabled="isDisabled || !hasRecords"
         :hide-on-single-page="hideOnSinglePage"
+        :teleported="teleported"
+        :append-size-to="appendSizeTo || undefined"
+        :popper-class="popperClass"
+        :popper-style="popperStyle"
         :prev-text="simple ? t('common.pagination.previous') : ''"
         :next-text="simple ? t('common.pagination.next') : ''"
         @update:current-page="handleCurrentPageUpdate"
+        @update:page-size="handlePageSizeUpdate"
       />
     </div>
 
     <BaseSelect
-      v-if="showPageSize && !simple"
+      v-if="shouldRenderBasePageSize"
       class="base-pagination__select"
       :model-value="safePageSize"
       :options="pageSizeSelectOptions"
       :disabled="isDisabled"
       :aria-label="t('common.pagination.pageSizeLabel')"
       :size="resolvedSize"
-      :teleported="true"
+      :teleported="teleported"
       :fit-input-width="false"
       @update:model-value="emitPageSize"
     />
@@ -350,6 +381,38 @@ const emitPageSize = (value: unknown) => {
 
 :deep(.base-pagination__pager .el-pagination__jump .el-input__inner) {
   @apply h-6 text-center text-[11px] font-black text-slate-700 dark:text-slate-100;
+}
+
+.base-pagination--native-sizes :deep(.base-pagination__pager) {
+  @apply gap-2;
+}
+
+:deep(.base-pagination__pager .el-pagination__sizes) {
+  @apply m-0 min-w-0;
+}
+
+:deep(.base-pagination__pager .el-pagination__sizes .el-select) {
+  @apply w-32;
+}
+
+:deep(.base-pagination__pager .el-pagination__sizes .el-select__wrapper) {
+  @apply min-h-7 rounded-lg border border-slate-200 bg-slate-50 px-2 text-[11px] shadow-none transition dark:border-slate-800 dark:bg-slate-950;
+  box-shadow: none;
+}
+
+:deep(.base-pagination__pager .el-pagination__sizes .el-select__wrapper:hover) {
+  @apply border-slate-300 bg-white dark:border-slate-700 dark:bg-slate-900;
+}
+
+:deep(.base-pagination__pager .el-pagination__sizes .el-select__wrapper.is-focused) {
+  border-color: rgb(var(--color-primary));
+  box-shadow: 0 0 0 3px rgba(var(--color-primary), 0.14);
+  @apply bg-white dark:bg-slate-900;
+}
+
+:deep(.base-pagination__pager .el-pagination__sizes .el-select__placeholder),
+:deep(.base-pagination__pager .el-pagination__sizes .el-select__selected-item) {
+  @apply text-[11px] font-black text-slate-700 dark:text-slate-100;
 }
 
 .base-pagination__simple {

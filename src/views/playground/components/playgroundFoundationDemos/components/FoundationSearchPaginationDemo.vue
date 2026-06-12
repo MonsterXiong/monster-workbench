@@ -107,6 +107,16 @@ const handleSearch = (value: string) => {
             @change="triggerToast(`分页：${$event.page} / ${$event.pageSize}`, 'info')"
           />
           <BasePagination
+            v-model:page="foundationPage"
+            v-model:page-size="foundationPageSize"
+            :page-size-options="[10, 20, 30, 50]"
+            :total="256"
+            page-size-control="native"
+            show-jumper
+            background
+            aria-label="Element Plus 原生页容量分页"
+          />
+          <BasePagination
             :page="18"
             :page-size="25"
             :page-size-options="[10, 20, 50]"
