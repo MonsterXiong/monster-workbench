@@ -573,6 +573,40 @@ flowchart TD
 3. 再把 `complete` 接到 Rust trusted settle helper，确保 asset/model_runs/task_events/task status 仍由 Rust 写入。
 4. 最后才评估是否把 `run_batch_supervisor_inner` 的任务拥有权迁到 Python worker loop，或仅把 worker shell 替换为 Python 拉取式执行。
 
+### 12.12 本轮复核后的迁移闸门
+
+本轮继续对照 `task_service.rs`、`batch_job_service.rs`、`worker_queue_service.rs`、`creative_task_repo.rs` 和 `creative_db_schema.rs` 后，结论保持收敛：当前可以继续抽小型 Rust helper，但不能以“尽快搬走 Rust supervisor”为目标。真正的下一刀应该先补 worker ownership / lease 和 Rust-owned control API，否则 Python worker loop 没有可信任务拥有权。
+
+| 判断项 | 当前代码证据 | 架构含义 |
+|---|---|---|
+| task ownership | `creative_tasks` 只有 `status`、`retry_count`、`started_at`、`finished_at` 等字段，没有 worker / lease / heartbeat 字段 | Python 不能成为主动消费者；否则无法阻止过期 worker 或重复 worker 写回 |
+| claim 语义 | `claim_next_queued_task` 只在事务内把一个 `queued` task 改为 `running` | 这是 Rust supervisor 内部原子 claim，不是跨进程 worker-pool 协议 |
+| complete 语义 | `WorkerQueueService::complete_task` 只校验当前状态为 `running` / `cancelling`，输入没有 worker identity / claim token | 现有 `complete_creative_task` 不能直接给 Python worker 使用 |
+| recovery 语义 | `recover_interrupted_tasks` 只按 `running` / `cancelling` 做启动兜底 | 还不能表达 lease 过期、runtime 重启、worker 退出和主动取消之间的差异 |
+| batch supervisor | `run_batch_supervisor_inner` 负责 snapshot 轮询、并发槽计算、claim、spawn worker 和 completed 判定 | 任务拥有权仍在 Rust；迁移前必须先有 lease-aware claim / heartbeat / complete / recovery |
+| sidecar settle | prompt/image worker 已把 provider 执行交给 Python，但 Rust 仍校验 result、写 `assets` / `model_runs` / `task_events` / status | 业务执行可在 Python，可信落库仍在 Rust |
+| image path boundary | `settle_batch_image_sidecar_response` 仍调用 `validate_sidecar_output_file` 和 `copy_sidecar_thumbnail` | Python 只能返回授权目录内文件引用，不能直接决定 DB 资产路径 |
+
+因此后续推进应分成三个互不混淆的层级：
+
+| 层级 | 可以推进 | 暂不推进 |
+|---|---|---|
+| Rust helper 收敛 | 抽取重复的 sidecar result 校验、model_runs/events 持久化、失败/取消状态映射；保持行为不变 | 为了“瘦身”删掉 Rust canonical path 校验、task_events 写入或 event emit |
+| Worker ownership 设计 | 先按 `docs/ai/database-migration-policy.md` 设计 nullable lease 字段、旧库兼容 fixture、claim token 和索引 | 在没有 schema 支撑时让 Python 直接 claim/complete SQLite task |
+| Python worker loop | 等 Rust-owned localhost control API、runtime token、heartbeat 和 lease recovery 都稳定后，再评估替换 prompt/image worker shell | 现在迁移 `run_batch_supervisor_inner`，或把 `complete_creative_task` 当成 sidecar `complete` 协议 |
+
+下一批若进入编码，验收门槛必须先覆盖：
+
+1. 新库、旧库、缺字段库都能通过 `init_schema()` 补齐 worker ownership / lease 字段，旧数据不丢失。
+2. `claim_next_queued_task_with_lease` 在同一事务内完成 `queued -> running` 和 lease 字段写入，并返回 claim token。
+3. `heartbeat_task_lease` 只允许当前 worker / runtime / token 续约，过期 lease 不能续。
+4. `complete_task_with_lease` 必须校验未过期 lease owner，然后进入 Rust trusted settle；token 不匹配或 lease 过期必须拒绝。
+5. `recover_expired_task_leases` 只回收过期 lease，并保留现有 startup recovery 作为 legacy 兜底。
+6. Python sidecar control API 只绑定 `127.0.0.1`、复用 runtime token、不暴露 SQL 或任意文件能力。
+7. image / asset settle 继续由 Rust 校验授权输出目录、生成 thumbnail、写 `assets` / `model_runs` / `task_events` 和 task status。
+
+这也意味着 `TaskService` 当前不是优先拆分对象。它的问题主要是仍有 demo/stub 入口需要冻结边界，而不是需要整体迁移；`BatchJobService` 的 provider 执行已经明显收窄，真正的剩余风险是 supervisor 任务拥有权缺少租约模型。
+
 ## 13. 不变量
 
 - Vue 永远不知道 Python 端口和 token。
