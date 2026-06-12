@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import type { FormRules } from "element-plus";
-import { computed, useId } from "vue";
+import type { FormInstance, FormItemProp, FormRules, FormValidateCallback } from "element-plus";
+import { computed, ref, useId } from "vue";
 import { useI18n } from "../../composables/useI18n";
 
 type FormSize = "sm" | "md" | "lg";
@@ -72,6 +72,7 @@ const props = withDefaults(defineProps<Props>(), {
 });
 
 const { t } = useI18n();
+const formRef = ref<FormInstance>();
 const formId = useId();
 const titleId = `${formId}-title`;
 const descriptionId = `${formId}-description`;
@@ -111,10 +112,32 @@ const handleReset = (event: Event) => {
 const handleValidate = (prop: string | string[], isValid: boolean, message: string) => {
   emit("validate", prop, isValid, message);
 };
+
+const validate = (callback?: FormValidateCallback) => formRef.value?.validate(callback);
+const validateField = (props?: FormItemProp | FormItemProp[], callback?: FormValidateCallback) =>
+  formRef.value?.validateField(props, callback);
+const resetFields = (props?: FormItemProp | FormItemProp[]) => {
+  formRef.value?.resetFields(props);
+};
+const clearValidate = (props?: FormItemProp | FormItemProp[]) => {
+  formRef.value?.clearValidate(props);
+};
+const scrollToField = (prop: FormItemProp) => {
+  formRef.value?.scrollToField(prop);
+};
+
+defineExpose({
+  validate,
+  validateField,
+  resetFields,
+  clearValidate,
+  scrollToField,
+});
 </script>
 
 <template>
   <el-form
+    ref="formRef"
     class="base-form"
     :class="[
       `base-form--cols-${columns}`,

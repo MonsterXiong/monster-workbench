@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { FormItemProp, FormItemRule } from "element-plus";
 import { computed, useId } from "vue";
 import { useI18n } from "../../composables/useI18n";
 import { joinAriaIds } from "../../utils";
@@ -12,6 +13,9 @@ interface Props {
   help?: string;
   error?: string;
   success?: string;
+  prop?: FormItemProp;
+  rules?: FormItemRule | FormItemRule[];
+  validateStatus?: FormItemStatus;
   loading?: boolean;
   loadingText?: string;
   required?: boolean;
@@ -36,6 +40,9 @@ const props = withDefaults(defineProps<Props>(), {
   help: "",
   error: "",
   success: "",
+  prop: undefined,
+  rules: undefined,
+  validateStatus: undefined,
   loading: false,
   loadingText: "",
   required: false,
@@ -68,6 +75,7 @@ const rootStyle = computed(() => ({
 }));
 const resolvedLabelPosition = computed(() => (props.horizontal ? "left" : "top"));
 const resolvedValidateStatus = computed<FormItemStatus>(() => {
+  if (props.validateStatus) return props.validateStatus;
   if (props.error) return "error";
   if (props.loading) return "validating";
   if (props.success) return "success";
@@ -100,6 +108,8 @@ const resolvedValidateStatus = computed<FormItemStatus>(() => {
     :label="label || undefined"
     :label-width="horizontal ? labelWidth : undefined"
     :label-position="resolvedLabelPosition"
+    :prop="prop"
+    :rules="rules"
     :required="required"
     :error="error || undefined"
     :validate-status="resolvedValidateStatus || undefined"
