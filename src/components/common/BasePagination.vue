@@ -2,6 +2,7 @@
 import { computed } from "vue";
 import { useI18n } from "../../composables/useI18n";
 import BaseSelect from "./BaseSelect.vue";
+import { toElementPlusSize } from "./elementPlusDom";
 import {
   clampNumber,
   formatTemplate,
@@ -22,11 +23,16 @@ interface Props {
   showPageSize?: boolean;
   showSummary?: boolean;
   showEdges?: boolean;
+  showJumper?: boolean;
+  hideOnSinglePage?: boolean;
+  background?: boolean;
   simple?: boolean;
   compact?: boolean;
   surface?: "card" | "muted" | "plain";
   size?: "sm" | "md" | "lg";
   siblingCount?: number;
+  pagerCount?: number;
+  layout?: string;
   loadingText?: string;
   ariaLabel?: string;
 }
@@ -38,11 +44,16 @@ const props = withDefaults(defineProps<Props>(), {
   showPageSize: true,
   showSummary: true,
   showEdges: false,
+  showJumper: false,
+  hideOnSinglePage: false,
+  background: false,
   simple: false,
   compact: false,
   surface: "card",
   size: "md",
   siblingCount: 1,
+  pagerCount: undefined,
+  layout: "",
   loadingText: "",
   ariaLabel: "",
 });
@@ -62,6 +73,7 @@ const totalPages = computed(() => getTotalPages(safeTotal.value, safePageSize.va
 const hasRecords = computed(() => safeTotal.value > 0);
 const displayTotalPages = computed(() => (hasRecords.value ? totalPages.value : 0));
 const currentPage = computed(() => (hasRecords.value ? normalizePage(props.page, totalPages.value) : 0));
+const isSinglePage = computed(() => totalPages.value <= 1);
 const resolvedSize = computed(() => (props.compact ? "sm" : props.size));
 const isDisabled = computed(() => props.disabled || props.loading);
 const start = computed(() => (safeTotal.value === 0 ? 0 : (currentPage.value - 1) * safePageSize.value + 1));
@@ -76,17 +88,23 @@ const summaryAriaText = computed(() =>
     : `显示 0-0，共 0 条`
 );
 const elementCurrentPage = computed(() => (hasRecords.value ? currentPage.value : 1));
-const elementSize = computed(() => {
-  if (resolvedSize.value === "sm") return "small";
-  if (resolvedSize.value === "lg") return "large";
-  return "default";
-});
+const elementSize = computed(() => toElementPlusSize(resolvedSize.value));
 const pagerCount = computed(() => {
+  if (props.pagerCount !== undefined) {
+    const oddCount = props.pagerCount % 2 === 0 ? props.pagerCount + 1 : props.pagerCount;
+    return clampNumber(oddCount, 5, 21);
+  }
   const rawCount = safeSiblingCount.value * 2 + (props.showEdges ? 5 : 3);
   const oddCount = rawCount % 2 === 0 ? rawCount + 1 : rawCount;
   return clampNumber(oddCount, 5, 21);
 });
-const paginationLayout = computed(() => (props.simple || !hasRecords.value ? "prev, next" : "prev, pager, next"));
+const paginationLayout = computed(() => {
+  if (props.layout) return props.layout;
+  if (props.simple || !hasRecords.value) return "prev, next";
+  return props.showJumper ? "prev, pager, next, jumper" : "prev, pager, next";
+});
+const shouldShowPager = computed(() => !(props.hideOnSinglePage && isSinglePage.value));
+const shouldRenderRoot = computed(() => shouldShowPager.value || props.showSummary || (props.showPageSize && !props.simple));
 
 const emitPage = (page: number) => {
   if (isDisabled.value || !hasRecords.value) return;
@@ -113,6 +131,7 @@ const emitPageSize = (value: unknown) => {
 
 <template>
   <nav
+    v-if="shouldRenderRoot"
     class="base-pagination"
     :class="[
       `base-pagination--${resolvedSize}`,
@@ -138,7 +157,7 @@ const emitPageSize = (value: unknown) => {
       <strong>{{ safeTotal }}</strong>
     </div>
 
-    <div class="base-pagination__controls">
+    <div v-if="shouldShowPager" class="base-pagination__controls">
       <span v-if="simple" class="base-pagination__simple" aria-live="polite">
         {{ currentPage }} / {{ displayTotalPages }}
       </span>
@@ -150,8 +169,9 @@ const emitPageSize = (value: unknown) => {
         :pager-count="pagerCount"
         :layout="paginationLayout"
         :size="elementSize"
+        :background="background"
         :disabled="isDisabled || !hasRecords"
-        :hide-on-single-page="false"
+        :hide-on-single-page="hideOnSinglePage"
         :prev-text="simple ? t('common.pagination.previous') : ''"
         :next-text="simple ? t('common.pagination.next') : ''"
         @update:current-page="handleCurrentPageUpdate"
@@ -285,6 +305,51 @@ const emitPageSize = (value: unknown) => {
   background-color: rgba(var(--color-primary), 0.1);
   box-shadow: inset 0 0 0 1px rgba(var(--color-primary), 0.12);
   @apply text-primary;
+}
+
+:deep(.base-pagination__pager.is-background .btn-prev),
+:deep(.base-pagination__pager.is-background .btn-next),
+:deep(.base-pagination__pager.is-background .el-pager li) {
+  @apply border-slate-200 bg-slate-100 dark:border-slate-800 dark:bg-slate-900;
+}
+
+:deep(.base-pagination__pager.is-background .el-pager li.is-active) {
+  border-color: rgba(var(--color-primary), 0.36);
+  background-color: rgb(var(--color-primary));
+  box-shadow: 0 8px 18px rgba(var(--color-primary), 0.18);
+  @apply text-white;
+}
+
+:deep(.base-pagination__pager .el-pagination__jump) {
+  @apply ml-1 flex h-7 items-center gap-1 whitespace-nowrap text-[11px] font-bold text-slate-500 dark:text-slate-400;
+}
+
+:deep(.base-pagination__pager .el-pagination__goto),
+:deep(.base-pagination__pager .el-pagination__classifier) {
+  @apply text-[11px] font-bold text-slate-400 dark:text-slate-500;
+}
+
+:deep(.base-pagination__pager .el-pagination__jump .el-input) {
+  @apply mx-1 w-14;
+}
+
+:deep(.base-pagination__pager .el-pagination__jump .el-input__wrapper) {
+  @apply h-7 rounded-lg border border-slate-200 bg-slate-50 px-2 shadow-none transition dark:border-slate-800 dark:bg-slate-950;
+  box-shadow: none;
+}
+
+:deep(.base-pagination__pager .el-pagination__jump .el-input__wrapper:hover) {
+  @apply border-slate-300 bg-white dark:border-slate-700 dark:bg-slate-900;
+}
+
+:deep(.base-pagination__pager .el-pagination__jump .el-input__wrapper.is-focus) {
+  border-color: rgb(var(--color-primary));
+  box-shadow: 0 0 0 3px rgba(var(--color-primary), 0.14);
+  @apply bg-white dark:bg-slate-900;
+}
+
+:deep(.base-pagination__pager .el-pagination__jump .el-input__inner) {
+  @apply h-6 text-center text-[11px] font-black text-slate-700 dark:text-slate-100;
 }
 
 .base-pagination__simple {

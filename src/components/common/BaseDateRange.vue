@@ -22,6 +22,7 @@ import {
   normalizeDateOnlyValue,
   parseDateOnlyValue,
 } from "../../utils";
+import { toElementPlusSize } from "./elementPlusDom";
 
 export interface DateRangeValue {
   start: string;
@@ -37,8 +38,13 @@ export interface DateRangePreset {
 
 type DateRangeField = "start" | "end";
 type DateRangeSize = "sm" | "md" | "lg";
+type DateRangePresetMode = "inline" | "panel" | "both";
 type DateRangeSurface = "card" | "muted" | "plain";
 type DatePickerModelValue = string[] | Date[] | string | Date | number | null | undefined;
+type DatePickerShortcut = {
+  text: string;
+  value: () => [string, string];
+};
 
 interface Props {
   modelValue: DateRangeValue;
@@ -57,6 +63,9 @@ interface Props {
   size?: DateRangeSize;
   surface?: DateRangeSurface;
   showCalendar?: boolean;
+  presetMode?: DateRangePresetMode;
+  unlinkPanels?: boolean;
+  singlePanel?: boolean;
   panelLabel?: string;
   firstDayOfWeek?: 0 | 1;
 }
@@ -77,6 +86,9 @@ const props = withDefaults(defineProps<Props>(), {
   size: "md",
   surface: "card",
   showCalendar: true,
+  presetMode: "inline",
+  unlinkPanels: false,
+  singlePanel: false,
   panelLabel: "",
   firstDayOfWeek: 1,
 });
@@ -133,11 +145,7 @@ const elementLocale = computed<Language>(() => {
     name: resolvedCalendarLocaleName.value,
   };
 });
-const elementSize = computed(() => {
-  if (props.size === "sm") return "small";
-  if (props.size === "lg") return "large";
-  return "default";
-});
+const elementSize = computed(() => toElementPlusSize(props.size));
 
 const normalizedStart = computed(() => normalizeDateValue(inputValue.value.start));
 const normalizedEnd = computed(() => normalizeDateValue(inputValue.value.end));
@@ -174,7 +182,29 @@ const describedBy = computed(() => joinAriaIds([resolvedError.value ? errorId : 
 const pickerModelValue = computed(() => {
   return validPickerStart.value && validPickerEnd.value ? [validPickerStart.value, validPickerEnd.value] : [];
 });
-const resolvedPopperClass = computed(() => `base-date-range-popper base-date-range-popper--${props.size}`);
+const showInlinePresets = computed(() => props.presets.length > 0 && props.presetMode !== "panel");
+const showPanelPresets = computed(() => props.showCalendar && props.presets.length > 0 && props.presetMode !== "inline");
+const elementShortcuts = computed<DatePickerShortcut[]>(() => {
+  if (!showPanelPresets.value) return [];
+
+  return props.presets.filter(isPresetAllowed).map((preset) => ({
+    text: preset.label,
+    value: () => {
+      emit("preset", preset);
+      return [normalizeDateValue(preset.start), normalizeDateValue(preset.end)];
+    },
+  }));
+});
+const resolvedPopperClass = computed(() =>
+  [
+    "base-date-range-popper",
+    `base-date-range-popper--${props.size}`,
+    showPanelPresets.value ? "base-date-range-popper--shortcuts" : "",
+    props.singlePanel ? "base-date-range-popper--single" : "",
+  ]
+    .filter(Boolean)
+    .join(" ")
+);
 const datePickerIds = computed(() => [`${rangeId}-start`, `${rangeId}-end`]);
 const datePickerNames = computed(() => [`${rangeId}-start`, `${rangeId}-end`]);
 
@@ -393,6 +423,9 @@ watchEffect(() => {
         :clearable="clearable"
         :editable="true"
         :disabled-date="disabledDate"
+        :shortcuts="elementShortcuts"
+        :unlink-panels="unlinkPanels"
+        :single-panel="singlePanel"
         :range-separator="t('common.to')"
         :start-placeholder="startPlaceholder || t('common.startDate')"
         :end-placeholder="endPlaceholder || t('common.endDate')"
@@ -459,7 +492,7 @@ watchEffect(() => {
       {{ boundaryMin || "..." }} - {{ boundaryMax || "..." }}
     </p>
 
-    <div v-if="presets.length" class="base-date-range__presets">
+    <div v-if="showInlinePresets" class="base-date-range__presets">
       <BaseButton
         v-for="preset in presets"
         :key="preset.key"
@@ -700,6 +733,43 @@ watchEffect(() => {
   min-width: 0;
 }
 
+:global(.base-date-range-popper .el-picker-panel__body-wrapper) {
+  background: linear-gradient(180deg, #ffffff, #f8fafc);
+}
+
+:global(.base-date-range-popper .el-picker-panel__sidebar) {
+  width: 128px;
+  border-right: 1px solid #e2e8f0;
+  background: rgba(248, 250, 252, 0.86);
+  padding: 8px;
+}
+
+:global(.base-date-range-popper .el-picker-panel__shortcut) {
+  width: 100%;
+  min-height: 30px;
+  border-radius: 10px;
+  padding: 0 10px;
+  color: #475569;
+  font-size: 11px;
+  font-weight: 900;
+  line-height: 30px;
+  text-align: left;
+  transition:
+    background-color 0.16s ease,
+    color 0.16s ease,
+    transform 0.16s ease;
+}
+
+:global(.base-date-range-popper .el-picker-panel__shortcut + .el-picker-panel__shortcut) {
+  margin-top: 2px;
+}
+
+:global(.base-date-range-popper .el-picker-panel__shortcut:hover) {
+  background: #ffffff;
+  color: rgb(var(--color-primary));
+  transform: translateX(2px);
+}
+
 :global(.base-date-range-popper .el-date-range-picker__content) {
   padding: 14px;
 }
@@ -789,6 +859,24 @@ watchEffect(() => {
   box-shadow:
     0 18px 42px rgba(0, 0, 0, 0.34),
     inset 0 1px 0 rgba(148, 163, 184, 0.08);
+}
+
+:global(.dark .base-date-range-popper .el-picker-panel__body-wrapper) {
+  background: linear-gradient(180deg, #0f172a, #020617);
+}
+
+:global(.dark .base-date-range-popper .el-picker-panel__sidebar) {
+  border-right-color: #1e293b;
+  background: rgba(15, 23, 42, 0.9);
+}
+
+:global(.dark .base-date-range-popper .el-picker-panel__shortcut) {
+  color: #cbd5e1;
+}
+
+:global(.dark .base-date-range-popper .el-picker-panel__shortcut:hover) {
+  background: #1e293b;
+  color: rgb(var(--color-primary));
 }
 
 :global(.dark .base-date-range-popper .el-date-range-picker__content.is-left) {

@@ -32,6 +32,8 @@ const datePresets = [
           min="2026-06-01"
           max="2026-06-30"
           size="lg"
+          preset-mode="panel"
+          unlink-panels
           @preset="triggerToast(`已选择：${$event.label}`, 'info')"
         />
         <BaseDateRange
@@ -42,6 +44,7 @@ const datePresets = [
           max="2026-06-30"
           compact
           surface="muted"
+          preset-mode="both"
         />
         <BaseDateRange
           v-model="sundayDateRangeValue"
@@ -50,6 +53,7 @@ const datePresets = [
           min="2026-06-01"
           max="2026-06-30"
           compact
+          single-panel
         />
         <BaseDateRange
           v-model="boundaryDateRangeValue"

@@ -101,6 +101,8 @@ const handleSearch = (value: string) => {
             v-model:page-size="foundationPageSize"
             :total="128"
             show-edges
+            show-jumper
+            background
             aria-label="完整分页"
             @change="triggerToast(`分页：${$event.page} / ${$event.pageSize}`, 'info')"
           />
@@ -110,9 +112,20 @@ const handleSearch = (value: string) => {
             :page-size-options="[10, 20, 50]"
             :total="980"
             show-edges
+            show-jumper
             :sibling-count="2"
             size="lg"
             aria-label="长列表分页"
+          />
+          <BasePagination
+            :page="6"
+            :page-size="20"
+            :total="320"
+            :pager-count="9"
+            layout="prev, pager, next, jumper"
+            surface="muted"
+            :show-page-size="false"
+            aria-label="跳页分页"
           />
           <BasePagination
             v-model:page="foundationPage"
@@ -172,6 +185,15 @@ const handleSearch = (value: string) => {
             show-edges
             surface="plain"
             aria-label="越界页码分页"
+          />
+          <BasePagination
+            :page="1"
+            :page-size="20"
+            :total="12"
+            hide-on-single-page
+            :show-summary="false"
+            :show-page-size="false"
+            aria-label="单页隐藏分页"
           />
           <div class="pagination-demo-narrow">
             <BasePagination
