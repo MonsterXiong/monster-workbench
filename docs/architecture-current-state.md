@@ -1171,6 +1171,12 @@ creative_model_run_repo.rs   model_runs repo behavior and tests
 
 Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `agent/open-loops.md` 与真实回归缺口，不再重新打开已完成 Goal 的收口条目。
 
+2026-06-12 继续清理后，`docs/agents/*` 和 `docs/templates/*` 已删除：
+
+- `docs/agents/*` 的角色职责已经被 `docs/ai/multi-agent-operating-model.md` 覆盖，且不再作为文档入口引用。
+- `docs/templates/*` 属于历史 Goal / QA / Review 提示词模板，和当前“以 `docs/architecture-current-state.md` + `agent/open-loops.md` 为事实入口，不新增一次性执行包”的规则冲突。
+- 后续如需要多 Agent 职责、Review 或 QA 输出格式，优先更新 `docs/ai/multi-agent-operating-model.md`、`docs/ai/review-checklist.md` 和 `docs/ai/creative-regression-checklist.md`，不要重新创建平行模板目录。
+
 ---
 
 ## 11. 面向业务调整的影响矩阵
