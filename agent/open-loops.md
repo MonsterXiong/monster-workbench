@@ -13,10 +13,6 @@
 - [ ] 完成 `creative_db` 后续治理：`creative_projects` 已有建表和最小 repo，后续补正式项目生命周期、FK / 稳定 ID 策略、归档传播、资产版本/来源建模，以及 migration dry-run、备份策略和旧库兼容回归。
 - [ ] 继续推进 Python workflow runtime：`generate_image_prompt`、`image.prompt.batch` 与 `image.generate.batch` 已由 Python sidecar 执行业务 workflow，并保留 Rust settle / model_runs / task_events / asset 写入。2026-06-13 再评估确认阻塞点仍是 `creative_tasks` 缺 worker identity、lease/claim token 和 heartbeat 字段，`complete_creative_task` 也不是带 runtime token 和租约校验的 sidecar control API；若实现 worker pool，先按 `workflow-runtime-boundary.md` 12.9-12.12 补 migration / lease repo 测试和 Rust-owned localhost control API。
 
-## 回归与验收待办
-
-- [ ] 确认图片落盘目录、asset URL 映射与 `creative_projects` 归档策略。
-
 ## 文档维护待办
 
 - [ ] 以代码事实为准继续同步 `docs/architecture-current-state.md`：AI façade、`/creative` 三栏壳层和公共组件 Element Plus 封装边界已在 2026-06-12 复核；后续重点转为 migration / project / asset provenance 的正式化缺口，以及 AI panels / `WorkspacePage` 少量页面直用 Element Plus 的回收判断。

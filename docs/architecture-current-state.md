@@ -561,6 +561,7 @@ erDiagram
 当前不足：
 
 - 已有 `creative_projects` 表，但 `creative_tasks` / `assets` / `batch_jobs` 等表的 `project_id` 仍主要是字符串维度，尚未形成 DB-level FK、归档传播或完整项目生命周期约束。
+- 图片存储与 URL 映射已形成当前过渡边界：AI Provider 与 Creative batch 真实生图都落到应用本地数据目录的 `ai/generated`，前端通过 `convertFileSrc()` 展示 `imagePaths`、`file_path` 或 `thumbnail_path`；但项目级资产目录、asset URL resolver、归档后的文件保留/移动策略还没有正式化，详见 `docs/ai/asset-versioning-and-provenance.md`。
 - creative schema 已切换到最小版本化 migration 框架：当前通过 `schema_migrations` 记录版本，并落地 `bootstrap_creative_schema`、`add_creative_task_goal_batch_columns`、`add_creative_projects` 三个幂等迁移；但迁移前备份、破坏性变更审批与更细粒度领域迁移仍未完全正式化。
 - `asset_version`、`parent_asset_id`、`source_task_id` 等 provenance 字段主要依赖 `metadata_json` 与 `asset_links` 表达，正式化后建议结构化。
 - `task_status` 没有 DB-level enum 约束，状态合法性主要靠 service 层约束。
@@ -1136,7 +1137,7 @@ creative_model_run_repo.rs   model_runs repo behavior and tests
 当前已经有 `creative_projects` 表，但项目域仍处于“seed bootstrap + 聚合视图”的过渡态。面向业务调整时，仍有这些限制：
 
 - 项目重命名。
-- 项目归档。
+- 项目归档传播：当前只有 `status` / `archived_at` 字段和 status list filter，没有专门 archive command，也没有 task / asset / batch / goal / 物理图片文件的级联规则。
 - 项目成员/权限。
 - 项目级预算。
 - 项目级资产索引。

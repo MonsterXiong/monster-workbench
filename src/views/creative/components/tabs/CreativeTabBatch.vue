@@ -24,6 +24,7 @@ const {
   batchJobTasks,
   batchJobRunning,
   batchJobError,
+  batchJobImageItems,
 } = storeToRefs(creativeBatchStore);
 
 const form = ref({
@@ -204,14 +205,12 @@ const canNextPage = computed(() => batchJobTasks.value.length === batchTaskPageS
 const showImageWall = computed(() => form.value.mode === "real");
 
 const imageItems = computed(() =>
-  batchJobTasks.value
-    .filter((t) => t.status === "succeeded" && t.assetId)
-    .map((task) => ({
-      id: task.id,
-      imageSrc: `tauri://localhost/assets/${task.assetId}/thumbnail.webp`,
-      title: `Batch Item #${task.sequenceNo}`,
-      assetId: task.assetId,
-    }))
+  batchJobImageItems.value.map((item) => ({
+    id: item.id,
+    imageSrc: item.imageSrc,
+    title: item.title,
+    assetId: item.assetId,
+  }))
 );
 
 const refreshBatchJobPage = async (page = batchTaskPage.value) => {
