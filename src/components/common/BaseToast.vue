@@ -61,19 +61,31 @@ onBeforeUnmount(() => {
         <span class="base-toast__message">{{ toastMsg }}</span>
         <span v-if="toastDescription" class="base-toast__description">{{ toastDescription }}</span>
       </div>
-      <button v-if="toastActionText" type="button" class="base-toast__action" @click="runToastAction">
+      <BaseButton
+        v-if="toastActionText"
+        type="ghost"
+        size="sm"
+        native-type="button"
+        class="base-toast__action"
+        @click="runToastAction"
+      >
         {{ toastActionText }}
-      </button>
-      <button
+      </BaseButton>
+      <BaseButton
         v-if="toastClosable"
-        type="button"
+        type="ghost"
+        size="sm"
+        native-type="button"
+        circle
         class="base-toast__close"
         :aria-label="closeLabel"
         :title="closeLabel"
         @click="hideToast"
       >
-        <BaseIcon name="X" :size="14" aria-hidden="true" />
-      </button>
+        <template #icon>
+          <BaseIcon name="X" :size="14" aria-hidden="true" />
+        </template>
+      </BaseButton>
       <span
         v-if="toastShowProgress && toastDuration > 0"
         class="base-toast__progress"
@@ -123,17 +135,24 @@ onBeforeUnmount(() => {
 }
 
 .base-toast__action {
-  @apply shrink-0 rounded-lg px-2 py-1 text-[11px] font-black transition;
-  color: var(--toast-fg);
-  background-color: var(--toast-action-bg);
+  @apply shrink-0 rounded-lg text-[11px] font-black transition;
+  height: 1.5rem !important;
+  padding: 0 0.5rem !important;
+  border-color: transparent !important;
+  color: var(--toast-fg) !important;
+  background-color: var(--toast-action-bg) !important;
 }
 
-.base-toast__action:hover {
-  background-color: var(--toast-action-hover);
+.base-toast__action:hover:not(.is-disabled) {
+  background-color: var(--toast-action-hover) !important;
 }
 
 .base-toast__close {
   @apply flex h-6 w-6 shrink-0 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 dark:text-slate-500 dark:hover:bg-slate-800 dark:hover:text-slate-300;
+  --el-button-size: 1.5rem;
+  border-color: transparent !important;
+  background: transparent !important;
+  padding: 0 !important;
 }
 
 .base-toast__progress {

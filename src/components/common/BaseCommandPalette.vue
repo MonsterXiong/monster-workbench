@@ -141,9 +141,20 @@ watch(filteredItems, () => {
               <BaseIcon name="Command" size="18" aria-hidden="true" />
               <h3 :id="titleId">{{ resolvedTitle }}</h3>
             </div>
-            <button type="button" class="base-command-palette__close" :aria-label="t('common.commandPalette.close')" @click="close">
-              <BaseIcon name="X" size="16" aria-hidden="true" />
-            </button>
+            <BaseButton
+              type="ghost"
+              size="sm"
+              native-type="button"
+              circle
+              class="base-command-palette__close"
+              :aria-label="t('common.commandPalette.close')"
+              :title="t('common.commandPalette.close')"
+              @click="close"
+            >
+              <template #icon>
+                <BaseIcon name="X" size="16" aria-hidden="true" />
+              </template>
+            </BaseButton>
           </header>
 
           <label class="base-command-palette__search">
@@ -212,6 +223,10 @@ watch(filteredItems, () => {
 
 .base-command-palette__close {
   @apply flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-800 dark:hover:bg-slate-800 dark:hover:text-slate-100;
+  --el-button-size: 2rem;
+  border-color: transparent !important;
+  background: transparent !important;
+  padding: 0 !important;
 }
 
 .base-command-palette__search {

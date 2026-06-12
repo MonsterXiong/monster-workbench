@@ -167,13 +167,13 @@ watch(
         <div v-if="$slots.actions" class="base-field-group__actions" :aria-label="resolvedActionsLabel">
           <slot name="actions"></slot>
         </div>
-        <el-button
+        <BaseButton
           v-if="collapsible"
           class="base-field-group__toggle"
-          type="info"
-          text
+          type="ghost"
+          size="sm"
+          native-type="button"
           circle
-          size="small"
           :disabled="isDisabled"
           :aria-expanded="!isCollapsed"
           :aria-controls="bodyId"
@@ -181,8 +181,10 @@ watch(
           :title="toggleLabel"
           @click="toggleCollapsed"
         >
-          <BaseIcon name="ChevronDown" size="15" aria-hidden="true" />
-        </el-button>
+          <template #icon>
+            <BaseIcon name="ChevronDown" size="15" aria-hidden="true" />
+          </template>
+        </BaseButton>
       </div>
     </header>
 
@@ -339,6 +341,10 @@ watch(
 
 .base-field-group__toggle {
   @apply h-7 w-7 shrink-0 rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-slate-800 dark:hover:text-slate-100;
+  --el-button-size: 1.75rem;
+  border-color: transparent !important;
+  background: transparent !important;
+  padding: 0 !important;
 }
 
 .base-field-group__toggle :deep(span) {

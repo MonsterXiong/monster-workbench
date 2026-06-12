@@ -57,12 +57,7 @@ const elementType = computed(() => {
   if (failed.value) return "danger";
   if (copied.value) return "success";
   if (copying.value) return "primary";
-  return "info";
-});
-const elementSize = computed(() => {
-  if (props.size === "xs") return "small";
-  if (props.size === "md") return "default";
-  return "small";
+  return "neutral";
 });
 
 const scheduleStateReset = () => {
@@ -107,7 +102,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <el-button
+  <BaseButton
     class="base-copy-button"
     :class="[
       `base-copy-button--${size}`,
@@ -119,7 +114,7 @@ onBeforeUnmount(() => {
       },
     ]"
     :type="elementType"
-    :size="elementSize"
+    :size="size"
     native-type="button"
     :disabled="!canCopy"
     :aria-label="resolvedAriaLabel"
@@ -127,12 +122,14 @@ onBeforeUnmount(() => {
     :aria-busy="copying ? 'true' : undefined"
     @click="handleCopy"
   >
-    <LoaderCircle v-if="copying" class="base-copy-button__icon" aria-hidden="true" />
-    <Check v-else-if="copied" class="base-copy-button__icon" aria-hidden="true" />
-    <XCircle v-else-if="failed" class="base-copy-button__icon" aria-hidden="true" />
-    <Copy v-else class="base-copy-button__icon" aria-hidden="true" />
+    <template #icon>
+      <LoaderCircle v-if="copying" class="base-copy-button__icon" aria-hidden="true" />
+      <Check v-else-if="copied" class="base-copy-button__icon" aria-hidden="true" />
+      <XCircle v-else-if="failed" class="base-copy-button__icon" aria-hidden="true" />
+      <Copy v-else class="base-copy-button__icon" aria-hidden="true" />
+    </template>
     <span v-if="showText" class="base-copy-button__label">{{ resolvedLabel }}</span>
-  </el-button>
+  </BaseButton>
 </template>
 
 <style scoped>

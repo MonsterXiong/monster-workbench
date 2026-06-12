@@ -177,26 +177,31 @@ watch(
 
           <!-- 操作按钮 -->
           <div class="confirm-dialog__actions">
-            <button
-              type="button"
+            <BaseButton
               class="confirm-dialog__button confirm-dialog__button--cancel"
+              type="neutral"
+              size="md"
+              native-type="button"
+              outline
               :aria-label="options.cancelText"
               :title="options.cancelText"
               @click="handleCancel"
             >
               {{ options.cancelText }}
-            </button>
-            <button
-              type="button"
+            </BaseButton>
+            <BaseButton
               class="confirm-dialog__button confirm-dialog__button--confirm"
               :class="options.danger ? 'confirm-dialog__button--danger' : 'confirm-dialog__button--primary'"
+              :type="isDanger ? 'danger' : 'primary'"
+              size="md"
+              native-type="button"
               :disabled="!isConfirmKeywordMatched"
               :aria-label="options.confirmText"
               :title="options.confirmText"
               @click="handleConfirmClick"
             >
               {{ options.confirmText }}
-            </button>
+            </BaseButton>
           </div>
         </div>
       </transition>
@@ -258,28 +263,46 @@ watch(
 }
 
 .confirm-dialog__button {
-  @apply flex h-9 min-w-20 items-center justify-center rounded-xl px-4 text-xs font-semibold transition;
+  @apply flex min-w-20 items-center justify-center rounded-xl text-xs font-semibold transition;
+  height: 2.25rem !important;
+  padding: 0 1rem !important;
 }
 
 .confirm-dialog__button--cancel {
-  @apply border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700/50;
+  border-color: #e2e8f0 !important;
+  background: #ffffff !important;
+  color: #475569 !important;
+}
+
+.confirm-dialog__button--cancel:hover:not(.is-disabled) {
+  background: #f8fafc !important;
+  color: #0f172a !important;
+}
+
+:global(.dark) .confirm-dialog__button--cancel {
+  border-color: #1e293b !important;
+  background: #1e293b !important;
+  color: #cbd5e1 !important;
+}
+
+:global(.dark) .confirm-dialog__button--cancel:hover:not(.is-disabled) {
+  background: rgb(51 65 85 / 0.5) !important;
+  color: #f8fafc !important;
 }
 
 .confirm-dialog__button--confirm {
   @apply text-white shadow-md hover:scale-[1.02] active:scale-[0.98];
 }
 
-.confirm-dialog__button--primary {
-  @apply bg-primary hover:bg-primary/90;
-  box-shadow: 0 10px 18px rgba(var(--color-primary), 0.18);
+.confirm-dialog__button--primary:not(.is-disabled) {
+  box-shadow: 0 10px 18px rgb(var(--color-primary) / 0.18) !important;
 }
 
-.confirm-dialog__button--danger {
-  @apply bg-red-600 hover:bg-red-700;
-  box-shadow: 0 10px 18px rgba(239, 68, 68, 0.12);
+.confirm-dialog__button--danger:not(.is-disabled) {
+  box-shadow: 0 10px 18px rgba(239, 68, 68, 0.12) !important;
 }
 
-.confirm-dialog__button:disabled {
+.confirm-dialog__button.is-disabled {
   @apply cursor-not-allowed opacity-50 shadow-none hover:scale-100 active:scale-100;
 }
 
