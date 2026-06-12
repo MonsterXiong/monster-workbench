@@ -607,6 +607,34 @@ flowchart TD
 
 这也意味着 `TaskService` 当前不是优先拆分对象。它的问题主要是仍有 demo/stub 入口需要冻结边界，而不是需要整体迁移；`BatchJobService` 的 provider 执行已经明显收窄，真正的剩余风险是 supervisor 任务拥有权缺少租约模型。
 
+### 12.13 2026-06-13 继续评估：TaskService / BatchJobService 编排边界
+
+本轮继续对照 `task_service.rs`、`batch_job_service.rs`、`worker_queue_service.rs`、`creative_task_repo.rs`、`creative_db_schema.rs` 和 `workflow_settle_service.rs`，结论是：当前不应把 Rust 编排边界简单理解为“Rust 太厚，需要搬到 Python”。更准确的边界是 Rust 仍拥有可信状态与任务所有权，Python 已经开始承接 provider / prompt / image workflow 执行，但还没有资格成为主动拉取队列的 worker owner。
+
+代码证据：
+
+| 观察点 | 当前代码事实 | 架构判断 |
+|---|---|---|
+| `TaskService` 常规方法 | `create_creative_task`、`update_creative_task_status`、`append_task_event`、asset/link 方法只做输入校验、repo 写入和 Tauri event | 这是 Rust 可信入口，不是优先迁移对象 |
+| `generate_image_prompt` | Rust 创建 task、启动 checkpoint、提交 sidecar、校验 `SidecarWorkflowTaskResult`，再写 asset/model_runs/events/status | 业务生成逻辑可继续在 Python；最终 settle 继续由 Rust 做 |
+| review / revision | `run_review_asset_quality_stub` 仍在 Rust 本地构造 review result 和 revise draft | 继续冻结为 demo/stub；正式 review、revision、一致性检查必须进入 Python workflow runtime |
+| batch lifecycle | `create/start/pause/resume/cancel_batch_job` 管 batch 状态、子任务生成、暂停/取消收敛和事件广播 | 属于 Rust 控制面，可保留 |
+| batch supervisor | `run_batch_supervisor_inner` 做 snapshot 轮询、concurrency slot 计算、`claim_next_queued_task`、spawn worker 和 completed 判定 | 当前任务拥有权仍在 Rust；没有 lease 前不能迁给 Python worker loop |
+| prompt / image worker shell | `run_prompt_task_worker` / `run_generate_task_worker` 做 checkpoint、sidecar submit、transport fallback 和 settle 分派 | 可作为过渡壳层保留；不要继续新增正式业务 worker 分支 |
+| trusted settle | `workflow_settle_service.rs` 已集中 protocol/taskId 校验、sidecar events、model_runs、ready asset 创建；image settle 还要校验输出目录和 thumbnail | 可以继续抽小 helper，但 asset/model_runs/task_events/status 仍由 Rust 写入 |
+| worker queue skeleton | `WorkerQueueCompleteTaskInput` 只有 taskId/status/resultJson/errorMessage/assetId，`complete_task` 只校验当前 status 为 running/cancelling | 这不是 sidecar worker-pool complete 协议，不能直接暴露给 Python worker |
+| schema | `creative_tasks` 只有 status/retry_count/max_retries/started_at/finished_at 等字段，没有 worker_id、claim_token、lease_expires_at、heartbeat | Python 暂不能成为可信 owner；迁移前必须先补 lease migration |
+
+后续推进口径：
+
+1. 允许继续收敛 Rust helper：sidecar result 校验、失败/取消映射、model_runs/events 持久化、普通 ready asset 创建可以继续复用，但保持行为不变。
+2. 暂不迁移 `run_batch_supervisor_inner` 的任务拥有权；它现在仍承担并发槽、claim、spawn 和最终 completed 判定。
+3. 暂不把 `complete_creative_task` 当成 Python sidecar 的 complete API；未来 complete 必须带 runtime token、worker identity、claim token、lease deadline 校验，并进入 Rust trusted settle。
+4. 新增正式 workflow 时，优先走 sidecar request/result；不要在 `BatchJobService` 继续加第四、第五个正式生产 worker 分支。
+5. 下一批后端编码应先做 worker ownership / lease migration、旧库兼容 fixture、lease-aware repo 测试，再设计 Rust-owned localhost control API。
+
+面向架构升级的判定：`TaskService` 的主要问题是 demo/stub 边界要冻结，`BatchJobService` 的主要问题是任务所有权缺少租约模型。只有当 `claim -> checkpoint -> heartbeat -> complete -> recover_expired_leases` 形成 Rust-owned control API 后，才重新评估 Python worker loop 是否接管 prompt/image worker shell 或 batch supervisor。
+
 ## 13. 不变量
 
 - Vue 永远不知道 Python 端口和 token。
