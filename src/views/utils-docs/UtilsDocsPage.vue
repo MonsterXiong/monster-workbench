@@ -214,8 +214,9 @@ function getDefaultParamValue(paramName: string, type: string): string {
   if (name.includes("getid") || name.includes("getkey")) return "item => item.id";
   if (name.includes("equals")) return "(left, right) => Object.is(left, right)";
   if (name.includes("mapper")) return "(item) => item";
-  if (name.includes("validator")) return "[(value) => value ? null : '必填']";
-  if (name.includes("schema")) return "{ name: [(value) => value ? null : '必填'] }";
+  if (name.includes("validators")) return "[(value) => value ? null : 'required']";
+  if (name.includes("validator")) return "(value) => value ? null : 'required'";
+  if (name.includes("schema")) return "createRecordValidationSchema({ name: [createRequiredValidator('required')] }, { name: 'Name' })";
   if (name.includes("options")) return "{}";
   if (name.includes("breakpoints")) return "[{ key: 'sm', minWidth: 640 }, { key: 'lg', minWidth: 1024 }]";
   if (name.includes("queries")) return "['(prefers-color-scheme: dark)']";

@@ -44,6 +44,7 @@ for (const element of elements) {
       // Read existing defaultTestArgs
       const existingArgsMap = new Map();
       const existingThrowsMap = new Map();
+      const existingSandboxMap = new Map();
 
       for (const fnObj of fnArray.getElements()) {
         if (fnObj.getKind() === SyntaxKind.ObjectLiteralExpression) {
@@ -53,6 +54,8 @@ for (const element of elements) {
             if (defaultArgs) existingArgsMap.set(fnName, defaultArgs);
             const throwsArr = fnObj.getProperty('throws')?.getInitializer()?.getText();
             if (throwsArr) existingThrowsMap.set(fnName, throwsArr);
+            const sandbox = fnObj.getProperty('sandbox')?.getInitializer()?.getText();
+            if (sandbox) existingSandboxMap.set(fnName, sandbox);
           }
         }
       }
@@ -156,6 +159,7 @@ for (const element of elements) {
           if (returns) fnObjStr += `,\n        returns: ${JSON.stringify(returns)}`;
           if (existingThrowsMap.has(name)) fnObjStr += `,\n        throws: ${existingThrowsMap.get(name)}`;
           if (existingArgsMap.has(name)) fnObjStr += `,\n        defaultTestArgs: ${existingArgsMap.get(name)}`;
+          if (existingSandboxMap.has(name)) fnObjStr += `,\n        sandbox: ${existingSandboxMap.get(name)}`;
           fnObjStr += `\n      }`;
           generatedFns.push(fnObjStr);
         }

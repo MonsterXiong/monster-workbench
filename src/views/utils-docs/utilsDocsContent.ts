@@ -321,7 +321,7 @@ export const utilityDocs: UtilityDocEntry[] = [
                 description: "创建带过滤、排序、分页功能的增强数组视图报告。",
                 params: [{"name":"items","type":"readonly T[]","required":true,"description":""},{"name":"options","type":"ArrayListViewOptions<T>","required":false,"description":""}],
                 returns: {"type":"ArrayListViewReport<T>","description":""},
-                defaultTestArgs: ["[{id:1, v:10}, {id:2, v:5}]","{ sortRules: [{ key: 'v', direction: 'desc' }] }"]
+                defaultTestArgs: ["[{id:1, v:10}, {id:2, v:5}]","{ sortRules: [{ getValue: item => item.v, direction: 'desc' }], page: 1, pageSize: 10 }"]
               },
               {
                 name: "uniqueBy",
@@ -406,14 +406,14 @@ export const utilityDocs: UtilityDocEntry[] = [
                 description: "探测当前浏览器支持的高级特性能力。",
                 params: [{"name":"win","type":"Window | null","required":false,"description":""},{"name":"nav","type":"Navigator | null","required":false,"description":""}],
                 returns: {"type":"BrowserCapabilitySummary","description":""},
-                defaultTestArgs: ["{ touch: true, webgl: false }"]
+                defaultTestArgs: ["window","navigator"]
               },
               {
                 name: "summarizeBrowserEnvironment",
                 description: "提取浏览器核心环境指标（如内核、平台、UA）。",
                 params: [{"name":"win","type":"Window | null","required":false,"description":""},{"name":"nav","type":"Navigator | null","required":false,"description":""}],
                 returns: {"type":"BrowserEnvironmentSummary","description":""},
-                defaultTestArgs: ["window.navigator.userAgent"]
+                defaultTestArgs: ["window","navigator"]
               },
               {
                 name: "getLocationSnapshot",
@@ -427,14 +427,14 @@ export const utilityDocs: UtilityDocEntry[] = [
                 description: "将视口尺寸折叠至当前的响应式断点类型。",
                 params: [{"name":"breakpoints","type":"readonly ViewportBreakpoint[]","required":true,"description":""},{"name":"win","type":"Window | null","required":false,"description":""},{"name":"fallback","type":"any","required":false,"description":""}],
                 returns: {"type":"ViewportBreakpointSummary","description":""},
-                defaultTestArgs: ["1024"]
+                defaultTestArgs: ["[{ key: 'sm', minWidth: 640 }, { key: 'lg', minWidth: 1024 }]","window"]
               },
               {
                 name: "summarizeMediaQueries",
                 description: "汇总并分析常见的 CSS 媒体查询生效状态。",
                 params: [{"name":"queries","type":"readonly string[]","required":true,"description":""},{"name":"fallback","type":"any","required":false,"description":""},{"name":"win","type":"Window | null","required":false,"description":""}],
                 returns: {"type":"MediaQuerySummary[]","description":""},
-                defaultTestArgs: ["'(prefers-color-scheme: dark)'"]
+                defaultTestArgs: ["['(prefers-color-scheme: dark)', '(hover: hover)']","false","window"]
               }
             ],
     snippets: ["summarizeBrowserEnvironment(window, navigator)", "summarizeViewportBreakpoints(breakpoints, window)"],
@@ -592,7 +592,7 @@ export const utilityDocs: UtilityDocEntry[] = [
                 description: "分析当前的排序设置，并给出 UI 面板应该展示的状态。",
                 params: [{"name":"current","type":"SortState<K> | null | undefined","required":true,"description":""},{"name":"keys","type":"readonly K[]","required":true,"description":""},{"name":"options","type":"SortControlSummaryOptions<K>","required":false,"description":""}],
                 returns: {"type":"SortControlsReport<K>","description":""},
-                defaultTestArgs: ["[{key: 'name', direction: 'asc'}]"]
+                defaultTestArgs: ["{ key: 'name', direction: 'asc' }","['name', 'size', 'status']","{ clearOnDesc: true }"]
               }
             ],
     snippets: ["sortByValue(items, (item) => item.size, 'desc')", "createSortControlsReport(current, allowedKeys)"],
@@ -745,7 +745,7 @@ export const utilityDocs: UtilityDocEntry[] = [
                 description: "合并多个事件销毁闭包为一个。",
                 params: [{"name":"cleanups","type":"readonly DomEventCleanup[]","required":true,"description":""}],
                 returns: {"type":"DomEventCleanup","description":""},
-                defaultTestArgs: ["() => console.log('cleanup1')","() => console.log('cleanup2')"]
+                defaultTestArgs: ["[() => console.log('cleanup1'), () => console.log('cleanup2')]"]
               },
               {
                 name: "summarizeRectInViewport",
@@ -889,7 +889,7 @@ export const utilityDocs: UtilityDocEntry[] = [
                 description: "自动针对给定的文件集合依据哈希或尺寸排重并报告结果。",
                 params: [{"name":"files","type":"FileListInput<T>","required":true,"description":""},{"name":"options","type":"FileDeduplicateOptions","required":false,"description":""}],
                 returns: {"type":"FileDeduplicationReport<T>","description":""},
-                defaultTestArgs: ["['a.txt', 'b.txt', 'a.txt']"]
+                defaultTestArgs: ["[{ name: 'a.txt', size: 10, type: 'text/plain' }, { name: 'a.txt', size: 10, type: 'text/plain' }]","{ mode: 'name-size-type' }"]
               },
               {
                 name: "summarizeFileSizes",
@@ -1148,7 +1148,7 @@ export const utilityDocs: UtilityDocEntry[] = [
                 description: "执行结构化特征分析并返回报告。",
                 params: [{"name":"values","type":"readonly unknown[]","required":true,"description":""},{"name":"buckets","type":"readonly NumberBucketDefinition[]","required":true,"description":""},{"name":"precision","type":"any","required":false,"description":""}],
                 returns: {"type":"NumberDistributionSummary","description":""},
-                defaultTestArgs: ["[1, 2, 2, 3, 3, 3]"]
+                defaultTestArgs: ["[1, 5, 12, 18]","[{ key: 'small', max: 10 }, { key: 'large', min: 10 }]","0"]
               },
               {
                 name: "summarizePagination",
@@ -1201,7 +1201,7 @@ export const utilityDocs: UtilityDocEntry[] = [
                 description: "执行格式化逻辑并返回可展示字符串。",
                 params: [{"name":"entries","type":"readonly ObjectDiffEntry[]","required":true,"description":""},{"name":"options","type":"FormatObjectDiffOptions","required":false,"description":""}],
                 returns: {"type":"string","description":""},
-                defaultTestArgs: ["{ a: 1 }","{ a: 2 }"]
+                defaultTestArgs: ["[{ type: 'changed', path: ['a'], before: 1, after: 2 }]","{ showValues: true }"]
               },
               {
                 name: "createDeepObjectDiffReport",
@@ -1314,21 +1314,21 @@ export const utilityDocs: UtilityDocEntry[] = [
                 description: "内部核心工具方法。",
                 params: [{"name":"items","type":"readonly T[]","required":true,"description":""},{"name":"keyword","type":"string | readonly string[]","required":true,"description":""},{"name":"fields","type":"ReadonlyArray<SearchField<T>>","required":true,"description":""},{"name":"options","type":"RankSearchItemsOptions","required":false,"description":""}],
                 returns: {"type":"RankedSearchItemsWithSummary<T>","description":""},
-                defaultTestArgs: ["['apple', 'banana', 'apricot']","'ap'"]
+                defaultTestArgs: ["[{ title: 'apple' }, { title: 'banana' }, { title: 'apricot' }]","'ap'","[item => item.title]"]
               },
               {
                 name: "partitionSearchQuery",
                 description: "内部核心工具方法。",
                 params: [{"name":"items","type":"readonly T[]","required":true,"description":""},{"name":"options","type":"SearchQueryOptions<T>","required":true,"description":""}],
                 returns: {"type":"SearchQueryPartition<T>","description":""},
-                defaultTestArgs: ["'tag:bug priority:high login crash'"]
+                defaultTestArgs: ["[{ title: 'login crash', status: 'ready' }, { title: 'settings', status: 'draft' }]","{ keyword: 'login', fields: [item => item.title] }"]
               },
               {
                 name: "createSearchResultDisplaySummary",
                 description: "基于参数构建一个复杂的数据实例报告。",
                 params: [{"name":"summary","type":"SearchResultSummary","required":true,"description":""},{"name":"options","type":"FormatSearchResultSummaryOptions","required":false,"description":""}],
                 returns: {"type":"SearchResultDisplaySummary","description":""},
-                defaultTestArgs: ["{ items: ['a', 'b'], total: 10, query: 'test' }"]
+                defaultTestArgs: ["{ keyword: 'test', tokens: ['test'], totalCount: 10, matchedCount: 2, unmatchedCount: 8, hasKeyword: true, hasMatches: true, empty: false }"]
               },
               {
                 name: "normalizeSearchKeywordText",
@@ -1366,14 +1366,14 @@ export const utilityDocs: UtilityDocEntry[] = [
                 description: "基于参数构建一个复杂的数据实例报告。",
                 params: [{"name":"availableKeys","type":"readonly K[]","required":true,"description":""},{"name":"selectedKeys","type":"readonly K[]","required":true,"description":""},{"name":"options","type":"FormatSelectionSummaryOptions","required":false,"description":""}],
                 returns: {"type":"SelectionDisplaySummary","description":""},
-                defaultTestArgs: ["['id1', 'id2']","[{id: 'id1', name: 'A'}, {id: 'id2', name: 'B'}, {id: 'id3', name: 'C'}]","item => item.id"]
+                defaultTestArgs: ["['id1', 'id2', 'id3']","['id1', 'id2']","{ unit: 'items' }"]
               },
               {
                 name: "createSelectionKeyReplacementReport",
                 description: "基于参数构建一个复杂的数据实例报告。",
                 params: [{"name":"selectedKeys","type":"readonly K[]","required":true,"description":""},{"name":"replacements","type":"ReadonlyMap<K, K> | ReadonlyArray<readonly [K, K]>","required":true,"description":""}],
                 returns: {"type":"SelectionKeyReplacementReport<K>","description":""},
-                defaultTestArgs: ["['id1', 'id2']","'id1'","'id1-new'"]
+                defaultTestArgs: ["['id1', 'id2']","[['id1', 'id1-new']]"]
               }
             ],
     snippets: ["createSelectionDisplaySummaryByKeys(allKeys, selectedKeys, { unit: 'items' })", "summarizeSelectionAvailability(allKeys, selectedKeys, disabledKeys)"],
@@ -1398,7 +1398,7 @@ export const utilityDocs: UtilityDocEntry[] = [
                 description: "基于参数构建一个复杂的数据实例报告。",
                 params: [{"name":"parts","type":"readonly StorageValue[]","required":true,"description":""},{"name":"separator","type":"any","required":false,"description":""}],
                 returns: {"type":"string","description":""},
-                defaultTestArgs: ["'user_settings'","'123'"]
+                defaultTestArgs: ["['user', 'settings', 'theme']"]
               },
               {
                 name: "parseStorageKey",
@@ -1419,7 +1419,7 @@ export const utilityDocs: UtilityDocEntry[] = [
                 description: "执行结构化特征分析并返回报告。",
                 params: [{"name":"entries","type":"readonly StorageEntry[]","required":true,"description":""},{"name":"prefixSeparator","type":"any","required":false,"description":""}],
                 returns: {"type":"StorageEntriesSummary","description":""},
-                defaultTestArgs: ["{ a: '1', b: '2' }"]
+                defaultTestArgs: ["[{ key: 'user:theme', value: 'dark', index: 0 }, { key: 'cache:last-open', value: '', index: 1 }]"]
               },
               {
                 name: "createStorageTtlEnvelope",
@@ -1433,7 +1433,7 @@ export const utilityDocs: UtilityDocEntry[] = [
                 description: "执行结构化特征分析并返回报告。",
                 params: [{"name":"entries","type":"readonly StorageTtlEntry[]","required":true,"description":""}],
                 returns: {"type":"StorageTtlSummary","description":""},
-                defaultTestArgs: ["{ a: { value: 1, expiresAt: Date.now() + 1000 } }"]
+                defaultTestArgs: ["[{ key: 'cache:active', value: '{}', index: 0, envelope: { value: 1, createdAt: 1000, expiresAt: 2000 }, expired: false, expiresAt: 2000, remainingMs: 1000 }]"]
               }
             ],
     snippets: ["createStorageKey(['user', 'settings', 'theme'])", "createStorageTtlEnvelope(value, now, ttlMs)"],
@@ -1525,49 +1525,49 @@ export const utilityDocs: UtilityDocEntry[] = [
                 description: "基于参数构建一个复杂的数据实例报告。",
                 params: [{"name":"before","type":"readonly T[]","required":true,"description":""},{"name":"after","type":"readonly T[]","required":true,"description":""},{"name":"getChildren","type":"TreeChildrenGetter<T>","required":true,"description":""},{"name":"getKey","type":"TreeKeyGetter<T, K>","required":true,"description":""},{"name":"options","type":"TreeDiffByKeyOptions<T, K>","required":false,"description":""}],
                 returns: {"type":"TreeDiffByKeyReport<T, K>","description":""},
-                defaultTestArgs: ["[{id:1}]","[{id:2}]","item => item.id"]
+                defaultTestArgs: ["[{ id: 1, children: [{ id: 2 }] }]","[{ id: 1, children: [{ id: 3 }] }]","item => item.children","item => item.id"]
               },
               {
                 name: "treeToListWithoutChildren",
                 description: "内部核心工具方法。",
                 params: [{"name":"items","type":"readonly T[]","required":true,"description":""},{"name":"getChildren","type":"(item: T) => readonly T[] | undefined","required":true,"description":""},{"name":"childrenKey","type":"any","required":false,"description":""}],
                 returns: {"type":"Array<Omit<T, C>>","description":""},
-                defaultTestArgs: ["[{ id: 1, children: [{ id: 2 }] }]"]
+                defaultTestArgs: ["[{ id: 1, children: [{ id: 2 }] }]","item => item.children"]
               },
               {
                 name: "treeToParentIdList",
                 description: "内部核心工具方法。",
                 params: [{"name":"items","type":"readonly T[]","required":true,"description":""},{"name":"options","type":"TreeParentIdListOptions<T, K, C>","required":true,"description":""}],
                 returns: {"type":"Array<TreeParentIdListItem<T, K, C>>","description":""},
-                defaultTestArgs: ["[{ id: 1, children: [{ id: 2 }] }]"]
+                defaultTestArgs: ["[{ id: 1, children: [{ id: 2 }] }]","{ getId: item => item.id, getChildren: item => item.children }"]
               },
               {
                 name: "listToTree",
                 description: "内部核心工具方法。",
                 params: [{"name":"items","type":"readonly T[]","required":true,"description":""},{"name":"options","type":"ListToTreeOptions<T, K, C>","required":true,"description":""}],
                 returns: {"type":"Array<TreeWithChildren<T, C>>","description":""},
-                defaultTestArgs: ["[{ id: 1, parentId: null }, { id: 2, parentId: 1 }]"]
+                defaultTestArgs: ["[{ id: 1, parentId: null }, { id: 2, parentId: 1 }]","{ getId: item => item.id, getParentId: item => item.parentId }"]
               },
               {
                 name: "diagnoseListTreeItems",
                 description: "内部核心工具方法。",
                 params: [{"name":"items","type":"readonly T[]","required":true,"description":""},{"name":"options","type":"Pick<ListToTreeOptions<T, K>, \"getId\" | \"getParentId\" | \"rootParentIds\">","required":true,"description":""}],
                 returns: {"type":"ListTreeDiagnostic<T, K>","description":""},
-                defaultTestArgs: ["[{ id: 1, parentId: 2 }, { id: 2, parentId: 1 }]"]
+                defaultTestArgs: ["[{ id: 1, parentId: 2 }, { id: 2, parentId: 1 }]","{ getId: item => item.id, getParentId: item => item.parentId }"]
               },
               {
                 name: "createTreeLookup",
                 description: "基于参数构建一个复杂的数据实例报告。",
                 params: [{"name":"items","type":"readonly T[]","required":true,"description":""},{"name":"getChildren","type":"TreeChildrenGetter<T>","required":true,"description":""},{"name":"getKey","type":"TreeKeyGetter<T, K>","required":true,"description":""}],
                 returns: {"type":"TreeLookup<T, K>","description":""},
-                defaultTestArgs: ["[{ id: 1, children: [{ id: 2 }] }]"]
+                defaultTestArgs: ["[{ id: 1, children: [{ id: 2 }] }]","item => item.children","item => item.id"]
               },
               {
                 name: "summarizeTreeByKey",
                 description: "执行结构化特征分析并返回报告。",
                 params: [{"name":"items","type":"readonly T[]","required":true,"description":""},{"name":"getChildren","type":"TreeChildrenGetter<T>","required":true,"description":""},{"name":"getKey","type":"TreeKeyGetter<T, K>","required":true,"description":""}],
                 returns: {"type":"TreeKeySummary<T, K>","description":""},
-                defaultTestArgs: ["[{ id: 1, children: [{ id: 2 }] }]","item => item.id"]
+                defaultTestArgs: ["[{ id: 1, children: [{ id: 2 }] }]","item => item.children","item => item.id"]
               }
             ],
     snippets: ["treeToListWithoutChildren(nodes, (item) => item.children)", "listToTree(rows, { getId, getParentId })"],
@@ -1666,14 +1666,14 @@ export const utilityDocs: UtilityDocEntry[] = [
                 description: "基于参数构建一个复杂的数据实例报告。",
                 params: [{"name":"validators","type":"ValidatorMap<T>","required":true,"description":""},{"name":"labels","type":"Partial<Record<keyof T, string>>","required":false,"description":""}],
                 returns: {"type":"RecordValidationSchema<T>","description":""},
-                defaultTestArgs: ["{ name: [createRequiredValidator('name')] }"]
+                defaultTestArgs: ["{ name: [createRequiredValidator('name required')] }","{ name: 'Name' }"]
               },
               {
                 name: "createRecordValidationSchemaReport",
                 description: "基于参数构建一个复杂的数据实例报告。",
                 params: [{"name":"value","type":"T","required":true,"description":""},{"name":"schema","type":"RecordValidationSchema<T>","required":true,"description":""},{"name":"options","type":"Omit<FormatRecordValidationSummaryOptions<T>, \"formatField\">","required":false,"description":""}],
                 returns: {"type":"RecordValidationSchemaReport<T>","description":""},
-                defaultTestArgs: ["{ name: '' }","{ name: [createRequiredValidator('name')] }"]
+                defaultTestArgs: ["{ name: '' }","createRecordValidationSchema({ name: [createRequiredValidator('name required')] }, { name: 'Name' })"]
               },
               {
                 name: "runValidators",
@@ -1753,7 +1753,7 @@ export const utilityDocs: UtilityDocEntry[] = [
                 description: "执行结构化特征分析并返回报告。",
                 params: [{"name":"values","type":"readonly unknown[]","required":true,"description":""}],
                 returns: {"type":"ValueTypeListSummary","description":""},
-                defaultTestArgs: ["{ a: 1, b: 'str', c: null }"]
+                defaultTestArgs: ["[null, '', 0, false, [], {}, new Date('2026-06-10')]"]
               }
             ],
     snippets: ["parseIntegerWithReport(input, fallback)", "parseEnumListWithReport(input, allowed, fallback)"],
