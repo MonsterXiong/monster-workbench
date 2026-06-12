@@ -2,9 +2,11 @@
 import { computed, ref, watch } from "vue";
 import { hasItem } from "../../utils";
 
+type Awaitable<T> = T | Promise<T>;
 type AccordionSize = "sm" | "md" | "lg";
 type AccordionSurface = "card" | "muted" | "plain";
 type BadgeType = "primary" | "success" | "warning" | "danger" | "neutral";
+type CollapseIconPosition = "left" | "right";
 type CollapseName = string | number;
 type CollapseModelValue = CollapseName | CollapseName[];
 
@@ -31,6 +33,8 @@ interface Props {
   divided?: boolean;
   allowCollapse?: boolean;
   keepMounted?: boolean;
+  expandIconPosition?: CollapseIconPosition;
+  beforeCollapse?: (key: string, item: AccordionItem) => Awaitable<void | boolean>;
   ariaLabel?: string;
   disabled?: boolean;
   showChevron?: boolean;
@@ -46,6 +50,7 @@ const props = withDefaults(defineProps<Props>(), {
   divided: true,
   allowCollapse: true,
   keepMounted: false,
+  expandIconPosition: "right",
   ariaLabel: "",
   disabled: false,
   showChevron: true,
@@ -53,6 +58,7 @@ const props = withDefaults(defineProps<Props>(), {
 
 const emit = defineEmits<{
   (e: "update:modelValue", value: string[]): void;
+  (e: "change", value: string[]): void;
   (e: "toggle", payload: { key: string; expanded: boolean }): void;
 }>();
 
@@ -96,19 +102,21 @@ const collapseValue = computed<CollapseModelValue>({
     }
 
     emit("update:modelValue", nextValue);
+    emit("change", nextValue);
     if (changedKey) {
       emit("toggle", { key: changedKey, expanded: hasItem(nextValue, changedKey) });
     }
   },
 });
 
-const handleBeforeCollapse = (name: CollapseName) => {
+const handleBeforeCollapse = async (name: CollapseName) => {
   const key = String(name);
   const item = props.items.find((current) => current.key === key);
   pendingToggleKey.value = key;
 
   if (!item || isItemDisabled(item)) return false;
   if (!props.allowCollapse && isExpanded(key)) return false;
+  if (props.beforeCollapse && (await props.beforeCollapse(key, item)) === false) return false;
   return true;
 };
 
@@ -135,12 +143,13 @@ watch(
         'base-accordion--divided': divided,
         'base-accordion--keep-mounted': keepMounted,
         'base-accordion--hide-chevron': !showChevron,
+        [`base-accordion--icon-${expandIconPosition}`]: true,
         'is-disabled': disabled,
       },
     ]"
     :accordion="!multiple"
     :before-collapse="handleBeforeCollapse"
-    expand-icon-position="right"
+    :expand-icon-position="expandIconPosition"
     :aria-label="ariaLabel || undefined"
     :aria-disabled="disabled ? 'true' : undefined"
   >
@@ -258,6 +267,10 @@ watch(
 
 .base-accordion :deep(.el-collapse-item__arrow) {
   @apply mr-4 shrink-0 text-slate-400 transition-transform duration-150 dark:text-slate-500;
+}
+
+.base-accordion--icon-left :deep(.el-collapse-item__arrow) {
+  @apply ml-4 mr-0;
 }
 
 .base-accordion :deep(.el-collapse-item__arrow.is-active) {

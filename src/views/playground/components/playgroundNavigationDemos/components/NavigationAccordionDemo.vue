@@ -6,6 +6,9 @@ const singleAccordion = ref(["usage"]);
 const multiAccordion = ref(["usage", "config"]);
 const lockedAccordion = ref(["config"]);
 const embeddedAccordion = ref(["usage"]);
+const leftIconAccordion = ref(["usage"]);
+const guardedAccordion = ref(["usage"]);
+const accordionGuardLocked = ref(true);
 const accordionEvent = ref("等待操作");
 
 const accordionItems = [
@@ -16,6 +19,18 @@ const accordionItems = [
 
 const handleAccordionToggle = (payload: { key: string; expanded: boolean }) => {
   accordionEvent.value = `${payload.key} ${payload.expanded ? "展开" : "收起"}`;
+};
+
+const handleAccordionChange = (keys: string[]) => {
+  accordionEvent.value = `当前展开：${keys.join("、") || "无"}`;
+};
+
+const guardAccordionCollapse = (key: string) => {
+  if (accordionGuardLocked.value && key === "config") {
+    accordionEvent.value = "配置能力需要先解锁";
+    return false;
+  }
+  return true;
 };
 </script>
 
@@ -67,6 +82,56 @@ const handleAccordionToggle = (payload: { key: string; expanded: boolean }) => {
               />
             </template>
           </BaseAccordion>
+        </BasePanel>
+
+        <BasePanel title="左侧展开图标" subtitle="expandIconPosition=left 复用 Element Plus 图标位置能力，更贴近设置清单。">
+          <BaseAccordion
+            v-model="leftIconAccordion"
+            :items="accordionItems"
+            multiple
+            expand-icon-position="left"
+            surface="muted"
+            aria-label="左侧展开图标折叠面板"
+            @change="handleAccordionChange"
+          >
+            <template #actions="{ expanded }">
+              <BaseBadge :type="expanded ? 'primary' : 'neutral'" size="xs">{{ expanded ? "已展开" : "未展开" }}</BaseBadge>
+            </template>
+            <template #default="{ item }">
+              <BaseAlert type="info" :title="item.title" :description="item.description || '暂无说明。'" compact />
+            </template>
+          </BaseAccordion>
+          <template #footer>
+            <span class="navigation-result">最近事件：{{ accordionEvent }}</span>
+          </template>
+        </BasePanel>
+      </div>
+
+      <div class="demo-grid">
+        <BasePanel title="折叠前拦截" subtitle="beforeCollapse 可阻止未校验配置展开，适合权限、保存和校验场景。">
+          <BaseAccordion
+            v-model="guardedAccordion"
+            :items="accordionItems"
+            surface="card"
+            :before-collapse="guardAccordionCollapse"
+            aria-label="拦截折叠面板"
+            @toggle="handleAccordionToggle"
+          >
+            <template #usage>
+              <BaseAlert type="info" title="使用说明" description="配置能力项被锁定时，点击不会展开。" compact />
+            </template>
+            <template #config>
+              <BaseAlert type="success" title="配置已解锁" description="解锁后 beforeCollapse 返回 true，面板可正常展开。" compact />
+            </template>
+          </BaseAccordion>
+          <template #footer>
+            <div class="accordion-footer-actions">
+              <span class="navigation-result">最近事件：{{ accordionEvent }}</span>
+              <BaseButton type="neutral" size="xs" outline @click="accordionGuardLocked = !accordionGuardLocked">
+                {{ accordionGuardLocked ? "解除拦截" : "恢复拦截" }}
+              </BaseButton>
+            </div>
+          </template>
         </BasePanel>
 
         <BasePanel title="嵌入式 Plain" subtitle="plain 表面、无边框和 keepMounted 适合嵌在侧栏或详情正文。">
@@ -139,5 +204,9 @@ const handleAccordionToggle = (payload: { key: string; expanded: boolean }) => {
 
 .navigation-result {
   @apply text-xs font-black text-slate-500 dark:text-slate-400;
+}
+
+.accordion-footer-actions {
+  @apply flex min-w-0 flex-wrap items-center justify-between gap-2;
 }
 </style>

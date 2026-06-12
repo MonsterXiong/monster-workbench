@@ -11,6 +11,10 @@ const compactTab = ref("all");
 const equalTab = ref("build");
 const scrollTab = ref("assets");
 const customTab = ref("preview");
+const dynamicTab = ref("draft");
+const verticalTab = ref("profile");
+const guardLocked = ref(true);
+const nextDynamicIndex = ref(3);
 
 const tabs = [
   { key: "overview", title: "概览", icon: "LayoutDashboard", badge: "New", badgeColor: "bg-primary text-white" },
@@ -46,6 +50,55 @@ const customTabs = [
   { key: "schema", title: "结构", icon: "Braces", badge: "JSON" },
   { key: "history", title: "历史", icon: "History" },
 ];
+
+const dynamicTabs = ref([
+  { key: "draft", title: "草稿", icon: "FilePenLine", closable: false },
+  { key: "review", title: "评审", icon: "ClipboardCheck", badge: "2", closable: true },
+  { key: "release", title: "发布", icon: "Rocket", closable: true },
+]);
+
+const verticalTabs = [
+  { key: "profile", title: "资料", icon: "UserRound" },
+  { key: "rules", title: "规则", icon: "ShieldCheck", badge: "锁定" },
+  { key: "logs", title: "日志", icon: "ScrollText" },
+];
+
+const addDynamicTab = () => {
+  const key = `custom-${nextDynamicIndex.value}`;
+  dynamicTabs.value.push({
+    key,
+    title: `视图 ${nextDynamicIndex.value}`,
+    icon: "PanelTop",
+    closable: true,
+  });
+  nextDynamicIndex.value += 1;
+  dynamicTab.value = key;
+  triggerToast("已新增标签页", "success");
+};
+
+const removeDynamicTab = (key: string | number) => {
+  dynamicTabs.value = dynamicTabs.value.filter((tab) => tab.key !== key);
+  if (dynamicTab.value === key) {
+    dynamicTab.value = dynamicTabs.value[0]?.key ?? "";
+  }
+  triggerToast(`已移除 ${key}`, "info");
+};
+
+const handleDynamicEdit = (payload: { key?: string | number; action: "add" | "remove" }) => {
+  if (payload.action === "add") {
+    addDynamicTab();
+    return;
+  }
+  if (payload.key !== undefined) removeDynamicTab(payload.key);
+};
+
+const guardBeforeLeave = (newKey: string | number, oldKey: string | number) => {
+  if (guardLocked.value && oldKey === "rules" && newKey !== "rules") {
+    triggerToast("规则页正在校验，暂不能离开", "warning");
+    return false;
+  }
+  return true;
+};
 </script>
 
 <template>
@@ -101,6 +154,48 @@ const customTabs = [
           </BaseTab>
         </BasePanel>
       </div>
+
+      <div class="demo-grid">
+        <BasePanel title="动态标签" subtitle="透出 Element Plus editable / closable / addable 能力，适合多视图工作区。">
+          <BaseTab
+            v-model="dynamicTab"
+            :tabs="dynamicTabs"
+            type="card"
+            editable
+            surface="plain"
+            full-width
+            aria-label="动态标签页"
+            @edit="handleDynamicEdit"
+          />
+          <BaseDataState class="mt-4" state="ready" :title="`当前动态页：${dynamicTab || '无'}`" description="新增和关闭事件由 BaseTab 统一转交业务侧，组件不直接持久化视图。">
+            <BaseDescriptionList
+              :items="[
+                { key: 'count', label: '标签数量', value: `${dynamicTabs.length}`, status: 'primary' },
+                { key: 'mode', label: 'Element Plus', value: 'editable / closable' },
+              ]"
+              compact
+            />
+          </BaseDataState>
+        </BasePanel>
+
+        <BasePanel title="垂直与拦截" subtitle="支持 left / right 标签位置，并可通过 beforeLeave 拦截未完成切换。">
+          <div class="vertical-tab-demo">
+            <BaseTab
+              v-model="verticalTab"
+              :tabs="verticalTabs"
+              variant="underline"
+              tab-position="left"
+              surface="plain"
+              :before-leave="guardBeforeLeave"
+              aria-label="垂直标签页"
+            />
+            <BaseDataState class="min-w-0 flex-1" state="ready" :title="`当前：${verticalTab}`" description="切到规则页后，在解锁前离开会被 beforeLeave 拦截。">
+              <BaseButton v-if="verticalTab === 'rules' && guardLocked" type="warning" size="sm" @click="guardLocked = false">解除拦截</BaseButton>
+              <BaseButton v-else type="neutral" size="sm" outline @click="guardLocked = true">恢复拦截</BaseButton>
+            </BaseDataState>
+          </div>
+        </BasePanel>
+      </div>
     </PlaygroundDemoSection>
   </section>
 </template>
@@ -120,5 +215,9 @@ const customTabs = [
 
 .tab-demo-custom-icon.is-active {
   @apply bg-primary text-white;
+}
+
+.vertical-tab-demo {
+  @apply flex min-w-0 items-stretch gap-4;
 }
 </style>

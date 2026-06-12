@@ -2,13 +2,20 @@
 import { computed } from "vue";
 import BaseIcon from "./BaseIcon.vue";
 
+type Awaitable<T> = T | Promise<T>;
+type TabKey = string | number;
+type TabElementType = "" | "card" | "border-card";
+type TabPosition = "top" | "right" | "bottom" | "left";
+type TabEditAction = "add" | "remove";
+
 interface TabItem {
-  key: string | number;
+  key: TabKey;
   title: string;
   icon?: any;
   badge?: string | number;
   badgeColor?: string;
   disabled?: boolean;
+  closable?: boolean;
   ariaLabel?: string;
 }
 
@@ -18,20 +25,26 @@ type TabSurface = "default" | "muted" | "plain";
 type TabAlign = "start" | "center" | "end" | "between";
 
 interface ElementPaneLike {
-  paneName?: { value?: string | number } | string | number;
+  paneName?: { value?: TabKey } | TabKey;
   props?: {
-    name?: string | number;
+    name?: TabKey;
     disabled?: boolean;
   };
 }
 
 interface Props {
-  modelValue: string | number;
+  modelValue: TabKey;
   tabs: TabItem[];
   variant?: TabVariant;
   size?: TabSize;
   surface?: TabSurface;
   align?: TabAlign;
+  type?: TabElementType;
+  tabPosition?: TabPosition;
+  closable?: boolean;
+  addable?: boolean;
+  editable?: boolean;
+  beforeLeave?: (newKey: TabKey, oldKey: TabKey) => Awaitable<void | boolean>;
   ariaLabel?: string;
   fullWidth?: boolean;
   equal?: boolean;
@@ -44,6 +57,11 @@ const props = withDefaults(defineProps<Props>(), {
   size: "md",
   surface: "default",
   align: "start",
+  type: "",
+  tabPosition: "top",
+  closable: false,
+  addable: false,
+  editable: false,
   ariaLabel: "",
   fullWidth: false,
   equal: false,
@@ -52,8 +70,11 @@ const props = withDefaults(defineProps<Props>(), {
 });
 
 const emit = defineEmits<{
-  (e: "update:modelValue", key: string | number): void;
+  (e: "update:modelValue", key: TabKey): void;
   (e: "select", tab: TabItem): void;
+  (e: "remove", key: TabKey): void;
+  (e: "add"): void;
+  (e: "edit", payload: { key?: TabKey; action: TabEditAction }): void;
 }>();
 
 defineSlots<{
@@ -64,6 +85,7 @@ defineSlots<{
 const rootClasses = computed(() => [
   `base-tab--${props.variant}`,
   `base-tab--${props.size}`,
+  `base-tab--position-${props.tabPosition}`,
   `base-tab--surface-${props.surface}`,
   `base-tab--align-${props.align}`,
   {
@@ -108,12 +130,38 @@ const handleTabClick = (pane: ElementPaneLike) => {
   if (!tab || isTabDisabled(tab) || key !== props.modelValue) return;
   emit("select", tab);
 };
+
+const handleBeforeLeave = (newKey: TabKey, oldKey: TabKey) => {
+  if (props.disabled) return false;
+  return props.beforeLeave?.(newKey, oldKey) ?? true;
+};
+
+const handleTabRemove = (key: TabKey) => {
+  if (props.disabled) return;
+  emit("remove", key);
+};
+
+const handleTabAdd = () => {
+  if (props.disabled) return;
+  emit("add");
+};
+
+const handleTabEdit = (key: TabKey | undefined, action: TabEditAction) => {
+  if (props.disabled) return;
+  emit("edit", { key, action });
+};
 </script>
 
 <template>
   <el-tabs
     :model-value="modelValue"
+    :type="type"
+    :tab-position="tabPosition"
     :stretch="equal"
+    :closable="closable"
+    :addable="addable"
+    :editable="editable"
+    :before-leave="handleBeforeLeave"
     :tabindex="disabled ? -1 : 0"
     class="base-tab"
     :class="rootClasses"
@@ -122,12 +170,16 @@ const handleTabClick = (pane: ElementPaneLike) => {
     @update:model-value="handleValueUpdate"
     @tab-change="handleTabChange"
     @tab-click="handleTabClick"
+    @tab-remove="handleTabRemove"
+    @tab-add="handleTabAdd"
+    @edit="handleTabEdit"
   >
     <el-tab-pane
       v-for="(tab, index) in tabs"
       :key="tab.key"
       :name="tab.key"
       :disabled="isTabDisabled(tab)"
+      :closable="tab.closable ?? closable"
       lazy
     >
       <template #label>
@@ -286,6 +338,41 @@ const handleTabClick = (pane: ElementPaneLike) => {
   @apply justify-between;
 }
 
+.base-tab--position-left,
+.base-tab--position-right {
+  @apply w-fit;
+}
+
+.base-tab--position-left :deep(.el-tabs__header),
+.base-tab--position-right :deep(.el-tabs__header) {
+  @apply m-0;
+}
+
+.base-tab--position-left :deep(.el-tabs__nav),
+.base-tab--position-right :deep(.el-tabs__nav) {
+  @apply flex-col items-stretch;
+  width: 100%;
+}
+
+.base-tab--position-left.base-tab--underline,
+.base-tab--position-right.base-tab--underline {
+  @apply border-b-0;
+  --base-tab-gap: 0.5rem;
+}
+
+.base-tab--position-left.base-tab--underline :deep(.el-tabs__item),
+.base-tab--position-right.base-tab--underline :deep(.el-tabs__item) {
+  @apply mb-0 border-b-0 py-2.5;
+}
+
+.base-tab--position-left.base-tab--underline :deep(.el-tabs__item.is-active) {
+  @apply border-l-2 border-primary pl-3;
+}
+
+.base-tab--position-right.base-tab--underline :deep(.el-tabs__item.is-active) {
+  @apply border-r-2 border-primary pr-3;
+}
+
 .base-tab--wrap :deep(.el-tabs__nav-wrap),
 .base-tab--wrap :deep(.el-tabs__nav-scroll) {
   overflow: visible;
@@ -370,6 +457,15 @@ const handleTabClick = (pane: ElementPaneLike) => {
 
 .base-tab__badge--default {
   @apply bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300;
+}
+
+.base-tab :deep(.el-tabs__new-tab) {
+  @apply ml-2 inline-flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 shadow-sm transition hover:border-primary hover:text-primary dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400;
+}
+
+.base-tab--position-left :deep(.el-tabs__new-tab),
+.base-tab--position-right :deep(.el-tabs__new-tab) {
+  @apply ml-0 mt-2;
 }
 
 @media (prefers-reduced-motion: reduce) {
