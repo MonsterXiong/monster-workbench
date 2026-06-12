@@ -3,7 +3,7 @@ import { computed, nextTick, onBeforeUnmount, ref, useAttrs, useId, watchEffect 
 import { Search, X, LoaderCircle } from "lucide-vue-next";
 import { useI18n } from "../../composables/useI18n";
 import { createDebouncedFunction, isEscapeKey, isKeyboardKey, joinAriaIds, omit, toIntegerAtLeast } from "../../utils";
-import { syncElementPlusClearButtonLabel } from "./elementPlusDom";
+import { syncElementPlusClearButtonLabel, toElementPlusSize, type ProjectControlSize } from "./elementPlusDom";
 
 defineOptions({
   inheritAttrs: false,
@@ -18,7 +18,7 @@ interface Props {
   readonly?: boolean;
   loading?: boolean;
   clearable?: boolean;
-  size?: "sm" | "md" | "lg";
+  size?: ProjectControlSize;
   surface?: "default" | "muted" | "plain";
   error?: boolean;
   searchOnInput?: boolean;
@@ -117,11 +117,7 @@ const describedBy = computed(() =>
   ])
 );
 const hasFieldText = computed(() => props.label || props.description || props.errorMessage);
-const elementSize = computed(() => {
-  if (props.size === "sm") return "small";
-  if (props.size === "lg") return "large";
-  return "default";
-});
+const elementSize = computed(() => toElementPlusSize(props.size));
 
 const shouldEmitSearch = (nextValue: string) => {
   if (!nextValue) return true;
@@ -233,7 +229,7 @@ onBeforeUnmount(() => {
       :model-value="modelValue"
       class="base-search-input__field"
       :class="{ 'base-search-input__field--with-text': hasFieldText }"
-      type="text"
+      type="search"
       :placeholder="placeholder || t('common.search')"
       :disabled="disabled"
       :readonly="isInputReadonly"
@@ -279,6 +275,11 @@ onBeforeUnmount(() => {
 <style scoped>
 .base-search-input {
   @apply flex w-full min-w-0 flex-col text-slate-700 transition-all dark:text-slate-100;
+  --base-search-input-height: 2.25rem;
+  --base-search-input-padding-x: 0.75rem;
+  --base-search-input-font-size: 0.75rem;
+  --base-search-input-icon-size: 1rem;
+  --base-search-input-gap: 0.375rem;
 }
 
 .base-search-input__field {
@@ -287,6 +288,8 @@ onBeforeUnmount(() => {
 
 .base-search-input__field :deep(.el-input__wrapper) {
   @apply rounded-xl border border-slate-300 bg-white text-slate-700 shadow-sm transition-all dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100;
+  min-height: var(--base-search-input-height);
+  padding-inline: var(--base-search-input-padding-x);
   box-shadow:
     0 1px 2px rgba(15, 23, 42, 0.04),
     inset 0 1px 0 rgba(255, 255, 255, 0.72);
@@ -301,7 +304,8 @@ onBeforeUnmount(() => {
 }
 
 .base-search-input--plain .base-search-input__field :deep(.el-input__wrapper) {
-  @apply rounded-none border-0 bg-transparent px-0 shadow-none dark:bg-transparent;
+  --base-search-input-padding-x: 0;
+  @apply rounded-none border-0 bg-transparent shadow-none dark:bg-transparent;
 }
 
 .base-search-input:focus-within .base-search-input__field :deep(.el-input__wrapper) {
@@ -328,16 +332,22 @@ onBeforeUnmount(() => {
   @apply border-red-400;
 }
 
-.base-search-input--sm .base-search-input__field :deep(.el-input__wrapper) {
-  @apply h-8 px-2.5;
+.base-search-input--xs {
+  --base-search-input-height: 1.75rem;
+  --base-search-input-padding-x: 0.5rem;
+  --base-search-input-font-size: 0.6875rem;
+  --base-search-input-icon-size: 0.875rem;
+  --base-search-input-gap: 0.25rem;
 }
 
-.base-search-input--md .base-search-input__field :deep(.el-input__wrapper) {
-  @apply h-9 px-3;
+.base-search-input--sm {
+  --base-search-input-height: 2rem;
+  --base-search-input-padding-x: 0.625rem;
 }
 
-.base-search-input--lg .base-search-input__field :deep(.el-input__wrapper) {
-  @apply h-10 px-3.5;
+.base-search-input--lg {
+  --base-search-input-height: 2.5rem;
+  --base-search-input-padding-x: 0.875rem;
 }
 
 .base-search-input.is-disabled {
@@ -365,11 +375,14 @@ onBeforeUnmount(() => {
 }
 
 .base-search-input__icon {
-  @apply h-4 w-4 shrink-0 text-slate-400;
+  @apply shrink-0 text-slate-400;
+  width: var(--base-search-input-icon-size);
+  height: var(--base-search-input-icon-size);
 }
 
 .base-search-input__field :deep(.el-input__inner) {
   @apply min-w-0 flex-1 bg-transparent text-xs font-bold outline-none placeholder:text-slate-400 disabled:cursor-not-allowed read-only:cursor-text;
+  font-size: var(--base-search-input-font-size);
 }
 
 .base-search-input__field :deep(.el-input__inner::-webkit-search-cancel-button),
@@ -380,19 +393,29 @@ onBeforeUnmount(() => {
 
 .base-search-input__field :deep(.el-input__prefix),
 .base-search-input__field :deep(.el-input__suffix) {
-  @apply text-slate-400 dark:text-slate-500;
+  @apply min-w-0 text-slate-400 dark:text-slate-500;
+}
+
+.base-search-input__field :deep(.el-input__prefix-inner),
+.base-search-input__field :deep(.el-input__suffix-inner) {
+  @apply flex min-w-0 items-center;
+  gap: var(--base-search-input-gap);
 }
 
 .base-search-input__field :deep(.el-input__clear) {
-  @apply h-5 w-5 rounded-md text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-100;
+  @apply inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-100;
 }
 
 .base-search-input__action {
-  @apply h-4 w-4 shrink-0 text-slate-400;
+  @apply shrink-0 text-slate-400;
+  width: var(--base-search-input-icon-size);
+  height: var(--base-search-input-icon-size);
 }
 
 .base-search-input__suffix {
-  @apply flex max-w-[45%] min-w-0 shrink-0 items-center gap-1 overflow-hidden;
+  @apply flex min-w-0 shrink-0 items-center overflow-hidden;
+  max-width: min(45%, 12rem);
+  gap: var(--base-search-input-gap);
 }
 
 .base-search-input__loading {

@@ -3,7 +3,7 @@ import { computed, ref, useAttrs, watchEffect } from "vue";
 import { useI18n } from "../../composables/useI18n";
 import BaseIcon from "./BaseIcon.vue";
 import { omit } from "../../utils";
-import { syncElementPlusClearButtonLabel } from "./elementPlusDom";
+import { syncElementPlusClearButtonLabel, toElementPlusSize, type ProjectControlSize } from "./elementPlusDom";
 
 defineOptions({
   inheritAttrs: false,
@@ -16,7 +16,7 @@ interface Props {
   disabled?: boolean;
   readonly?: boolean;
   error?: boolean;
-  size?: "xs" | "sm" | "md" | "lg";
+  size?: ProjectControlSize;
   clearable?: boolean;
   maxlength?: string | number;
   showWordLimit?: boolean;
@@ -73,12 +73,7 @@ const filteredAttrs = computed(() => {
   return omit(attrs, ["size", "type"]);
 });
 
-const elSize = computed(() => {
-  if (props.size === "xs") return "small";
-  if (props.size === "sm") return "small";
-  if (props.size === "lg") return "large";
-  return "default";
-});
+const elSize = computed(() => toElementPlusSize(props.size));
 
 const resolvedAriaLabel = computed(() => props.ariaLabel || props.placeholder || t("common.inputPlaceholder"));
 const resolvedClearText = computed(() => props.clearText || t("common.clear"));

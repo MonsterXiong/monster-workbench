@@ -14,6 +14,7 @@ import {
   normalizeSteppedNumber,
   toRangePercent,
 } from "../../utils";
+import { toElementPlusSize, type ProjectControlSize } from "./elementPlusDom";
 
 export interface SliderMark {
   value: number;
@@ -34,7 +35,7 @@ interface Props {
   error?: boolean;
   showValue?: boolean;
   showRange?: boolean;
-  size?: "sm" | "md";
+  size?: ProjectControlSize;
   compact?: boolean;
   unit?: string;
   marks?: SliderMark[];
@@ -171,7 +172,7 @@ const handleKeydown = (event: KeyboardEvent) => {
   }
 };
 
-const elementSize = computed(() => (props.size === "sm" ? "small" : "default"));
+const elementSize = computed(() => toElementPlusSize(props.size));
 
 const formatTooltip = (value: number) => {
   if (props.formatValue) return props.formatValue(normalizeValue(value));
@@ -384,11 +385,25 @@ onUpdated(() => {
   --base-slider-wrapper-size: 36px;
 }
 
+.base-slider--xs {
+  --base-slider-control-height: 28px;
+  --base-slider-thumb-size: 14px;
+  --base-slider-track-height: 4px;
+  --base-slider-wrapper-size: 32px;
+}
+
 .base-slider--md {
   --base-slider-control-height: 38px;
   --base-slider-thumb-size: 18px;
   --base-slider-track-height: 6px;
   --base-slider-wrapper-size: 40px;
+}
+
+.base-slider--lg {
+  --base-slider-control-height: 44px;
+  --base-slider-thumb-size: 20px;
+  --base-slider-track-height: 7px;
+  --base-slider-wrapper-size: 42px;
 }
 
 .base-slider__control {
@@ -407,11 +422,13 @@ onUpdated(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  top: 50% !important;
   cursor: pointer;
   line-height: normal;
   outline: none;
-  transform: translate(-50%, -50%);
+}
+
+.base-slider__control :deep(.el-slider__button-wrapper::after) {
+  display: none;
 }
 
 .base-slider__control :deep(.el-slider__runway) {

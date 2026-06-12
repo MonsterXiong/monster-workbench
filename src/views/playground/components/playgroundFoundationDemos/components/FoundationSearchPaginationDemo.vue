@@ -44,6 +44,7 @@ const handleSearch = (value: string) => {
           />
           <BaseSearchInput model-value="只读查询" placeholder="只读态" readonly surface="muted" />
           <BaseSearchInput model-value="禁用查询" placeholder="禁用态带值" disabled />
+          <BaseSearchInput model-value="XS" placeholder="迷你搜索尺寸" size="xs" clear-text="清空迷你搜索" />
           <BaseSearchInput
             v-model="searchValue"
             placeholder="即时搜索"

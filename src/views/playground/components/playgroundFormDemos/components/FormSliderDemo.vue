@@ -97,7 +97,9 @@ const sliderDecimalMarks = [
         </BasePanel>
         <BasePanel title="紧凑、只读与禁用" subtitle="适合卡片、侧栏和不可编辑状态。">
           <div class="field-stack">
+            <BaseSlider :model-value="18" compact size="xs" label="迷你滑块" :min="0" :max="100" :show-value="false" :show-range="false" />
             <BaseSlider v-model="sliderValue" compact size="sm" label="紧凑滑块" :min="0" :max="100" />
+            <BaseSlider :model-value="72" compact size="lg" label="宽松滑块" :min="0" :max="100" unit="%" />
             <BaseSlider :model-value="42" compact label="只读滑块" description="展示当前配置，不允许修改。" readonly unit="%" />
             <BaseSlider :model-value="48" compact label="禁用滑块" disabled />
           </div>
