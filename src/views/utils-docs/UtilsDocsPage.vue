@@ -380,10 +380,10 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="flex h-full w-full flex-col overflow-hidden bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+  <div class="utils-docs-page flex h-full w-full flex-col overflow-hidden bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
     <div class="flex min-h-0 flex-1 flex-col lg:flex-row">
       <aside
-        class="flex w-full shrink-0 flex-col border-b border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900 lg:max-h-none lg:w-72 lg:border-b-0 lg:border-r"
+        class="utils-docs-nav-panel flex w-full shrink-0 flex-col border-b border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900 lg:max-h-none lg:w-72 lg:border-b-0 lg:border-r"
         :class="selectedFuncName ? 'max-h-52' : 'max-h-[42vh]'"
       >
         <div class="shrink-0 border-b border-slate-100 p-4 dark:border-slate-800">
@@ -507,7 +507,7 @@ onBeforeUnmount(() => {
         </nav>
       </aside>
 
-      <main class="min-h-0 flex-1 overflow-hidden bg-slate-50 dark:bg-slate-950">
+      <main class="utils-docs-main min-h-0 flex-1 overflow-hidden bg-slate-50 dark:bg-slate-950">
         <div v-if="filteredDocs.length === 0" class="flex h-full min-h-[360px] flex-col items-center justify-center p-8 text-center">
           <Search class="mb-3 h-8 w-8 text-slate-300 dark:text-slate-600" />
           <div class="text-sm font-black text-slate-600 dark:text-slate-300">没有匹配的工具函数模块</div>
@@ -516,7 +516,7 @@ onBeforeUnmount(() => {
 
         <Transition name="fade" mode="out-in">
           <div v-if="activeDocKey === 'overview'" key="overview" class="h-full w-full space-y-5 overflow-y-auto p-4 lg:p-6">
-            <section class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+            <section class="utils-docs-hero rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
               <div class="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
                 <div class="min-w-0">
                   <div class="flex items-center gap-2 text-xs font-black uppercase tracking-wide text-primary">
@@ -530,19 +530,19 @@ onBeforeUnmount(() => {
                 </div>
 
                 <div class="grid min-w-[320px] grid-cols-2 gap-2 sm:grid-cols-4">
-                  <div class="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950">
+                  <div class="utils-docs-stat-card rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950">
                     <div class="text-[10px] font-black uppercase tracking-wide text-slate-400">模块</div>
                     <div class="mt-1 text-xl font-black text-slate-900 dark:text-white">{{ visibleStats.moduleCount }}</div>
                   </div>
-                  <div class="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950">
+                  <div class="utils-docs-stat-card rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950">
                     <div class="text-[10px] font-black uppercase tracking-wide text-slate-400">函数</div>
                     <div class="mt-1 text-xl font-black text-slate-900 dark:text-white">{{ visibleStats.functionCount }}</div>
                   </div>
-                  <div class="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950">
+                  <div class="utils-docs-stat-card rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950">
                     <div class="text-[10px] font-black uppercase tracking-wide text-slate-400">示例</div>
                     <div class="mt-1 text-xl font-black text-slate-900 dark:text-white">{{ visibleStats.exampleCount }}</div>
                   </div>
-                  <div class="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950">
+                  <div class="utils-docs-stat-card rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950">
                     <div class="text-[10px] font-black uppercase tracking-wide text-slate-400">质量</div>
                     <div class="mt-1 text-xl font-black text-emerald-600 dark:text-emerald-400">{{ visibleStats.averageQualityScore }}</div>
                   </div>
@@ -554,7 +554,7 @@ onBeforeUnmount(() => {
               <article
                 v-for="doc in filteredDocs"
                 :key="doc.key"
-                class="group flex min-h-[220px] cursor-pointer flex-col rounded-xl border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-primary hover:shadow-md dark:border-slate-800 dark:bg-slate-900 dark:hover:border-primary"
+                class="utils-docs-module-card group flex min-h-[220px] cursor-pointer flex-col rounded-xl border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-primary hover:shadow-md dark:border-slate-800 dark:bg-slate-900 dark:hover:border-primary"
                 @click="selectDoc(doc.key)"
               >
                 <div class="flex items-start justify-between gap-3">
@@ -607,7 +607,7 @@ onBeforeUnmount(() => {
               <span class="font-black text-slate-800 dark:text-slate-200">{{ activeDoc.title }}</span>
             </div>
 
-            <section class="rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+            <section class="utils-docs-module-panel rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
               <header class="border-b border-slate-100 p-5 dark:border-slate-800">
                 <div class="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
                   <div class="min-w-0">
@@ -672,7 +672,7 @@ onBeforeUnmount(() => {
                       v-for="fn in activeDoc.functions"
                       :key="fn.name"
                       type="button"
-                      class="group min-w-0 rounded-lg border border-slate-200 bg-slate-50 p-4 text-left transition hover:-translate-y-0.5 hover:border-primary hover:bg-white hover:shadow-sm dark:border-slate-800 dark:bg-slate-950 dark:hover:border-primary dark:hover:bg-slate-900"
+                      class="utils-docs-function-card group min-w-0 rounded-lg border border-slate-200 bg-slate-50 p-4 text-left transition hover:-translate-y-0.5 hover:border-primary hover:bg-white hover:shadow-sm dark:border-slate-800 dark:bg-slate-950 dark:hover:border-primary dark:hover:bg-slate-900"
                       @click="selectFunction(fn.name)"
                     >
                       <div class="flex items-start justify-between gap-2">
@@ -737,7 +737,7 @@ onBeforeUnmount(() => {
                 <span class="font-mono font-black text-slate-800 dark:text-slate-200">{{ activeFunctionObj.name }}</span>
               </div>
 
-            <section class="rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+            <section class="utils-docs-detail-card rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
               <header class="border-b border-slate-100 p-5 dark:border-slate-800">
                 <div class="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
                   <div class="min-w-0">
@@ -890,7 +890,7 @@ onBeforeUnmount(() => {
               </section>
             </div>
 
-            <aside class="flex min-h-[520px] flex-col border-t border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900 xl:h-full xl:min-h-0 xl:border-l xl:border-t-0">
+            <aside class="utils-docs-sandbox-panel flex min-h-[520px] flex-col border-t border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900 xl:h-full xl:min-h-0 xl:border-l xl:border-t-0">
               <div class="flex min-h-0 flex-1 flex-col">
                     <div class="flex items-center justify-between border-b border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
                       <h2 class="flex items-center gap-2 text-sm font-black text-indigo-900 dark:text-indigo-100">
@@ -968,3 +968,151 @@ onBeforeUnmount(() => {
     </div>
   </div>
 </template>
+
+<style scoped>
+.utils-docs-page {
+  background:
+    linear-gradient(180deg, rgba(248, 250, 252, 0.98), rgba(241, 245, 249, 0.94));
+}
+
+.utils-docs-main {
+  background:
+    linear-gradient(180deg, rgba(248, 250, 252, 0.96), rgba(241, 245, 249, 0.92));
+}
+
+.utils-docs-nav-panel {
+  box-shadow: inset -1px 0 0 rgba(148, 163, 184, 0.12);
+}
+
+.utils-docs-nav-panel input,
+.utils-docs-sandbox-panel textarea {
+  border-color: #dbe3ef;
+  background-color: #f8fafc;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+}
+
+.utils-docs-nav-panel input:focus,
+.utils-docs-sandbox-panel textarea:focus {
+  background-color: #ffffff;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+.utils-docs-hero,
+.utils-docs-module-panel,
+.utils-docs-detail-card,
+.utils-docs-sandbox-panel {
+  border-color: rgba(203, 213, 225, 0.86);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.045);
+}
+
+.utils-docs-hero {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.96));
+}
+
+.utils-docs-stat-card {
+  min-height: 74px;
+  background:
+    linear-gradient(180deg, rgba(248, 250, 252, 0.96), rgba(241, 245, 249, 0.72));
+}
+
+.utils-docs-module-card,
+.utils-docs-function-card {
+  border-color: rgba(203, 213, 225, 0.88);
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.035);
+}
+
+.utils-docs-module-card:hover,
+.utils-docs-function-card:hover {
+  box-shadow: 0 14px 30px rgba(37, 99, 235, 0.1);
+}
+
+.utils-docs-detail-card {
+  overflow: hidden;
+}
+
+.utils-docs-detail-card table {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.utils-docs-detail-card thead {
+  background-color: #f8fafc;
+}
+
+.utils-docs-sandbox-panel {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.96));
+}
+
+.utils-docs-sandbox-panel pre {
+  line-height: 1.65;
+}
+
+.utils-docs-page * {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.75) transparent;
+}
+
+.utils-docs-page ::-webkit-scrollbar {
+  height: 10px;
+  width: 10px;
+}
+
+.utils-docs-page ::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
+  background-color: rgba(148, 163, 184, 0.7);
+}
+
+.utils-docs-page ::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(100, 116, 139, 0.78);
+}
+
+.utils-docs-page ::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+:global(.dark) .utils-docs-page,
+:global(.dark) .utils-docs-main {
+  background:
+    linear-gradient(180deg, rgba(2, 6, 23, 0.98), rgba(15, 23, 42, 0.96));
+}
+
+:global(.dark) .utils-docs-nav-panel {
+  box-shadow: inset -1px 0 0 rgba(51, 65, 85, 0.65);
+}
+
+:global(.dark) .utils-docs-nav-panel input,
+:global(.dark) .utils-docs-sandbox-panel textarea {
+  border-color: #334155;
+  background-color: #020617;
+  box-shadow: inset 0 1px 0 rgba(148, 163, 184, 0.08);
+}
+
+:global(.dark) .utils-docs-hero,
+:global(.dark) .utils-docs-module-panel,
+:global(.dark) .utils-docs-detail-card,
+:global(.dark) .utils-docs-sandbox-panel {
+  border-color: rgba(51, 65, 85, 0.9);
+  box-shadow: 0 16px 34px rgba(0, 0, 0, 0.24);
+}
+
+:global(.dark) .utils-docs-hero,
+:global(.dark) .utils-docs-sandbox-panel {
+  background:
+    linear-gradient(180deg, rgba(15, 23, 42, 0.98), rgba(2, 6, 23, 0.92));
+}
+
+:global(.dark) .utils-docs-stat-card {
+  background:
+    linear-gradient(180deg, rgba(15, 23, 42, 0.94), rgba(2, 6, 23, 0.8));
+}
+
+:global(.dark) .utils-docs-module-card,
+:global(.dark) .utils-docs-function-card {
+  border-color: rgba(51, 65, 85, 0.88);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.2);
+}
+</style>
