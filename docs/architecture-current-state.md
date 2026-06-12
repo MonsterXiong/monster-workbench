@@ -1506,7 +1506,7 @@ Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `
 代码事实：
 
 - `model_runs` 表已在 creative schema 中，字段覆盖 provider、model、request_type、status、duration、prompt_hash、token、cost、error 和 metadata。
-- `creative_model_run_repo.rs` 只提供 create/list；行为测试覆盖 task 绑定后的创建与列表查询。
+- `creative_model_run_repo.rs` 当前生产侧提供 create 写入；list/filter 查询主要用于 repo / service 测试验证，还没有正式 command、service 外观或 UI 观测页面。
 - `workflow_settle_service::persist_sidecar_model_runs` 是 sidecar workflow 结果写入 `model_runs` 的公共入口，写入时绑定 `project_id`、`task_id`、可选 `asset_id`，并可补 prompt hash。
 - `TaskService::run_generate_image_prompt_workflow_after_task` 在成功和失败/取消/blocked settle 中都会持久化 sidecar 返回的 `modelRuns`。
 - `BatchJobService` 的 prompt/image sidecar settle 在 succeeded、failed、cancelled 分支都会持久化 `modelRuns`，并把 `modelRunIds` 放回 task result。
@@ -1518,6 +1518,7 @@ Goal 00-13 真实 Tauri 验证闭环已经完成；后续待办统一收敛到 `
 |---|---|---|
 | creative workflow provider 调用 | 已通过 Rust trusted settle 写 `model_runs` | 保持所有正式 workflow 必须写 model_runs，不让 Python 直接写库 |
 | AI Provider 工作台 | 诊断链路，不写 `model_runs` | 可保留；若升级为正式创作任务，必须补 task/model_runs/task_events 归档 |
+| model_runs 查询面 | 当前缺少正式 command/service/UI | 后续做 provider 观测仪表盘时先补受控 list/filter API，不让前端直查 DB |
 | request_type | 当前实际有 `chat` / `image` 等短值 | 新增语义值前先兼容已有数据，不机械改名 |
 | provider profile | batch workflow 复用 provider config 适配为 sidecar DTO | 暂不建立独立 creative provider profile，除非业务配置与测试工作台明显分叉 |
 

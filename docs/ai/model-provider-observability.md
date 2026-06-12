@@ -63,7 +63,7 @@ unknown
 当前代码事实：
 
 - `model_runs` 表由 `src-tauri/src/infra/creative_db_schema.rs` 创建。
-- `src-tauri/src/infra/creative_model_run_repo.rs` 提供 create/list repo。
+- `src-tauri/src/infra/creative_model_run_repo.rs` 当前生产侧提供 create 写入；list 查询主要保留给 repo / service 测试验证，尚未形成正式查询 command 或观测页面。
 - `src-tauri/src/services/workflow_settle_service.rs::persist_sidecar_model_runs` 是当前 sidecar workflow 写入 `model_runs` 的公共入口。
 - `TaskService::run_generate_image_prompt_workflow_after_task` 在 success 和 non-success settle 中都会持久化 sidecar 返回的 `modelRuns`。
 - `BatchJobService` 的 prompt/image worker shell 在 success、failed、cancelled 等 settle 路径都会持久化 sidecar 返回的 `modelRuns`，并把 `modelRunIds` 写入 task result。
@@ -74,6 +74,7 @@ unknown
 - 正式 creative workflow 的 provider 调用必须经 Rust trusted settle 写 `model_runs`。
 - AI Provider 工作台的连接测试、聊天测试、生图测试可以继续作为诊断链路保留；如果未来把它们提升为正式任务或创作 workflow，必须补 `creative_tasks` / `model_runs` / `task_events` 归档。
 - Python sidecar 只能返回 `modelRuns` 摘要；最终落库、task/asset 绑定和脱敏边界仍由 Rust 控制。
+- 当前还没有面向 UI 的 model_runs 查询服务或仪表盘；后续做 provider 观测时应先补受控 list/filter command，而不是让前端直查数据库。
 
 ## 5. 脱敏要求
 
