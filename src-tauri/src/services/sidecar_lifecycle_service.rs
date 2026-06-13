@@ -1,7 +1,10 @@
+use crate::infra::path::PathProvider;
 use crate::infra::{AppError, AppResult};
 use crate::services::log_service::LogService;
+use crate::services::worker_queue_service::{start_worker_control_server, WorkerControlServer};
 use serde_json::{json, Value};
 use std::collections::{HashSet, VecDeque};
+use std::fs;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
@@ -229,10 +232,18 @@ pub struct SidecarRuntimeEndpoint {
     pub token: String,
 }
 
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub struct SidecarWorkerControlEndpoint {
+    pub url: String,
+    pub token: String,
+}
+
 pub struct SidecarLifecycleService<R: Runtime = Wry> {
     app_handle: AppHandle<R>,
     child: Option<Child>,
     runtime_token: Option<String>,
+    worker_control_server: Option<WorkerControlServer>,
     recovery_backoff_until: Option<u128>,
     last_status_event_status: Option<String>,
     last_status_event_at: Option<u128>,
@@ -253,6 +264,7 @@ impl<R: Runtime> SidecarLifecycleService<R> {
             app_handle,
             child: None,
             runtime_token: None,
+            worker_control_server: None,
             recovery_backoff_until: None,
             last_status_event_status: None,
             last_status_event_at: None,
@@ -392,7 +404,15 @@ impl<R: Runtime> SidecarLifecycleService<R> {
         let port = reserve_port()?;
         let token = format!("monster-sidecar-{}", now_millis());
         let script_path = self.resolve_sidecar_script()?;
-        let child = spawn_python_sidecar(&script_path, port, &token)?;
+        let worker_control_server =
+            start_worker_control_server(PathProvider::new(self.app_handle.clone()), token.clone())?;
+        let image_output_dir = resolve_worker_image_output_dir(&self.app_handle)?;
+        let worker_control_env = PythonWorkerControlEnv {
+            url: worker_control_server.url.clone(),
+            token: token.clone(),
+            image_output_dir,
+        };
+        let child = spawn_python_sidecar(&script_path, port, &token, Some(&worker_control_env))?;
 
         self.snapshot.status = "starting".to_string();
         self.snapshot.port = Some(port);
@@ -402,6 +422,7 @@ impl<R: Runtime> SidecarLifecycleService<R> {
         self.snapshot.checked_at = None;
         self.runtime_token = Some(token);
         self.child = Some(child);
+        self.worker_control_server = Some(worker_control_server);
         self.emit_status_event("starting", Some("sidecar starting".to_string()), true);
 
         std::thread::sleep(Duration::from_millis(250));
@@ -467,6 +488,7 @@ impl<R: Runtime> SidecarLifecycleService<R> {
         self.snapshot.pid = None;
         self.snapshot.checked_at = Some(now_text());
         self.runtime_token = None;
+        self.worker_control_server = None;
         self.reset_recovery_circuit();
         self.emit_status_event(
             "stopped",
@@ -566,6 +588,33 @@ impl<R: Runtime> SidecarLifecycleService<R> {
             .ok_or_else(|| AppError::Process("sidecar runtime token is missing".to_string()))?;
 
         Ok(SidecarRuntimeEndpoint { port, token })
+    }
+
+    #[allow(dead_code)]
+    pub fn ensure_worker_control_endpoint(
+        &mut self,
+        path_provider: PathProvider,
+    ) -> AppResult<SidecarWorkerControlEndpoint> {
+        let runtime_endpoint = self.ensure_runtime_endpoint()?;
+        let should_start = self
+            .worker_control_server
+            .as_ref()
+            .map(|server| server.token != runtime_endpoint.token)
+            .unwrap_or(true);
+        if should_start {
+            self.worker_control_server = Some(start_worker_control_server(
+                path_provider,
+                runtime_endpoint.token.clone(),
+            )?);
+        }
+        let server = self
+            .worker_control_server
+            .as_ref()
+            .ok_or_else(|| AppError::Process("worker control server is missing".to_string()))?;
+        Ok(SidecarWorkerControlEndpoint {
+            url: server.url.clone(),
+            token: runtime_endpoint.token,
+        })
     }
 
     #[allow(dead_code)]
@@ -830,6 +879,7 @@ impl<R: Runtime> SidecarLifecycleService<R> {
             self.snapshot.last_error = Some(message);
             self.snapshot.pid = None;
             self.runtime_token = None;
+            self.worker_control_server = None;
             self.child = None;
             self.snapshot.checked_at = Some(now_text());
             self.emit_status_event("process_exited", self.snapshot.last_error.clone(), true);
@@ -1121,9 +1171,14 @@ fn budget_read_timeout(budget: &Value) -> Duration {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::infra::creative_db_schema::init_schema;
+    use crate::infra::creative_task_repo;
+    use crate::infra::creative_types::CreateCreativeTaskInput;
     use crate::infra::path::PathProvider;
     use crate::services::log_service::LogService;
+    use std::ffi::OsStr;
     use std::path::PathBuf;
+    use std::process::Command;
     use std::sync::mpsc;
 
     #[test]
@@ -1149,6 +1204,41 @@ mod tests {
 
         assert!(budget.is_null());
         assert_eq!(budget_read_timeout(&budget), Duration::from_millis(125_000));
+    }
+
+    #[test]
+    fn python_sidecar_command_injects_worker_control_env() {
+        let script_path = PathBuf::from("creative_health_server.py");
+        let args = vec!["creative_health_server.py".to_string()];
+        let worker_control = PythonWorkerControlEnv {
+            url: "http://127.0.0.1:12345/worker".to_string(),
+            token: "runtime-token".to_string(),
+            image_output_dir: PathBuf::from("C:/tmp/monster-images"),
+        };
+        let mut command = Command::new("python");
+
+        configure_python_sidecar_command(&mut command, &args, &script_path, Some(&worker_control));
+
+        assert!(command_has_env(&command, "PYTHONIOENCODING"));
+        assert!(command_has_env(&command, "PYTHONNOUSERSITE"));
+        assert_eq!(
+            command_env_value(&command, "MONSTER_WORKER_CONTROL_URL").as_deref(),
+            Some("http://127.0.0.1:12345/worker")
+        );
+        assert_eq!(
+            command_env_value(&command, "MONSTER_WORKER_CONTROL_TOKEN").as_deref(),
+            Some("runtime-token")
+        );
+        assert_eq!(
+            command_env_value(&command, "MONSTER_WORKER_TASK_TYPES").as_deref(),
+            Some("image.prompt.batch,image.generate.batch")
+        );
+        assert_eq!(
+            command_env_value(&command, "MONSTER_WORKER_IMAGE_OUTPUT_DIR").as_deref(),
+            Some("C:/tmp/monster-images")
+        );
+        assert!(!command_has_env(&command, "PYTHONPATH"));
+        assert!(!command_has_env(&command, "PYTHONHOME"));
     }
 
     #[test]
@@ -1374,6 +1464,77 @@ mod tests {
     }
 
     #[test]
+    fn ensure_worker_control_endpoint_uses_runtime_token_and_claims_task() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
+        let port = listener
+            .local_addr()
+            .expect("listener addr should exist")
+            .port();
+        let token = "sidecar-worker-control-test";
+        let handle = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("health request should arrive");
+            let request = read_test_http_request(&mut stream);
+            assert!(request.starts_with("GET /health "));
+            assert!(request.contains(&format!("X-Monster-Token: {token}")));
+            write_test_json_response(&mut stream, r#"{"ok":true,"status":"ok"}"#);
+        });
+
+        let root = temp_root("worker-control-endpoint");
+        let app_dir = root.join("app-data");
+        let db_path = app_dir.join("monster_workbench.db");
+        std::fs::create_dir_all(&app_dir).expect("app dir should create");
+        init_schema(&db_path).expect("schema should init");
+        let task = creative_task_repo::create_task(
+            &db_path,
+            CreateCreativeTaskInput {
+                project_id: Some("project-a".to_string()),
+                goal_id: None,
+                batch_job_id: None,
+                task_type: "image.generate.batch".to_string(),
+                status: Some("queued".to_string()),
+                priority: Some(10),
+                payload_json: None,
+                max_retries: Some(1),
+                parent_task_id: None,
+                asset_id: None,
+                sequence_no: None,
+            },
+        )
+        .expect("task should create");
+        let path_provider = PathProvider::new_for_test(app_dir.clone(), db_path);
+
+        let app = tauri::test::mock_app();
+        let mut service = SidecarLifecycleService::new(app.handle().clone());
+        service.set_test_endpoint(port, token);
+        let endpoint = service
+            .ensure_worker_control_endpoint(path_provider)
+            .expect("worker control endpoint should start");
+
+        handle.join().expect("health server should finish");
+        assert!(endpoint.url.starts_with("http://127.0.0.1:"));
+        assert_eq!(endpoint.token, token);
+
+        let (_, response) = post_test_worker_control(
+            &endpoint.url,
+            &endpoint.token,
+            "/worker/claim",
+            json!({
+                "taskType": "image.generate.batch",
+                "projectId": "project-a",
+                "workerId": "worker-a",
+                "runtimeInstanceId": "runtime-a",
+                "leaseDurationMs": 60000
+            }),
+        );
+        assert_eq!(response["ok"], true);
+        assert_eq!(response["claimed"]["task"]["id"], task.id);
+        assert_eq!(response["claimed"]["claimToken"].is_string(), true);
+
+        drop(service);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn runtime_event_diagnostics_dedupes_by_runtime_source_key() {
         let app = tauri::test::mock_app();
         let mut service = SidecarLifecycleService::new(app.handle().clone());
@@ -1595,9 +1756,69 @@ mod tests {
             .expect("response should write");
         stream.flush().expect("response should flush");
     }
+
+    fn post_test_worker_control(
+        url: &str,
+        token: &str,
+        path: &str,
+        body: Value,
+    ) -> (String, Value) {
+        let port = url
+            .trim_start_matches("http://127.0.0.1:")
+            .split('/')
+            .next()
+            .expect("port should exist")
+            .parse::<u16>()
+            .expect("port should parse");
+        let body = body.to_string();
+        let mut stream = TcpStream::connect(("127.0.0.1", port)).expect("control should accept");
+        let request = format!(
+            "POST {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: {}\r\nX-Monster-Token: {token}\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        stream
+            .write_all(request.as_bytes())
+            .expect("request should write");
+        let mut response = String::new();
+        stream
+            .read_to_string(&mut response)
+            .expect("response should read");
+        let response_body = response
+            .split("\r\n\r\n")
+            .nth(1)
+            .expect("response body should exist");
+        let parsed =
+            serde_json::from_str::<Value>(response_body).expect("response json should parse");
+        (response, parsed)
+    }
+
+    fn command_has_env(command: &Command, key: &str) -> bool {
+        command
+            .get_envs()
+            .any(|(name, value)| name == OsStr::new(key) && value.is_some())
+    }
+
+    fn command_env_value(command: &Command, key: &str) -> Option<String> {
+        command
+            .get_envs()
+            .find(|(name, value)| name == &OsStr::new(key) && value.is_some())
+            .and_then(|(_, value)| value.map(|item| item.to_string_lossy().to_string()))
+    }
 }
 
-fn spawn_python_sidecar(script_path: &Path, port: u16, token: &str) -> AppResult<Child> {
+struct PythonWorkerControlEnv {
+    url: String,
+    token: String,
+    image_output_dir: PathBuf,
+}
+
+fn spawn_python_sidecar(
+    script_path: &Path,
+    port: u16,
+    token: &str,
+    worker_control: Option<&PythonWorkerControlEnv>,
+) -> AppResult<Child> {
     let args = [
         script_path.to_string_lossy().to_string(),
         "--port".to_string(),
@@ -1614,7 +1835,7 @@ fn spawn_python_sidecar(script_path: &Path, port: u16, token: &str) -> AppResult
         let mut command = Command::new(program);
         let mut full_args = prefix;
         full_args.extend(args.iter().cloned());
-        configure_python_sidecar_command(&mut command, &full_args, script_path);
+        configure_python_sidecar_command(&mut command, &full_args, script_path, worker_control);
         match command.spawn() {
             Ok(child) => return Ok(child),
             Err(error) => errors.push(format!("{program}: {error}")),
@@ -1627,7 +1848,12 @@ fn spawn_python_sidecar(script_path: &Path, port: u16, token: &str) -> AppResult
     )))
 }
 
-fn configure_python_sidecar_command(command: &mut Command, args: &[String], script_path: &Path) {
+fn configure_python_sidecar_command(
+    command: &mut Command,
+    args: &[String],
+    script_path: &Path,
+    worker_control: Option<&PythonWorkerControlEnv>,
+) {
     command.env_clear();
     for name in PYTHON_SIDECAR_ENV_ALLOWLIST {
         if let Some(value) = std::env::var_os(name) {
@@ -1641,12 +1867,45 @@ fn configure_python_sidecar_command(command: &mut Command, args: &[String], scri
         .env("PYTHONUTF8", "1")
         .env("PYTHONDONTWRITEBYTECODE", "1")
         .env("PYTHONNOUSERSITE", "1")
+        .env(
+            "MONSTER_WORKER_TASK_TYPES",
+            "image.prompt.batch,image.generate.batch",
+        )
         .env_remove("PYTHONHOME")
         .env_remove("PYTHONPATH")
         .current_dir(script_path.parent().unwrap_or_else(|| Path::new(".")))
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
+
+    if let Some(worker_control) = worker_control {
+        command
+            .env("MONSTER_WORKER_CONTROL_URL", &worker_control.url)
+            .env("MONSTER_WORKER_CONTROL_TOKEN", &worker_control.token)
+            .env(
+                "MONSTER_WORKER_IMAGE_OUTPUT_DIR",
+                &worker_control.image_output_dir,
+            );
+    }
+}
+
+fn resolve_worker_image_output_dir<R: Runtime>(app_handle: &AppHandle<R>) -> AppResult<PathBuf> {
+    #[cfg(test)]
+    if let Some(test_path) = std::env::var_os("MONSTER_TOOLS_TEST_OUTPUT_DIR") {
+        let output_dir = PathBuf::from(test_path);
+        fs::create_dir_all(&output_dir).map_err(|error| {
+            AppError::Io(format!("failed to create test image output dir: {error}"))
+        })?;
+        return Ok(output_dir);
+    }
+
+    let output_dir = PathProvider::new(app_handle.clone())
+        .get_app_local_data_dir()?
+        .join("ai")
+        .join("generated");
+    fs::create_dir_all(&output_dir)
+        .map_err(|error| AppError::Io(format!("failed to create image output dir: {error}")))?;
+    Ok(output_dir)
 }
 
 fn now_text() -> String {

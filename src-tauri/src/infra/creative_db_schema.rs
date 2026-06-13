@@ -30,6 +30,11 @@ const MIGRATIONS: &[Migration] = &[
         name: "add_creative_projects",
         apply: apply_creative_projects,
     },
+    Migration {
+        version: 4,
+        name: "add_creative_task_worker_lease_columns",
+        apply: apply_creative_task_worker_lease_columns,
+    },
 ];
 
 fn run_migrations(conn: &mut Connection) -> AppResult<()> {
@@ -271,6 +276,30 @@ fn apply_creative_projects(conn: &Connection) -> AppResult<()> {
 
         CREATE INDEX IF NOT EXISTS idx_creative_projects_status ON creative_projects(status);
         CREATE INDEX IF NOT EXISTS idx_creative_projects_updated_at ON creative_projects(updated_at);",
+    )?;
+    Ok(())
+}
+
+fn apply_creative_task_worker_lease_columns(conn: &Connection) -> AppResult<()> {
+    ensure_column(conn, "creative_tasks", "worker_id", "TEXT")?;
+    ensure_column(conn, "creative_tasks", "worker_runtime_instance_id", "TEXT")?;
+    ensure_column(conn, "creative_tasks", "worker_claim_token", "TEXT")?;
+    ensure_column(conn, "creative_tasks", "worker_claimed_at", "TEXT")?;
+    ensure_column(conn, "creative_tasks", "worker_heartbeat_at", "TEXT")?;
+    ensure_column(conn, "creative_tasks", "lease_expires_at", "TEXT")?;
+    ensure_column(
+        conn,
+        "creative_tasks",
+        "lease_renewal_count",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
+    conn.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_creative_tasks_status_lease_expires_at
+            ON creative_tasks(status, lease_expires_at);
+        CREATE INDEX IF NOT EXISTS idx_creative_tasks_worker_claim
+            ON creative_tasks(worker_id, worker_claim_token);
+        CREATE INDEX IF NOT EXISTS idx_creative_tasks_worker_runtime_instance_id
+            ON creative_tasks(worker_runtime_instance_id);",
     )?;
     Ok(())
 }

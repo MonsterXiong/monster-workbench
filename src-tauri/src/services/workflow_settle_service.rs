@@ -116,6 +116,32 @@ pub(crate) fn persist_sidecar_model_runs(
     Ok(model_run_ids)
 }
 
+pub(crate) fn persist_cancelled_sidecar_model_runs(
+    db_path: &Path,
+    task: &CreativeTask,
+    asset_id: Option<i64>,
+    model_runs: &[SidecarWorkflowModelRun],
+    prompt_hash_fallback: Option<&str>,
+    metadata_error_context: &str,
+) -> AppResult<Vec<i64>> {
+    let cancelled_model_runs = model_runs
+        .iter()
+        .cloned()
+        .map(|mut model_run| {
+            model_run.status = "cancelled".to_string();
+            model_run
+        })
+        .collect::<Vec<_>>();
+    persist_sidecar_model_runs(
+        db_path,
+        task,
+        asset_id,
+        &cancelled_model_runs,
+        prompt_hash_fallback,
+        metadata_error_context,
+    )
+}
+
 pub(crate) fn create_ready_sidecar_asset(
     db_path: &Path,
     project_id: Option<String>,

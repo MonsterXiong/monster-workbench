@@ -18,6 +18,9 @@ BATCH_IMAGE_GENERATE_TASK_TYPES = {"image.generate.batch", "demo.image.generate"
 BATCH_IMAGE_GENERATE_WORKFLOW_TYPE = "image.generate.batch"
 DEFAULT_BATCH_PROMPT_TEMPLATE = "Create a production-ready image prompt for a clean visual concept."
 SIDECAR_EVENT_BUFFER_LIMIT = 1000
+DEFAULT_WORKER_TASK_TYPES = "image.prompt.batch,image.generate.batch"
+DEFAULT_WORKER_LEASE_MS = 60000
+DEFAULT_WORKER_POLL_SECONDS = 1.0
 
 
 class SidecarEventBuffer:
@@ -137,6 +140,8 @@ class CreativeHealthHandler(BaseHTTPRequestHandler):
 
         if self.path == "/shutdown":
             self._write_json(HTTPStatus.OK, {"ok": True, "status": "shutting_down"})
+            if hasattr(self.server, "worker_stop"):
+                self.server.worker_stop.set()
             threading.Thread(target=self.server.shutdown, daemon=True).start()
             return
 
@@ -247,7 +252,366 @@ def main():
     server = ThreadingHTTPServer(("127.0.0.1", args.port), CreativeHealthHandler)
     server.access_token = args.token
     server.event_buffer = SidecarEventBuffer()
-    server.serve_forever()
+    server.worker_stop = threading.Event()
+    maybe_start_worker_loop(server)
+    try:
+        server.serve_forever()
+    finally:
+        server.worker_stop.set()
+
+
+class WorkerControlClient:
+    def __init__(self, base_url, token, timeout=5):
+        self.base_url = str(base_url or "").rstrip("/")
+        self.token = token
+        self.timeout = timeout
+        self._opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+    def post(self, path, payload):
+        url = self.base_url + "/" + str(path or "").lstrip("/")
+        data = json.dumps(payload or {}).encode("utf-8")
+        request = urllib.request.Request(
+            url,
+            data=data,
+            headers={
+                "Content-Type": "application/json",
+                "X-Monster-Token": self.token,
+            },
+            method="POST",
+        )
+        with self._opener.open(request, timeout=self.timeout) as response:
+            return json.loads(response.read().decode("utf-8") or "{}")
+
+    def claim(self, task_type, worker_id, runtime_instance_id, lease_duration_ms):
+        return self.post(
+            "claim",
+            {
+                "taskType": task_type,
+                "workerId": worker_id,
+                "runtimeInstanceId": runtime_instance_id,
+                "leaseDurationMs": lease_duration_ms,
+            },
+        ).get("claimed")
+
+    def checkpoint(self, task_id, worker_id, runtime_instance_id, claim_token):
+        result = self.post(
+            "checkpoint",
+            {
+                "taskId": task_id,
+                "workerId": worker_id,
+                "runtimeInstanceId": runtime_instance_id,
+                "claimToken": claim_token,
+            },
+        )
+        return bool(result.get("cancelRequested"))
+
+    def heartbeat(self, task_id, worker_id, runtime_instance_id, claim_token, lease_duration_ms):
+        return self.post(
+            "heartbeat",
+            {
+                "taskId": task_id,
+                "workerId": worker_id,
+                "runtimeInstanceId": runtime_instance_id,
+                "claimToken": claim_token,
+                "leaseDurationMs": lease_duration_ms,
+            },
+        ).get("heartbeat")
+
+    def complete(
+        self,
+        task_id,
+        worker_id,
+        runtime_instance_id,
+        claim_token,
+        status,
+        sidecar_result,
+        lease_duration_ms,
+    ):
+        return self.post(
+            "complete",
+            {
+                "taskId": task_id,
+                "workerId": worker_id,
+                "runtimeInstanceId": runtime_instance_id,
+                "claimToken": claim_token,
+                "status": status,
+                "leaseDurationMs": lease_duration_ms,
+                "sidecarResult": sidecar_result,
+            },
+        ).get("completed")
+
+
+def maybe_start_worker_loop(server):
+    control_url = os.environ.get("MONSTER_WORKER_CONTROL_URL")
+    control_token = os.environ.get("MONSTER_WORKER_CONTROL_TOKEN")
+    if not control_url or not control_token:
+        return None
+
+    task_types = parse_worker_task_types(os.environ.get("MONSTER_WORKER_TASK_TYPES"))
+    worker_id = os.environ.get("MONSTER_WORKER_ID") or "python-sidecar-{0}".format(
+        server.event_buffer.runtime_instance_id[:8]
+    )
+    lease_ms = positive_int(os.environ.get("MONSTER_WORKER_LEASE_MS"), DEFAULT_WORKER_LEASE_MS)
+    poll_seconds = parse_positive_float(
+        os.environ.get("MONSTER_WORKER_POLL_SECONDS"),
+        DEFAULT_WORKER_POLL_SECONDS,
+    )
+    client = WorkerControlClient(control_url, control_token)
+    thread = threading.Thread(
+        target=run_worker_loop,
+        args=(
+            client,
+            server.event_buffer,
+            server.worker_stop,
+            worker_id,
+            server.event_buffer.runtime_instance_id,
+            task_types,
+            lease_ms,
+            poll_seconds,
+        ),
+        daemon=True,
+    )
+    thread.start()
+    server.worker_thread = thread
+    return thread
+
+
+def run_worker_loop(
+    client,
+    event_buffer,
+    stop_event,
+    worker_id,
+    runtime_instance_id,
+    task_types,
+    lease_duration_ms=DEFAULT_WORKER_LEASE_MS,
+    poll_seconds=DEFAULT_WORKER_POLL_SECONDS,
+):
+    while not stop_event.is_set():
+        processed = False
+        try:
+            processed = worker_loop_once(
+                client,
+                event_buffer,
+                worker_id,
+                runtime_instance_id,
+                task_types,
+                lease_duration_ms,
+            )
+        except Exception as error:
+            event_buffer.append_event(
+                task_id=None,
+                workflow_type="worker_loop",
+                event_type="worker_loop_error",
+                message=str(error),
+                payload=None,
+            )
+        if not processed:
+            stop_event.wait(poll_seconds)
+
+
+def worker_loop_once(
+    client,
+    event_buffer,
+    worker_id,
+    runtime_instance_id,
+    task_types,
+    lease_duration_ms=DEFAULT_WORKER_LEASE_MS,
+):
+    for task_type in task_types:
+        claimed = client.claim(task_type, worker_id, runtime_instance_id, lease_duration_ms)
+        if not claimed:
+            continue
+        execute_claimed_worker_task(
+            client,
+            event_buffer,
+            claimed,
+            worker_id,
+            runtime_instance_id,
+            lease_duration_ms,
+        )
+        return True
+    return False
+
+
+def execute_claimed_worker_task(
+    client,
+    event_buffer,
+    claimed,
+    worker_id,
+    runtime_instance_id,
+    lease_duration_ms=DEFAULT_WORKER_LEASE_MS,
+):
+    task = claimed.get("task") or {}
+    task_id = task.get("id")
+    claim_token = claimed.get("claimToken")
+    if not task_id or not claim_token:
+        return None
+
+    stop_heartbeat = threading.Event()
+    heartbeat_thread = threading.Thread(
+        target=heartbeat_until_done,
+        args=(
+            client,
+            stop_heartbeat,
+            task_id,
+            worker_id,
+            runtime_instance_id,
+            claim_token,
+            lease_duration_ms,
+        ),
+        daemon=True,
+    )
+    heartbeat_thread.start()
+    try:
+        payload = build_worker_task_payload(task)
+        if client.checkpoint(task_id, worker_id, runtime_instance_id, claim_token):
+            result = build_worker_forced_result(task, "cancelled", "worker task cancelled before workflow")
+        else:
+            result = execute_worker_task_payload(payload)
+            event_buffer.append_result_events(result, payload)
+            if (
+                client.checkpoint(task_id, worker_id, runtime_instance_id, claim_token)
+                and result.get("status") == "succeeded"
+            ):
+                result = build_worker_forced_result(task, "cancelled", "worker task cancelled after workflow")
+    except Exception as error:
+        result = build_worker_forced_result(task, "failed", str(error))
+    finally:
+        stop_heartbeat.set()
+
+    client.complete(
+        task_id,
+        worker_id,
+        runtime_instance_id,
+        claim_token,
+        result.get("status") or "failed",
+        result,
+        lease_duration_ms,
+    )
+    return result
+
+
+def heartbeat_until_done(
+    client,
+    stop_event,
+    task_id,
+    worker_id,
+    runtime_instance_id,
+    claim_token,
+    lease_duration_ms,
+):
+    interval = max(float(lease_duration_ms) / 3000.0, 1.0)
+    while not stop_event.wait(interval):
+        client.heartbeat(
+            task_id,
+            worker_id,
+            runtime_instance_id,
+            claim_token,
+            lease_duration_ms,
+        )
+
+
+def execute_worker_task_payload(payload):
+    task_type = payload.get("taskType")
+    if task_type in BATCH_IMAGE_PROMPT_TASK_TYPES:
+        return run_batch_image_prompt(payload)
+    if task_type in BATCH_IMAGE_GENERATE_TASK_TYPES:
+        return run_batch_image_generate(payload)
+    raise ValueError("unsupported worker task type: {0}".format(task_type))
+
+
+def build_worker_task_payload(task):
+    task_type = task.get("taskType")
+    if task_type not in BATCH_IMAGE_PROMPT_TASK_TYPES and task_type not in BATCH_IMAGE_GENERATE_TASK_TYPES:
+        raise ValueError("unsupported worker task type: {0}".format(task_type))
+    payload_json = task.get("payloadJson")
+    task_payload = json.loads(payload_json) if payload_json else {}
+    provider_config = task_payload.get("providerConfig") or {}
+    if not provider_config:
+        raise ValueError("providerConfig is required for worker task")
+    is_image_task = task_type in BATCH_IMAGE_GENERATE_TASK_TYPES
+    output_dir = task_payload.get("outputDir") or os.environ.get("MONSTER_WORKER_IMAGE_OUTPUT_DIR")
+    if is_image_task and not output_dir:
+        raise ValueError("outputDir is required for image worker task")
+
+    return {
+        "protocolVersion": 1,
+        "taskId": task.get("id"),
+        "projectId": task.get("projectId"),
+        "taskType": "image.generate.batch" if is_image_task else "image.prompt.batch",
+        "workflowType": BATCH_IMAGE_GENERATE_WORKFLOW_TYPE if is_image_task else BATCH_IMAGE_PROMPT_WORKFLOW_TYPE,
+        "attempt": positive_int(task.get("retryCount"), 0) + 1,
+        "maxRetries": positive_int(task.get("maxRetries"), 0),
+        "cancelToken": "task-{0}".format(task.get("id")),
+        "budget": None,
+        "provider": {
+            "providerId": provider_config.get("displayName"),
+            "providerType": provider_config.get("provider"),
+            "displayName": provider_config.get("displayName"),
+            "baseUrl": provider_config.get("baseUrl"),
+            "apiKey": provider_config.get("apiKey"),
+            "model": provider_config.get("model"),
+            "requestType": "image" if is_image_task else "chat",
+            "timeoutMs": provider_config.get("timeoutMs"),
+        },
+        "cancelCheckpoint": None,
+        "input": {
+            "promptTemplate": task_payload.get("promptTemplate"),
+            "imageSize": task_payload.get("imageSize") or "1024x1024",
+            "outputDir": output_dir,
+        },
+        "context": {
+            "sourceAssetIds": [],
+            "parentTaskId": task.get("parentTaskId"),
+            "batchJobId": task.get("batchJobId") or task_payload.get("batchJobId"),
+            "goalId": task.get("goalId"),
+            "sequenceNo": task.get("sequenceNo") or task_payload.get("sequenceNo"),
+        },
+    }
+
+
+def build_worker_forced_result(task, status, message):
+    return {
+        "protocolVersion": 1,
+        "taskId": task.get("id"),
+        "status": status,
+        "message": message,
+        "outputs": [],
+        "modelRuns": [],
+        "events": [{
+            "eventType": "worker_task_{0}".format(status),
+            "message": message,
+            "payload": {
+                "taskType": task.get("taskType"),
+            },
+        }],
+        "retry": {
+            "shouldRetry": status == "failed",
+            "reason": message if status == "failed" else None,
+        },
+    }
+
+
+def parse_worker_task_types(value):
+    raw = value or DEFAULT_WORKER_TASK_TYPES
+    task_types = [
+        item.strip()
+        for item in str(raw).split(",")
+        if item.strip()
+    ]
+    return task_types or [
+        item.strip()
+        for item in DEFAULT_WORKER_TASK_TYPES.split(",")
+        if item.strip()
+    ]
+
+
+def parse_positive_float(value, default_value):
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return default_value
+    return parsed if parsed > 0 else default_value
 
 
 def build_image_prompt(payload):

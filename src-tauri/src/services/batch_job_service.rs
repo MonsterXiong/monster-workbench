@@ -18,8 +18,8 @@ use crate::services::sidecar_lifecycle_service::{
 };
 use crate::services::task_service::CreativeTaskEventPayload;
 use crate::services::workflow_settle_service::{
-    append_sidecar_result_events, create_ready_sidecar_asset, persist_sidecar_model_runs,
-    validate_sidecar_task_result,
+    append_sidecar_result_events, create_ready_sidecar_asset, persist_cancelled_sidecar_model_runs,
+    persist_sidecar_model_runs, validate_sidecar_task_result,
 };
 use serde_json::{json, Value};
 use std::collections::HashSet;
@@ -218,6 +218,7 @@ impl<R: Runtime> BatchJobService<R> {
                 "sequenceNo": sequence_no,
                 "batchType": batch_type,
                 "promptTemplate": input.prompt_template,
+                "imageSize": input.image_size,
                 "providerConfig": input.provider_config,
             })
             .to_string();
@@ -1112,7 +1113,7 @@ fn settle_batch_prompt_sidecar_response<R: Runtime>(
     if sidecar_response.status == "succeeded"
         && batch_prompt_cancel_requested(db_path, batch_job_id, task.id)?
     {
-        let model_run_ids = persist_sidecar_model_runs(
+        let model_run_ids = persist_cancelled_sidecar_model_runs(
             db_path,
             task,
             None,
@@ -1132,7 +1133,7 @@ fn settle_batch_prompt_sidecar_response<R: Runtime>(
     }
 
     if sidecar_response.status == "cancelled" {
-        let model_run_ids = persist_sidecar_model_runs(
+        let model_run_ids = persist_cancelled_sidecar_model_runs(
             db_path,
             task,
             None,
@@ -1637,7 +1638,7 @@ fn settle_batch_image_sidecar_response<R: Runtime>(
     if sidecar_response.status == "succeeded"
         && batch_prompt_cancel_requested(db_path, batch_job_id, task.id)?
     {
-        let model_run_ids = persist_sidecar_model_runs(
+        let model_run_ids = persist_cancelled_sidecar_model_runs(
             db_path,
             task,
             None,
@@ -1657,7 +1658,7 @@ fn settle_batch_image_sidecar_response<R: Runtime>(
     }
 
     if sidecar_response.status == "cancelled" {
-        let model_run_ids = persist_sidecar_model_runs(
+        let model_run_ids = persist_cancelled_sidecar_model_runs(
             db_path,
             task,
             None,
@@ -2132,12 +2133,20 @@ mod tests {
     use std::net::TcpListener;
     use std::path::PathBuf;
     use std::process::Command;
+    use std::sync::{Mutex as TestMutex, MutexGuard};
     use std::thread::JoinHandle;
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
     use tauri::Manager;
 
     const TINY_PNG_BASE64: &str =
         "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO2p8Z0AAAAASUVORK5CYII=";
+    static TEST_OUTPUT_DIR_ENV_LOCK: TestMutex<()> = TestMutex::new(());
+
+    fn lock_test_output_dir_env() -> MutexGuard<'static, ()> {
+        TEST_OUTPUT_DIR_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+    }
 
     fn python_available() -> bool {
         Command::new("python")
@@ -2592,6 +2601,7 @@ mod tests {
             return;
         }
 
+        let _output_dir_env_lock = lock_test_output_dir_env();
         let app = tauri::test::mock_app();
         let root = temp_root("generate-auto-pause");
         let db_path = root.join("monster_workbench.db");
@@ -3012,6 +3022,7 @@ mod tests {
             return;
         }
 
+        let _output_dir_env_lock = lock_test_output_dir_env();
         let app = tauri::test::mock_app();
         let root = temp_root("generate");
         let db_path = root.join("monster_workbench.db");
@@ -3153,6 +3164,7 @@ mod tests {
             return;
         }
 
+        let _output_dir_env_lock = lock_test_output_dir_env();
         let app = tauri::test::mock_app();
         let root = temp_root("generate-cancel-checkpoint");
         let db_path = root.join("monster_workbench.db");

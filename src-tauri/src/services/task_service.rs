@@ -13,8 +13,8 @@ use crate::services::sidecar_lifecycle_service::{
     SidecarWorkflowTaskResult,
 };
 use crate::services::workflow_settle_service::{
-    append_sidecar_result_events, create_ready_sidecar_asset, persist_sidecar_model_runs,
-    validate_sidecar_task_result,
+    append_sidecar_result_events, create_ready_sidecar_asset, persist_cancelled_sidecar_model_runs,
+    persist_sidecar_model_runs, validate_sidecar_task_result,
 };
 use serde_json::json;
 use tauri::{AppHandle, Emitter, Runtime, Wry};
@@ -498,15 +498,26 @@ impl<R: Runtime> TaskService<R> {
         task: &CreativeTask,
         sidecar_response: &SidecarWorkflowTaskResult,
     ) -> AppResult<()> {
-        let model_run_ids = persist_sidecar_model_runs(
-            db_path,
-            task,
-            None,
-            &sidecar_response.model_runs,
-            None,
-            "sidecar model run metadata",
-        )?;
         let next_status = resolve_sidecar_failure_status(task, sidecar_response);
+        let model_run_ids = if next_status == "cancelled" {
+            persist_cancelled_sidecar_model_runs(
+                db_path,
+                task,
+                None,
+                &sidecar_response.model_runs,
+                None,
+                "sidecar model run metadata",
+            )?
+        } else {
+            persist_sidecar_model_runs(
+                db_path,
+                task,
+                None,
+                &sidecar_response.model_runs,
+                None,
+                "sidecar model run metadata",
+            )?
+        };
         let retry_increment = if next_status == "retrying" {
             Some(1)
         } else {
