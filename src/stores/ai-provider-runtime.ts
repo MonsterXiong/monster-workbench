@@ -26,6 +26,7 @@ const TASK_POLL_RECOVERY_SLACK_MS = 30_000;
 const IMAGE_TASK_POLL_INTERVAL_MS = 300;
 const IMAGE_SIDECAR_TIMEOUT_SLACK_MS = 30_000;
 const IMAGE_QUEUE_POLL_TIMEOUT_MS = 24 * 60 * 60_000;
+const AI_PROVIDER_TEST_CANCELLED_MESSAGE = "AI provider test canceled";
 
 const currentTime = () => Date.now();
 
@@ -112,6 +113,10 @@ export const useAiProviderRuntimeStore = defineStore("ai-provider-runtime", () =
     let shouldWaitBeforePoll = false;
 
     for (;;) {
+      if (item.status === "canceled") {
+        throw new Error(item.error || AI_PROVIDER_TEST_CANCELLED_MESSAGE);
+      }
+
       if (hasTimeElapsed(startedAt, pollTimeoutMs)) {
         item.status = "failed";
         item.finishedAt = currentTime();
@@ -233,10 +238,7 @@ export const useAiProviderRuntimeStore = defineStore("ai-provider-runtime", () =
       } catch (error) {
         if (item && item.status === "queued") {
           const message = stringifyErrorMessage(error);
-          item.status = "failed";
-          item.finishedAt = currentTime();
-          item.error = `AI 模型测试任务状态丢失：${message}`;
-          aiQueueStore.trimLocalTestQueue();
+          aiQueueStore.markTestQueueItemCanceled(requestId, message);
         }
       }
     });
@@ -252,18 +254,17 @@ export const useAiProviderRuntimeStore = defineStore("ai-provider-runtime", () =
       return false;
     }
 
+    aiQueueStore.markTestQueueItemCanceled(requestId);
+
     try {
       const task = await aiService.getProviderTestTask(requestId);
       aiQueueStore.applyBackendTask(task, item);
-    } catch (error) {
-      if (item && item.status === "queued") {
-        const message = stringifyErrorMessage(error);
-        item.status = "failed";
-        item.finishedAt = currentTime();
-        item.error = `AI 模型测试任务状态丢失：${message}`;
-        aiQueueStore.trimLocalTestQueue();
+      } catch (error) {
+        if (item && item.status === "queued") {
+          const message = stringifyErrorMessage(error);
+          aiQueueStore.markTestQueueItemCanceled(requestId, message);
+        }
       }
-    }
     return true;
   }
 
@@ -321,9 +322,11 @@ export const useAiProviderRuntimeStore = defineStore("ai-provider-runtime", () =
     } catch (error) {
       const message = stringifyErrorMessage(error);
       if (activeItem) {
-        activeItem.status = "failed";
-        activeItem.error = message;
-        activeItem.finishedAt = currentTime();
+        if (activeItem.status !== "canceled") {
+          activeItem.status = "failed";
+          activeItem.error = message;
+          activeItem.finishedAt = currentTime();
+        }
       } else {
         testQueue.value.push({
           id: createId(action),

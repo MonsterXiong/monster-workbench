@@ -112,7 +112,8 @@ export default {
         queued: "等待执行",
         running: "正在执行",
         success: "执行成功",
-        failed: "执行失败"
+        failed: "执行失败",
+        canceled: "已取消"
       },
       resultAction: "动作",
       resultStatus: "状态码",

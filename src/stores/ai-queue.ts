@@ -8,6 +8,7 @@ import {
   firstItem,
   getCurrentTimestampMs,
   hasByValue,
+  includesAnyText,
   keySetBy,
   removeByValues,
   sortByMany,
@@ -17,11 +18,23 @@ import type {
   AiProviderBackendQueueStatus,
   AiProviderTestAction,
   AiProviderTestQueueItem,
+  AiProviderTestQueueStatus,
   AiProviderTestResult,
   AiProviderTestTask,
 } from "../types/ai";
 
 const LOCAL_FINISHED_TASK_LIMIT = 40;
+const AI_PROVIDER_CANCELLED_MESSAGE = "AI provider test canceled";
+const AI_PROVIDER_CANCEL_KEYWORDS = [
+  "cancel",
+  "canceled",
+  "cancelled",
+  "aborted",
+  "interrupted",
+  "取消",
+  "中止",
+  "终止",
+];
 const currentTime = () => getCurrentTimestampMs();
 
 export const useAiQueueStore = defineStore("ai-queue", () => {
@@ -136,6 +149,39 @@ export const useAiQueueStore = defineStore("ai-queue", () => {
     }
   }
 
+  function isCancellationMessage(value: unknown) {
+    return includesAnyText(String(value || ""), AI_PROVIDER_CANCEL_KEYWORDS, {
+      ignoreCase: true,
+    });
+  }
+
+  function getBackendTaskQueueStatus(task: AiProviderTestTask): AiProviderTestQueueStatus {
+    if (
+      task.status === "failed" &&
+      (task.result?.failureKind === "canceled" ||
+        isCancellationMessage(task.error) ||
+        isCancellationMessage(task.result?.message))
+    ) {
+      return "canceled";
+    }
+
+    return task.status;
+  }
+
+  function markTestQueueItemCanceled(requestId: string, message = AI_PROVIDER_CANCELLED_MESSAGE) {
+    const queueItem = findByValue(testQueue.value, (candidate) => candidate.id, requestId);
+    if (!queueItem) {
+      return false;
+    }
+
+    queueItem.status = "canceled";
+    queueItem.finishedAt = currentTime();
+    queueItem.error = message;
+    trimLocalTestQueue();
+    updateTestingState();
+    return true;
+  }
+
   function applyBackendTask(task: AiProviderTestTask, item?: AiProviderTestQueueItem) {
     const queueItem =
       item ??
@@ -151,13 +197,20 @@ export const useAiQueueStore = defineStore("ai-queue", () => {
       testQueue.value.push(queueItem);
     }
 
-    queueItem.status = task.status;
+    const nextStatus = getBackendTaskQueueStatus(task);
+    if (queueItem.status !== "canceled") {
+      queueItem.status = nextStatus;
+    }
     queueItem.startedAt = task.startedAtMs ? Number(task.startedAtMs) : queueItem.startedAt;
     queueItem.finishedAt = task.finishedAtMs ? Number(task.finishedAtMs) : queueItem.finishedAt;
-    queueItem.error = task.error ?? undefined;
+    queueItem.error = queueItem.status === "canceled"
+      ? task.error ?? queueItem.error ?? AI_PROVIDER_CANCELLED_MESSAGE
+      : task.error ?? undefined;
     if (task.result) {
       queueItem.result = task.result;
-      queueItem.error = task.result.ok ? undefined : task.result.message;
+      queueItem.error = queueItem.status === "canceled"
+        ? task.result.message || queueItem.error || AI_PROVIDER_CANCELLED_MESSAGE
+        : task.result.ok ? undefined : task.result.message;
       testResult.value = task.result;
     }
     trimLocalTestQueue();
@@ -195,6 +248,7 @@ export const useAiQueueStore = defineStore("ai-queue", () => {
     trimLocalTestQueue,
     syncLocalQueueWithBackendStatus,
     applyBackendTask,
+    markTestQueueItemCanceled,
     setBackendQueueStatus,
     clearFinishedTests,
     resetTestQueue,

@@ -112,7 +112,8 @@ export default {
         queued: "Waiting",
         running: "Running",
         success: "Succeeded",
-        failed: "Failed"
+        failed: "Failed",
+        canceled: "Canceled"
       },
       resultAction: "Action",
       resultStatus: "Status",

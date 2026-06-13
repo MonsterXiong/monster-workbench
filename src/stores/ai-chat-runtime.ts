@@ -20,6 +20,7 @@ import type {
 } from "../types/ai";
 import { useAiProviderStore } from "./ai-provider";
 import { useAiProviderRuntimeStore } from "./ai-provider-runtime";
+import { useAiQueueStore } from "./ai-queue";
 import { useAiSessionStore } from "./ai-session";
 
 type AiSessionMessage = AiConversationSession["messages"][number];
@@ -40,6 +41,7 @@ const AI_CHAT_CANCELLED_MESSAGE = "Chat request canceled";
 export const useAiChatRuntimeStore = defineStore("ai-chat-runtime", () => {
   const aiProviderStore = useAiProviderStore();
   const aiProviderRuntimeStore = useAiProviderRuntimeStore();
+  const aiQueueStore = useAiQueueStore();
   const aiSessionStore = useAiSessionStore();
 
   const { activeModelConfigIds } = storeToRefs(aiProviderStore);
@@ -325,6 +327,7 @@ export const useAiChatRuntimeStore = defineStore("ai-chat-runtime", () => {
       return false;
     }
 
+    aiQueueStore.markTestQueueItemCanceled(message.requestId, AI_CHAT_CANCELLED_MESSAGE);
     aiSessionStore.patchSessionMessage(messageId, {
       role: "error",
       status: "canceled",

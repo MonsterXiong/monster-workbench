@@ -420,6 +420,10 @@ export const useAiImageRuntimeStore = defineStore("ai-image-runtime", () => {
     let shouldWaitBeforePoll = false;
 
     for (;;) {
+      if (item.status === "canceled") {
+        throw new Error(item.error || IMAGE_REQUEST_CANCELLED_MESSAGE);
+      }
+
       if (hasTimeElapsed(startedAt, pollTimeoutMs)) {
         item.status = "failed";
         item.finishedAt = currentTime();
@@ -482,13 +486,10 @@ export const useAiImageRuntimeStore = defineStore("ai-image-runtime", () => {
       return false;
     }
 
-    const queueItem = findByValue(testQueue.value, (item) => item.id, message.requestId);
-    if (queueItem) {
-      queueItem.status = "failed";
-      queueItem.finishedAt = currentTime();
-      queueItem.error =
-        message.error || message.content || IMAGE_REQUEST_CANCELLED_MESSAGE;
-    }
+    aiQueueStore.markTestQueueItemCanceled(
+      message.requestId,
+      message.error || message.content || IMAGE_REQUEST_CANCELLED_MESSAGE
+    );
 
     patchSessionMessage(messageId, {
       role: "error",

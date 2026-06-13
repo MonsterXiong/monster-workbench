@@ -1,7 +1,7 @@
 export type AiProviderType = "openai" | "deepseek" | "siliconflow" | "anyrouter" | "custom";
 export type AiProviderTestAction = "models" | "chat" | "image";
 export type AiProviderQueueMode = "serial" | "concurrent";
-export type AiProviderTestQueueStatus = "queued" | "running" | "success" | "failed";
+export type AiProviderTestQueueStatus = "queued" | "running" | "success" | "failed" | "canceled";
 export type AiPromptType = "chat" | "image";
 export type AiSessionType = AiPromptType;
 export type AiSessionMessageRole = "user" | "assistant" | "error";
