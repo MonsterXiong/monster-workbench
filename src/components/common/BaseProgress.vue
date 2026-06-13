@@ -1,7 +1,13 @@
 <script setup lang="ts">
-import { computed, useId } from "vue";
+import type { ProgressInstance } from "element-plus";
+import type { StyleValue } from "vue";
+import { computed, ref, useAttrs, useId } from "vue";
 import { useI18n } from "../../composables/useI18n";
-import { clampNumber, createLineClampStyle, joinAriaIds, maxNumber, normalizeNumberBounds, toRangePercent } from "../../utils";
+import { clampNumber, createLineClampStyle, joinAriaIds, maxNumber, normalizeNumberBounds, omit, toRangePercent } from "../../utils";
+
+defineOptions({
+  inheritAttrs: false,
+});
 
 type ProgressType = "primary" | "success" | "warning" | "danger" | "neutral";
 type ProgressSize = "xs" | "sm" | "md" | "lg";
@@ -9,6 +15,7 @@ type ProgressSurface = "plain" | "card" | "muted";
 type ProgressShape = "line" | "circle" | "dashboard";
 type ProgressStrokeLinecap = "butt" | "round" | "square" | "inherit";
 type ProgressValuePlacement = "header" | "track" | "both" | "none";
+type ProgressColor = string | ((percentage: number) => string) | Array<{ color: string; percentage: number }>;
 
 export interface ProgressFormatPayload {
   value: number;
@@ -29,7 +36,10 @@ interface Props {
   shape?: ProgressShape;
   size?: ProgressSize;
   width?: number;
+  strokeWidth?: number;
   strokeLinecap?: ProgressStrokeLinecap;
+  color?: ProgressColor;
+  duration?: number;
   showValue?: boolean;
   valuePlacement?: ProgressValuePlacement;
   striped?: boolean;
@@ -67,7 +77,10 @@ const props = withDefaults(defineProps<Props>(), {
   shape: "line",
   size: "md",
   width: 0,
+  strokeWidth: undefined,
   strokeLinecap: "round",
+  color: undefined,
+  duration: undefined,
   showValue: true,
   valuePlacement: "header",
   striped: false,
@@ -94,7 +107,10 @@ const props = withDefaults(defineProps<Props>(), {
 });
 
 const { t } = useI18n();
+const attrs = useAttrs();
 const progressId = useId();
+const rootRef = ref<HTMLElement | null>(null);
+const progressRef = ref<ProgressInstance | null>(null);
 const rootId = computed(() => props.id || `base-progress-${progressId}`);
 const labelId = computed(() => `${rootId.value}-label`);
 const descriptionId = computed(() => `${rootId.value}-description`);
@@ -114,8 +130,18 @@ const visualPercent = computed(() => (isLineShape.value && isIndeterminate.value
 const elementIndeterminate = computed(() => isLineShape.value && isIndeterminate.value && props.animated);
 const elementStriped = computed(() => isLineShape.value && props.striped);
 const elementStripedFlow = computed(() => elementStriped.value && props.animated);
-const progressDuration = computed(() => (props.animated ? 3 : 0));
+const progressDuration = computed(() => {
+  if (!props.animated) return 0;
+  if (props.duration !== undefined) return clampNumber(props.duration, 0, 30, 3, 1);
+  return 3;
+});
 const progressStrokeWidth = computed(() => {
+  if (props.strokeWidth !== undefined && props.strokeWidth > 0) {
+    return isLineShape.value
+      ? clampNumber(props.strokeWidth, 2, 28, 10, 0)
+      : clampNumber(props.strokeWidth, 3, 22, 8, 0);
+  }
+
   if (isLineShape.value) {
     if (props.size === "xs") return 4;
     if (props.size === "sm") return 6;
@@ -139,6 +165,7 @@ const progressWidth = computed(() => {
   return defaultRingWidth.value;
 });
 const progressColor = computed(() => {
+  if (props.color) return props.color;
   if (props.type === "success") return "#10b981";
   if (props.type === "warning") return "#f59e0b";
   if (props.type === "danger") return "#ef4444";
@@ -178,13 +205,44 @@ const descriptionStyle = computed(() => {
   if (!props.wrapDescription || props.maxDescriptionLines <= 0) return undefined;
   return createLineClampStyle(props.maxDescriptionLines);
 });
+const rootClass = computed(() => attrs.class);
+const rootStyle = computed(() => attrs.style as StyleValue | undefined);
+const progressPassthroughAttrs = computed(() => omit(attrs, ["id", "class", "style", "aria-disabled", "aria-busy"]));
+
+const getElement = () => (rootRef.value instanceof HTMLElement ? rootRef.value : null);
+const getProgressElement = () => {
+  const nativeRoot = progressRef.value?.$el;
+  if (nativeRoot instanceof HTMLElement) return nativeRoot;
+  return getElement()?.querySelector<HTMLElement>(".base-progress__element") ?? null;
+};
+const focusTrack = () => {
+  const target = getElement()?.querySelector<HTMLElement>(".base-progress__track");
+  if (!target) return null;
+
+  if (!target.hasAttribute("tabindex")) {
+    target.tabIndex = -1;
+  }
+
+  target.focus();
+  return target;
+};
+
+defineExpose({
+  getNativeProgress: () => progressRef.value,
+  getElement,
+  getProgressElement,
+  focusTrack,
+});
 </script>
 
 <template>
   <div
+    ref="rootRef"
+    v-bind="progressPassthroughAttrs"
     :id="rootId"
     class="base-progress"
     :class="[
+      rootClass,
       `base-progress--${type}`,
       `base-progress--shape-${shape}`,
       `base-progress--${size}`,
@@ -200,6 +258,7 @@ const descriptionStyle = computed(() => {
         'is-disabled': disabled,
       },
     ]"
+    :style="rootStyle"
     :aria-disabled="disabled ? 'true' : undefined"
     :aria-busy="loading ? 'true' : undefined"
   >
@@ -232,6 +291,7 @@ const descriptionStyle = computed(() => {
     >
       <div v-if="showBuffer" class="base-progress__buffer" :style="{ width: `${bufferPercent}%` }"></div>
       <el-progress
+        ref="progressRef"
         class="base-progress__element"
         :type="shape"
         :percentage="visualPercent"

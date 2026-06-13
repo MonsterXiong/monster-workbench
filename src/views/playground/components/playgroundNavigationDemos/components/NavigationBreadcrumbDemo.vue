@@ -7,6 +7,13 @@ const { triggerToast } = useToast();
 
 const selectedBreadcrumbKey = ref("detail");
 const breadcrumbExpandEvent = ref("等待展开");
+const breadcrumbInstanceText = ref("等待实例操作");
+const breadcrumbInstanceRef = ref<{
+  getNativeBreadcrumb: () => unknown;
+  getElement: () => HTMLElement | null;
+  focusFirstItem: () => HTMLElement | null;
+  focusCurrentItem: () => HTMLElement | null;
+} | null>(null);
 
 const breadcrumbItems = [
   { key: "workspace", label: "工作台", icon: "LayoutDashboard" },
@@ -51,13 +58,47 @@ const handleBreadcrumbSelect = (item: { key: string; label: string }) => {
 const handleBreadcrumbExpand = (count: number) => {
   breadcrumbExpandEvent.value = `展开 ${count} 级路径`;
 };
+
+const readBreadcrumbElement = () => {
+  const element = breadcrumbInstanceRef.value?.getElement();
+  breadcrumbInstanceText.value = element ? `DOM: ${element.tagName.toLowerCase()}.${element.classList[0] || "root"}` : "未读取到 DOM";
+};
+
+const focusBreadcrumbFirstItem = () => {
+  const element = breadcrumbInstanceRef.value?.focusFirstItem();
+  breadcrumbInstanceText.value = element ? `聚焦: ${element.textContent?.trim() || element.tagName.toLowerCase()}` : "未找到可聚焦项";
+};
+
+const focusBreadcrumbCurrentItem = () => {
+  const element = breadcrumbInstanceRef.value?.focusCurrentItem();
+  breadcrumbInstanceText.value = element ? `当前项: ${element.textContent?.trim() || "-"}` : "未找到当前项";
+};
 </script>
 
 <template>
   <section class="detail-stack">
     <PlaygroundDemoSection title="面包屑" subtitle="展示层级路径、返回入口、折叠路径、禁用项和当前项交互。" icon="Route">
       <BasePanel title="标准路径" subtitle="保留旧 API：只传 items 就能获得可点击层级导航。">
-        <BaseBreadcrumb :items="breadcrumbItems" @select="handleBreadcrumbSelect" />
+        <div class="breadcrumb-demo-stack">
+          <BaseBreadcrumb
+            ref="breadcrumbInstanceRef"
+            data-native-breadcrumb-ref="base-breadcrumb-instance"
+            :items="breadcrumbItems"
+            @select="handleBreadcrumbSelect"
+          />
+          <div class="breadcrumb-instance-panel">
+            <div class="breadcrumb-instance-copy">
+              <BaseIcon name="Workflow" size="14" aria-hidden="true" />
+              <span>实例能力</span>
+              <strong>{{ breadcrumbInstanceText }}</strong>
+            </div>
+            <div class="breadcrumb-instance-actions">
+              <BaseButton size="xs" type="secondary" outline @click="readBreadcrumbElement">读取 DOM</BaseButton>
+              <BaseButton size="xs" type="secondary" outline @click="focusBreadcrumbFirstItem">聚焦首项</BaseButton>
+              <BaseButton size="xs" type="secondary" outline @click="focusBreadcrumbCurrentItem">聚焦当前项</BaseButton>
+            </div>
+          </div>
+        </div>
         <template #footer>
           <span class="navigation-result">最近选择：{{ selectedBreadcrumbKey }}</span>
         </template>
@@ -141,6 +182,26 @@ const handleBreadcrumbExpand = (count: number) => {
 
 .demo-grid {
   @apply grid gap-4 lg:grid-cols-2;
+}
+
+.breadcrumb-demo-stack {
+  @apply grid min-w-0 gap-3;
+}
+
+.breadcrumb-instance-panel {
+  @apply flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-950;
+}
+
+.breadcrumb-instance-copy {
+  @apply flex min-w-0 items-center gap-2 text-[11px] font-black text-slate-500 dark:text-slate-400;
+}
+
+.breadcrumb-instance-copy strong {
+  @apply min-w-0 truncate text-slate-800 dark:text-slate-100;
+}
+
+.breadcrumb-instance-actions {
+  @apply flex shrink-0 flex-wrap items-center gap-2;
 }
 
 .navigation-result {

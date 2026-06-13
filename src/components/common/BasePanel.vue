@@ -1,7 +1,12 @@
 <script setup lang="ts">
-import { computed, useId } from "vue";
+import { computed, ref, useAttrs, useId } from "vue";
 import { useI18n } from "../../composables/useI18n";
 import { handleActivationKeydown, isEventFromInteractiveElement } from "../../utils";
+import { getElementPlusControlRoot, type ElementPlusControlRef } from "./elementPlusDom";
+
+defineOptions({
+  inheritAttrs: false,
+});
 
 type PanelSize = "sm" | "md" | "lg";
 type PanelLevel = 2 | 3 | 4 | 5 | 6;
@@ -67,6 +72,8 @@ const emit = defineEmits<{
   (e: "keydown", event: KeyboardEvent): void;
 }>();
 
+const attrs = useAttrs();
+const cardRef = ref<ElementPlusControlRef>(null);
 const panelId = useId();
 const titleId = `${panelId}-title`;
 const subtitleId = `${panelId}-subtitle`;
@@ -94,10 +101,27 @@ const handleKeydown = (event: KeyboardEvent) => {
   if (isEventFromInteractiveElement(event)) return;
   handleActivationKeydown(event, () => emit("click", event as unknown as MouseEvent));
 };
+
+const getElement = () => getElementPlusControlRoot(cardRef.value);
+const focus = () => {
+  if (!isInteractive.value) return null;
+  const element = getElement();
+  element?.focus();
+  return element;
+};
+
+defineExpose({
+  focus,
+  getNativeCard: () => cardRef.value,
+  getElement,
+  getCardElement: getElement,
+});
 </script>
 
 <template>
   <el-card
+    v-bind="attrs"
+    ref="cardRef"
     class="base-panel"
     shadow="never"
     :body-style="cardBodyStyle"

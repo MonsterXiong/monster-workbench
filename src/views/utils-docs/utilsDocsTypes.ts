@@ -4,8 +4,6 @@ import type {
   UtilityFunctionDoc,
 } from "./utilsDocsContent";
 
-export type QualityFilter = "all" | "runnable" | "review";
-
 export interface UtilityDocStats {
   moduleCount: number;
   splitCount: number;

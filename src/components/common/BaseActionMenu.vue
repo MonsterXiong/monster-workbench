@@ -1,15 +1,22 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import type { DropdownInstance } from "element-plus";
+import type { StyleValue } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, useAttrs } from "vue";
 import { useI18n } from "../../composables/useI18n";
 import {
   addDomEventListener,
   createRandomId,
   dispatchWindowCustomEvent,
   isEmptyArray,
+  omit,
   toAriaKeyShortcuts,
   toNonNegativeNumber,
   type DomEventCleanup,
 } from "../../utils";
+
+defineOptions({
+  inheritAttrs: false,
+});
 
 export interface ActionMenuItem {
   key: string;
@@ -31,6 +38,7 @@ interface Props {
   label?: string;
   icon?: string;
   disabled?: boolean;
+  trigger?: "click" | "hover" | "contextmenu";
   align?: "left" | "center" | "right";
   placement?: "auto" | "bottom" | "top";
   ariaLabel?: string;
@@ -38,22 +46,24 @@ interface Props {
   maxWidth?: number;
   maxHeight?: number;
   viewportPadding?: number;
+  offset?: number;
   closeOnSelect?: boolean;
   emptyText?: string;
   wrapText?: boolean;
   exposeAriaShortcuts?: boolean;
+  teleported?: boolean;
+  persistent?: boolean;
+  showArrow?: boolean;
+  popperClass?: string;
 }
 
 type DropdownPlacement = "bottom" | "bottom-start" | "bottom-end" | "top" | "top-start" | "top-end";
-type DropdownControlRef = {
-  handleClose?: () => void;
-  handleOpen?: () => void;
-} | null;
 
 const props = withDefaults(defineProps<Props>(), {
   label: "",
   icon: "MoreHorizontal",
   disabled: false,
+  trigger: "click",
   align: "right",
   placement: "auto",
   ariaLabel: "",
@@ -61,21 +71,31 @@ const props = withDefaults(defineProps<Props>(), {
   maxWidth: 320,
   maxHeight: 320,
   viewportPadding: 10,
+  offset: 8,
   closeOnSelect: true,
   emptyText: "",
   wrapText: false,
   exposeAriaShortcuts: false,
+  teleported: true,
+  persistent: false,
+  showArrow: false,
+  popperClass: "",
 });
 
 const emit = defineEmits<{
   (e: "select", action: ActionMenuItem): void;
+  (e: "visible-change", visible: boolean): void;
 }>();
 
-const dropdownRef = ref<DropdownControlRef>(null);
+const attrs = useAttrs();
+const dropdownRef = ref<DropdownInstance | null>(null);
 const open = ref(false);
 const { t } = useI18n();
 const menuId = createRandomId("base-action-menu");
 const triggerId = createRandomId("base-action-menu-trigger");
+const rootClass = computed(() => attrs.class);
+const rootStyle = computed(() => attrs.style as StyleValue | undefined);
+const actionMenuPassthroughAttrs = computed(() => omit(attrs, ["class", "style"]));
 const resolvedMenuLabel = computed(() => props.ariaLabel || props.label || t("common.moreActions"));
 const resolvedEmptyText = computed(() => props.emptyText || t("common.noData"));
 let stopGlobalListeners: DomEventCleanup | null = null;
@@ -95,6 +115,8 @@ const resolvedPopperClass = computed(() =>
     "base-action-menu-popper",
     `base-action-menu-popper--${props.align}`,
     props.wrapText ? "base-action-menu-popper--wrap-text" : "",
+    props.showArrow ? "base-action-menu-popper--arrow" : "",
+    props.popperClass,
   ]
     .filter(Boolean)
     .join(" ")
@@ -107,7 +129,7 @@ const popperStyle = computed(() => ({
 const popperOptions = computed(() => ({
   strategy: "fixed",
   modifiers: [
-    { name: "offset", options: { offset: [0, 8] } },
+    { name: "offset", options: { offset: [0, Math.max(0, toNonNegativeNumber(props.offset))] } },
     { name: "preventOverflow", options: { padding: viewportPadding.value } },
     { name: "flip", options: { padding: viewportPadding.value } },
   ],
@@ -124,6 +146,13 @@ const getActionRole = (action: ActionMenuItem) => (action.selected ? "menuitemch
 const closeMenu = () => {
   dropdownRef.value?.handleClose?.();
   open.value = false;
+};
+
+const openMenu = () => {
+  if (props.disabled) return;
+  closeOtherMenus();
+  dropdownRef.value?.handleOpen?.();
+  open.value = true;
 };
 
 const closeOtherMenus = () => {
@@ -143,6 +172,7 @@ const handleVisibleChange = (visible: boolean) => {
 
   if (visible) closeOtherMenus();
   open.value = visible;
+  emit("visible-change", visible);
 };
 
 const handleCommand = (command: unknown) => {
@@ -164,13 +194,39 @@ onBeforeUnmount(() => {
   stopGlobalListeners?.();
   stopGlobalListeners = null;
 });
+
+const getElement = () => {
+  const rootElement = dropdownRef.value?.$el;
+  if (rootElement instanceof HTMLElement) return rootElement;
+
+  const triggerElement = document.getElementById(triggerId);
+  return triggerElement?.closest<HTMLElement>(".base-action-menu") ?? null;
+};
+
+const focusTrigger = () => {
+  const triggerElement = document.getElementById(triggerId);
+  if (triggerElement instanceof HTMLElement) {
+    triggerElement.focus();
+  }
+};
+
+defineExpose({
+  getNativeDropdown: () => dropdownRef.value,
+  getElement,
+  focusTrigger,
+  open: openMenu,
+  close: closeMenu,
+});
 </script>
 
 <template>
   <el-dropdown
     ref="dropdownRef"
+    v-bind="actionMenuPassthroughAttrs"
     class="base-action-menu"
-    trigger="click"
+    :class="rootClass"
+    :style="rootStyle"
+    :trigger="trigger"
     :disabled="disabled"
     :placement="resolvedPlacement"
     :hide-on-click="closeOnSelect"
@@ -178,9 +234,9 @@ onBeforeUnmount(() => {
     :popper-class="resolvedPopperClass"
     :popper-style="popperStyle"
     :popper-options="popperOptions"
-    :show-arrow="false"
-    :teleported="true"
-    :persistent="false"
+    :show-arrow="showArrow"
+    :teleported="teleported"
+    :persistent="persistent"
     role="menu"
     @command="handleCommand"
     @visible-change="handleVisibleChange"
@@ -322,6 +378,15 @@ onBeforeUnmount(() => {
 
 :global(.base-action-menu-popper .el-popper__arrow) {
   display: none;
+}
+
+:global(.base-action-menu-popper--arrow .el-popper__arrow) {
+  display: block;
+}
+
+:global(.base-action-menu-popper--arrow .el-popper__arrow::before) {
+  border-color: #e2e8f0;
+  background: #ffffff;
 }
 
 :global(.base-action-menu-popper .el-dropdown-menu) {
@@ -509,6 +574,11 @@ onBeforeUnmount(() => {
   box-shadow:
     0 18px 42px rgba(0, 0, 0, 0.34),
     inset 0 1px 0 rgba(148, 163, 184, 0.08);
+}
+
+:global(.dark .base-action-menu-popper--arrow .el-popper__arrow::before) {
+  border-color: #1e293b;
+  background: #0f172a;
 }
 
 :global(.dark .base-action-menu-popper .el-dropdown-menu::-webkit-scrollbar-thumb) {

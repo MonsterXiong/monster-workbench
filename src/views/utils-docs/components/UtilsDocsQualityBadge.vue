@@ -21,7 +21,7 @@ function getDisplayText(): string {
 
 <template>
   <span
-    class="inline-flex shrink-0 items-center rounded border px-2 py-0.5 text-[10px] font-black leading-5"
+    class="inline-flex shrink-0 items-center rounded-lg border px-2 py-0.5 text-[10px] font-black leading-5"
     :class="getQualityClasses(report)"
   >
     {{ getDisplayText() }}

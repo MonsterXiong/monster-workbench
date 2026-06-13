@@ -1,7 +1,14 @@
 <script setup lang="ts">
 import type { FormInstance, FormItemProp, FormRules, FormValidateCallback } from "element-plus";
-import { computed, ref, useId } from "vue";
+import type { StyleValue } from "vue";
+import { computed, ref, useAttrs, useId } from "vue";
 import { useI18n } from "../../composables/useI18n";
+import { omit } from "../../utils";
+import { getElementPlusControlRoot } from "./elementPlusDom";
+
+defineOptions({
+  inheritAttrs: false,
+});
 
 type FormSize = "sm" | "md" | "lg";
 type FormBodyGap = "sm" | "md" | "lg";
@@ -31,9 +38,16 @@ interface Props {
   autocomplete?: "on" | "off";
   labelPosition?: ElementFormLabelPosition;
   labelWidth?: string | number;
+  labelSuffix?: string;
+  inline?: boolean;
+  inlineMessage?: boolean;
+  showMessage?: boolean;
+  validateOnRuleChange?: boolean;
+  hideRequiredAsterisk?: boolean;
   requireAsteriskPosition?: ElementFormAsteriskPosition;
   statusIcon?: boolean;
   scrollToError?: boolean;
+  scrollIntoViewOptions?: ScrollIntoViewOptions | boolean;
   ariaLabel?: string;
   actionsLabel?: string;
   bodyLabel?: string;
@@ -62,9 +76,16 @@ const props = withDefaults(defineProps<Props>(), {
   autocomplete: undefined,
   labelPosition: "top",
   labelWidth: "",
+  labelSuffix: "",
+  inline: false,
+  inlineMessage: false,
+  showMessage: false,
+  validateOnRuleChange: false,
+  hideRequiredAsterisk: false,
   requireAsteriskPosition: "left",
   statusIcon: false,
   scrollToError: false,
+  scrollIntoViewOptions: true,
   ariaLabel: "",
   actionsLabel: "",
   bodyLabel: "",
@@ -72,7 +93,8 @@ const props = withDefaults(defineProps<Props>(), {
 });
 
 const { t } = useI18n();
-const formRef = ref<FormInstance>();
+const attrs = useAttrs();
+const formRef = ref<FormInstance | null>(null);
 const formId = useId();
 const titleId = `${formId}-title`;
 const descriptionId = `${formId}-description`;
@@ -89,6 +111,11 @@ const elementSize = computed(() => {
   if (props.size === "lg") return "large";
   return "default";
 });
+const rootClass = computed(() => attrs.class);
+const rootStyle = computed(() => attrs.style as StyleValue | undefined);
+const formPassthroughAttrs = computed(() =>
+  omit(attrs, ["class", "style", "aria-label", "aria-labelledby", "aria-describedby", "aria-busy", "aria-disabled"])
+);
 
 const emit = defineEmits<{
   (e: "submit", event: SubmitEvent): void;
@@ -125,8 +152,11 @@ const clearValidate = (props?: FormItemProp | FormItemProp[]) => {
 const scrollToField = (prop: FormItemProp) => {
   formRef.value?.scrollToField(prop);
 };
+const getElement = () => getElementPlusControlRoot(formRef.value);
 
 defineExpose({
+  getNativeForm: () => formRef.value,
+  getElement,
   validate,
   validateField,
   resetFields,
@@ -138,8 +168,10 @@ defineExpose({
 <template>
   <el-form
     ref="formRef"
+    v-bind="formPassthroughAttrs"
     class="base-form"
     :class="[
+      rootClass,
       `base-form--cols-${columns}`,
       `base-form--${size}`,
       `base-form--gap-${bodyGap}`,
@@ -148,6 +180,7 @@ defineExpose({
         'base-form--divided': divided,
         'base-form--muted': surface === 'muted',
         'base-form--plain': surface === 'plain',
+        'base-form--inline': inline,
         'base-form--wrap-title': wrapTitle,
         'base-form--wrap-description': wrapDescription,
         'is-disabled': disabled,
@@ -159,17 +192,23 @@ defineExpose({
     :aria-describedby="describedBy"
     :aria-busy="loading ? 'true' : undefined"
     :aria-disabled="isDisabled ? 'true' : undefined"
+    :style="rootStyle"
     :model="model"
     :rules="rules"
     :size="elementSize"
     :disabled="isContentLocked"
     :label-position="labelPosition"
     :label-width="labelWidth"
+    :label-suffix="labelSuffix"
+    :inline="inline"
+    :inline-message="inlineMessage"
+    :show-message="showMessage"
+    :validate-on-rule-change="validateOnRuleChange"
+    :hide-required-asterisk="hideRequiredAsterisk"
     :require-asterisk-position="requireAsteriskPosition"
     :status-icon="statusIcon"
     :scroll-to-error="scrollToError"
-    :show-message="false"
-    :validate-on-rule-change="false"
+    :scroll-into-view-options="scrollIntoViewOptions"
     :novalidate="noValidate"
     :autocomplete="autocomplete"
     @submit.prevent="handleSubmit"
@@ -312,6 +351,10 @@ defineExpose({
 
 .base-form__body {
   @apply grid min-w-0 gap-3;
+}
+
+.base-form--inline .base-form__body {
+  @apply flex flex-wrap items-start gap-3;
 }
 
 .base-form__body--with-header {

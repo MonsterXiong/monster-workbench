@@ -1,8 +1,14 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, useId, watchEffect } from "vue";
+import type { SelectInstance } from "element-plus";
+import type { Component, CSSProperties } from "vue";
+import { computed, nextTick, ref, useAttrs, useId, watchEffect } from "vue";
 import { useI18n } from "../../composables/useI18n";
-import { getValueIdentity, isSameValueIdentity, joinAriaIds, joinNonEmptyStrings, normalizeStringKey } from "../../utils";
+import { getValueIdentity, isSameValueIdentity, joinAriaIds, joinNonEmptyStrings, normalizeStringKey, omit } from "../../utils";
 import { toElementPlusSize, type ProjectControlSize } from "./elementPlusDom";
+
+defineOptions({
+  inheritAttrs: false,
+});
 
 type SelectValue = string | number | boolean | Record<string, unknown> | null | undefined;
 type SelectClearValue = SelectValue | SelectValue[] | (() => SelectValue | SelectValue[]);
@@ -24,6 +30,9 @@ type SelectPlacement =
   | "right-start"
   | "right-end";
 type SelectScrollDirection = "top" | "bottom" | "left" | "right";
+type SelectEffect = "dark" | "light" | string;
+type SelectTagType = "primary" | "success" | "warning" | "danger" | "info";
+type SelectTagEffect = "dark" | "light" | "plain";
 
 interface Option {
   label: string;
@@ -64,13 +73,24 @@ interface Props {
   loadingText?: string;
   emptyText?: string;
   noMatchText?: string;
+  autocomplete?: string;
   teleported?: boolean;
   fitInputWidth?: boolean;
+  appendTo?: string | HTMLElement;
   popperClass?: string;
+  popperStyle?: string | CSSProperties;
+  popperOptions?: Record<string, unknown>;
+  effect?: SelectEffect;
   placement?: SelectPlacement;
   fallbackPlacements?: SelectPlacement[];
   offset?: number;
   showArrow?: boolean;
+  clearIcon?: string | Component;
+  suffixIcon?: string | Component;
+  tagType?: SelectTagType;
+  tagEffect?: SelectTagEffect;
+  tagTooltip?: Record<string, unknown>;
+  tabindex?: string | number;
   size?: ProjectControlSize;
   error?: boolean;
   errorMessage?: string;
@@ -78,6 +98,7 @@ interface Props {
   valueOnClear?: SelectClearValue;
   emptyValues?: Array<SelectValue | SelectValue[]>;
   persistent?: boolean;
+  validateEvent?: boolean;
   ariaLabel?: string;
   ariaDescribedby?: string;
 }
@@ -107,13 +128,24 @@ const props = withDefaults(defineProps<Props>(), {
   loadingText: "",
   emptyText: "",
   noMatchText: "",
+  autocomplete: "off",
   teleported: true,
   fitInputWidth: true,
+  appendTo: undefined,
   popperClass: "",
+  popperStyle: undefined,
+  popperOptions: undefined,
+  effect: "light",
   placement: "bottom-start",
   fallbackPlacements: () => ["bottom-start", "top-start", "right", "left"],
   offset: 12,
   showArrow: true,
+  clearIcon: undefined,
+  suffixIcon: undefined,
+  tagType: "info",
+  tagEffect: "light",
+  tagTooltip: undefined,
+  tabindex: 0,
   size: "md",
   error: false,
   errorMessage: "",
@@ -121,6 +153,7 @@ const props = withDefaults(defineProps<Props>(), {
   valueOnClear: undefined,
   emptyValues: () => ["", null, undefined, []],
   persistent: false,
+  validateEvent: false,
   ariaLabel: "",
   ariaDescribedby: "",
 });
@@ -137,11 +170,28 @@ const emit = defineEmits<{
   (e: "blur", event: FocusEvent): void;
 }>();
 
+const attrs = useAttrs();
 const { t } = useI18n();
 const selectId = useId();
 const rootRef = ref<HTMLElement | null>(null);
+const selectRef = ref<SelectInstance>();
 const errorId = `${selectId}-error`;
 
+const filteredAttrs = computed(() =>
+  omit(attrs, [
+    "modelValue",
+    "options",
+    "size",
+    "class",
+    "style",
+    "aria-label",
+    "aria-describedby",
+    "aria-disabled",
+    "aria-invalid",
+    "aria-errormessage",
+    "aria-busy",
+  ])
+);
 const resolvedAriaLabel = computed(() => props.ariaLabel || props.placeholder || t("common.selectPlaceholder"));
 const resolvedErrorMessage = computed(() => props.errorMessage);
 const describedBy = computed(() => joinAriaIds([props.ariaDescribedby, resolvedErrorMessage.value ? errorId : undefined]));
@@ -273,11 +323,24 @@ watchEffect(() => {
   void syncComboboxAria();
 });
 
+const focus = () => selectRef.value?.focus();
+const blur = () => selectRef.value?.blur();
+const toggleMenu = (event?: Event) => selectRef.value?.toggleMenu(event);
+
+defineExpose({
+  focus,
+  blur,
+  toggleMenu,
+  getNativeSelect: () => selectRef.value,
+  getElement: () => (rootRef.value instanceof HTMLElement ? rootRef.value : null),
+});
 </script>
 
 <template>
-  <div ref="rootRef" class="base-select-shell">
+  <div ref="rootRef" class="base-select-shell" :class="$attrs.class" :style="$attrs.style">
     <el-select
+      v-bind="filteredAttrs"
+      ref="selectRef"
       v-model="computedValue"
       :id="id || undefined"
       :name="name || undefined"
@@ -303,18 +366,29 @@ watchEffect(() => {
       :loading-text="loadingText || t('common.loading')"
       :no-data-text="emptyText || t('common.noData')"
       :no-match-text="noMatchText || emptyText || t('common.noData')"
+      :autocomplete="autocomplete"
       :teleported="teleported"
       :fit-input-width="fitInputWidth"
+      :append-to="appendTo"
       :popper-class="resolvedPopperClass"
+      :popper-style="popperStyle"
+      :popper-options="popperOptions"
+      :effect="effect"
       :placement="placement"
       :fallback-placements="fallbackPlacements"
       :offset="offset"
       :show-arrow="showArrow"
+      :clear-icon="clearIcon"
+      :suffix-icon="suffixIcon"
+      :tag-type="tagType"
+      :tag-effect="tagEffect"
+      :tag-tooltip="tagTooltip"
+      :tabindex="tabindex"
       :value-key="valueKey"
       :value-on-clear="resolvedValueOnClear"
       :empty-values="emptyValues"
       :persistent="persistent"
-      :validate-event="false"
+      :validate-event="validateEvent"
       :size="elSize"
       :aria-label="resolvedAriaLabel"
       :aria-describedby="describedBy"

@@ -1,8 +1,14 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from "vue";
-import { Loader2 } from "lucide-vue-next";
+import type { SkeletonInstance } from "element-plus";
+import type { Component, StyleValue } from "vue";
+import { computed, onBeforeUnmount, ref, useAttrs, watch } from "vue";
+import { Loading } from "@element-plus/icons-vue";
 import { useI18n } from "../../composables/useI18n";
-import { clampNumber, clearTimeoutHandle, resetTimeoutHandle, type TimeoutHandle } from "../../utils";
+import { clampNumber, clearTimeoutHandle, omit, resetTimeoutHandle, type TimeoutHandle } from "../../utils";
+
+defineOptions({
+  inheritAttrs: false,
+});
 
 type LoadingType = "spinner" | "dots" | "ring" | "skeleton";
 type LoadingSize = "xs" | "sm" | "md" | "lg";
@@ -10,6 +16,7 @@ type LoadingSurface = "plain" | "card" | "muted";
 type LoadingDirection = "vertical" | "horizontal";
 type LoadingAlign = "center" | "start";
 type LoadingTone = "primary" | "success" | "warning" | "danger" | "neutral";
+type LoadingSkeletonVariant = "p" | "text" | "h1" | "h3" | "caption" | "button" | "image" | "circle" | "rect";
 
 interface Props {
   type?: LoadingType;
@@ -24,12 +31,16 @@ interface Props {
   bordered?: boolean;
   compact?: boolean;
   skeletonLines?: number;
+  skeletonVariant?: LoadingSkeletonVariant;
+  skeletonThrottle?: number;
   minHeight?: string;
   showText?: boolean;
   showIndicator?: boolean;
   animated?: boolean;
   delay?: number;
   wrapText?: boolean;
+  spinnerIcon?: Component;
+  indicatorLabel?: string;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -45,19 +56,39 @@ const props = withDefaults(defineProps<Props>(), {
   bordered: false,
   compact: false,
   skeletonLines: 3,
+  skeletonVariant: "p",
+  skeletonThrottle: 0,
   minHeight: "",
   showText: true,
   showIndicator: true,
   animated: true,
   delay: 0,
   wrapText: false,
+  spinnerIcon: undefined,
+  indicatorLabel: "",
 });
 
 const { t } = useI18n();
+const attrs = useAttrs();
+const rootRef = ref<HTMLElement | null>(null);
+const skeletonRef = ref<SkeletonInstance | null>(null);
 const resolvedLabel = computed(() => props.ariaLabel || props.text || t("common.loading"));
+const resolvedIndicatorLabel = computed(() => props.indicatorLabel || resolvedLabel.value);
 const resolvedSkeletonLines = computed(() => clampNumber(props.skeletonLines, 1, 8, 3, 0));
+const normalizedSkeletonThrottle = computed(() => clampNumber(props.skeletonThrottle, 0, 3000, 0, 0));
 const normalizedDelay = computed(() => clampNumber(props.delay, 0, 3000, 0, 0));
+const resolvedSpinnerIcon = computed(() => props.spinnerIcon || Loading);
+const indicatorSize = computed(() => {
+  if (props.size === "xs") return 16;
+  if (props.size === "sm") return 20;
+  if (props.size === "lg") return 40;
+  return 28;
+});
 const isVisible = ref(normalizedDelay.value <= 0);
+const rootClass = computed(() => attrs.class);
+const rootStyle = computed(() => attrs.style as StyleValue | undefined);
+const rootMergedStyle = computed<StyleValue>(() => [rootStyle.value, { minHeight: props.minHeight || undefined }]);
+const loadingPassthroughAttrs = computed(() => omit(attrs, ["class", "style", "role", "aria-live", "aria-busy", "aria-label"]));
 let delayTimer: TimeoutHandle | null = null;
 
 const resetDelay = () => {
@@ -81,13 +112,38 @@ onBeforeUnmount(() => {
   clearTimeoutHandle(delayTimer);
   delayTimer = null;
 });
+
+const getElement = () => (rootRef.value instanceof HTMLElement ? rootRef.value : null);
+const getIndicatorElement = () =>
+  getElement()?.querySelector<HTMLElement>(".base-loading__skeleton, .base-loading__spinner, .base-loading__ring, .base-loading__dots") ?? null;
+const focusStatus = () => {
+  const target = getElement();
+  if (!target) return null;
+
+  if (!target.hasAttribute("tabindex")) {
+    target.tabIndex = -1;
+  }
+
+  target.focus();
+  return target;
+};
+
+defineExpose({
+  getNativeSkeleton: () => skeletonRef.value,
+  getElement,
+  getIndicatorElement,
+  focusStatus,
+});
 </script>
 
 <template>
   <div
     v-if="isVisible"
+    ref="rootRef"
+    v-bind="loadingPassthroughAttrs"
     class="base-loading"
     :class="[
+      rootClass,
       `base-loading--${size}`,
       `base-loading--${type}`,
       `base-loading--${surface}`,
@@ -101,7 +157,7 @@ onBeforeUnmount(() => {
         'base-loading--wrap-text': wrapText,
       },
     ]"
-    :style="{ minHeight: minHeight || undefined }"
+    :style="rootMergedStyle"
     role="status"
     aria-live="polite"
     aria-busy="true"
@@ -110,17 +166,19 @@ onBeforeUnmount(() => {
     <template v-if="type === 'skeleton'">
       <el-skeleton
         v-if="showIndicator"
+        ref="skeletonRef"
         class="base-loading__skeleton"
         :animated="animated"
         :loading="true"
         :rows="0"
+        :throttle="normalizedSkeletonThrottle"
         aria-hidden="true"
       >
         <template #template>
           <el-skeleton-item
             v-for="line in resolvedSkeletonLines"
             :key="line"
-            variant="p"
+            :variant="skeletonVariant"
             class="base-loading__skeleton-line"
             :class="`is-line-${line}`"
           />
@@ -135,7 +193,14 @@ onBeforeUnmount(() => {
     </template>
     <template v-else>
       <template v-if="showIndicator">
-        <Loader2 v-if="type === 'spinner'" class="base-loading__spinner" aria-hidden="true" />
+        <el-icon
+          v-if="type === 'spinner'"
+          class="base-loading__spinner"
+          :size="indicatorSize"
+          :aria-label="resolvedIndicatorLabel"
+        >
+          <component :is="resolvedSpinnerIcon" aria-hidden="true" />
+        </el-icon>
         <span v-else-if="type === 'ring'" class="base-loading__ring" aria-hidden="true"></span>
         <span v-else class="base-loading__dots" aria-hidden="true">
           <i></i>
@@ -202,6 +267,10 @@ onBeforeUnmount(() => {
 .base-loading__spinner {
   color: var(--loading-color);
   @apply animate-spin;
+}
+
+.base-loading__spinner :deep(svg) {
+  @apply h-full w-full;
 }
 
 .base-loading--xs .base-loading__spinner,

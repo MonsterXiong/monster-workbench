@@ -1,6 +1,14 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import type { TabsInstance } from "element-plus";
+import type { StyleValue } from "vue";
+import { computed, ref, useAttrs } from "vue";
+import { omit } from "../../utils";
+import { getElementPlusControlRoot } from "./elementPlusDom";
 import BaseIcon from "./BaseIcon.vue";
+
+defineOptions({
+  inheritAttrs: false,
+});
 
 type Awaitable<T> = T | Promise<T>;
 type TabKey = string | number;
@@ -16,6 +24,7 @@ interface TabItem {
   badgeColor?: string;
   disabled?: boolean;
   closable?: boolean;
+  lazy?: boolean;
   ariaLabel?: string;
 }
 
@@ -44,6 +53,8 @@ interface Props {
   closable?: boolean;
   addable?: boolean;
   editable?: boolean;
+  lazy?: boolean;
+  tabindex?: string | number;
   beforeLeave?: (newKey: TabKey, oldKey: TabKey) => Awaitable<void | boolean>;
   ariaLabel?: string;
   fullWidth?: boolean;
@@ -62,6 +73,8 @@ const props = withDefaults(defineProps<Props>(), {
   closable: false,
   addable: false,
   editable: false,
+  lazy: true,
+  tabindex: 0,
   ariaLabel: "",
   fullWidth: false,
   equal: false,
@@ -72,6 +85,8 @@ const props = withDefaults(defineProps<Props>(), {
 const emit = defineEmits<{
   (e: "update:modelValue", key: TabKey): void;
   (e: "select", tab: TabItem): void;
+  (e: "tab-click", payload: { key?: TabKey; tab?: TabItem; pane: ElementPaneLike; event?: Event }): void;
+  (e: "tab-change", payload: { key: TabKey; tab: TabItem }): void;
   (e: "remove", key: TabKey): void;
   (e: "add"): void;
   (e: "edit", payload: { key?: TabKey; action: TabEditAction }): void;
@@ -82,7 +97,14 @@ defineSlots<{
   badge?: (props: { tab: TabItem; active: boolean; disabled: boolean }) => any;
 }>();
 
+const attrs = useAttrs();
+const tabsRef = ref<TabsInstance | null>(null);
+const rootClass = computed(() => attrs.class);
+const rootStyle = computed(() => attrs.style as StyleValue | undefined);
+const tabPassthroughAttrs = computed(() => omit(attrs, ["class", "style", "aria-label", "aria-disabled"]));
+
 const rootClasses = computed(() => [
+  rootClass.value,
   `base-tab--${props.variant}`,
   `base-tab--${props.size}`,
   `base-tab--position-${props.tabPosition}`,
@@ -119,14 +141,16 @@ const handleValueUpdate = (key: string | number) => {
 const handleTabChange = (key: string | number) => {
   const tab = findTabByKey(key);
   if (!tab || isTabDisabled(tab)) return;
+  emit("tab-change", { key, tab });
   emit("select", tab);
 };
 
-const handleTabClick = (pane: ElementPaneLike) => {
+const handleTabClick = (pane: ElementPaneLike, event?: Event) => {
   const key = resolvePaneKey(pane);
+  const tab = key === undefined ? undefined : findTabByKey(key);
+  emit("tab-click", { key, tab, pane, event });
   if (key === undefined) return;
 
-  const tab = findTabByKey(key);
   if (!tab || isTabDisabled(tab) || key !== props.modelValue) return;
   emit("select", tab);
 };
@@ -150,10 +174,28 @@ const handleTabEdit = (key: TabKey | undefined, action: TabEditAction) => {
   if (props.disabled) return;
   emit("edit", { key, action });
 };
+
+const getElement = () => getElementPlusControlRoot(tabsRef.value);
+
+const focusActiveTab = () => {
+  const target = getElement()?.querySelector<HTMLElement>(".el-tabs__item.is-active");
+  target?.focus();
+  return target ?? null;
+};
+
+defineExpose({
+  getNativeTabs: () => tabsRef.value,
+  getCurrentName: () => tabsRef.value?.currentName,
+  getTabNav: () => tabsRef.value?.tabNavRef,
+  getElement,
+  focusActiveTab,
+});
 </script>
 
 <template>
   <el-tabs
+    ref="tabsRef"
+    v-bind="tabPassthroughAttrs"
     :model-value="modelValue"
     :type="type"
     :tab-position="tabPosition"
@@ -162,9 +204,10 @@ const handleTabEdit = (key: TabKey | undefined, action: TabEditAction) => {
     :addable="addable"
     :editable="editable"
     :before-leave="handleBeforeLeave"
-    :tabindex="disabled ? -1 : 0"
+    :tabindex="disabled ? -1 : tabindex"
     class="base-tab"
     :class="rootClasses"
+    :style="rootStyle"
     :aria-label="ariaLabel || '标签页'"
     :aria-disabled="disabled ? 'true' : undefined"
     @update:model-value="handleValueUpdate"
@@ -180,7 +223,7 @@ const handleTabEdit = (key: TabKey | undefined, action: TabEditAction) => {
       :name="tab.key"
       :disabled="isTabDisabled(tab)"
       :closable="tab.closable ?? closable"
-      lazy
+      :lazy="tab.lazy ?? lazy"
     >
       <template #label>
         <span class="base-tab__button-content" :aria-label="tab.ariaLabel || undefined">

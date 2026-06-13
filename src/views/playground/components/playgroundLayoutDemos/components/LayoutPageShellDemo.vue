@@ -1,20 +1,36 @@
 <script setup lang="ts">
+import { ref } from "vue";
+import BasePageShell from "../../../../../components/common/BasePageShell.vue";
 import { useToast } from "../../../../../composables/useToast";
 import PlaygroundDemoSection from "../../PlaygroundDemoSection.vue";
 
 const { triggerToast } = useToast();
+const pageShellInstanceText = ref("等待实例操作");
+const pageShellInstanceRef = ref<InstanceType<typeof BasePageShell> | null>(null);
 
 const pageShellBreadcrumbs = [
   { key: "workspace", label: "工作台", icon: "LayoutDashboard" },
   { key: "components", label: "组件库", icon: "Boxes" },
   { key: "page-shell", label: "页面外壳" },
 ];
+
+const readPageShellRoot = () => {
+  const element = pageShellInstanceRef.value?.getElement();
+  pageShellInstanceText.value = element ? `根节点: ${element.tagName.toLowerCase()}.${element.classList[0] || "root"}` : "未读取到页面外壳";
+};
+
+const readPageShellContent = () => {
+  const element = pageShellInstanceRef.value?.getContentElement();
+  pageShellInstanceText.value = element ? `内容区: ${element.tagName.toLowerCase()}.${element.classList[0] || "content"}` : "未读取到内容区";
+};
 </script>
 
 <template>
   <section class="detail-stack">
     <PlaygroundDemoSection title="页面外壳" subtitle="把页面头、工具条、主内容、侧栏和底部操作收成稳定结构。" icon="LayoutDashboard">
       <BasePageShell
+        ref="pageShellInstanceRef"
+        data-native-page-shell-ref="base-page-shell-instance"
         title="组件工作区"
         description="适合列表页、配置页 and 资源管理页的顶层页面骨架。"
         icon="Boxes"
@@ -29,8 +45,11 @@ const pageShellBreadcrumbs = [
         <template #meta>
           <BaseBadge type="primary">页面级容器</BaseBadge>
           <BaseStatusDot type="success" label="已同步" description="刚刚" />
+          <BaseBadge type="neutral" variant="outline">{{ pageShellInstanceText }}</BaseBadge>
         </template>
         <template #actions>
+          <BaseButton type="neutral" size="sm" outline @click="readPageShellRoot">DOM</BaseButton>
+          <BaseButton type="neutral" size="sm" outline @click="readPageShellContent">内容区</BaseButton>
           <BaseButton type="neutral" size="sm">预览</BaseButton>
           <BaseButton type="primary" size="sm">保存</BaseButton>
         </template>

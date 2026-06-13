@@ -1,8 +1,12 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount } from "vue";
+import { computed, onBeforeUnmount, ref, useAttrs } from "vue";
 import { useToast } from "../../composables/useToast";
 import { useI18n } from "../../composables/useI18n";
 import BaseIcon from "./BaseIcon.vue";
+
+defineOptions({
+  inheritAttrs: false,
+});
 
 const {
   showToast,
@@ -22,6 +26,8 @@ const {
   clearToastTimer,
 } = useToast();
 const { t } = useI18n();
+const attrs = useAttrs();
+const rootRef = ref<HTMLElement | null>(null);
 const liveMode = computed(() => (toastType.value === "error" || toastType.value === "warning" ? "assertive" : "polite"));
 const closeLabel = computed(() => t("common.close"));
 const iconName = computed(() => {
@@ -34,6 +40,11 @@ const iconName = computed(() => {
 
 onBeforeUnmount(() => {
   clearToastTimer();
+});
+
+defineExpose({
+  close: hideToast,
+  getElement: () => rootRef.value,
 });
 </script>
 
@@ -48,6 +59,8 @@ onBeforeUnmount(() => {
   >
     <div
       v-if="showToast"
+      v-bind="attrs"
+      ref="rootRef"
       :key="toastId"
       class="base-toast"
       :class="[`base-toast--${toastType}`, { 'base-toast--wrap': toastWrap }]"

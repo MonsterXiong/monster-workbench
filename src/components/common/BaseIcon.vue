@@ -1,7 +1,11 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref, useAttrs } from "vue";
 import * as icons from "lucide-vue-next";
 import { capitalize } from "../../utils";
+
+defineOptions({
+  inheritAttrs: false,
+});
 
 interface Props {
   name: string;
@@ -19,15 +23,28 @@ const props = withDefaults(defineProps<Props>(), {
   title: "",
 });
 
+const attrs = useAttrs();
+const iconRef = ref<HTMLElement | { $el?: Element | null } | null>(null);
 const iconComponent = computed(() => {
   const formattedName = capitalize(props.name);
   return (icons as any)[formattedName] || (icons as any)["HelpCircle"];
+});
+
+const getElement = () => {
+  if (iconRef.value instanceof HTMLElement) return iconRef.value;
+  return iconRef.value?.$el instanceof HTMLElement ? iconRef.value.$el : null;
+};
+
+defineExpose({
+  getElement,
 });
 </script>
 
 <template>
   <component
     :is="iconComponent"
+    v-bind="attrs"
+    ref="iconRef"
     :size="size"
     :color="color"
     :stroke-width="strokeWidth"

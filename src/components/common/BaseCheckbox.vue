@@ -1,8 +1,13 @@
 <script setup lang="ts">
-import { computed, useId } from "vue";
+import type { CheckboxInstance } from "element-plus";
+import { computed, ref, useAttrs, useId } from "vue";
 import { LoaderCircle } from "lucide-vue-next";
-import { isActivationKey, isKeyboardKey, joinAriaIds, preventDomEventDefault } from "../../utils";
-import { toElementPlusSize, type ProjectControlSize } from "./elementPlusDom";
+import { isActivationKey, isKeyboardKey, joinAriaIds, omit, preventDomEventDefault } from "../../utils";
+import { getElementPlusControlRoot, toElementPlusSize, type ProjectControlSize } from "./elementPlusDom";
+
+defineOptions({
+  inheritAttrs: false,
+});
 
 interface Props {
   modelValue: boolean;
@@ -21,6 +26,7 @@ interface Props {
   ariaLabel?: string;
   ariaLabelledby?: string;
   ariaDescribedby?: string;
+  validateEvent?: boolean;
   size?: ProjectControlSize;
 }
 
@@ -40,6 +46,7 @@ const props = withDefaults(defineProps<Props>(), {
   ariaLabel: "",
   ariaLabelledby: "",
   ariaDescribedby: "",
+  validateEvent: false,
   size: "md",
 });
 
@@ -51,6 +58,9 @@ const emit = defineEmits<{
   (e: "keydown", value: KeyboardEvent): void;
 }>();
 
+const attrs = useAttrs();
+const rootRef = ref<HTMLElement | null>(null);
+const checkboxRef = ref<CheckboxInstance | null>(null);
 const checkboxId = useId();
 const labelId = `${checkboxId}-label`;
 const descriptionId = `${checkboxId}-description`;
@@ -61,6 +71,7 @@ const describedBy = computed(() => joinAriaIds([props.description ? descriptionI
 
 const checked = computed(() => props.modelValue);
 const elementSize = computed(() => toElementPlusSize(props.size));
+const rootAttrs = computed(() => omit(attrs, ["class", "style"]));
 
 const commitChecked = (value: boolean) => {
   if (isReadonly.value) return;
@@ -114,22 +125,44 @@ const handleFocusIn = (event: FocusEvent) => {
 const handleFocusOut = (event: FocusEvent) => {
   emit("blur", event);
 };
+
+const getElement = () => rootRef.value;
+const getCheckboxElement = () => getElementPlusControlRoot(checkboxRef.value)?.querySelector<HTMLInputElement>("input[type='checkbox']") ?? null;
+const focus = () => {
+  const checkbox = getCheckboxElement();
+  checkbox?.focus();
+  return checkbox;
+};
+
+defineExpose({
+  focus,
+  toggle,
+  getNativeCheckbox: () => checkboxRef.value,
+  getElement,
+  getCheckboxElement,
+});
 </script>
 
 <template>
   <div
+    v-bind="rootAttrs"
+    ref="rootRef"
     class="base-checkbox"
-    :class="{
-      [`base-checkbox--${size}`]: true,
-      'base-checkbox--checked': checked,
-      'base-checkbox--disabled': disabled,
-      'base-checkbox--readonly': readonly,
-      'base-checkbox--loading': loading,
-      'base-checkbox--indeterminate': indeterminate,
-      'base-checkbox--compact': compact,
-      'base-checkbox--error': error,
-      'base-checkbox--success': success
-    }"
+    :class="[
+      attrs.class,
+      {
+        [`base-checkbox--${size}`]: true,
+        'base-checkbox--checked': checked,
+        'base-checkbox--disabled': disabled,
+        'base-checkbox--readonly': readonly,
+        'base-checkbox--loading': loading,
+        'base-checkbox--indeterminate': indeterminate,
+        'base-checkbox--compact': compact,
+        'base-checkbox--error': error,
+        'base-checkbox--success': success
+      }
+    ]"
+    :style="attrs.style"
     :aria-disabled="isReadonly ? 'true' : undefined"
     :aria-readonly="readonly ? 'true' : undefined"
     :aria-busy="loading ? 'true' : undefined"
@@ -141,6 +174,7 @@ const handleFocusOut = (event: FocusEvent) => {
   >
     <span class="base-checkbox__box">
       <el-checkbox
+        ref="checkboxRef"
         :id="id || undefined"
         v-model="computedValue"
         class="base-checkbox__control"
@@ -156,7 +190,7 @@ const handleFocusOut = (event: FocusEvent) => {
         :aria-disabled="(readonly || loading) ? 'true' : undefined"
         :aria-busy="loading ? 'true' : undefined"
         :aria-invalid="error ? 'true' : undefined"
-        :validate-event="false"
+        :validate-event="validateEvent"
       />
       <span v-if="loading" class="base-checkbox__loading" aria-hidden="true">
         <LoaderCircle class="h-3.5 w-3.5" aria-hidden="true" />

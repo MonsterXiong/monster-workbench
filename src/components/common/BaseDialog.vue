@@ -1,7 +1,12 @@
 <script setup lang="ts">
-import { computed, useId, useSlots } from "vue";
+import type { DialogBeforeCloseFn, DialogInstance, DialogTransition } from "element-plus";
+import { computed, ref, useAttrs, useId, useSlots } from "vue";
 import { useI18n } from "../../composables/useI18n";
 import { joinAriaIds, resolveCssSizeAlias } from "../../utils";
+
+defineOptions({
+  inheritAttrs: false,
+});
 
 type DialogSize = "sm" | "md" | "lg" | "xl";
 type DialogLevel = 2 | 3 | 4 | 5 | 6;
@@ -22,9 +27,29 @@ interface Props {
   showClose?: boolean;
   closeDisabled?: boolean;
   lockCloseOnLoading?: boolean;
+  beforeClose?: DialogBeforeCloseFn;
   destroyOnClose?: boolean;
   fullscreen?: boolean;
   top?: string;
+  appendToBody?: boolean;
+  appendTo?: string | HTMLElement;
+  lockScroll?: boolean;
+  modal?: boolean;
+  modalPenetrable?: boolean;
+  openDelay?: number;
+  closeDelay?: number;
+  modalClass?: string;
+  headerClass?: string;
+  bodyClass?: string;
+  footerClass?: string;
+  zIndex?: number;
+  trapFocus?: boolean;
+  headerAriaLevel?: string;
+  transition?: DialogTransition;
+  center?: boolean;
+  alignCenter?: boolean;
+  draggable?: boolean;
+  overflow?: boolean;
   loading?: boolean;
   loadingText?: string;
   confirmLoading?: boolean;
@@ -54,9 +79,29 @@ const props = withDefaults(defineProps<Props>(), {
   showClose: true,
   closeDisabled: false,
   lockCloseOnLoading: false,
+  beforeClose: undefined,
   destroyOnClose: true,
   fullscreen: false,
   top: "10vh",
+  appendToBody: false,
+  appendTo: "body",
+  lockScroll: true,
+  modal: true,
+  modalPenetrable: false,
+  openDelay: 0,
+  closeDelay: 0,
+  modalClass: "",
+  headerClass: "",
+  bodyClass: "",
+  footerClass: "",
+  zIndex: undefined,
+  trapFocus: false,
+  headerAriaLevel: undefined,
+  transition: undefined,
+  center: false,
+  alignCenter: undefined,
+  draggable: false,
+  overflow: false,
   loading: false,
   loadingText: "",
   confirmLoading: false,
@@ -76,10 +121,17 @@ const props = withDefaults(defineProps<Props>(), {
 const { t } = useI18n();
 const slots = useSlots();
 const dialogId = useId();
+const attrs = useAttrs();
+const dialogRef = ref<DialogInstance | null>(null);
 
 const emit = defineEmits<{
   (e: "update:modelValue", val: boolean): void;
+  (e: "open"): void;
+  (e: "opened"): void;
   (e: "close"): void;
+  (e: "closed"): void;
+  (e: "open-auto-focus"): void;
+  (e: "close-auto-focus"): void;
 }>();
 
 const computedValue = computed({
@@ -109,6 +161,11 @@ const describedBy = computed(() =>
   joinAriaIds([!hasCustomHeader.value && props.description ? descriptionId.value : undefined, props.ariaDescribedby])
 );
 const resolvedActionsLabel = computed(() => props.actionsLabel || `${props.title || props.ariaLabel || t("common.dialog")} 操作`);
+const rootClass = computed(() => attrs.class);
+const rootStyle = computed(() => attrs.style);
+const dialogPassthroughAttrs = computed(() =>
+  Object.fromEntries(Object.entries(attrs).filter(([key]) => key !== "class" && key !== "style"))
+);
 const resolvedWidth = computed(() => {
   if (props.width) {
     return resolveCssSizeAlias(props.width);
@@ -123,18 +180,65 @@ const resolvedWidth = computed(() => {
   return sizeMap[props.size];
 });
 
-const handleClose = () => {
+const emitClose = () => {
   emit("close");
+};
+
+const getDialogElement = () => {
+  const current = dialogRef.value;
+  const contentRef = current?.dialogContentRef;
+  const element = contentRef?.$el ?? contentRef ?? current?.$el;
+
+  return element instanceof HTMLElement ? element : null;
+};
+
+const open = () => {
+  computedValue.value = true;
+};
+
+const close = () => {
+  if (isCloseDisabled.value) return;
+
+  if (dialogRef.value?.handleClose) {
+    dialogRef.value.handleClose();
+    return;
+  }
+
+  computedValue.value = false;
+};
+
+const resetPosition = () => {
+  dialogRef.value?.resetPosition?.();
 };
 
 const handleBeforeClose = (done: () => void) => {
   if (isCloseDisabled.value) return;
+  if (props.beforeClose) {
+    props.beforeClose(done);
+    return;
+  }
   done();
 };
+
+const handleClosed = () => {
+  emitClose();
+  emit("closed");
+};
+
+defineExpose({
+  getNativeDialog: () => dialogRef.value,
+  getElement: getDialogElement,
+  resetPosition,
+  handleClose: close,
+  open,
+  close,
+});
 </script>
 
 <template>
   <el-dialog
+    ref="dialogRef"
+    v-bind="dialogPassthroughAttrs"
     v-model="computedValue"
     class="base-dialog"
     :class="[
@@ -145,7 +249,9 @@ const handleBeforeClose = (done: () => void) => {
         'base-dialog--wrap-title': wrapTitle,
         'base-dialog--wrap-description': wrapDescription,
       },
+      rootClass,
     ]"
+    :style="rootStyle"
     :width="resolvedWidth"
     :close-on-click-modal="closeOnClickModal"
     :close-on-press-escape="closeOnPressEscape"
@@ -153,6 +259,25 @@ const handleBeforeClose = (done: () => void) => {
     :destroy-on-close="destroyOnClose"
     :fullscreen="fullscreen"
     :top="top"
+    :append-to-body="appendToBody"
+    :append-to="appendTo"
+    :lock-scroll="lockScroll"
+    :modal="modal"
+    :modal-penetrable="modalPenetrable"
+    :open-delay="openDelay"
+    :close-delay="closeDelay"
+    :modal-class="modalClass || undefined"
+    :header-class="headerClass || undefined"
+    :body-class="bodyClass || undefined"
+    :footer-class="footerClass || undefined"
+    :z-index="zIndex"
+    :trap-focus="trapFocus"
+    :header-aria-level="headerAriaLevel || String(level)"
+    :transition="transition"
+    :center="center"
+    :align-center="alignCenter"
+    :draggable="draggable"
+    :overflow="overflow"
     :before-close="handleBeforeClose"
     :role="role"
     aria-modal="true"
@@ -160,7 +285,11 @@ const handleBeforeClose = (done: () => void) => {
     :aria-labelledby="labelledBy"
     :aria-describedby="describedBy"
     :aria-busy="loading || confirmLoading ? 'true' : undefined"
-    @closed="handleClose"
+    @open="emit('open')"
+    @opened="emit('opened')"
+    @closed="handleClosed"
+    @open-auto-focus="emit('open-auto-focus')"
+    @close-auto-focus="emit('close-auto-focus')"
   >
     <template #header="{ close, titleClass }">
       <header class="base-dialog__header">

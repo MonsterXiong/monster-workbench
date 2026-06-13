@@ -15,7 +15,6 @@ import {
   type UtilityDocEntry,
   type UtilityDocQualityReport,
 } from "./utilsDocsContent";
-import type { QualityFilter } from "./utilsDocsTypes";
 import { formatFunctionSignature, formatSourceFiles } from "./utilsDocsUi";
 
 interface SandboxResponse {
@@ -29,8 +28,7 @@ const searchKeyword = ref("");
 const activeDocKey = ref<string | null>("overview");
 const selectedFuncName = ref("");
 const sidebarRef = ref<InstanceType<typeof UtilsDocsSidebar> | null>(null);
-const expandedGroups = ref<Set<string>>(new Set(utilityDocGroups));
-const qualityFilter = ref<QualityFilter>("all");
+const expandedGroups = ref<Set<string>>(new Set());
 const { copyText } = useClipboard();
 
 const paramValues = ref<string[]>([]);
@@ -51,19 +49,9 @@ const normalizedKeyword = computed(() => searchKeyword.value.trim().toLowerCase(
 
 const filteredDocs = computed(() => {
   const keyword = normalizedKeyword.value;
+  if (!keyword) return utilityDocs;
 
-  return utilityDocs.filter((entry) => {
-    const qualityReport = qualityReports.value[entry.key];
-    const matchesFilter =
-      qualityFilter.value === "all" ||
-      (qualityFilter.value === "runnable" && qualityReport.sandboxReadyCount > 0) ||
-      (qualityFilter.value === "review" && qualityReport.level !== "excellent");
-
-    if (!matchesFilter) return false;
-    if (!keyword) return true;
-
-    return buildDocSearchText(entry).includes(keyword);
-  });
+  return utilityDocs.filter((entry) => buildDocSearchText(entry).includes(keyword));
 });
 
 const visibleStats = computed(() => getUtilityDocStats(filteredDocs.value));
@@ -109,12 +97,17 @@ const canRunSandbox = computed(() => Boolean(activeFunctionObj.value?.sandbox?.e
 
 watch(activeDoc, (doc) => {
   if (doc) {
-    expandedGroups.value.add(doc.group);
+    const nextGroups = new Set(expandedGroups.value);
+    nextGroups.add(doc.group);
+    expandedGroups.value = nextGroups;
   }
 });
 
 watch(normalizedKeyword, (keyword) => {
-  if (!keyword) return;
+  if (!keyword) {
+    expandedGroups.value = activeDoc.value ? new Set([activeDoc.value.group]) : new Set();
+    return;
+  }
   expandedGroups.value = new Set(docsByGroup.value.filter((group) => group.docs.length > 0).map((group) => group.groupName));
 });
 
@@ -167,6 +160,7 @@ function toggleGroup(group: string) {
 function selectOverview() {
   activeDocKey.value = "overview";
   selectedFuncName.value = "";
+  expandedGroups.value = new Set();
 }
 
 function selectDoc(key: string) {
@@ -330,12 +324,11 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="utils-docs-page flex h-full w-full overflow-hidden bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+  <div class="utils-docs-page flex h-full w-full overflow-hidden rounded-3xl bg-white text-slate-900 dark:bg-slate-900 dark:text-slate-100">
     <div class="utils-docs-shell flex min-h-0 flex-1 flex-col overflow-hidden lg:flex-row">
       <UtilsDocsSidebar
         ref="sidebarRef"
         v-model:search-keyword="searchKeyword"
-        v-model:quality-filter="qualityFilter"
         :doc-stats="docStats"
         :visible-stats="visibleStats"
         :docs-by-group="docsByGroup"
@@ -353,7 +346,7 @@ onBeforeUnmount(() => {
         <div v-if="filteredDocs.length === 0" class="flex h-full min-h-[360px] flex-col items-center justify-center p-8 text-center">
           <Search class="mb-3 h-8 w-8 text-slate-300 dark:text-slate-600" />
           <div class="text-sm font-black text-slate-600 dark:text-slate-300">没有匹配的工具函数模块</div>
-          <div class="mt-1 text-xs font-semibold text-slate-400">请调整搜索词或筛选条件</div>
+          <div class="mt-1 text-xs font-semibold text-slate-400">请调整搜索词</div>
         </div>
 
         <Transition name="fade" mode="out-in">
@@ -381,7 +374,7 @@ onBeforeUnmount(() => {
           <div
             v-else-if="activeDoc && activeFunctionObj"
             :key="`fn-${activeFunctionObj.name}`"
-            class="grid h-full min-h-0 w-full grid-cols-1 overflow-y-auto xl:grid-cols-[minmax(0,1fr)_420px] xl:overflow-hidden 2xl:grid-cols-[minmax(0,1fr)_460px]"
+            class="grid h-full min-h-0 w-full grid-cols-1 grid-rows-[minmax(0,1fr)_minmax(520px,auto)] overflow-hidden xl:grid-cols-[minmax(0,1fr)_420px] xl:grid-rows-1 2xl:grid-cols-[minmax(0,1fr)_460px]"
           >
             <UtilsDocsFunctionDetail
               :doc="activeDoc"
@@ -398,7 +391,6 @@ onBeforeUnmount(() => {
 
             <UtilsDocsSandboxPanel
               v-model:param-values="paramValues"
-              :function-doc="activeFunctionObj"
               :params="activeFunctionParams"
               :syntax-errors="syntaxErrors"
               :disabled-reason="sandboxDisabledReason"
@@ -419,18 +411,20 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .utils-docs-page {
-  background: #eef2f7;
+  border-radius: 24px;
+  background: #ffffff;
+  overflow: hidden;
 }
 
 .utils-docs-shell {
   border: 1px solid #cbd5e1;
+  border-radius: inherit;
   background: #ffffff;
   box-shadow: 0 16px 34px rgba(15, 23, 42, 0.06);
 }
 
 .utils-docs-main {
   border-left: 1px solid #cbd5e1;
-  border-right: 1px solid #cbd5e1;
   background:
     linear-gradient(180deg, rgba(248, 250, 252, 0.98), rgba(241, 245, 249, 0.96));
 }
@@ -438,19 +432,31 @@ onBeforeUnmount(() => {
 .utils-docs-page :deep(.utils-docs-sidebar) {
   border-color: #cbd5e1;
   background: #ffffff;
-  box-shadow: inset -1px 0 0 rgba(148, 163, 184, 0.18);
 }
 
 .utils-docs-page :deep(.utils-docs-sandbox-panel) {
   border-color: #cbd5e1;
   background: #ffffff;
-  box-shadow: inset 1px 0 0 rgba(148, 163, 184, 0.18);
+}
+
+@media (min-width: 1024px) {
+  .utils-docs-page :deep(.utils-docs-sidebar) {
+    border-radius: 24px 0 0 24px;
+  }
+}
+
+@media (min-width: 1280px) {
+  .utils-docs-page :deep(.utils-docs-sandbox-panel) {
+    border-left: 1px solid #cbd5e1;
+    border-radius: 0 24px 24px 0;
+    overflow: hidden;
+  }
 }
 
 .utils-docs-page :deep(.utils-docs-panel),
 .utils-docs-page :deep(.utils-docs-card) {
   border: 1px solid rgba(203, 213, 225, 0.86);
-  border-radius: 8px;
+  border-radius: 16px;
   background: rgba(255, 255, 255, 0.96);
   box-shadow: 0 10px 24px rgba(15, 23, 42, 0.04);
 }
@@ -464,7 +470,7 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 6px;
   border: 1px solid #cbd5e1;
-  border-radius: 8px;
+  border-radius: 12px;
   background: #ffffff;
   padding: 8px 12px;
   font-size: 12px;
@@ -481,6 +487,7 @@ onBeforeUnmount(() => {
 }
 
 .utils-docs-page :deep(.utils-docs-input) {
+  border-radius: 12px;
   border-color: #cbd5e1;
   background-color: #f8fafc;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
@@ -528,7 +535,10 @@ onBeforeUnmount(() => {
   transform: translateY(4px);
 }
 
-:global(.dark) .utils-docs-page,
+:global(.dark) .utils-docs-page {
+  background: #0f172a;
+}
+
 :global(.dark) .utils-docs-main {
   background:
     linear-gradient(180deg, rgba(2, 6, 23, 0.98), rgba(15, 23, 42, 0.96));
@@ -542,18 +552,21 @@ onBeforeUnmount(() => {
 
 :global(.dark) .utils-docs-main {
   border-left-color: #334155;
-  border-right-color: #334155;
 }
 
 :global(.dark) .utils-docs-page :deep(.utils-docs-sidebar) {
   border-color: #334155;
-  box-shadow: inset -1px 0 0 rgba(51, 65, 85, 0.65);
 }
 
 :global(.dark) .utils-docs-page :deep(.utils-docs-sandbox-panel) {
   border-color: #334155;
   background: #0f172a;
-  box-shadow: inset 1px 0 0 rgba(51, 65, 85, 0.65);
+}
+
+@media (min-width: 1280px) {
+  :global(.dark) .utils-docs-page :deep(.utils-docs-sandbox-panel) {
+    border-left-color: #334155;
+  }
 }
 
 :global(.dark) .utils-docs-page :deep(.utils-docs-panel),

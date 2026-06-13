@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ExternalLink, LoaderCircle, Plus } from "lucide-vue-next";
 import { useToast } from "../../../../../composables/useToast";
 import PlaygroundDemoSection from "../../PlaygroundDemoSection.vue";
 
@@ -54,6 +55,14 @@ const { triggerToast } = useToast();
             <BaseButton type="primary" native-type="submit">提交表单</BaseButton>
             <BaseButton type="neutral" native-type="reset" outline>重置</BaseButton>
             <BaseButton type="success" block>整行确认</BaseButton>
+          </div>
+          <BaseDivider compact dashed label="原生能力" />
+          <div class="button-demo-row">
+            <BaseButton type="primary" :icon="Plus">原生图标</BaseButton>
+            <BaseButton color="#6366f1">品牌色</BaseButton>
+            <BaseButton type="primary" loading :loading-icon="LoaderCircle">自定义加载</BaseButton>
+            <BaseButton tag="a" href="#/playground" type="link" :icon="ExternalLink">链接标签</BaseButton>
+            <BaseButton type="primary" auto-insert-space>保存</BaseButton>
           </div>
         </BasePanel>
 

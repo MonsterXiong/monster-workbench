@@ -1,8 +1,16 @@
 <script setup lang="ts">
-import { computed, useId } from "vue";
+import type { SwitchInstance } from "element-plus";
+import type { Component } from "vue";
+import { computed, ref, useAttrs, useId } from "vue";
 import { useI18n } from "../../composables/useI18n";
-import { joinAriaIds, joinNonEmptyStrings } from "../../utils";
-import { toElementPlusSize, type ProjectControlSize } from "./elementPlusDom";
+import { joinAriaIds, joinNonEmptyStrings, omit } from "../../utils";
+import { getElementPlusControlRoot, toElementPlusSize, type ProjectControlSize } from "./elementPlusDom";
+
+defineOptions({
+  inheritAttrs: false,
+});
+
+type Awaitable<T> = T | Promise<T>;
 
 interface Props {
   modelValue: boolean;
@@ -16,8 +24,16 @@ interface Props {
   success?: boolean;
   activeText?: string;
   inactiveText?: string;
+  inlinePrompt?: boolean;
+  activeIcon?: Component;
+  inactiveIcon?: Component;
+  width?: string | number;
+  activeColor?: string;
+  inactiveColor?: string;
+  beforeChange?: () => Awaitable<boolean>;
   ariaLabel?: string;
   ariaDescribedby?: string;
+  validateEvent?: boolean;
   size?: ProjectControlSize;
 }
 
@@ -32,8 +48,16 @@ const props = withDefaults(defineProps<Props>(), {
   success: false,
   activeText: "",
   inactiveText: "",
+  inlinePrompt: false,
+  activeIcon: undefined,
+  inactiveIcon: undefined,
+  width: undefined,
+  activeColor: "",
+  inactiveColor: "",
+  beforeChange: undefined,
   ariaLabel: "",
   ariaDescribedby: "",
+  validateEvent: false,
   size: "md",
 });
 
@@ -45,6 +69,9 @@ const emit = defineEmits<{
 }>();
 
 const { t } = useI18n();
+const attrs = useAttrs();
+const rootRef = ref<HTMLLabelElement | null>(null);
+const switchRef = ref<SwitchInstance | null>(null);
 const switchId = useId();
 const labelId = `${switchId}-label`;
 const descriptionId = `${switchId}-description`;
@@ -73,23 +100,52 @@ const computedValue = computed({
 });
 
 const elSize = computed(() => toElementPlusSize(props.size));
+const resolvedActiveColor = computed(() => props.activeColor || "rgb(var(--color-primary))");
+const rootAttrs = computed(() => omit(attrs, ["class", "style"]));
 
-const handleBeforeChange = () => !isReadonly.value;
+const handleBeforeChange = () => {
+  if (isReadonly.value) return false;
+  return props.beforeChange?.() ?? true;
+};
+
+const getElement = () => rootRef.value;
+const getSwitchElement = () => {
+  const element = getElementPlusControlRoot(switchRef.value);
+  return element?.querySelector<HTMLElement>("[role='switch'],input,button") ?? element;
+};
+const focus = () => {
+  const element = getSwitchElement();
+  element?.focus();
+  return element;
+};
+
+defineExpose({
+  focus,
+  getNativeSwitch: () => switchRef.value,
+  getElement,
+  getSwitchElement,
+});
 </script>
 
 <template>
   <label
+    v-bind="rootAttrs"
+    ref="rootRef"
     class="base-switch"
-    :class="{
-      'base-switch--checked': modelValue,
-      [`base-switch--${size}`]: true,
-      'base-switch--disabled': disabled,
-      'base-switch--readonly': readonly,
-      'base-switch--loading': loading,
-      'base-switch--compact': compact,
-      'base-switch--error': error,
-      'base-switch--success': success
-    }"
+    :class="[
+      attrs.class,
+      {
+        'base-switch--checked': modelValue,
+        [`base-switch--${size}`]: true,
+        'base-switch--disabled': disabled,
+        'base-switch--readonly': readonly,
+        'base-switch--loading': loading,
+        'base-switch--compact': compact,
+        'base-switch--error': error,
+        'base-switch--success': success
+      }
+    ]"
+    :style="attrs.style"
     :aria-disabled="isReadonly ? 'true' : undefined"
     :aria-readonly="readonly ? 'true' : undefined"
     :aria-busy="loading ? 'true' : undefined"
@@ -102,20 +158,28 @@ const handleBeforeChange = () => !isReadonly.value;
     <span class="base-switch__control">
       <span v-if="currentText" :id="stateId" class="base-switch__state">{{ currentText }}</span>
       <el-switch
+        ref="switchRef"
         v-model="computedValue"
         :disabled="disabled || loading"
         :loading="loading"
         :size="elSize"
         :active-value="true"
         :inactive-value="false"
+        :inline-prompt="inlinePrompt"
+        :active-icon="activeIcon"
+        :inactive-icon="inactiveIcon"
+        :width="width"
         :aria-label="switchLabel"
         :aria-describedby="switchDescribedBy"
         :aria-disabled="isReadonly ? 'true' : undefined"
         :aria-readonly="readonly ? 'true' : undefined"
         :aria-busy="loading || undefined"
         :before-change="handleBeforeChange"
-        :validate-event="false"
-        style="--el-switch-on-color: rgb(var(--color-primary))"
+        :validate-event="validateEvent"
+        :style="{
+          '--el-switch-on-color': resolvedActiveColor,
+          '--el-switch-off-color': inactiveColor || undefined,
+        }"
         @focus="emit('focus', $event as FocusEvent)"
         @blur="emit('blur', $event as FocusEvent)"
       />

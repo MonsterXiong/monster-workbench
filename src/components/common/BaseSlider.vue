@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUpdated, ref, useId } from "vue";
+import type { SliderInstance } from "element-plus";
+import type { StyleValue } from "vue";
+import { computed, nextTick, onMounted, onUpdated, ref, useAttrs, useId } from "vue";
 import { useI18n } from "../../composables/useI18n";
 import {
   clampNumber,
@@ -9,25 +11,52 @@ import {
   isFiniteNumber,
   isNonEmptyArray,
   joinAriaIds,
+  joinNonEmptyStrings,
   normalizeNumberBounds,
   normalizeNumberStep,
   normalizeSteppedNumber,
+  omit,
   toRangePercent,
 } from "../../utils";
-import { toElementPlusSize, type ProjectControlSize } from "./elementPlusDom";
+import { getElementPlusControlRoot, toElementPlusSize, type ProjectControlSize } from "./elementPlusDom";
+
+defineOptions({
+  inheritAttrs: false,
+});
 
 export interface SliderMark {
   value: number;
   label?: string;
 }
 
+type SliderValue = number | number[];
+type SliderTooltipPlacement =
+  | "top"
+  | "top-start"
+  | "top-end"
+  | "bottom"
+  | "bottom-start"
+  | "bottom-end"
+  | "left"
+  | "left-start"
+  | "left-end"
+  | "right"
+  | "right-start"
+  | "right-end";
+
 interface Props {
   id?: string;
   name?: string;
-  modelValue: number;
+  modelValue: SliderValue;
   min?: number;
   max?: number;
   step?: number;
+  range?: boolean;
+  rangeStartLabel?: string;
+  rangeEndLabel?: string;
+  vertical?: boolean;
+  height?: string;
+  debounce?: number;
   label?: string;
   description?: string;
   disabled?: boolean;
@@ -39,6 +68,15 @@ interface Props {
   compact?: boolean;
   unit?: string;
   marks?: SliderMark[];
+  showStops?: boolean;
+  showTooltip?: boolean;
+  tooltipPlacement?: SliderTooltipPlacement;
+  tooltipClass?: string;
+  persistent?: boolean;
+  validateEvent?: boolean;
+  showInput?: boolean;
+  showInputControls?: boolean;
+  inputSize?: ProjectControlSize;
   formatValue?: (value: number) => string;
   ariaLabel?: string;
   ariaLabelledby?: string;
@@ -54,6 +92,12 @@ const props = withDefaults(defineProps<Props>(), {
   min: 0,
   max: 100,
   step: 1,
+  range: false,
+  rangeStartLabel: "",
+  rangeEndLabel: "",
+  vertical: false,
+  height: "",
+  debounce: undefined,
   label: "",
   description: "",
   disabled: false,
@@ -65,6 +109,15 @@ const props = withDefaults(defineProps<Props>(), {
   compact: false,
   unit: "",
   marks: () => [],
+  showStops: false,
+  showTooltip: true,
+  tooltipPlacement: "top",
+  tooltipClass: "",
+  persistent: false,
+  validateEvent: false,
+  showInput: false,
+  showInputControls: true,
+  inputSize: undefined,
   formatValue: undefined,
   ariaLabel: "",
   ariaLabelledby: "",
@@ -75,9 +128,9 @@ const props = withDefaults(defineProps<Props>(), {
 });
 
 const emit = defineEmits<{
-  (e: "update:modelValue", value: number): void;
-  (e: "input", value: number): void;
-  (e: "change", value: number): void;
+  (e: "update:modelValue", value: SliderValue): void;
+  (e: "input", value: SliderValue): void;
+  (e: "change", value: SliderValue): void;
   (e: "focus", value: FocusEvent): void;
   (e: "blur", value: FocusEvent): void;
   (e: "keydown", value: KeyboardEvent): void;
@@ -85,9 +138,9 @@ const emit = defineEmits<{
 }>();
 
 const { t } = useI18n();
+const attrs = useAttrs();
 const sliderId = useId();
-type SliderControlRef = HTMLElement | { $el?: Element | null } | null;
-const sliderControlRef = ref<SliderControlRef>(null);
+const sliderControlRef = ref<SliderInstance | null>(null);
 const inputId = computed(() => props.id || sliderId);
 const labelId = `${sliderId}-label`;
 const descriptionId = `${sliderId}-description`;
@@ -108,7 +161,18 @@ const normalizeValue = (value: unknown) => {
   });
 };
 
-const currentValue = computed(() => normalizeValue(props.modelValue));
+const normalizeRangeValue = (value: unknown): [number, number] => {
+  const rawValues = Array.isArray(value) ? value : [normalizedMin.value, value];
+  const start = normalizeValue(rawValues[0]);
+  const end = normalizeValue(rawValues[1] ?? rawValues[0]);
+  return start <= end ? [start, end] : [end, start];
+};
+
+const normalizeSliderValue = (value: unknown): SliderValue => {
+  return props.range ? normalizeRangeValue(value) : normalizeValue(firstOf(value));
+};
+
+const currentValue = computed<SliderValue>(() => normalizeSliderValue(props.modelValue));
 
 const normalizedMarks = computed(() =>
   compactMap(props.marks, (mark) =>
@@ -125,6 +189,9 @@ const hasElementMarks = computed(() => isNonEmptyArray(normalizedMarks.value));
 
 const resolvedValueText = computed(() => {
   if (props.ariaValueText) return props.ariaValueText;
+  if (Array.isArray(currentValue.value)) {
+    return currentValue.value.map((value) => formatBoundaryValue(value)).join(" - ");
+  }
   if (props.formatValue) return props.formatValue(currentValue.value);
   return props.unit ? `${currentValue.value}${props.unit}` : String(currentValue.value);
 });
@@ -134,6 +201,11 @@ const groupLabel = computed(() => (labelledBy.value ? undefined : props.ariaLabe
 const controlLabelledBy = computed(() => (props.ariaLabel ? undefined : labelledBy.value));
 const controlLabel = computed(() => (controlLabelledBy.value ? undefined : props.ariaLabel || props.label || t("common.slider")));
 const describedBy = computed(() => joinAriaIds([props.description ? descriptionId : undefined, props.ariaDescribedby]));
+const rootClass = computed(() => attrs.class);
+const rootStyle = computed(() => attrs.style as StyleValue | undefined);
+const sliderPassthroughAttrs = computed(() =>
+  omit(attrs, ["class", "style", "aria-label", "aria-labelledby", "aria-describedby", "aria-disabled"])
+);
 
 const getMarkPercent = (value: number) => {
   return toRangePercent(value, normalizedMin.value, normalizedMax.value);
@@ -151,18 +223,18 @@ const formatMarkTitle = (mark: SliderMark) => {
 
 const handleValueUpdate = (value: number | number[]) => {
   if (isReadonly.value) return;
-  const nextValue = normalizeValue(firstOf(value));
+  const nextValue = normalizeSliderValue(value);
   emit("update:modelValue", nextValue);
 };
 
 const handleInput = (value: number | number[]) => {
   if (isReadonly.value) return;
-  emit("input", normalizeValue(firstOf(value)));
+  emit("input", normalizeSliderValue(value));
 };
 
 const handleChange = (value: number | number[]) => {
   if (isReadonly.value) return;
-  emit("change", normalizeValue(firstOf(value)));
+  emit("change", normalizeSliderValue(value));
 };
 
 const handleKeydown = (event: KeyboardEvent) => {
@@ -173,6 +245,8 @@ const handleKeydown = (event: KeyboardEvent) => {
 };
 
 const elementSize = computed(() => toElementPlusSize(props.size));
+const elementInputSize = computed(() => toElementPlusSize(props.inputSize || props.size));
+const resolvedTooltipClass = computed(() => joinNonEmptyStrings(["base-slider-tooltip", props.tooltipClass]));
 
 const formatTooltip = (value: number) => {
   if (props.formatValue) return props.formatValue(normalizeValue(value));
@@ -181,11 +255,23 @@ const formatTooltip = (value: number) => {
 
 const formatValueText = () => resolvedValueText.value;
 
-const getSliderElement = () => {
-  const current = sliderControlRef.value;
-  if (!current) return null;
-  if (current instanceof HTMLElement) return current;
-  return current.$el instanceof HTMLElement ? current.$el : null;
+const formatHiddenValue = (value: SliderValue) => (Array.isArray(value) ? value.join(",") : String(value));
+
+const isMarkActive = (value: number) => {
+  if (!Array.isArray(currentValue.value)) return value <= currentValue.value;
+  return value >= currentValue.value[0] && value <= currentValue.value[1];
+};
+
+const getSliderElement = () => getElementPlusControlRoot(sliderControlRef.value);
+const getTrackElement = () => getSliderElement()?.querySelector<HTMLElement>(".el-slider__runway") ?? null;
+const getThumbElement = (index = 0) => {
+  return getSliderElement()?.querySelectorAll<HTMLElement>('[role="slider"]').item(index) ?? null;
+};
+
+const focusThumb = (index = 0) => {
+  const target = getThumbElement(index);
+  target?.focus();
+  return target;
 };
 
 const setOptionalAttribute = (element: HTMLElement, name: string, value?: string | null) => {
@@ -217,12 +303,22 @@ onMounted(() => {
 onUpdated(() => {
   void syncSliderAria();
 });
+
+defineExpose({
+  getNativeSlider: () => sliderControlRef.value,
+  getElement: getSliderElement,
+  getTrackElement,
+  getThumbElement,
+  focusThumb,
+});
 </script>
 
 <template>
   <div
+    v-bind="sliderPassthroughAttrs"
     class="base-slider"
     :class="[
+      rootClass,
       `base-slider--${size}`,
       {
         'is-disabled': disabled,
@@ -230,6 +326,7 @@ onUpdated(() => {
         'is-error': error,
         'base-slider--compact': compact,
         'base-slider--with-marks': hasElementMarks,
+        'base-slider--vertical': vertical,
         'base-slider--wrap-label': wrapLabel,
         'base-slider--wrap-description': wrapDescription
       }
@@ -239,6 +336,7 @@ onUpdated(() => {
     :aria-labelledby="labelledBy"
     :aria-describedby="describedBy"
     :aria-disabled="disabled || readonly ? 'true' : undefined"
+    :style="rootStyle"
   >
     <div v-if="label || description || showValue" class="base-slider__header">
       <div class="base-slider__text">
@@ -257,12 +355,25 @@ onUpdated(() => {
         :min="normalizedMin"
         :max="normalizedMax"
         :step="normalizedStep"
+        :range="range"
+        :range-start-label="rangeStartLabel || undefined"
+        :range-end-label="rangeEndLabel || undefined"
+        :vertical="vertical"
+        :height="vertical ? height || '160px' : undefined"
+        :debounce="debounce"
         :disabled="disabled || readonly"
         :size="elementSize"
-        :show-tooltip="!disabled && !readonly"
+        :input-size="elementInputSize"
+        :show-input="showInput"
+        :show-input-controls="showInputControls"
+        :show-stops="showStops"
+        :show-tooltip="showTooltip && !disabled && !readonly"
         :format-tooltip="formatTooltip"
         :format-value-text="formatValueText"
-        :validate-event="false"
+        :tooltip-class="resolvedTooltipClass"
+        :placement="tooltipPlacement"
+        :persistent="persistent"
+        :validate-event="validateEvent"
         :aria-label="controlLabel"
         @update:model-value="handleValueUpdate"
         @input="handleInput"
@@ -276,7 +387,7 @@ onUpdated(() => {
         v-if="name"
         :name="name"
         type="hidden"
-        :value="currentValue"
+        :value="formatHiddenValue(currentValue)"
       />
       <div v-if="normalizedMarks.length" class="base-slider__marks" aria-hidden="true">
         <span
@@ -284,7 +395,7 @@ onUpdated(() => {
           :key="`${mark.value}-${mark.label ?? ''}-${index}`"
           class="base-slider__mark"
           :class="{
-            'is-active': mark.value <= currentValue,
+            'is-active': isMarkActive(mark.value),
             'is-edge-start': mark.value <= normalizedMin,
             'is-edge-end': mark.value >= normalizedMax
           }"
@@ -312,15 +423,16 @@ onUpdated(() => {
   --base-slider-track-height: 6px;
   --base-slider-track-bg: #e2e8f0;
   --base-slider-track-hover-bg: #cbd5e1;
+  --base-slider-stop-bg: #ffffff;
   --base-slider-thumb-bg: #ffffff;
   --base-slider-thumb-border: rgb(var(--color-primary));
   --base-slider-thumb-ring: rgb(var(--color-primary) / 0.14);
   --base-slider-thumb-shadow: 0 2px 8px rgba(15, 23, 42, 0.12);
   --base-slider-thumb-active-shadow:
-    0 0 0 3px #ffffff,
-    0 0 0 7px var(--base-slider-thumb-ring),
+    0 0 0 4px var(--base-slider-thumb-ring),
     0 4px 12px rgba(15, 23, 42, 0.16);
   --base-slider-wrapper-size: 38px;
+  --base-slider-wrapper-offset: calc((var(--base-slider-track-height) - var(--base-slider-wrapper-size)) / 2);
 }
 
 .base-slider.is-disabled {
@@ -413,20 +525,34 @@ onUpdated(() => {
   height: var(--base-slider-control-height) !important;
   --el-slider-main-bg-color: rgb(var(--color-primary));
   --el-slider-runway-bg-color: var(--base-slider-track-bg);
+  --el-slider-stop-bg-color: var(--base-slider-stop-bg);
   --el-slider-height: var(--base-slider-track-height);
   --el-slider-button-size: var(--base-slider-thumb-size);
   --el-slider-button-wrapper-size: var(--base-slider-wrapper-size);
-  --el-slider-button-wrapper-offset: calc((var(--base-slider-track-height) - var(--el-slider-button-wrapper-size)) / 2);
+  --el-slider-button-wrapper-offset: var(--base-slider-wrapper-offset);
   --el-slider-border-radius: 999px;
 }
 
 .base-slider__control :deep(.el-slider__button-wrapper) {
   display: inline-flex;
+  width: var(--base-slider-wrapper-size);
+  height: var(--base-slider-wrapper-size);
   align-items: center;
   justify-content: center;
   cursor: pointer;
   line-height: normal;
   outline: none;
+}
+
+.base-slider:not(.base-slider--vertical) .base-slider__control :deep(.el-slider__button-wrapper) {
+  top: var(--base-slider-wrapper-offset);
+  transform: translateX(-50%);
+}
+
+.base-slider--vertical .base-slider__control :deep(.el-slider__button-wrapper) {
+  top: auto;
+  left: var(--base-slider-wrapper-offset);
+  transform: translateY(50%);
 }
 
 .base-slider__control :deep(.el-slider__button-wrapper::after) {
@@ -455,8 +581,7 @@ onUpdated(() => {
 
 .base-slider__control :deep(.el-slider__button) {
   position: relative;
-  display: inline-grid;
-  place-items: center;
+  display: inline-block;
   box-sizing: border-box;
   width: var(--base-slider-thumb-size);
   height: var(--base-slider-thumb-size);
@@ -466,27 +591,19 @@ onUpdated(() => {
   border: 2px solid var(--base-slider-thumb-border);
   border-radius: 999px;
   box-shadow:
-    0 0 0 2px #ffffff,
+    0 0 0 1px #ffffff,
     var(--base-slider-thumb-shadow);
-  transform: none;
+  transform: scale(1);
   transform-origin: center;
   transition:
+    transform 0.15s ease,
     box-shadow 0.15s ease,
     border-color 0.15s ease,
     background-color 0.15s ease;
 }
 
 .base-slider__control :deep(.el-slider__button::before) {
-  content: "";
-  width: 6px;
-  height: 6px;
-  border-radius: inherit;
-  background-color: rgb(var(--color-primary) / 0.86);
-  opacity: 0.62;
-  transform: scale(0.86);
-  transition:
-    opacity 0.15s ease,
-    transform 0.15s ease;
+  display: none;
 }
 
 .base-slider:not(.is-disabled):not(.is-readonly) .base-slider__control :deep(.el-slider__button-wrapper:hover .el-slider__button),
@@ -495,27 +612,13 @@ onUpdated(() => {
 .base-slider:not(.is-disabled):not(.is-readonly) .base-slider__control :deep(.el-slider__button:hover),
 .base-slider:not(.is-disabled):not(.is-readonly) .base-slider__control :deep(.el-slider__button.hover),
 .base-slider:not(.is-disabled):not(.is-readonly) .base-slider__control :deep(.el-slider__button.dragging) {
-  transform: none;
+  transform: scale(1.08);
   box-shadow: var(--base-slider-thumb-active-shadow);
-}
-
-.base-slider:not(.is-disabled):not(.is-readonly) .base-slider__control :deep(.el-slider__button-wrapper:hover .el-slider__button::before),
-.base-slider:not(.is-disabled):not(.is-readonly) .base-slider__control :deep(.el-slider__button-wrapper.hover .el-slider__button::before),
-.base-slider:not(.is-disabled):not(.is-readonly) .base-slider__control :deep(.el-slider__button-wrapper.dragging .el-slider__button::before),
-.base-slider:not(.is-disabled):not(.is-readonly) .base-slider__control :deep(.el-slider__button:hover::before),
-.base-slider:not(.is-disabled):not(.is-readonly) .base-slider__control :deep(.el-slider__button.hover::before),
-.base-slider:not(.is-disabled):not(.is-readonly) .base-slider__control :deep(.el-slider__button.dragging::before) {
-  opacity: 1;
-  transform: scale(1);
 }
 
 .base-slider__control :deep(.el-slider__button-wrapper:focus-visible .el-slider__button) {
+  transform: scale(1.08);
   box-shadow: var(--base-slider-thumb-active-shadow);
-}
-
-.base-slider__control :deep(.el-slider__button-wrapper:focus-visible .el-slider__button::before) {
-  opacity: 1;
-  transform: scale(1);
 }
 
 .base-slider.is-error .base-slider__control :deep(.el-slider__runway) {
@@ -534,7 +637,7 @@ onUpdated(() => {
 }
 
 .base-slider.is-error .base-slider__control :deep(.el-slider__button::before) {
-  background-color: rgb(239 68 68 / 0.86);
+  display: none;
 }
 
 .base-slider.is-disabled .base-slider__control :deep(.el-slider__button),
@@ -551,9 +654,7 @@ onUpdated(() => {
 
 .base-slider.is-disabled .base-slider__control :deep(.el-slider__button::before),
 .base-slider.is-readonly .base-slider__control :deep(.el-slider__button::before) {
-  background-color: #94a3b8;
-  opacity: 1;
-  transform: scale(1);
+  display: none;
 }
 
 .base-slider.is-disabled .base-slider__control :deep(.el-slider__bar),
@@ -564,12 +665,81 @@ onUpdated(() => {
 :global(.dark) .base-slider {
   --base-slider-track-bg: #1e293b;
   --base-slider-track-hover-bg: #334155;
+  --base-slider-stop-bg: #0f172a;
   --base-slider-thumb-bg: #0f172a;
   --base-slider-thumb-shadow: 0 2px 8px rgba(0, 0, 0, 0.34);
   --base-slider-thumb-active-shadow:
-    0 0 0 4px #0f172a,
-    0 0 0 8px var(--base-slider-thumb-ring),
+    0 0 0 4px var(--base-slider-thumb-ring),
     0 4px 14px rgba(0, 0, 0, 0.34);
+}
+
+.base-slider__control :deep(.el-slider__stop) {
+  width: 5px;
+  height: 5px;
+  transform: translateX(-50%) translateY(calc((var(--base-slider-track-height) - 5px) / 2));
+  box-shadow:
+    0 0 0 1px rgba(148, 163, 184, 0.25),
+    0 1px 2px rgba(15, 23, 42, 0.08);
+}
+
+.base-slider--vertical .base-slider__track-wrap {
+  @apply flex min-h-40 justify-center;
+}
+
+.base-slider--vertical .base-slider__control {
+  width: auto;
+  min-height: 160px;
+}
+
+.base-slider--vertical .base-slider__range,
+.base-slider--vertical .base-slider__marks {
+  display: none;
+}
+
+.base-slider__control :deep(.el-slider__input) {
+  width: 112px;
+}
+
+.base-slider__control :deep(.el-input-number__wrapper),
+.base-slider__control :deep(.el-input__wrapper) {
+  border-radius: 10px;
+  box-shadow: 0 0 0 1px #cbd5e1 inset;
+}
+
+.base-slider__control :deep(.el-input-number__wrapper:hover),
+.base-slider__control :deep(.el-input__wrapper:hover) {
+  box-shadow: 0 0 0 1px #94a3b8 inset;
+}
+
+.base-slider__control :deep(.el-input-number__wrapper.is-focus),
+.base-slider__control :deep(.el-input__wrapper.is-focus) {
+  box-shadow: 0 0 0 1px rgb(var(--color-primary)) inset;
+}
+
+:global(.base-slider-tooltip.el-popper) {
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #0f172a;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 800;
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.18);
+}
+
+:global(.base-slider-tooltip.el-popper .el-popper__arrow::before) {
+  background: #0f172a;
+  border-color: #0f172a;
+}
+
+:global(.dark .base-slider-tooltip.el-popper) {
+  border-color: #334155;
+  background: #f8fafc;
+  color: #0f172a;
+}
+
+:global(.dark .base-slider-tooltip.el-popper .el-popper__arrow::before) {
+  background: #f8fafc;
+  border-color: #f8fafc;
 }
 
 .base-slider__range {

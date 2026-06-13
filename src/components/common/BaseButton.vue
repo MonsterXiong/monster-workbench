@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { Comment, computed, useAttrs, useSlots } from "vue";
+import type { ButtonInstance } from "element-plus";
+import type { Component } from "vue";
+import { Comment, computed, ref, useAttrs, useSlots } from "vue";
 import { omit } from "../../utils";
-import { toElementPlusSize, type ProjectControlSize } from "./elementPlusDom";
+import { getElementPlusControlRoot, toElementPlusSize, type ProjectControlSize } from "./elementPlusDom";
 
 defineOptions({
   inheritAttrs: false,
@@ -17,6 +19,12 @@ interface Props {
   outline?: boolean;
   round?: boolean;
   circle?: boolean;
+  icon?: string | Component;
+  loadingIcon?: string | Component;
+  color?: string;
+  dark?: boolean;
+  autoInsertSpace?: boolean;
+  tag?: string | Component;
   autofocus?: boolean;
   ariaLabel?: string;
   title?: string;
@@ -32,6 +40,12 @@ const props = withDefaults(defineProps<Props>(), {
   outline: false,
   round: false,
   circle: false,
+  icon: undefined,
+  loadingIcon: undefined,
+  color: "",
+  dark: undefined,
+  autoInsertSpace: undefined,
+  tag: "button",
   autofocus: false,
   ariaLabel: "",
   title: "",
@@ -39,6 +53,7 @@ const props = withDefaults(defineProps<Props>(), {
 
 const slots = useSlots();
 const attrs = useAttrs();
+const buttonRef = ref<ButtonInstance | null>(null);
 
 // 过滤掉可能冲突的 size 与 type 属性，防止透传到 el-button 上覆盖我们显式绑定的 :size 与 :type
 const filteredAttrs = computed(() => {
@@ -62,12 +77,39 @@ const hasDefaultSlot = computed(() => {
   const defaultNodes = slots.default?.() ?? [];
   return defaultNodes.some((node) => node.type !== Comment);
 });
+const hasIcon = computed(() => Boolean(props.icon || slots.icon));
 const accessibleLabel = computed(() => props.ariaLabel || props.title || "");
+
+const getElement = () => getElementPlusControlRoot(buttonRef.value);
+const getButtonElement = () => {
+  const element = getElement();
+  if (element instanceof HTMLButtonElement || element instanceof HTMLAnchorElement) return element;
+  return element?.querySelector<HTMLButtonElement | HTMLAnchorElement>("button,a") ?? null;
+};
+const focus = () => {
+  const button = getButtonElement();
+  button?.focus();
+  return button;
+};
+const click = () => {
+  const button = getButtonElement();
+  button?.click();
+  return button;
+};
+
+defineExpose({
+  getNativeButton: () => buttonRef.value,
+  getElement,
+  getButtonElement,
+  focus,
+  click,
+});
 </script>
 
 <template>
   <el-button
     v-bind="filteredAttrs"
+    ref="buttonRef"
     class="base-button"
     :type="elType"
     :native-type="nativeType"
@@ -79,6 +121,12 @@ const accessibleLabel = computed(() => props.ariaLabel || props.title || "");
     :link="isLink"
     :round="round"
     :circle="circle"
+    :icon="icon || undefined"
+    :loading-icon="loadingIcon || undefined"
+    :color="color || undefined"
+    :dark="dark"
+    :auto-insert-space="autoInsertSpace"
+    :tag="tag"
     :autofocus="autofocus"
     :aria-label="accessibleLabel || undefined"
     :aria-busy="loading ? 'true' : undefined"
@@ -86,7 +134,7 @@ const accessibleLabel = computed(() => props.ariaLabel || props.title || "");
     :class="{
       'w-full': block,
       'is-xs': props.size === 'xs',
-      'is-icon-only': circle || (!hasDefaultSlot && slots.icon),
+      'is-icon-only': circle || (!hasDefaultSlot && hasIcon),
     }"
   >
     <template #icon v-if="slots.icon">
@@ -126,8 +174,9 @@ const accessibleLabel = computed(() => props.ariaLabel || props.title || "");
 }
 
 .el-button.is-icon-only {
-  display: inline-grid !important;
-  place-items: center !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
   width: var(--el-button-size, 32px) !important;
   min-width: var(--el-button-size, 32px) !important;
   height: var(--el-button-size, 32px) !important;
@@ -138,8 +187,9 @@ const accessibleLabel = computed(() => props.ariaLabel || props.title || "");
 
 .el-button.is-icon-only :deep(> span),
 .el-button.is-icon-only :deep(.el-icon) {
-  display: inline-grid !important;
-  place-items: center !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
   width: auto !important;
   height: auto !important;
   line-height: 1;
@@ -155,6 +205,7 @@ const accessibleLabel = computed(() => props.ariaLabel || props.title || "");
 .el-button.is-icon-only :deep(.el-icon) {
   margin: 0 !important;
   transform: translate(0, 0);
+  font-size: 1em;
 }
 
 .el-button.is-icon-only :deep(svg) {
@@ -168,6 +219,7 @@ const accessibleLabel = computed(() => props.ariaLabel || props.title || "");
 .el-button.is-icon-only :deep(> span > svg) {
   align-self: center;
   justify-self: center;
+  margin: 0;
 }
 
 .el-button :deep(.el-icon + span),

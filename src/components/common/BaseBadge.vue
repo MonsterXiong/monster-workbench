@@ -1,7 +1,11 @@
 <script setup lang="ts">
-import { computed, ref, watchEffect } from "vue";
+import { computed, ref, useAttrs, watchEffect } from "vue";
 import { handleActivationKeydown, stopDomEventPropagation } from "../../utils";
-import { syncElementPlusClearButtonLabel, type ElementPlusControlRef } from "./elementPlusDom";
+import { getElementPlusControlRoot, syncElementPlusClearButtonLabel, type ElementPlusControlRef } from "./elementPlusDom";
+
+defineOptions({
+  inheritAttrs: false,
+});
 
 interface Props {
   type?: "primary" | "success" | "warning" | "danger" | "neutral";
@@ -34,6 +38,7 @@ const emit = defineEmits<{
   (e: "close", event: MouseEvent): void;
 }>();
 
+const attrs = useAttrs();
 const isInteractive = computed(() => props.clickable && !props.disabled);
 const accessibleLabel = computed(() => props.ariaLabel || props.title || "");
 const badgeRef = ref<ElementPlusControlRef>(null);
@@ -70,10 +75,25 @@ watchEffect(() => {
   if (!props.closable) return;
   void syncElementPlusClearButtonLabel(badgeRef.value, ".el-tag__close", resolvedCloseLabel.value);
 });
+
+const getElement = () => getElementPlusControlRoot(badgeRef.value);
+const focus = () => {
+  const element = getElement();
+  element?.focus();
+  return element;
+};
+
+defineExpose({
+  focus,
+  getNativeTag: () => badgeRef.value,
+  getElement,
+  getTagElement: getElement,
+});
 </script>
 
 <template>
   <el-tag
+    v-bind="attrs"
     ref="badgeRef"
     class="base-badge"
     :class="[

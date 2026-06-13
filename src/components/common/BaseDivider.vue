@@ -1,5 +1,10 @@
 <script setup lang="ts">
-import { computed, useSlots } from "vue";
+import { computed, ref, useAttrs, useSlots } from "vue";
+import { getElementPlusControlRoot, type ElementPlusControlRef } from "./elementPlusDom";
+
+defineOptions({
+  inheritAttrs: false,
+});
 
 type DividerDirection = "horizontal" | "vertical";
 type DividerAlign = "start" | "center" | "end";
@@ -37,7 +42,9 @@ const props = withDefaults(defineProps<Props>(), {
   ariaLabel: "",
 });
 
+const attrs = useAttrs();
 const slots = useSlots();
+const dividerRef = ref<ElementPlusControlRef>(null);
 const hasLabel = computed(() => Boolean(props.label || slots.default));
 const resolvedSpacing = computed(() => (props.compact ? "sm" : props.spacing));
 const resolvedRole = computed(() => (props.decorative ? "presentation" : "separator"));
@@ -56,10 +63,20 @@ const borderStyle = computed(() => {
   if (props.dashed) return "dashed";
   return "solid";
 });
+
+const getElement = () => getElementPlusControlRoot(dividerRef.value);
+
+defineExpose({
+  getNativeDivider: () => dividerRef.value,
+  getElement,
+  getDividerElement: getElement,
+});
 </script>
 
 <template>
   <el-divider
+    v-bind="attrs"
+    ref="dividerRef"
     class="base-divider"
     :class="[
       `base-divider--${direction}`,

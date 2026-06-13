@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, useId, watch, type CSSProperties } from "vue";
+import { computed, onBeforeUnmount, ref, useAttrs, useId, watch, type CSSProperties } from "vue";
 import { useI18n } from "../../composables/useI18n";
 import {
   addDomEventListener,
@@ -12,6 +12,10 @@ import {
   type DomEventCleanup,
   type TimeoutHandle,
 } from "../../utils";
+
+defineOptions({
+  inheritAttrs: false,
+});
 
 type Side = "left" | "right";
 type ThreeColumnLayoutSize = "sm" | "md" | "lg";
@@ -78,7 +82,11 @@ const emit = defineEmits<{
 const localLeftWidth = ref(0);
 const localRightWidth = ref(0);
 const draggingSide = ref<Side | null>(null);
+const attrs = useAttrs();
 const rootRef = ref<HTMLElement | null>(null);
+const leftPaneRef = ref<HTMLElement | null>(null);
+const mainPaneRef = ref<HTMLElement | null>(null);
+const rightPaneRef = ref<HTMLElement | null>(null);
 const dragStartX = ref(0);
 const didDrag = ref(false);
 let resetDragStateTimer: TimeoutHandle | null = null;
@@ -236,10 +244,21 @@ onBeforeUnmount(() => {
   clearTimeoutHandle(resetDragStateTimer);
   resetDragStateTimer = null;
 });
+
+defineExpose({
+  collapse,
+  expand,
+  getElement: () => rootRef.value,
+  getLeftPaneElement: () => leftPaneRef.value,
+  getMainPaneElement: () => mainPaneRef.value,
+  getRightPaneElement: () => rightPaneRef.value,
+  getWidths: () => ({ leftWidth: localLeftWidth.value, rightWidth: localRightWidth.value }),
+});
 </script>
 
 <template>
   <section
+    v-bind="attrs"
     ref="rootRef"
     class="base-three-column-layout"
     :class="[
@@ -259,6 +278,7 @@ onBeforeUnmount(() => {
     :aria-disabled="disabled ? 'true' : undefined"
   >
     <aside
+      ref="leftPaneRef"
       :id="leftPaneId"
       class="base-three-column-layout__side base-three-column-layout__side--left"
       role="region"
@@ -290,7 +310,7 @@ onBeforeUnmount(() => {
       <BaseIcon name="PanelLeftClose" size="18" aria-hidden="true" />
     </button>
 
-    <main :id="mainPaneId" class="base-three-column-layout__main" role="region" :aria-label="resolvedMainLabel">
+    <main ref="mainPaneRef" :id="mainPaneId" class="base-three-column-layout__main" role="region" :aria-label="resolvedMainLabel">
       <slot />
     </main>
 
@@ -317,6 +337,7 @@ onBeforeUnmount(() => {
     </button>
 
     <aside
+      ref="rightPaneRef"
       :id="rightPaneId"
       class="base-three-column-layout__side base-three-column-layout__side--right"
       role="region"

@@ -1,6 +1,11 @@
 <script setup lang="ts">
-import { computed, useId } from "vue";
+import { computed, ref, useAttrs, useId } from "vue";
 import { createDomIdMap, createLineClampStyle, handleActivationKeydown, isEventFromInteractiveElement, joinAriaIds } from "../../utils";
+import { getElementPlusControlRoot, type ElementPlusControlRef } from "./elementPlusDom";
+
+defineOptions({
+  inheritAttrs: false,
+});
 
 type InfoCardLevel = 2 | 3 | 4 | 5 | 6;
 
@@ -55,6 +60,9 @@ const props = withDefaults(defineProps<Props>(), {
   contentLabel: "",
 });
 
+const attrs = useAttrs();
+const cardRef = ref<ElementPlusControlRef>(null);
+const mainRef = ref<HTMLElement | null>(null);
 const infoId = useId();
 const infoIds = createDomIdMap(infoId, ["title", "description"]);
 const titleId = infoIds.title;
@@ -112,10 +120,28 @@ const handleKeydown = (event: KeyboardEvent) => {
   if (isEventFromInteractiveElement(event)) return;
   handleActivationKeydown(event, () => emit("click", event));
 };
+
+const getElement = () => getElementPlusControlRoot(cardRef.value);
+const getMainElement = () => mainRef.value;
+const focus = () => {
+  if (!isInteractive.value) return null;
+  mainRef.value?.focus();
+  return mainRef.value;
+};
+
+defineExpose({
+  focus,
+  getNativeCard: () => cardRef.value,
+  getElement,
+  getCardElement: getElement,
+  getMainElement,
+});
 </script>
 
 <template>
   <el-card
+    v-bind="attrs"
+    ref="cardRef"
     class="base-info-card"
     shadow="never"
     :body-style="cardBodyStyle"
@@ -143,6 +169,7 @@ const handleKeydown = (event: KeyboardEvent) => {
   >
     <div class="base-info-card__inner">
       <div
+        ref="mainRef"
         class="base-info-card__main"
         :role="clickable ? 'button' : undefined"
         :tabindex="isInteractive ? 0 : undefined"

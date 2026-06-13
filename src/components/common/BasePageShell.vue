@@ -1,7 +1,11 @@
 <script setup lang="ts">
-import { computed, useId } from "vue";
+import { computed, ref, useAttrs, useId } from "vue";
 import type { BreadcrumbItem } from "./BaseBreadcrumb.vue";
 import { useI18n } from "../../composables/useI18n";
+
+defineOptions({
+  inheritAttrs: false,
+});
 
 type PageShellSize = "sm" | "md" | "lg";
 type PageHeaderLevel = 1 | 2 | 3 | 4 | 5 | 6;
@@ -71,6 +75,12 @@ const emit = defineEmits<{
 }>();
 
 const { t } = useI18n();
+const attrs = useAttrs();
+const rootRef = ref<HTMLElement | null>(null);
+const contentRef = ref<HTMLElement | null>(null);
+const toolbarRef = ref<HTMLElement | null>(null);
+const asideRef = ref<HTMLElement | null>(null);
+const footerRef = ref<HTMLElement | null>(null);
 const shellId = useId();
 const contentId = `${shellId}-content`;
 const toolbarId = `${shellId}-toolbar`;
@@ -80,10 +90,20 @@ const isDisabled = computed(() => props.disabled || props.loading);
 const shellStyle = computed(() => ({
   "--base-page-shell-sticky-offset": props.stickyOffset,
 }));
+
+defineExpose({
+  getElement: () => rootRef.value,
+  getContentElement: () => contentRef.value,
+  getToolbarElement: () => toolbarRef.value,
+  getAsideElement: () => asideRef.value,
+  getFooterElement: () => footerRef.value,
+});
 </script>
 
 <template>
   <section
+    v-bind="attrs"
+    ref="rootRef"
     class="base-page-shell"
     :class="[
       `base-page-shell--${size}`,
@@ -128,6 +148,7 @@ const shellStyle = computed(() => ({
 
     <div
       v-if="$slots.toolbar"
+      ref="toolbarRef"
       :id="toolbarId"
       class="base-page-shell__toolbar"
       :class="{ 'base-page-shell__toolbar--sticky': toolbarSticky }"
@@ -145,6 +166,7 @@ const shellStyle = computed(() => ({
       }"
     >
       <main
+        ref="contentRef"
         :id="contentId"
         class="base-page-shell__content"
         :class="{
@@ -163,6 +185,7 @@ const shellStyle = computed(() => ({
 
       <aside
         v-if="$slots.aside"
+        ref="asideRef"
         :id="asideId"
         class="base-page-shell__aside"
         :class="{
@@ -178,6 +201,7 @@ const shellStyle = computed(() => ({
 
     <footer
       v-if="$slots.footer"
+      ref="footerRef"
       :id="footerId"
       class="base-page-shell__footer"
       :class="{

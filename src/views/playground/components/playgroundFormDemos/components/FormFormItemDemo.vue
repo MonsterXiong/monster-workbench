@@ -1,11 +1,39 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import type BaseFormItem from "../../../../../components/common/BaseFormItem.vue";
+import { reactive, ref } from "vue";
 import PlaygroundDemoSection from "../../PlaygroundDemoSection.vue";
 
 const textValue = ref("Monster Workbench");
 const codeValue = ref("base-form-item");
 const selectValue = ref("design-system");
 const tagValues = ref(["组件", "沙箱", "高频"]);
+const fieldMethodItemRef = ref<InstanceType<typeof BaseFormItem> | null>(null);
+const fieldMethodStatus = ref("等待字段方法");
+const fieldMethodModel = reactive({
+  methodName: "",
+});
+const fieldMethodRules = {
+  methodName: [{ required: true, message: "请输入字段名称。", trigger: "change" }],
+};
+
+const validateFieldItem = async () => {
+  try {
+    const isValid = await fieldMethodItemRef.value?.validate("change");
+    fieldMethodStatus.value = isValid === false ? "字段 validate 未通过" : "字段 validate 通过";
+  } catch {
+    fieldMethodStatus.value = "字段 validate 未通过";
+  }
+};
+
+const clearFieldItem = () => {
+  fieldMethodItemRef.value?.clearValidate();
+  fieldMethodStatus.value = "已调用 clearValidate";
+};
+
+const resetFieldItem = () => {
+  fieldMethodItemRef.value?.resetField();
+  fieldMethodStatus.value = "已调用 resetField";
+};
 
 const selectOptions = [
   { value: "vue", label: "Vue 3", description: "前端交互框架。", icon: "PanelsTopLeft", meta: "前端" },
@@ -78,6 +106,37 @@ const selectOptions = [
             <BaseInput v-model="textValue" />
           </BaseFormItem>
         </BaseForm>
+
+        <BaseForm
+          title="字段级方法"
+          description="BaseFormItem 透传原生属性，并通过 ref 暴露 Element Plus 字段级方法。"
+          :model="fieldMethodModel"
+          :rules="fieldMethodRules"
+          :columns="2"
+          surface="muted"
+          divided
+        >
+          <template #actions>
+            <BaseBadge type="neutral" variant="outline">{{ fieldMethodStatus }}</BaseBadge>
+          </template>
+          <BaseFormItem
+            ref="fieldMethodItemRef"
+            label="字段名称"
+            prop="methodName"
+            required
+            show-message
+            data-test-id="base-form-item-native-ref"
+          >
+            <BaseInput v-model="fieldMethodModel.methodName" placeholder="输入后可调用 validate" clearable />
+          </BaseFormItem>
+          <BaseFormItem label="方法调用" description="validate、clearValidate、resetField 均来自 el-form-item 实例。">
+            <div class="method-actions">
+              <BaseButton type="primary" size="sm" @click="validateFieldItem">校验字段</BaseButton>
+              <BaseButton type="neutral" size="sm" outline @click="clearFieldItem">清空校验</BaseButton>
+              <BaseButton type="neutral" size="sm" outline @click="resetFieldItem">重置字段</BaseButton>
+            </div>
+          </BaseFormItem>
+        </BaseForm>
       </div>
     </PlaygroundDemoSection>
   </section>
@@ -94,5 +153,9 @@ const selectOptions = [
 
 .field-stack {
   @apply flex min-w-0 flex-col gap-3;
+}
+
+.method-actions {
+  @apply flex min-w-0 flex-wrap items-center gap-2;
 }
 </style>

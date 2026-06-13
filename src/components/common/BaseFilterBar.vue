@@ -1,7 +1,12 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUpdated, ref, useId } from "vue";
+import { computed, nextTick, onMounted, onUpdated, ref, useAttrs, useId } from "vue";
 import { useI18n } from "../../composables/useI18n";
 import { joinAriaIds } from "../../utils";
+import BaseSearchInput from "./BaseSearchInput.vue";
+
+defineOptions({
+  inheritAttrs: false,
+});
 
 export interface FilterBarItem {
   key: string;
@@ -83,9 +88,11 @@ const props = withDefaults(defineProps<Props>(), {
   ariaDescribedby: "",
 });
 
+const attrs = useAttrs();
 const { t } = useI18n();
 const filterId = useId();
 const rootRef = ref<HTMLElement | null>(null);
+const searchInputRef = ref<InstanceType<typeof BaseSearchInput> | null>(null);
 const titleId = `base-filter-bar-title-${filterId}`;
 const descriptionId = `base-filter-bar-description-${filterId}`;
 const labelledBy = computed(() => (props.ariaLabel ? undefined : props.ariaLabelledby || (props.title ? titleId : undefined)));
@@ -154,10 +161,30 @@ onMounted(() => {
 onUpdated(() => {
   void syncChipCloseLabels();
 });
+
+const getElement = () => rootRef.value;
+const getSearchInput = () => searchInputRef.value;
+const getSearchInputElement = () => searchInputRef.value?.getInputElement() ?? null;
+const focusSearch = () => searchInputRef.value?.focus() ?? null;
+const selectSearch = () => searchInputRef.value?.select() ?? null;
+const clearSearch = () => {
+  searchInputRef.value?.clear();
+  return getSearchInputElement();
+};
+
+defineExpose({
+  focusSearch,
+  selectSearch,
+  clearSearch,
+  getElement,
+  getSearchInput,
+  getSearchInputElement,
+});
 </script>
 
 <template>
   <section
+    v-bind="attrs"
     ref="rootRef"
     class="base-filter-bar"
     :class="[
@@ -194,6 +221,7 @@ onUpdated(() => {
     <div class="base-filter-bar__main">
       <BaseSearchInput
         v-if="showSearch"
+        ref="searchInputRef"
         :id="searchId || undefined"
         :name="searchName || undefined"
         class="base-filter-bar__search"

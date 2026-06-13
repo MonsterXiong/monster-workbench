@@ -1,5 +1,9 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref, useAttrs } from "vue";
+
+defineOptions({
+  inheritAttrs: false,
+});
 
 interface Props {
   type?: "primary" | "success" | "warning" | "danger" | "neutral";
@@ -26,10 +30,18 @@ const props = withDefaults(defineProps<Props>(), {
 const accessibleLabel = computed(() => props.ariaLabel || props.label || props.description || "");
 const hasVisibleText = computed(() => Boolean(props.label || props.description));
 const badgeType = computed(() => (props.type === "neutral" ? "info" : props.type));
+const attrs = useAttrs();
+const rootRef = ref<HTMLElement | null>(null);
+
+defineExpose({
+  getElement: () => rootRef.value,
+});
 </script>
 
 <template>
   <span
+    v-bind="attrs"
+    ref="rootRef"
     class="base-status-dot"
     :class="[
       `base-status-dot--${type}`,

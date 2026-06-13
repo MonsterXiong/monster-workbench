@@ -1,7 +1,11 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from "vue";
+import { computed, nextTick, ref, useAttrs, watch } from "vue";
 import { useI18n } from "../../composables/useI18n";
 import { createRandomId, filterByFalsyValue, filterBySearchFields, groupByEntries, handleKeyboardIndexNavigation, isEscapeKey, isKeyboardKey, normalizeSearchText } from "../../utils";
+
+defineOptions({
+  inheritAttrs: false,
+});
 
 export interface CommandPaletteItem {
   key: string;
@@ -36,6 +40,9 @@ const emit = defineEmits<{
 
 const query = ref("");
 const activeIndex = ref(0);
+const attrs = useAttrs();
+const rootRef = ref<HTMLElement | null>(null);
+const panelRef = ref<HTMLElement | null>(null);
 const inputRef = ref<HTMLInputElement | null>(null);
 const { t } = useI18n();
 const instanceId = createRandomId("base-command-palette");
@@ -45,9 +52,22 @@ const resolvedTitle = computed(() => props.title || t("common.commandPalette.tit
 const resolvedPlaceholder = computed(() => props.placeholder || t("common.commandPalette.placeholder"));
 const resolvedEmptyText = computed(() => props.emptyText || t("common.commandPalette.empty"));
 
+const open = async () => {
+  emit("update:modelValue", true);
+  await nextTick();
+  inputRef.value?.focus();
+  return panelRef.value;
+};
+
 const close = () => {
   emit("update:modelValue", false);
   emit("close");
+};
+
+const clearSearch = () => {
+  query.value = "";
+  activeIndex.value = 0;
+  inputRef.value?.focus();
 };
 
 const normalizedQuery = computed(() => normalizeSearchText(query.value));
@@ -121,6 +141,20 @@ watch(
 watch(filteredItems, () => {
   activeIndex.value = 0;
 });
+
+defineExpose({
+  open,
+  close,
+  clearSearch,
+  focusInput: () => {
+    inputRef.value?.focus();
+    return inputRef.value;
+  },
+  getElement: () => rootRef.value,
+  getPanelElement: () => panelRef.value,
+  getInputElement: () => inputRef.value,
+  getQuery: () => query.value,
+});
 </script>
 
 <template>
@@ -128,6 +162,8 @@ watch(filteredItems, () => {
     <Transition name="base-command-palette-fade">
       <div
         v-if="modelValue"
+        v-bind="attrs"
+        ref="rootRef"
         class="base-command-palette"
         role="dialog"
         aria-modal="true"
@@ -135,7 +171,7 @@ watch(filteredItems, () => {
         @click.self="close"
         @keydown="handleKeydown"
       >
-        <section class="base-command-palette__panel">
+        <section ref="panelRef" class="base-command-palette__panel">
           <header class="base-command-palette__header">
             <div class="base-command-palette__title">
               <BaseIcon name="Command" size="18" aria-hidden="true" />

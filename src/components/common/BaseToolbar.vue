@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, useSlots } from "vue";
+import { computed, ref, useAttrs, useSlots } from "vue";
 import { useI18n } from "../../composables/useI18n";
 import {
   focusElementIntoView,
@@ -12,6 +12,10 @@ import {
   isEditableEventTarget,
   queryFocusableElements,
 } from "../../utils";
+
+defineOptions({
+  inheritAttrs: false,
+});
 
 type ToolbarSize = "sm" | "md" | "lg";
 type ToolbarSurface = "default" | "muted" | "plain";
@@ -68,6 +72,7 @@ const props = withDefaults(defineProps<Props>(), {
 });
 
 const { t } = useI18n();
+const attrs = useAttrs();
 const slots = useSlots();
 const rootRef = ref<HTMLElement | null>(null);
 const toolbarLabel = computed(() => props.ariaLabel || (props.role === "toolbar" ? t("common.toolbar") : ""));
@@ -81,7 +86,18 @@ const getToolbarFocusableElements = () => queryFocusableElements(rootRef.value);
 
 const focusToolbarItem = (element?: HTMLElement) => {
   focusElementIntoView(element);
+  return element ?? null;
 };
+
+const focusItem = (index = 0) => {
+  const items = getToolbarFocusableElements();
+  const target = items[index] ?? null;
+  return focusToolbarItem(target ?? undefined);
+};
+
+const focusFirstItem = () => focusToolbarItem(getBoundaryItem(getToolbarFocusableElements(), "first") ?? undefined);
+const focusLastItem = () => focusToolbarItem(getBoundaryItem(getToolbarFocusableElements(), "last") ?? undefined);
+const getElement = () => rootRef.value;
 
 const handleToolbarKeydown = (event: KeyboardEvent) => {
   if (!props.keyboardNavigation || props.role !== "toolbar" || isInteractionDisabled.value) return;
@@ -107,10 +123,19 @@ const handleToolbarKeydown = (event: KeyboardEvent) => {
 
   focusToolbarItem(getNextCircularItem(items, items.indexOf(document.activeElement as HTMLElement), direction ?? 1));
 };
+
+defineExpose({
+  focusItem,
+  focusFirstItem,
+  focusLastItem,
+  getElement,
+  getFocusableElements: getToolbarFocusableElements,
+});
 </script>
 
 <template>
   <div
+    v-bind="attrs"
     ref="rootRef"
     class="base-toolbar"
     :class="[

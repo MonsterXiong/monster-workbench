@@ -6,6 +6,16 @@ import PlaygroundDemoSection from "../../PlaygroundDemoSection.vue";
 const sliderValue = ref(36);
 const numberValue = ref(36);
 const volumeValue = ref(64);
+const rangeValue = ref([24, 64]);
+const verticalValue = ref(42);
+const sliderInstanceText = ref("等待实例操作");
+const sliderInstanceRef = ref<{
+  getNativeSlider: () => unknown;
+  getElement: () => HTMLElement | null;
+  getTrackElement: () => HTMLElement | null;
+  getThumbElement: (index?: number) => HTMLElement | null;
+  focusThumb: (index?: number) => HTMLElement | null;
+} | null>(null);
 
 const sliderMarks = [
   { value: 18, label: "窄" },
@@ -26,6 +36,21 @@ const sliderDecimalMarks = [
   { value: 2.5, label: "中" },
   { value: 5, label: "5" },
 ];
+
+const readSliderElement = () => {
+  const element = sliderInstanceRef.value?.getElement();
+  sliderInstanceText.value = element ? `DOM: ${element.tagName.toLowerCase()}.${element.classList[0] || "root"}` : "未读取到 DOM";
+};
+
+const readSliderTrack = () => {
+  const element = sliderInstanceRef.value?.getTrackElement();
+  sliderInstanceText.value = element ? `Track: ${element.tagName.toLowerCase()}.${element.classList[0] || "track"}` : "未读取到轨道";
+};
+
+const focusSliderThumb = () => {
+  const element = sliderInstanceRef.value?.focusThumb();
+  sliderInstanceText.value = element ? `聚焦: ${element.getAttribute("role") || element.tagName.toLowerCase()}` : "未找到滑块手柄";
+};
 </script>
 
 <template>
@@ -35,7 +60,9 @@ const sliderDecimalMarks = [
         <BasePanel title="范围与刻度" subtitle="展示单位、格式化数值、刻度和 hover 聚焦反馈。">
           <p id="slider-keyboard-hint" class="sr-only">滑块支持方向键、PageUp、PageDown、Home 和 End 调整数值。</p>
           <BaseSlider
+            ref="sliderInstanceRef"
             id="panel-width-slider"
+            data-native-slider-ref="base-slider-instance"
             name="panelWidth"
             v-model="sliderValue"
             label="面板宽度"
@@ -45,8 +72,22 @@ const sliderDecimalMarks = [
             :step="2"
             unit="%"
             :marks="sliderMarks"
+            show-stops
+            tooltip-placement="bottom"
             aria-describedby="slider-keyboard-hint"
           />
+          <div class="slider-instance-panel">
+            <div class="slider-instance-copy">
+              <BaseIcon name="Workflow" size="14" aria-hidden="true" />
+              <span>实例能力</span>
+              <strong>{{ sliderInstanceText }}</strong>
+            </div>
+            <div class="slider-instance-actions">
+              <BaseButton size="xs" type="secondary" outline @click="readSliderElement">读取 DOM</BaseButton>
+              <BaseButton size="xs" type="secondary" outline @click="readSliderTrack">读取轨道</BaseButton>
+              <BaseButton size="xs" type="secondary" outline @click="focusSliderThumb">聚焦手柄</BaseButton>
+            </div>
+          </div>
         </BasePanel>
         <BasePanel title="精确输入组合" subtitle="滑块负责直觉调节，数字输入负责精确值。">
           <div class="field-stack">
@@ -60,6 +101,33 @@ const sliderDecimalMarks = [
               :format-value="(value) => `${formatNumber(value)} 个`"
             />
             <BaseNumberInput v-model="numberValue" block :min="1" :max="100" />
+            <BaseSlider
+              v-model="numberValue"
+              compact
+              label="内置数字输入"
+              description="直接启用 Element Plus 的 showInput，用于轻量配置场景。"
+              :min="1"
+              :max="100"
+              :step="1"
+              show-input
+              :show-input-controls="false"
+              :show-range="false"
+              size="sm"
+            />
+            <BaseSlider
+              v-model="rangeValue"
+              compact
+              range
+              label="范围选择"
+              description="复用 Element Plus range，用于区间、阈值和裁剪范围。"
+              :min="0"
+              :max="100"
+              :step="4"
+              unit="%"
+              range-start-label="最小阈值"
+              range-end-label="最大阈值"
+              :show-range="false"
+            />
           </div>
         </BasePanel>
         <BasePanel title="音量调节" subtitle="适合偏好设置、图像参数和资源阈值。">
@@ -73,6 +141,7 @@ const sliderDecimalMarks = [
               :step="5"
               unit="%"
               :show-range="false"
+              show-stops
             />
             <BaseSlider
               :model-value="92"
@@ -91,6 +160,18 @@ const sliderDecimalMarks = [
               label="静默阈值"
               description="隐藏数值和范围，适合窄侧栏设置。"
               :show-value="false"
+              :show-range="false"
+            />
+            <BaseSlider
+              v-model="verticalValue"
+              compact
+              vertical
+              label="竖向滑块"
+              description="适合音量、透明度和窄侧栏参数。"
+              :min="0"
+              :max="100"
+              unit="%"
+              height="168px"
               :show-range="false"
             />
           </div>
@@ -158,5 +239,21 @@ const sliderDecimalMarks = [
 
 .field-stack {
   @apply flex min-w-0 flex-col gap-3;
+}
+
+.slider-instance-panel {
+  @apply mt-3 flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-950;
+}
+
+.slider-instance-copy {
+  @apply flex min-w-0 items-center gap-2 text-[11px] font-black text-slate-500 dark:text-slate-400;
+}
+
+.slider-instance-copy strong {
+  @apply min-w-0 truncate text-slate-800 dark:text-slate-100;
+}
+
+.slider-instance-actions {
+  @apply flex shrink-0 flex-wrap items-center gap-2;
 }
 </style>

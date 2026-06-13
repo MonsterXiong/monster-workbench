@@ -1,9 +1,15 @@
 <script setup lang="ts">
 import { CircleCheckFilled, WarningFilled } from "@element-plus/icons-vue";
-import { computed, onBeforeUnmount, onMounted, ref, useSlots } from "vue";
+import type { PopconfirmInstance } from "element-plus";
+import type { StyleValue } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, useAttrs, useSlots } from "vue";
 import { useConfirm } from "../../composables/useConfirm";
 import { useI18n } from "../../composables/useI18n";
-import { addDomEventListener, createRandomId, type DomEventCleanup } from "../../utils";
+import { addDomEventListener, createRandomId, omit, type DomEventCleanup } from "../../utils";
+
+defineOptions({
+  inheritAttrs: false,
+});
 
 type ButtonType = "primary" | "secondary" | "danger" | "warning" | "success" | "neutral" | "ghost" | "link";
 type ButtonSize = "xs" | "sm" | "md" | "lg";
@@ -102,14 +108,21 @@ const emit = defineEmits<{
   (e: "cancel"): void;
 }>();
 
+type TriggerButtonRef = HTMLElement | { $el?: Element | null } | null;
+
+const attrs = useAttrs();
 const slots = useSlots();
 const { confirm } = useConfirm();
 const { t } = useI18n();
 const pending = ref(false);
-const popconfirmRef = ref<{ hide?: () => void } | null>(null);
+const popconfirmRef = ref<PopconfirmInstance | null>(null);
+const triggerRef = ref<TriggerButtonRef>(null);
 const instanceId = createRandomId("base-confirm-action");
 let stopGlobalListeners: DomEventCleanup | null = null;
 
+const rootClass = computed(() => attrs.class);
+const rootStyle = computed(() => attrs.style as StyleValue | undefined);
+const triggerButtonAttrs = computed(() => omit(attrs, ["class", "style"]));
 const isDanger = computed(() => props.danger || props.type === "danger");
 const usesKeywordConfirm = computed(() => Boolean(props.confirmKeyword.trim()));
 const resolvedConfirmText = computed(() => props.confirmText || t("common.confirm"));
@@ -157,9 +170,13 @@ const closeOtherPopconfirms = () => {
   window.dispatchEvent(new CustomEvent("base-confirm-action:close-all", { detail: instanceId }));
 };
 
+const closePopconfirm = () => {
+  popconfirmRef.value?.hide?.();
+};
+
 const handleGlobalClose = (event: Event) => {
   if ((event as CustomEvent<string>).detail === instanceId) return;
-  popconfirmRef.value?.hide?.();
+  closePopconfirm();
 };
 
 const handlePopconfirmTrigger = () => {
@@ -213,11 +230,37 @@ onBeforeUnmount(() => {
   stopGlobalListeners?.();
   stopGlobalListeners = null;
 });
+
+const getElement = () => {
+  const current = triggerRef.value;
+  if (!current) return null;
+  if (current instanceof HTMLElement) return current;
+  return current.$el instanceof HTMLElement ? current.$el : null;
+};
+
+const focusTrigger = () => {
+  getElement()?.focus();
+};
+
+const open = () => {
+  if (props.disabled || buttonLoading.value) return;
+  getElement()?.click();
+};
+
+defineExpose({
+  getNativePopconfirm: () => popconfirmRef.value,
+  getElement,
+  focusTrigger,
+  open,
+  close: closePopconfirm,
+});
 </script>
 
 <template>
   <BaseButton
     v-if="usesKeywordConfirm"
+    ref="triggerRef"
+    v-bind="triggerButtonAttrs"
     :type="type"
     :size="size"
     :disabled="disabled"
@@ -226,6 +269,8 @@ onBeforeUnmount(() => {
     :block="block"
     :aria-label="buttonAriaLabel"
     :title="buttonTitle"
+    :class="rootClass"
+    :style="rootStyle"
     @click="handleClick"
   >
     <template v-if="icon || slots.icon" #icon>
@@ -260,6 +305,8 @@ onBeforeUnmount(() => {
   >
     <template #reference>
       <BaseButton
+        ref="triggerRef"
+        v-bind="triggerButtonAttrs"
         :type="type"
         :size="size"
         :disabled="disabled"
@@ -268,6 +315,8 @@ onBeforeUnmount(() => {
         :block="block"
         :aria-label="buttonAriaLabel"
         :title="buttonTitle"
+        :class="rootClass"
+        :style="rootStyle"
         @click="handlePopconfirmTrigger"
       >
         <template v-if="icon || slots.icon" #icon>

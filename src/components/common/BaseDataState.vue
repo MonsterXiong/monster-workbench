@@ -1,7 +1,12 @@
 <script setup lang="ts">
-import { computed, useId } from "vue";
+import { computed, ref, useAttrs, useId } from "vue";
 import { useI18n } from "../../composables/useI18n";
 import { joinAriaIds } from "../../utils";
+import { getElementPlusControlRoot, type ElementPlusControlRef } from "./elementPlusDom";
+
+defineOptions({
+  inheritAttrs: false,
+});
 
 type DataState = "ready" | "loading" | "empty" | "error";
 
@@ -63,7 +68,9 @@ const props = withDefaults(defineProps<Props>(), {
   readyEmptyText: "",
 });
 
+const attrs = useAttrs();
 const { t } = useI18n();
+const cardRef = ref<ElementPlusControlRef>(null);
 const stateId = useId();
 const titleId = `base-data-state-title-${stateId}`;
 const descriptionId = `base-data-state-description-${stateId}`;
@@ -106,10 +113,20 @@ const slotState = computed(() => ({
 const emit = defineEmits<{
   (e: "retry"): void;
 }>();
+
+const getElement = () => getElementPlusControlRoot(cardRef.value);
+
+defineExpose({
+  getNativeCard: () => cardRef.value,
+  getElement,
+  getCardElement: getElement,
+});
 </script>
 
 <template>
   <el-card
+    v-bind="attrs"
+    ref="cardRef"
     class="base-data-state"
     shadow="never"
     :body-style="cardBodyStyle"

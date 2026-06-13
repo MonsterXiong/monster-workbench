@@ -1,7 +1,11 @@
 <script setup lang="ts">
-import { computed, useId } from "vue";
+import { computed, ref, useAttrs, useId } from "vue";
 import { useI18n } from "../../composables/useI18n";
 import { joinAriaIds } from "../../utils";
+
+defineOptions({
+  inheritAttrs: false,
+});
 
 interface Props {
   count: number;
@@ -52,6 +56,9 @@ const emit = defineEmits<{
   (e: "clear"): void;
 }>();
 
+const attrs = useAttrs();
+const rootRef = ref<HTMLElement | null>(null);
+const clearButtonRef = ref<{ focus?: () => HTMLElement | null; click?: () => HTMLElement | null } | null>(null);
 const { t } = useI18n();
 const barId = useId();
 const labelId = `base-selection-bar-label-${barId}`;
@@ -82,10 +89,23 @@ const handleClear = () => {
   if (isActionDisabled.value) return;
   emit("clear");
 };
+
+const clear = () => {
+  handleClear();
+};
+
+defineExpose({
+  clear,
+  getElement: () => rootRef.value,
+  getClearButton: () => clearButtonRef.value,
+  focusClearButton: () => clearButtonRef.value?.focus?.() ?? null,
+});
 </script>
 
 <template>
   <section
+    v-bind="attrs"
+    ref="rootRef"
     class="base-selection-bar"
     :class="[
       `base-selection-bar--${resolvedSize}`,
@@ -129,6 +149,7 @@ const handleClear = () => {
 
     <BaseButton
       v-if="showClear"
+      ref="clearButtonRef"
       class="base-selection-bar__clear"
       type="ghost"
       size="sm"

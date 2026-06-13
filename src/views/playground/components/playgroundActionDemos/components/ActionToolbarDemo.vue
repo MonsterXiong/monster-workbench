@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { ref } from "vue";
+import BaseToolbar from "../../../../../components/common/BaseToolbar.vue";
 import PlaygroundDemoSection from "../../PlaygroundDemoSection.vue";
 
 const actionMenuItems = [
@@ -7,12 +9,39 @@ const actionMenuItems = [
   { key: "disabled", label: "暂不可用", description: "等待权限开放。", icon: "Lock", disabled: true },
   { key: "delete", label: "删除组件", description: "危险操作需要确认。", icon: "Trash2", type: "danger" as const, divided: true },
 ];
+
+const toolbarInstanceText = ref("等待工具栏操作");
+const toolbarInstanceRef = ref<InstanceType<typeof BaseToolbar> | null>(null);
+
+function readToolbarElement() {
+  const element = toolbarInstanceRef.value?.getElement();
+  toolbarInstanceText.value = element ? `DOM: ${element.tagName.toLowerCase()}.${element.classList[0] || "root"}` : "未读取到 DOM";
+}
+
+function focusToolbarFirstItem() {
+  const element = toolbarInstanceRef.value?.focusFirstItem();
+  toolbarInstanceText.value = element ? `首个控件: ${element.textContent?.trim() || element.tagName.toLowerCase()}` : "未找到可聚焦控件";
+}
+
+function focusToolbarLastItem() {
+  const element = toolbarInstanceRef.value?.focusLastItem();
+  toolbarInstanceText.value = element ? `末尾控件: ${element.textContent?.trim() || element.tagName.toLowerCase()}` : "未找到可聚焦控件";
+}
 </script>
 
 <template>
   <section class="detail-stack">
     <PlaygroundDemoSection title="工具栏" subtitle="统一页面、表格、编辑器顶部的左中右操作组。" icon="Wrench">
-      <BaseToolbar aria-label="组件编辑工具栏" size="lg" divided left-label="上下文" main-label="编辑动作" right-label="发布动作">
+      <BaseToolbar
+        ref="toolbarInstanceRef"
+        data-native-toolbar-ref="base-toolbar-instance"
+        aria-label="组件编辑工具栏"
+        size="lg"
+        divided
+        left-label="上下文"
+        main-label="编辑动作"
+        right-label="发布动作"
+      >
         <template #left>
           <BaseBadge type="primary">组件库</BaseBadge>
           <BaseButton type="neutral" size="sm">返回</BaseButton>
@@ -34,6 +63,19 @@ const actionMenuItems = [
           <BaseButton type="primary" size="sm">保存</BaseButton>
         </template>
       </BaseToolbar>
+      <BasePanel title="工具栏实例" subtitle="组合组件可以直接控制工具栏的 DOM 与焦点。">
+        <div class="toolbar-instance-panel">
+          <div class="toolbar-instance-copy">
+            <BaseIcon name="Workflow" size="14" aria-hidden="true" />
+            <span>{{ toolbarInstanceText }}</span>
+          </div>
+          <div class="toolbar-instance-actions">
+            <BaseButton size="xs" type="secondary" outline @click="readToolbarElement">DOM</BaseButton>
+            <BaseButton size="xs" type="secondary" outline @click="focusToolbarFirstItem">首项</BaseButton>
+            <BaseButton size="xs" type="secondary" outline @click="focusToolbarLastItem">末项</BaseButton>
+          </div>
+        </div>
+      </BasePanel>
 
       <BaseToolbar compact :wrap="false" aria-label="紧凑滚动工具栏" surface="muted">
         <template #left>
@@ -216,5 +258,21 @@ const actionMenuItems = [
 
 .toolbar-long-badge {
   @apply max-w-full;
+}
+
+.toolbar-instance-panel {
+  @apply flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-950;
+}
+
+.toolbar-instance-copy {
+  @apply flex min-w-0 items-center gap-2 text-[11px] font-black text-slate-500 dark:text-slate-400;
+}
+
+.toolbar-instance-copy span {
+  @apply min-w-0 truncate;
+}
+
+.toolbar-instance-actions {
+  @apply flex shrink-0 flex-wrap items-center gap-2;
 }
 </style>

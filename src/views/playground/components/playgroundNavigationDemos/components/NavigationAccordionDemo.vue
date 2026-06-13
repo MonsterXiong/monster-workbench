@@ -10,6 +10,15 @@ const leftIconAccordion = ref(["usage"]);
 const guardedAccordion = ref(["usage"]);
 const accordionGuardLocked = ref(true);
 const accordionEvent = ref("等待操作");
+const accordionNativeEvent = ref("等待原生事件");
+const accordionInstanceText = ref("等待实例操作");
+const accordionInstanceRef = ref<{
+  getNativeCollapse: () => unknown;
+  getElement: () => HTMLElement | null;
+  getItemElement: (key: string) => HTMLElement | null;
+  focusFirstHeader: () => HTMLElement | null;
+  focusItemHeader: (key: string) => HTMLElement | null;
+} | null>(null);
 
 const accordionItems = [
   { key: "usage", title: "使用场景", description: "用于详情页、设置页和分组说明。", icon: "BookOpen", badge: "指南", badgeType: "primary" as const, meta: "3 min" },
@@ -23,6 +32,26 @@ const handleAccordionToggle = (payload: { key: string; expanded: boolean }) => {
 
 const handleAccordionChange = (keys: string[]) => {
   accordionEvent.value = `当前展开：${keys.join("、") || "无"}`;
+};
+
+const handleAccordionNativeChange = (value: string | number | Array<string | number>) => {
+  const values = Array.isArray(value) ? value : [value];
+  accordionNativeEvent.value = `native-change：${values.filter(Boolean).join("、") || "无"}`;
+};
+
+const readAccordionElement = () => {
+  const element = accordionInstanceRef.value?.getElement();
+  accordionInstanceText.value = element ? `DOM: ${element.tagName.toLowerCase()}.${element.classList[0] || "root"}` : "未读取到 DOM";
+};
+
+const focusAccordionFirstHeader = () => {
+  const element = accordionInstanceRef.value?.focusFirstHeader();
+  accordionInstanceText.value = element ? `聚焦: ${element.textContent?.trim() || element.tagName.toLowerCase()}` : "未找到可聚焦项";
+};
+
+const focusAccordionConfigHeader = () => {
+  const element = accordionInstanceRef.value?.focusItemHeader("config");
+  accordionInstanceText.value = element ? `配置项: ${element.textContent?.trim() || "-"}` : "未找到配置项";
 };
 
 const guardAccordionCollapse = (key: string) => {
@@ -86,6 +115,8 @@ const guardAccordionCollapse = (key: string) => {
 
         <BasePanel title="左侧展开图标" subtitle="expandIconPosition=left 复用 Element Plus 图标位置能力，更贴近设置清单。">
           <BaseAccordion
+            ref="accordionInstanceRef"
+            data-native-accordion-ref="base-accordion-instance"
             v-model="leftIconAccordion"
             :items="accordionItems"
             multiple
@@ -93,6 +124,7 @@ const guardAccordionCollapse = (key: string) => {
             surface="muted"
             aria-label="左侧展开图标折叠面板"
             @change="handleAccordionChange"
+            @native-change="handleAccordionNativeChange"
           >
             <template #actions="{ expanded }">
               <BaseBadge :type="expanded ? 'primary' : 'neutral'" size="xs">{{ expanded ? "已展开" : "未展开" }}</BaseBadge>
@@ -101,8 +133,23 @@ const guardAccordionCollapse = (key: string) => {
               <BaseAlert type="info" :title="item.title" :description="item.description || '暂无说明。'" compact />
             </template>
           </BaseAccordion>
+          <div class="accordion-instance-panel">
+            <div class="accordion-instance-copy">
+              <BaseIcon name="Workflow" size="14" aria-hidden="true" />
+              <span>实例能力</span>
+              <strong>{{ accordionInstanceText }}</strong>
+            </div>
+            <div class="accordion-instance-actions">
+              <BaseButton size="xs" type="secondary" outline @click="readAccordionElement">读取 DOM</BaseButton>
+              <BaseButton size="xs" type="secondary" outline @click="focusAccordionFirstHeader">聚焦首项</BaseButton>
+              <BaseButton size="xs" type="secondary" outline @click="focusAccordionConfigHeader">聚焦配置</BaseButton>
+            </div>
+          </div>
           <template #footer>
-            <span class="navigation-result">最近事件：{{ accordionEvent }}</span>
+            <div class="accordion-footer-actions">
+              <span class="navigation-result">最近事件：{{ accordionEvent }}</span>
+              <span class="navigation-result">{{ accordionNativeEvent }}</span>
+            </div>
           </template>
         </BasePanel>
       </div>
@@ -208,5 +255,21 @@ const guardAccordionCollapse = (key: string) => {
 
 .accordion-footer-actions {
   @apply flex min-w-0 flex-wrap items-center justify-between gap-2;
+}
+
+.accordion-instance-panel {
+  @apply mt-3 flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-950;
+}
+
+.accordion-instance-copy {
+  @apply flex min-w-0 items-center gap-2 text-[11px] font-black text-slate-500 dark:text-slate-400;
+}
+
+.accordion-instance-copy strong {
+  @apply min-w-0 truncate text-slate-800 dark:text-slate-100;
+}
+
+.accordion-instance-actions {
+  @apply flex shrink-0 flex-wrap items-center gap-2;
 }
 </style>

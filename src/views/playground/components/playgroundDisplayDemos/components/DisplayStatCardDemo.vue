@@ -1,8 +1,22 @@
 <script setup lang="ts">
+import { ref } from "vue";
+import BaseStatCard from "../../../../../components/common/BaseStatCard.vue";
 import { useToast } from "../../../../../composables/useToast";
 import PlaygroundDemoSection from "../../PlaygroundDemoSection.vue";
 
 const { triggerToast } = useToast();
+const statCardInstanceText = ref("等待实例操作");
+const statCardInstanceRef = ref<InstanceType<typeof BaseStatCard> | null>(null);
+
+const readStatCardElement = () => {
+  const element = statCardInstanceRef.value?.getElement();
+  statCardInstanceText.value = element ? `DOM: ${element.tagName.toLowerCase()}.${element.classList[0] || "root"}` : "未读取到 DOM";
+};
+
+const focusStatCard = () => {
+  const element = statCardInstanceRef.value?.focus();
+  statCardInstanceText.value = element ? "已聚焦可点击指标" : "指标不可聚焦";
+};
 </script>
 
 <template>
@@ -10,6 +24,8 @@ const { triggerToast } = useToast();
     <PlaygroundDemoSection title="统计卡片" subtitle="用于工作台、列表摘要和任务看板顶部指标。" icon="ChartNoAxesColumnIncreasing">
       <div class="stat-grid">
         <BaseStatCard
+          ref="statCardInstanceRef"
+          data-native-stat-card-ref="base-stat-card-instance"
           label="已接入"
           value="36"
           description="已进入组件沙箱"
@@ -46,6 +62,18 @@ const { triggerToast } = useToast();
           :max-description-lines="3"
         />
       </div>
+      <BasePanel title="实例能力" subtitle="可点击统计卡片可以读取根节点，并把焦点交给卡片本身。">
+        <div class="stat-instance-panel">
+          <div class="stat-instance-copy">
+            <BaseIcon name="Workflow" size="14" aria-hidden="true" />
+            <span>{{ statCardInstanceText }}</span>
+          </div>
+          <div class="stat-instance-actions">
+            <BaseButton size="xs" type="secondary" outline @click="readStatCardElement">DOM</BaseButton>
+            <BaseButton size="xs" type="secondary" outline @click="focusStatCard">聚焦</BaseButton>
+          </div>
+        </div>
+      </BasePanel>
     </PlaygroundDemoSection>
   </section>
 </template>
@@ -57,5 +85,21 @@ const { triggerToast } = useToast();
 
 .stat-grid {
   @apply grid gap-4 sm:grid-cols-2 xl:grid-cols-4;
+}
+
+.stat-instance-panel {
+  @apply flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-950;
+}
+
+.stat-instance-copy {
+  @apply flex min-w-0 items-center gap-2 text-[11px] font-black text-slate-500 dark:text-slate-400;
+}
+
+.stat-instance-copy span {
+  @apply min-w-0 truncate;
+}
+
+.stat-instance-actions {
+  @apply flex shrink-0 flex-wrap items-center gap-2;
 }
 </style>

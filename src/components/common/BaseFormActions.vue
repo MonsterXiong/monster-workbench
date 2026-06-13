@@ -1,7 +1,11 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref, useAttrs } from "vue";
 import { useI18n } from "../../composables/useI18n";
 import { createRandomId, formatCssLengthValue } from "../../utils";
+
+defineOptions({
+  inheritAttrs: false,
+});
 
 type FormActionsSurface = "plain" | "default" | "muted";
 
@@ -45,6 +49,8 @@ const props = withDefaults(defineProps<Props>(), {
   actionsLabel: "",
 });
 
+const attrs = useAttrs();
+const rootRef = ref<HTMLElement | null>(null);
 const { t } = useI18n();
 const actionsId = createRandomId("");
 const titleId = `base-form-actions-title-${actionsId}`;
@@ -59,10 +65,24 @@ const rootStyle = computed(
       "--base-form-actions-sticky-bottom": formatCssLengthValue(props.stickyOffset),
     }) as Record<string, string>
 );
+
+defineExpose({
+  getElement: () => rootRef.value,
+  getButtonElements: () => Array.from(rootRef.value?.querySelectorAll<HTMLElement>(".base-form-actions__buttons button") ?? []),
+  focusFirstAction: () => {
+    const element = rootRef.value?.querySelector<HTMLElement>(
+      ".base-form-actions__buttons button:not(:disabled), .base-form-actions__buttons [tabindex]:not([tabindex='-1'])"
+    ) ?? null;
+    element?.focus();
+    return element;
+  },
+});
 </script>
 
 <template>
   <footer
+    v-bind="attrs"
+    ref="rootRef"
     class="base-form-actions"
     :class="[
       `base-form-actions--surface-${surface}`,

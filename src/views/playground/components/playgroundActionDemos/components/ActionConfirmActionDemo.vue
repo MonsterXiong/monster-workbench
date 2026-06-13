@@ -1,11 +1,31 @@
 <script setup lang="ts">
+import { ref } from "vue";
 import { useToast } from "../../../../../composables/useToast";
+import BaseConfirmAction from "../../../../../components/common/BaseConfirmAction.vue";
 import PlaygroundDemoSection from "../../PlaygroundDemoSection.vue";
 
 const { triggerToast } = useToast();
+const instanceConfirmRef = ref<InstanceType<typeof BaseConfirmAction> | null>(null);
+const confirmMethodText = ref("等待实例方法触发");
 
 const handleConfirmAction = (label: string) => {
   triggerToast(`已确认：${label}`, "success");
+};
+
+const openConfirmViaRef = () => {
+  confirmMethodText.value = "通过 open() 打开确认浮层";
+  instanceConfirmRef.value?.open();
+};
+
+const readConfirmElement = () => {
+  confirmMethodText.value = instanceConfirmRef.value?.getElement()
+    ? "已读取确认按钮节点"
+    : "确认按钮节点尚未挂载";
+};
+
+const closeConfirmViaRef = () => {
+  confirmMethodText.value = "通过 close() 关闭确认浮层";
+  instanceConfirmRef.value?.close();
 };
 </script>
 
@@ -133,6 +153,31 @@ const handleConfirmAction = (label: string) => {
             />
           </div>
         </BasePanel>
+
+        <BasePanel title="实例能力" subtitle="公开 Element Plus 实例、触发节点和开关方法，便于复杂工作台统一控制。">
+          <div class="confirm-instance-demo">
+            <div class="action-row">
+              <BaseConfirmAction
+                ref="instanceConfirmRef"
+                data-native-confirm-action-ref="base-confirm-action-instance"
+                label="实例确认"
+                title="确认执行实例动作？"
+                message="这个示例通过组件公开方法打开、读取触发按钮并关闭 Popconfirm。"
+                type="primary"
+                icon="MousePointerClick"
+                placement="bottom-start"
+                :width="340"
+                @confirm="handleConfirmAction('实例确认')"
+              />
+              <BaseBadge type="neutral" variant="outline">{{ confirmMethodText }}</BaseBadge>
+            </div>
+            <div class="confirm-instance-demo__actions">
+              <BaseButton type="neutral" size="sm" outline @click="openConfirmViaRef">实例打开</BaseButton>
+              <BaseButton type="neutral" size="sm" outline @click="readConfirmElement">读取 DOM</BaseButton>
+              <BaseButton type="neutral" size="sm" outline @click="closeConfirmViaRef">实例关闭</BaseButton>
+            </div>
+          </div>
+        </BasePanel>
       </div>
     </PlaygroundDemoSection>
   </section>
@@ -153,5 +198,13 @@ const handleConfirmAction = (label: string) => {
 
 .confirm-action-stack {
   @apply grid min-w-0 gap-3;
+}
+
+.confirm-instance-demo {
+  @apply grid min-w-0 gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950;
+}
+
+.confirm-instance-demo__actions {
+  @apply flex min-w-0 flex-wrap items-center gap-2;
 }
 </style>

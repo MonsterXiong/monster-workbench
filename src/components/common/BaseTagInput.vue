@@ -1,9 +1,20 @@
 <script setup lang="ts">
-import { computed, ref, useId, watch, watchEffect } from "vue";
+import type { InputTagInstance } from "element-plus";
+import { computed, ref, useAttrs, useId, watch, watchEffect } from "vue";
 import { LoaderCircle, Plus } from "lucide-vue-next";
 import { useI18n } from "../../composables/useI18n";
 import { escapeRegExp, mergeLimitedUniqueItems } from "../../utils";
-import { syncElementPlusClearButtonLabel, toElementPlusSize, type ProjectControlSize } from "./elementPlusDom";
+import { getElementPlusControlRoot, syncElementPlusClearButtonLabel, toElementPlusSize, type ProjectControlSize } from "./elementPlusDom";
+
+defineOptions({
+  inheritAttrs: false,
+});
+
+type TagInputType = "primary" | "success" | "warning" | "danger" | "info";
+type TagInputEffect = "dark" | "light" | "plain";
+type TagInputTooltipEffect = "dark" | "light";
+type TagInputTrigger = "Enter" | "Space";
+type NativeInputLength = string | number;
 
 interface Props {
   modelValue: string[];
@@ -27,6 +38,16 @@ interface Props {
   collapseTagsTooltip?: boolean;
   maxCollapseTags?: number;
   draggable?: boolean;
+  tagType?: TagInputType;
+  tagEffect?: TagInputEffect;
+  effect?: TagInputTooltipEffect;
+  trigger?: TagInputTrigger;
+  maxlength?: NativeInputLength;
+  minlength?: NativeInputLength;
+  autocomplete?: string;
+  autofocus?: boolean;
+  tabindex?: string | number;
+  validateEvent?: boolean;
   ariaLabel?: string;
   inputAriaLabel?: string;
   clearLabel?: string;
@@ -53,6 +74,16 @@ const props = withDefaults(defineProps<Props>(), {
   collapseTagsTooltip: true,
   maxCollapseTags: 1,
   draggable: false,
+  tagType: "info",
+  tagEffect: "light",
+  effect: "light",
+  trigger: "Enter",
+  maxlength: undefined,
+  minlength: undefined,
+  autocomplete: "off",
+  autofocus: false,
+  tabindex: 0,
+  validateEvent: false,
   ariaLabel: "",
   inputAriaLabel: "",
   clearLabel: "",
@@ -64,14 +95,20 @@ const emit = defineEmits<{
   (e: "add", value: string): void;
   (e: "remove", value: string): void;
   (e: "clear"): void;
+  (e: "input", value: string): void;
+  (e: "add-tag", value: string | string[]): void;
+  (e: "remove-tag", value: string, index: number): void;
+  (e: "drag-tag", oldIndex: number, newIndex: number, value: string): void;
   (e: "focus", value: FocusEvent): void;
   (e: "blur", value: FocusEvent): void;
 }>();
 
+const attrs = useAttrs();
 const { t } = useI18n();
 const inputId = useId();
 const countId = `${inputId}-count`;
-const tagInputRef = ref<HTMLElement | null>(null);
+const rootRef = ref<HTMLElement | null>(null);
+const tagInputRef = ref<InputTagInstance | null>(null);
 const internalValue = ref<string[]>(normalizeTags(props.modelValue));
 
 watch(
@@ -163,11 +200,48 @@ function handleValueUpdate(value?: string[]) {
 function handleClear() {
   emit("clear");
 }
+
+function handleRemoveTag(value: string, index: number) {
+  emit("remove-tag", value, index);
+}
+
+function handleDragTag(oldIndex: number, newIndex: number, value: string) {
+  emit("drag-tag", oldIndex, newIndex, value);
+}
+
+const getElement = () => rootRef.value;
+const getInputTagElement = () => getElementPlusControlRoot(tagInputRef.value);
+const getInputElement = () => getInputTagElement()?.querySelector<HTMLInputElement>("input") ?? null;
+const focus = () => {
+  tagInputRef.value?.focus?.();
+  return getInputElement();
+};
+const blur = () => {
+  tagInputRef.value?.blur?.();
+  return getInputElement();
+};
+const clear = () => {
+  if (isLocked.value || internalValue.value.length === 0) return internalValue.value;
+  emitValue([]);
+  emit("clear");
+  return internalValue.value;
+};
+
+defineExpose({
+  focus,
+  blur,
+  clear,
+  getNativeInputTag: () => tagInputRef.value,
+  getElement,
+  getInputTagElement,
+  getInputElement,
+});
 </script>
 
 <template>
   <div
-    ref="tagInputRef"
+    v-bind="attrs"
+    ref="rootRef"
     class="base-tag-input"
     :class="{
       'is-disabled': disabled,
@@ -190,6 +264,7 @@ function handleClear() {
     @focusin="syncClearButtonLabel"
   >
     <el-input-tag
+      ref="tagInputRef"
       :id="inputId"
       class="base-tag-input__control"
       :model-value="internalValue"
@@ -205,13 +280,24 @@ function handleClear() {
       :collapse-tags-tooltip="collapseTagsTooltip"
       :max-collapse-tags="maxCollapseTags"
       :draggable="draggable && !isLocked"
+      :tag-type="tagType"
+      :tag-effect="tagEffect"
+      :effect="effect"
+      :trigger="trigger"
+      :maxlength="maxlength"
+      :minlength="minlength"
+      :autocomplete="autocomplete"
+      :autofocus="autofocus"
+      :tabindex="tabindex"
       :aria-label="tagInputLabel"
       :aria-describedby="describedBy"
-      :validate-event="false"
-      tag-type="info"
-      tag-effect="light"
+      :validate-event="validateEvent"
       @update:model-value="handleValueUpdate"
       @clear="handleClear"
+      @input="emit('input', $event)"
+      @add-tag="emit('add-tag', $event)"
+      @remove-tag="handleRemoveTag"
+      @drag-tag="handleDragTag"
       @focus="emit('focus', $event)"
       @blur="emit('blur', $event)"
     >
@@ -343,7 +429,53 @@ function handleClear() {
 }
 
 .base-tag-input__control :deep(.el-tag) {
-  @apply max-w-full rounded-lg border-slate-200 bg-white px-2 text-[11px] font-black text-slate-700 shadow-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200;
+  @apply max-w-full rounded-lg px-2 text-[11px] font-black shadow-sm;
+  --el-tag-border-radius: 0.5rem;
+}
+
+.base-tag-input__control :deep(.el-tag.el-tag--primary) {
+  --el-tag-bg-color: rgb(var(--color-primary) / 0.1);
+  --el-tag-border-color: rgb(var(--color-primary) / 0.24);
+  --el-tag-text-color: rgb(var(--color-primary));
+  --el-tag-hover-color: rgb(var(--color-primary));
+}
+
+.base-tag-input__control :deep(.el-tag.el-tag--info) {
+  --el-tag-bg-color: #ffffff;
+  --el-tag-border-color: #e2e8f0;
+  --el-tag-text-color: #334155;
+  --el-tag-hover-color: #64748b;
+}
+
+.base-tag-input__control :deep(.el-tag.el-tag--success) {
+  --el-tag-bg-color: rgba(16, 185, 129, 0.1);
+  --el-tag-border-color: rgba(16, 185, 129, 0.28);
+  --el-tag-text-color: #047857;
+  --el-tag-hover-color: #059669;
+}
+
+.base-tag-input__control :deep(.el-tag.el-tag--warning) {
+  --el-tag-bg-color: rgba(245, 158, 11, 0.1);
+  --el-tag-border-color: rgba(245, 158, 11, 0.3);
+  --el-tag-text-color: #b45309;
+  --el-tag-hover-color: #d97706;
+}
+
+.base-tag-input__control :deep(.el-tag.el-tag--danger) {
+  --el-tag-bg-color: rgba(239, 68, 68, 0.1);
+  --el-tag-border-color: rgba(239, 68, 68, 0.28);
+  --el-tag-text-color: #dc2626;
+  --el-tag-hover-color: #ef4444;
+}
+
+.base-tag-input__control :deep(.el-tag.el-tag--plain) {
+  --el-tag-bg-color: #ffffff;
+}
+
+.base-tag-input__control :deep(.el-tag.el-tag--dark) {
+  --el-tag-bg-color: var(--el-tag-hover-color);
+  --el-tag-border-color: var(--el-tag-hover-color);
+  --el-tag-text-color: #ffffff;
 }
 
 .base-tag-input--lg .base-tag-input__control :deep(.el-tag) {
@@ -404,6 +536,17 @@ function handleClear() {
 :global(.dark) .base-tag-input.is-success .base-tag-input__control {
   background-color: #052e16;
   box-shadow: 0 0 0 1px #047857 inset;
+}
+
+:global(.dark) .base-tag-input__control :deep(.el-tag.el-tag--info) {
+  --el-tag-bg-color: #0f172a;
+  --el-tag-border-color: #334155;
+  --el-tag-text-color: #e2e8f0;
+  --el-tag-hover-color: #94a3b8;
+}
+
+:global(.dark) .base-tag-input__control :deep(.el-tag.el-tag--plain) {
+  --el-tag-bg-color: #020617;
 }
 
 @media (prefers-reduced-motion: reduce) {

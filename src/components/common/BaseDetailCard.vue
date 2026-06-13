@@ -1,7 +1,12 @@
 <script setup lang="ts">
-import { computed, useId } from "vue";
+import { computed, ref, useAttrs, useId } from "vue";
 import type { DescriptionListItem } from "./BaseDescriptionList.vue";
 import { createDomIdMap, createLineClampStyle, handleActivationKeydown, isEventFromInteractiveElement, joinAriaIds } from "../../utils";
+import { getElementPlusControlRoot, type ElementPlusControlRef } from "./elementPlusDom";
+
+defineOptions({
+  inheritAttrs: false,
+});
 
 type DetailCardLevel = 2 | 3 | 4 | 5 | 6;
 
@@ -81,6 +86,8 @@ const emit = defineEmits<{
   (e: "keydown", event: KeyboardEvent): void;
 }>();
 
+const attrs = useAttrs();
+const cardRef = ref<ElementPlusControlRef>(null);
 const detailId = useId();
 const detailIds = createDomIdMap(detailId, ["title", "description"]);
 const titleId = detailIds.title;
@@ -123,10 +130,27 @@ const handleKeydown = (event: KeyboardEvent) => {
   if (isEventFromInteractiveElement(event)) return;
   handleActivationKeydown(event, () => emit("click", event));
 };
+
+const getElement = () => getElementPlusControlRoot(cardRef.value);
+const focus = () => {
+  if (!isInteractive.value) return null;
+  const element = getElement();
+  element?.focus();
+  return element;
+};
+
+defineExpose({
+  focus,
+  getNativeCard: () => cardRef.value,
+  getElement,
+  getCardElement: getElement,
+});
 </script>
 
 <template>
   <el-card
+    v-bind="attrs"
+    ref="cardRef"
     class="base-detail-card"
     shadow="never"
     :body-style="cardBodyStyle"

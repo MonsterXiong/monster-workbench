@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { computed, useAttrs, useId } from "vue";
+import type { InputInstance } from "element-plus";
+import type { StyleValue } from "vue";
+import { computed, ref, useAttrs, useId } from "vue";
 import { useI18n } from "../../composables/useI18n";
 import { joinAriaIds, omit } from "../../utils";
 import BaseIcon from "./BaseIcon.vue";
-import { toElementPlusSize, type ProjectControlSize } from "./elementPlusDom";
+import { getElementPlusControlRoot, toElementPlusSize, type ProjectControlSize } from "./elementPlusDom";
 
 defineOptions({
   inheritAttrs: false,
@@ -19,11 +21,19 @@ interface Props {
   size?: ProjectControlSize;
   rows?: number;
   autosize?: boolean | { minRows?: number; maxRows?: number };
-  maxlength?: number;
+  maxlength?: string | number;
+  minlength?: string | number;
   showCount?: boolean;
   showWordLimit?: boolean;
+  wordLimitPosition?: "inside" | "outside";
   autocomplete?: string;
-  resize?: "none" | "vertical";
+  resize?: "none" | "both" | "horizontal" | "vertical";
+  formatter?: (value: string) => string;
+  parser?: (value: string) => string;
+  inputStyle?: StyleValue;
+  containerRole?: string;
+  validateEvent?: boolean;
+  countGraphemes?: (value: string) => number;
   ariaLabel?: string;
   errorMessage?: string;
 }
@@ -38,10 +48,18 @@ const props = withDefaults(defineProps<Props>(), {
   rows: 4,
   autosize: false,
   maxlength: undefined,
+  minlength: undefined,
   showCount: true,
   showWordLimit: undefined,
+  wordLimitPosition: "inside",
   autocomplete: "off",
   resize: "vertical",
+  formatter: undefined,
+  parser: undefined,
+  inputStyle: undefined,
+  containerRole: "",
+  validateEvent: false,
+  countGraphemes: undefined,
   ariaLabel: "",
   errorMessage: "",
 });
@@ -64,6 +82,8 @@ const value = computed({
 
 const { t } = useI18n();
 const attrs = useAttrs();
+const rootRef = ref<HTMLElement | null>(null);
+const textareaRef = ref<InputInstance | null>(null);
 const textareaId = useId();
 const countId = `${textareaId}-count`;
 const errorId = `${textareaId}-error`;
@@ -82,16 +102,42 @@ const countText = computed(() => {
 });
 
 const filteredAttrs = computed(() => {
-  return omit(attrs, ["size", "type", "rows", "autosize", "resize", "maxlength"]);
+  return omit(attrs, ["class", "style", "size", "type", "rows", "autosize", "resize", "maxlength"]);
 });
 
 const elSize = computed(() => toElementPlusSize(props.size));
+
+const getElement = () => rootRef.value;
+const getTextareaElement = () => getElementPlusControlRoot(textareaRef.value)?.querySelector<HTMLTextAreaElement>("textarea") ?? null;
+const focus = () => {
+  textareaRef.value?.focus?.();
+  return getTextareaElement();
+};
+const blur = () => {
+  textareaRef.value?.blur?.();
+  return getTextareaElement();
+};
+const select = () => {
+  textareaRef.value?.select?.();
+  return getTextareaElement();
+};
+
+defineExpose({
+  focus,
+  blur,
+  select,
+  getNativeTextarea: () => textareaRef.value,
+  getElement,
+  getTextareaElement,
+});
 </script>
 
 <template>
   <div
+    ref="rootRef"
     class="base-textarea"
     :class="[
+      attrs.class,
       `base-textarea--${size}`,
       {
         'is-error': error,
@@ -102,11 +148,13 @@ const elSize = computed(() => toElementPlusSize(props.size));
       },
       `is-resize-${resize}`,
     ]"
+    :style="attrs.style"
     :aria-invalid="error ? 'true' : undefined"
     :aria-busy="loading ? 'true' : undefined"
   >
     <el-input
       v-bind="filteredAttrs"
+      ref="textareaRef"
       v-model="value"
       class="base-textarea__field"
       type="textarea"
@@ -116,11 +164,18 @@ const elSize = computed(() => toElementPlusSize(props.size));
       :size="elSize"
       :readonly="readonly"
       :maxlength="maxlength"
+      :minlength="minlength"
       :show-word-limit="usesNativeWordLimit"
+      :word-limit-position="wordLimitPosition"
       :placeholder="placeholder || t('common.inputPlaceholder')"
       :disabled="disabled"
       :autocomplete="autocomplete"
-      :validate-event="false"
+      :formatter="formatter"
+      :parser="parser"
+      :input-style="inputStyle"
+      :container-role="containerRole || undefined"
+      :validate-event="validateEvent"
+      :count-graphemes="countGraphemes"
       :aria-label="resolvedAriaLabel"
       :aria-invalid="error ? 'true' : undefined"
       :aria-describedby="describedBy"
@@ -217,6 +272,14 @@ const elSize = computed(() => toElementPlusSize(props.size));
 
 .base-textarea.is-resize-vertical :deep(.el-textarea__inner) {
   resize: vertical;
+}
+
+.base-textarea.is-resize-horizontal :deep(.el-textarea__inner) {
+  resize: horizontal;
+}
+
+.base-textarea.is-resize-both :deep(.el-textarea__inner) {
+  resize: both;
 }
 
 :deep(.el-input__count) {

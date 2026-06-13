@@ -1,7 +1,11 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref, useAttrs } from "vue";
 import { useI18n } from "../../composables/useI18n";
 import { clampNumber, createLineClampStyle, isEmptyArray, toIntegerAtLeast } from "../../utils";
+
+defineOptions({
+  inheritAttrs: false,
+});
 
 type KeyValueStatus = "primary" | "success" | "warning" | "danger" | "neutral";
 
@@ -60,6 +64,8 @@ const props = withDefaults(defineProps<Props>(), {
   ariaLabel: "",
 });
 
+const attrs = useAttrs();
+const rootRef = ref<HTMLElement | null>(null);
 const { t } = useI18n();
 const resolvedSize = computed(() => (props.compact ? "sm" : props.size));
 const resolvedColumns = computed(() => clampNumber(props.columns, 1, 3, 2, 0) as 1 | 2 | 3);
@@ -86,10 +92,18 @@ const getItemStatusLabel = (item: KeyValueItem) => {
   if (!item.status) return "";
   return `${item.label}状态：${item.statusLabel || statusLabels[item.status]}`;
 };
+defineExpose({
+  getElement: () => rootRef.value,
+  getItemElements: () =>
+    Array.from(rootRef.value?.querySelectorAll<HTMLElement>(".base-key-value-list__item:not(.base-key-value-list__item--skeleton)") ?? []),
+  getEmptyElement: () => rootRef.value?.querySelector<HTMLElement>(".base-key-value-list__empty") ?? null,
+});
 </script>
 
 <template>
   <dl
+    v-bind="attrs"
+    ref="rootRef"
     class="base-key-value-list"
     :class="[
       `base-key-value-list--cols-${resolvedColumns}`,

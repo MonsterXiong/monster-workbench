@@ -1,7 +1,11 @@
 <script setup lang="ts">
-import { computed, nextTick, ref } from "vue";
+import { computed, nextTick, ref, useAttrs } from "vue";
 import type { ComponentPublicInstance } from "vue";
 import { compactMap, findIndexByValue, focusElementPreventScroll, getBoundaryItem, getFirstRecordValue, getKeyboardBoundaryPosition, getKeyboardNavigationDirection, getNextClampedIndex, handleActivationKeydown, isEventFromInteractiveElement, isHTMLElement } from "../../utils";
+
+defineOptions({
+  inheritAttrs: false,
+});
 
 type ListVariant = "card" | "plain" | "row";
 type ListSize = "xs" | "sm" | "md" | "lg";
@@ -79,6 +83,8 @@ defineSlots<{
   empty?: () => any;
 }>();
 
+const attrs = useAttrs();
+const rootRef = ref<HTMLElement | ComponentPublicInstance | null>(null);
 const itemRefs = ref(new Map<string | number, HTMLElement>());
 
 const getItemKey = (item: any, index: number) => getFirstRecordValue<string | number>(item, [props.itemKey, "key", "id"], index) ?? index;
@@ -117,10 +123,32 @@ const handleItemClick = (event: MouseEvent, item: any, index: number) => {
   selectItem(item, index);
 };
 
-const focusItem = (key: string | number) => {
-  void nextTick(() => {
-    focusElementPreventScroll(itemRefs.value.get(key));
-  });
+const getElement = () => {
+  if (isHTMLElement(rootRef.value)) return rootRef.value;
+  const element = rootRef.value?.$el;
+  return isHTMLElement(element) ? element : null;
+};
+
+const focusItem = async (key: string | number) => {
+  await nextTick();
+  const element = itemRefs.value.get(key) ?? null;
+  focusElementPreventScroll(element ?? undefined);
+  return element;
+};
+
+const focusActive = () => {
+  if (props.activeKey === null) return Promise.resolve(null);
+  return focusItem(props.activeKey);
+};
+
+const focusFirst = () => {
+  const targetEntry = getBoundaryItem(enabledEntries.value, "first");
+  return targetEntry ? focusItem(targetEntry.key) : Promise.resolve(null);
+};
+
+const focusLast = () => {
+  const targetEntry = getBoundaryItem(enabledEntries.value, "last");
+  return targetEntry ? focusItem(targetEntry.key) : Promise.resolve(null);
 };
 
 const moveFocus = (item: any, index: number, offset: 1 | -1) => {
@@ -153,10 +181,21 @@ const handleItemKeydown = (event: KeyboardEvent, item: any, index: number) => {
     if (targetEntry) focusItem(targetEntry.key);
   }
 };
+
+defineExpose({
+  focusItem,
+  focusActive,
+  focusFirst,
+  focusLast,
+  getElement,
+  getItemElement: (key: string | number) => itemRefs.value.get(key) ?? null,
+});
 </script>
 
 <template>
   <transition-group
+    v-bind="attrs"
+    ref="rootRef"
     tag="ul"
     name="list-transition"
     class="base-list"

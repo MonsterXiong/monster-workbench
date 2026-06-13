@@ -1,18 +1,28 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import type { StepsInstance } from "element-plus";
+import type { StyleValue } from "vue";
+import { computed, ref, useAttrs } from "vue";
 import { useI18n } from "../../composables/useI18n";
 import {
   clampNumber,
   compactMap,
   createLineClampStyle,
-  findNextCircularItem,
+  getBoundaryItem,
+  getKeyboardBoundaryPosition,
   getKeyboardNavigationDirection,
+  getNextClampedIndex,
   getLastIndex,
   isActivationKey,
   isEmptyArray,
   isNonEmptyArray,
+  omit,
 } from "../../utils";
+import { getElementPlusControlRoot } from "./elementPlusDom";
 import BaseIcon from "./BaseIcon.vue";
+
+defineOptions({
+  inheritAttrs: false,
+});
 
 type StepperState = "done" | "current" | "pending" | "error" | "disabled";
 type StepperSize = "sm" | "md" | "lg";
@@ -82,6 +92,8 @@ const emit = defineEmits<{
 }>();
 
 const { t } = useI18n();
+const attrs = useAttrs();
+const stepsRef = ref<StepsInstance | null>(null);
 const hasSteps = computed(() => isNonEmptyArray(props.steps));
 const normalizedCurrent = computed(() => (hasSteps.value ? clampNumber(props.current, 0, getLastIndex(props.steps), 0, 0) : 0));
 const resolvedLoadingText = computed(() => props.loadingText || t("common.loading"));
@@ -96,6 +108,11 @@ const descriptionStyle = computed(() => {
   if (props.wrapDescription) return undefined;
   return createLineClampStyle(props.maxDescriptionLines);
 });
+const rootClass = computed(() => attrs.class);
+const rootStyle = computed(() => attrs.style as StyleValue | undefined);
+const stepperPassthroughAttrs = computed(() =>
+  omit(attrs, ["class", "style", "aria-label", "aria-busy", "aria-disabled"])
+);
 
 const stepState = (step: StepperItem, index: number): StepperState => {
   if (step.disabled || step.state === "disabled") return "disabled";
@@ -131,6 +148,8 @@ const canSelect = (step: StepperItem, index: number) => {
   return index <= normalizedCurrent.value + 1;
 };
 
+const getSelectableSteps = () => compactMap(props.steps, (step, index) => (canSelect(step, index) ? { step, index } : undefined));
+
 const commitSelect = (step: StepperItem, index: number) => {
   const payload = { step, index };
   emit("update:current", index);
@@ -145,10 +164,18 @@ const handleSelect = (step: StepperItem, index: number) => {
 
 const moveStep = (direction: 1 | -1) => {
   if (!props.clickable) return;
-  const enabledSteps = compactMap(props.steps, (step, index) => (canSelect(step, index) ? { step, index } : undefined));
+  const enabledSteps = getSelectableSteps();
   if (isEmptyArray(enabledSteps)) return;
-  const nextStep = findNextCircularItem(enabledSteps, (item) => item.index === normalizedCurrent.value, direction);
+  const currentEnabledIndex = enabledSteps.findIndex((item) => item.index === normalizedCurrent.value);
+  const nextIndex = getNextClampedIndex(enabledSteps.length, currentEnabledIndex, direction);
+  const nextStep = enabledSteps[nextIndex];
   if (nextStep) commitSelect(nextStep.step, nextStep.index);
+};
+
+const moveStepToBoundary = (position: "first" | "last") => {
+  if (!props.clickable) return;
+  const targetStep = getBoundaryItem(getSelectableSteps(), position);
+  if (targetStep) commitSelect(targetStep.step, targetStep.index);
 };
 
 const handleStepKeydown = (event: KeyboardEvent, step: StepperItem, index: number) => {
@@ -163,13 +190,43 @@ const handleStepKeydown = (event: KeyboardEvent, step: StepperItem, index: numbe
     event.preventDefault();
     handleSelect(step, index);
   }
+
+  const boundaryPosition = getKeyboardBoundaryPosition(event);
+  if (boundaryPosition) {
+    event.preventDefault();
+    moveStepToBoundary(boundaryPosition);
+  }
 };
+
+const getElement = () => getElementPlusControlRoot(stepsRef.value);
+
+const getStepElement = (target: number | string) => {
+  if (typeof target === "number") {
+    return getElement()?.querySelectorAll<HTMLElement>(".base-stepper__item").item(target) ?? null;
+  }
+  return getElement()?.querySelector<HTMLElement>(`.base-stepper__item[data-step-key="${CSS.escape(target)}"]`) ?? null;
+};
+
+const focusStep = (target: number | string = normalizedCurrent.value) => {
+  const element = getStepElement(target);
+  element?.focus();
+  return element;
+};
+
+defineExpose({
+  getNativeSteps: () => stepsRef.value,
+  getElement,
+  getStepElement,
+  focusStep,
+});
 </script>
 
 <template>
   <div
+    v-bind="stepperPassthroughAttrs"
     class="base-stepper"
     :class="[
+      rootClass,
       `base-stepper--${size}`,
       `base-stepper--${surface}`,
       {
@@ -187,6 +244,7 @@ const handleStepKeydown = (event: KeyboardEvent, step: StepperItem, index: numbe
     ]"
     :aria-label="ariaLabel || undefined"
     :aria-busy="loading ? 'true' : undefined"
+    :style="rootStyle"
   >
     <div v-if="loading || !hasSteps" class="base-stepper__state" aria-live="polite">
       <span class="base-stepper__state-icon" aria-hidden="true">
@@ -197,6 +255,7 @@ const handleStepKeydown = (event: KeyboardEvent, step: StepperItem, index: numbe
 
     <el-steps
       v-else
+      ref="stepsRef"
       class="base-stepper__steps"
       :active="normalizedCurrent"
       :direction="elementDirection"
@@ -205,7 +264,7 @@ const handleStepKeydown = (event: KeyboardEvent, step: StepperItem, index: numbe
       :simple="isSimpleLayout"
       :finish-status="finishStatus"
       :process-status="processStatus"
-      role="list"
+      :role="clickable ? 'group' : 'list'"
     >
       <el-step
         v-for="(step, index) in steps"
@@ -215,6 +274,7 @@ const handleStepKeydown = (event: KeyboardEvent, step: StepperItem, index: numbe
           `is-${stepState(step, index)}`,
           { 'is-clickable': canSelect(step, index), 'is-disabled': stepState(step, index) === 'disabled' },
         ]"
+        :data-step-key="step.key"
         :status="stepStatus(step, index)"
         :aria-current="isCurrentStep(step, index) ? 'step' : undefined"
         :aria-disabled="clickable && !canSelect(step, index) ? 'true' : undefined"

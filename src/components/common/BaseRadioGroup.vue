@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUpdate, ref, useId } from "vue";
+import type { RadioGroupInstance } from "element-plus";
+import { computed, nextTick, onBeforeUpdate, ref, useAttrs, useId } from "vue";
 import type { ComponentPublicInstance } from "vue";
 import {
   filterByFalsyValue,
@@ -9,10 +10,15 @@ import {
   getKeyboardBoundaryPosition,
   getKeyboardNavigationDirection,
   isActivationKey,
+  omit,
   preventAndStopDomEvent,
   preventDomEventDefault,
 } from "../../utils";
-import { toElementPlusSize, type ProjectControlSize } from "./elementPlusDom";
+import { getElementPlusControlRoot, toElementPlusSize, type ProjectControlSize } from "./elementPlusDom";
+
+defineOptions({
+  inheritAttrs: false,
+});
 
 export interface RadioOption {
   label: string;
@@ -39,6 +45,7 @@ interface Props {
   ariaLabel?: string;
   ariaLabelledby?: string;
   ariaDescribedby?: string;
+  validateEvent?: boolean;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -55,6 +62,7 @@ const props = withDefaults(defineProps<Props>(), {
   ariaLabel: "",
   ariaLabelledby: "",
   ariaDescribedby: "",
+  validateEvent: false,
 });
 
 const emit = defineEmits<{
@@ -65,11 +73,14 @@ const emit = defineEmits<{
   (e: "keydown", value: KeyboardEvent): void;
 }>();
 
+const attrs = useAttrs();
 const groupId = useId();
+const radioGroupRef = ref<RadioGroupInstance | null>(null);
 const optionRefs = ref<Array<HTMLElement | null>>([]);
 const isReadonly = computed(() => props.disabled || props.readonly);
 const enabledOptions = computed(() => filterByFalsyValue(props.options, (option) => option.disabled));
 const elementSize = computed(() => toElementPlusSize(props.size));
+const rootAttrs = computed(() => omit(attrs, ["class", "style"]));
 
 const currentValue = computed(() => props.modelValue);
 
@@ -88,11 +99,13 @@ const optionRefSetter = (index: number) => {
 
 const focusOptionByValue = async (value: string | number) => {
   const optionIndex = findIndexByValue(props.options, (option) => option.value, value);
-  if (optionIndex < 0) return;
+  if (optionIndex < 0) return null;
   await nextTick();
   const optionElement = optionRefs.value[optionIndex];
   const radioInput = optionElement?.querySelector<HTMLInputElement>("input[type='radio']");
-  (radioInput ?? optionElement)?.focus();
+  const focusTarget = radioInput ?? optionElement ?? null;
+  focusTarget?.focus();
+  return focusTarget;
 };
 
 const isRadioValue = (value: unknown): value is string | number => {
@@ -158,14 +171,31 @@ const handleClickCapture = (event: MouseEvent) => {
 const optionLabelId = (index: number) => `${groupId}-label-${index}`;
 const optionDescriptionId = (index: number) => `${groupId}-description-${index}`;
 const optionButtonId = (index: number) => `${groupId}-option-${index}`;
+const getElement = () => getElementPlusControlRoot(radioGroupRef.value);
+const focusCurrentOption = () => focusOptionByValue(props.modelValue);
+const focusFirstOption = () => {
+  const firstEnabled = enabledOptions.value[0];
+  return firstEnabled ? focusOptionByValue(firstEnabled.value) : Promise.resolve(null);
+};
+
+defineExpose({
+  focusOptionByValue,
+  focusCurrentOption,
+  focusFirstOption,
+  getNativeRadioGroup: () => radioGroupRef.value,
+  getElement,
+});
 </script>
 
 <template>
   <el-radio-group
+    v-bind="rootAttrs"
+    ref="radioGroupRef"
     :id="id || undefined"
     :model-value="currentValue"
     class="base-radio-group"
     :class="[
+      attrs.class,
       `base-radio-group--cols-${columns}`,
       `base-radio-group--${size}`,
       {
@@ -177,10 +207,11 @@ const optionButtonId = (index: number) => `${groupId}-option-${index}`;
         'base-radio-group--success': success
       }
     ]"
+    :style="attrs.style"
     :name="name || undefined"
     :size="elementSize"
     :disabled="disabled"
-    :validate-event="false"
+    :validate-event="validateEvent"
     :aria-label="ariaLabelledby ? undefined : ariaLabel || undefined"
     :aria-labelledby="ariaLabelledby || undefined"
     :aria-describedby="ariaDescribedby || undefined"

@@ -1,7 +1,12 @@
 <script setup lang="ts">
-import { computed, useId, useSlots } from "vue";
+import { computed, ref, useAttrs, useId, useSlots } from "vue";
 import { useI18n } from "../../composables/useI18n";
 import BaseIcon from "./BaseIcon.vue";
+import { getElementPlusControlRoot, type ElementPlusControlRef } from "./elementPlusDom";
+
+defineOptions({
+  inheritAttrs: false,
+});
 
 type ErrorSurface = "card" | "muted" | "plain";
 type ErrorSize = "sm" | "md" | "lg";
@@ -52,7 +57,10 @@ const props = withDefaults(defineProps<Props>(), {
 });
 
 const { t } = useI18n();
+const attrs = useAttrs();
 const slots = useSlots();
+const rootRef = ref<HTMLElement | null>(null);
+const resultRef = ref<ElementPlusControlRef>(null);
 const errorId = useId();
 const titleId = computed(() => `${errorId}-title`);
 const messageId = computed(() => `${errorId}-message`);
@@ -91,10 +99,21 @@ const handleRetry = () => {
   if (isRetryDisabled.value) return;
   emit("retry");
 };
+
+const getElement = () => rootRef.value;
+const getResultElement = () => getElementPlusControlRoot(resultRef.value);
+
+defineExpose({
+  getNativeResult: () => resultRef.value,
+  getElement,
+  getResultElement,
+});
 </script>
 
 <template>
   <div
+    v-bind="attrs"
+    ref="rootRef"
     class="base-error"
     :class="[
       `base-error--${resolvedSize}`,
@@ -115,7 +134,7 @@ const handleRetry = () => {
     :aria-describedby="message ? messageId : undefined"
     :aria-disabled="disabled ? 'true' : undefined"
   >
-    <el-result class="base-error__result" :icon="elementIconType">
+    <el-result ref="resultRef" class="base-error__result" :icon="elementIconType">
       <template v-if="shouldRenderCustomIcon" #icon>
         <div class="base-error__icon" aria-hidden="true">
           <BaseIcon :name="icon" :size="iconSize" aria-hidden="true" />

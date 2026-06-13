@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { computed, useId } from "vue";
+import type { TimelineInstance } from "element-plus";
+import type { StyleValue } from "vue";
+import { computed, ref, useAttrs, useId } from "vue";
 import { useI18n } from "../../composables/useI18n";
 import {
   createDomIdFromParts,
@@ -9,8 +11,14 @@ import {
   isEventFromInteractiveElement,
   isNonEmptyArray,
   joinAriaIds,
+  omit,
   toReversedArray,
 } from "../../utils";
+import { getElementPlusControlRoot } from "./elementPlusDom";
+
+defineOptions({
+  inheritAttrs: false,
+});
 
 type TimelineType = "primary" | "success" | "warning" | "danger" | "neutral";
 type TimelineSize = "sm" | "md" | "lg";
@@ -99,7 +107,10 @@ defineSlots<{
 }>();
 
 const { t } = useI18n();
+const attrs = useAttrs();
 const timelineId = useId();
+const rootRef = ref<HTMLElement | null>(null);
+const timelineRef = ref<TimelineInstance | null>(null);
 const loadingId = createDomIdFromParts([timelineId, "loading"]);
 const emptyId = createDomIdFromParts([timelineId, "empty"]);
 const renderedEntries = computed(() => {
@@ -123,6 +134,11 @@ const descriptionStyle = computed(() => {
 
   return createLineClampStyle(props.maxDescriptionLines);
 });
+const rootClass = computed(() => attrs.class);
+const rootStyle = computed(() => attrs.style as StyleValue | undefined);
+const timelinePassthroughAttrs = computed(() =>
+  omit(attrs, ["class", "style", "aria-label", "aria-labelledby", "aria-describedby", "aria-busy", "aria-disabled"])
+);
 
 const isItemDisabled = (item: TimelineItem) => props.disabled || props.loading || Boolean(item.disabled);
 const canSelect = (item: TimelineItem) => props.clickable && !isItemDisabled(item);
@@ -167,12 +183,34 @@ const getSlotState = (item: TimelineItem, index: number): TimelineSlotState => (
   clickable: props.clickable,
   interactiveDisabled: isItemDisabled(item),
 });
+
+const getElement = () => getElementPlusControlRoot(timelineRef.value) ?? rootRef.value;
+
+const getItemElement = (key: string) => {
+  return getElement()?.querySelector<HTMLElement>(`.base-timeline__item[data-timeline-key="${CSS.escape(key)}"]`) ?? null;
+};
+
+const focusItem = (key: string) => {
+  const target = getItemElement(key)?.querySelector<HTMLElement>(".base-timeline__main") ?? getItemElement(key);
+  target?.focus();
+  return target ?? null;
+};
+
+defineExpose({
+  getNativeTimeline: () => timelineRef.value,
+  getElement,
+  getItemElement,
+  focusItem,
+});
 </script>
 
 <template>
   <div
+    ref="rootRef"
+    v-bind="timelinePassthroughAttrs"
     class="base-timeline"
     :class="[
+      rootClass,
       `base-timeline--${size}`,
       `base-timeline--${surface}`,
       `base-timeline--marker-${marker}`,
@@ -192,6 +230,7 @@ const getSlotState = (item: TimelineItem, index: number): TimelineSlotState => (
     :aria-describedby="describedBy"
     :aria-busy="loading ? 'true' : undefined"
     :aria-disabled="disabled ? 'true' : undefined"
+    :style="rootStyle"
   >
     <div
       v-if="loading"
@@ -216,11 +255,12 @@ const getSlotState = (item: TimelineItem, index: number): TimelineSlotState => (
         <span :id="emptyId" class="base-timeline__state-text">{{ resolvedEmptyText }}</span>
       </div>
     </div>
-    <el-timeline v-else class="base-timeline__list">
+    <el-timeline v-else ref="timelineRef" class="base-timeline__list">
       <el-timeline-item
         v-for="(entry, visualIndex) in renderedEntries"
         :key="entry.item.key"
         class="base-timeline__item"
+        :data-timeline-key="entry.item.key"
         :class="[
           `base-timeline__item--${entry.item.type || 'neutral'}`,
           {

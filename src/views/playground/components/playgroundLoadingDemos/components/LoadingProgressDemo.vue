@@ -1,7 +1,35 @@
 <script setup lang="ts">
+import { ref } from "vue";
 import PlaygroundDemoSection from "../../PlaygroundDemoSection.vue";
 
 const formatShardProgress = ({ value, percent }: { value: number; percent: number }) => `${value} / 240 个分片 · ${percent}%`;
+const thresholdProgressColors = [
+  { color: "#ef4444", percentage: 35 },
+  { color: "#f59e0b", percentage: 70 },
+  { color: "#10b981", percentage: 100 },
+];
+const progressInstanceText = ref("等待实例操作");
+const progressInstanceRef = ref<{
+  getNativeProgress: () => unknown;
+  getElement: () => HTMLElement | null;
+  getProgressElement: () => HTMLElement | null;
+  focusTrack: () => HTMLElement | null;
+} | null>(null);
+
+const readProgressElement = () => {
+  const element = progressInstanceRef.value?.getElement();
+  progressInstanceText.value = element ? `DOM: ${element.tagName.toLowerCase()}.${element.classList[0] || "root"}` : "未读取到 DOM";
+};
+
+const readNativeProgressElement = () => {
+  const element = progressInstanceRef.value?.getProgressElement();
+  progressInstanceText.value = element ? `Element: ${element.tagName.toLowerCase()}.${element.classList[0] || "progress"}` : "未读取到原生进度";
+};
+
+const focusProgressTrack = () => {
+  const element = progressInstanceRef.value?.focusTrack();
+  progressInstanceText.value = element ? `聚焦: ${element.getAttribute("role") || element.tagName.toLowerCase()}` : "未找到进度轨道";
+};
 </script>
 
 <template>
@@ -11,7 +39,21 @@ const formatShardProgress = ({ value, percent }: { value: number; percent: numbe
         <BasePanel title="状态进度" subtitle="不同语义色用于不同任务阶段。" divided>
           <div class="progress-stack">
             <p id="progress-a11y-hint" class="sr-only">进度条会关联可见标题和说明，支持外部说明、确定进度和不确定进度。</p>
+            <div class="progress-instance-panel">
+              <div class="progress-instance-copy">
+                <BaseIcon name="Workflow" size="14" aria-hidden="true" />
+                <span>实例能力</span>
+                <strong>{{ progressInstanceText }}</strong>
+              </div>
+              <div class="progress-instance-actions">
+                <BaseButton size="xs" type="secondary" outline @click="readProgressElement">读取 DOM</BaseButton>
+                <BaseButton size="xs" type="secondary" outline @click="readNativeProgressElement">读取 Element</BaseButton>
+                <BaseButton size="xs" type="secondary" outline @click="focusProgressTrack">聚焦轨道</BaseButton>
+              </div>
+            </div>
             <BaseProgress
+              ref="progressInstanceRef"
+              data-native-progress-ref="base-progress-instance"
               id="typecheck-progress"
               label="类型校验"
               description="vue-tsc 通过。"
@@ -32,6 +74,7 @@ const formatShardProgress = ({ value, percent }: { value: number; percent: numbe
             <BaseProgress label="等待队列" description="等待远端服务返回执行进度。" indeterminate type="neutral" value-text="排队中" :animated="false" />
             <BaseProgress label="同步状态" description="loading 会设置 aria-busy，并进入不确定态。" loading type="primary" status-text="同步中" live />
             <BaseProgress label="容量占用" description="缓存目录已接近上限。" :value="86" type="warning" size="lg" surface="card" bordered />
+            <BaseProgress label="自定义节奏" description="可透传动画时长、描边宽度和颜色。" :value="58" color="#6366f1" :stroke-width="12" :duration="8" striped />
           </div>
         </BasePanel>
         <BasePanel title="环形与仪表盘" subtitle="复用 Element Plus circle / dashboard，保留统一语义色和尺寸。" divided>
@@ -158,6 +201,14 @@ const formatShardProgress = ({ value, percent }: { value: number; percent: numbe
               :format-value="formatShardProgress"
               type="primary"
             />
+            <BaseProgress
+              label="阈值色阶"
+              description="color 可使用 Element Plus 原生阈值数组。"
+              :value="74"
+              :color="thresholdProgressColors"
+              :stroke-width="12"
+              status-text="健康"
+            />
             <div class="progress-narrow-demo">
               <BaseProgress
                 label="窄容器长值"
@@ -183,6 +234,22 @@ const formatShardProgress = ({ value, percent }: { value: number; percent: numbe
 
 .progress-stack {
   @apply flex min-w-0 flex-col gap-4;
+}
+
+.progress-instance-panel {
+  @apply flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-950;
+}
+
+.progress-instance-copy {
+  @apply flex min-w-0 items-center gap-2 text-[11px] font-black text-slate-500 dark:text-slate-400;
+}
+
+.progress-instance-copy strong {
+  @apply min-w-0 truncate text-slate-800 dark:text-slate-100;
+}
+
+.progress-instance-actions {
+  @apply flex shrink-0 flex-wrap items-center gap-2;
 }
 
 .progress-demo-grid {

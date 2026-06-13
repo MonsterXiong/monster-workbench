@@ -1,8 +1,22 @@
 <script setup lang="ts">
+import type BaseCheckbox from "../../../../../components/common/BaseCheckbox.vue";
+import type BaseRadioGroup from "../../../../../components/common/BaseRadioGroup.vue";
+import type BaseSegmented from "../../../../../components/common/BaseSegmented.vue";
+import type BaseSelect from "../../../../../components/common/BaseSelect.vue";
+import type BaseSwitch from "../../../../../components/common/BaseSwitch.vue";
 import { computed, onBeforeUnmount, ref } from "vue";
+import { Check, X } from "lucide-vue-next";
 import PlaygroundDemoSection from "../../PlaygroundDemoSection.vue";
 
 const selectValue = ref("design-system");
+const selectMethodValue = ref("vue");
+const selectMethodStatus = ref("等待实例方法");
+const selectMethodRef = ref<InstanceType<typeof BaseSelect> | null>(null);
+const choiceMethodStatus = ref("等待实例操作");
+const segmentedMethodRef = ref<InstanceType<typeof BaseSegmented> | null>(null);
+const checkboxMethodRef = ref<InstanceType<typeof BaseCheckbox> | null>(null);
+const switchMethodRef = ref<InstanceType<typeof BaseSwitch> | null>(null);
+const radioMethodRef = ref<InstanceType<typeof BaseRadioGroup> | null>(null);
 const multiSelectValue = ref(["vue", "design-system"]);
 const limitedMultiSelectValue = ref(["vue", "design-system"]);
 const objectSelectValue = ref<Record<string, unknown>>({ id: "component", code: "BaseSelect" });
@@ -15,6 +29,10 @@ const checkboxValue = ref(true);
 const disabledCheckboxValue = ref(false);
 const switchValue = ref(true);
 const disabledSwitchValue = ref(false);
+const inlineSwitchValue = ref(true);
+const guardedSwitchValue = ref(false);
+const guardedSwitchLocked = ref(true);
+const switchEventText = ref("等待切换");
 const radioValue = ref("balanced");
 let remoteSelectTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -242,9 +260,60 @@ const handleRemoteSelectSearch = (query: string) => {
   }, 260);
 };
 
+const focusNativeSelect = () => {
+  selectMethodRef.value?.focus();
+  selectMethodStatus.value = "已调用 focus";
+};
+
+const toggleNativeSelect = () => {
+  selectMethodRef.value?.toggleMenu();
+  selectMethodStatus.value = "已调用 toggleMenu";
+};
+
+const blurNativeSelect = () => {
+  selectMethodRef.value?.blur();
+  selectMethodStatus.value = "已调用 blur";
+};
+
+const describeChoiceElement = (label: string, element?: HTMLElement | null) => {
+  choiceMethodStatus.value = element ? `${label}: ${element.tagName.toLowerCase()}.${element.classList[0] || "root"}` : `${label}: 未读取到 DOM`;
+};
+
+const readSegmentedElement = () => {
+  describeChoiceElement("Segmented DOM", segmentedMethodRef.value?.getElement());
+};
+
+const focusSegmentedCurrent = async () => {
+  const element = await segmentedMethodRef.value?.focusCurrentOption();
+  describeChoiceElement("Segmented Focus", element);
+};
+
+const focusCheckbox = () => {
+  describeChoiceElement("Checkbox Focus", checkboxMethodRef.value?.focus());
+};
+
+const focusSwitch = () => {
+  describeChoiceElement("Switch Focus", switchMethodRef.value?.focus());
+};
+
+const focusRadioCurrent = async () => {
+  const element = await radioMethodRef.value?.focusCurrentOption();
+  describeChoiceElement("Radio Focus", element);
+};
+
 onBeforeUnmount(() => {
   if (remoteSelectTimer) clearTimeout(remoteSelectTimer);
 });
+
+const guardSwitchChange = () => {
+  if (guardedSwitchLocked.value) {
+    switchEventText.value = "beforeChange 已拦截";
+    return false;
+  }
+
+  switchEventText.value = "beforeChange 允许切换";
+  return true;
+};
 
 const radioOptions = [
   { value: "compact", label: "紧凑", description: "适合侧栏和抽屉。", icon: "Rows3", meta: "S" },
@@ -329,6 +398,19 @@ const longSegmentedOptions = [
               aria-label="多选上限"
             />
             <BaseSelect
+              v-model="multiSelectValue"
+              :options="selectOptions"
+              multiple
+              clearable
+              filterable
+              tag-type="primary"
+              tag-effect="plain"
+              :tag-tooltip="{ placement: 'top', effect: 'light' }"
+              :popper-style="{ maxWidth: '360px' }"
+              placeholder="主题化多选标签"
+              aria-label="主题化多选标签"
+            />
+            <BaseSelect
               v-model="selectValue"
               :options="longSelectOptions"
               clearable
@@ -374,6 +456,25 @@ const longSegmentedOptions = [
               placeholder="远程搜索组件能力"
               aria-label="远程搜索能力选择"
             />
+            <div class="select-method-demo">
+              <BaseSelect
+                ref="selectMethodRef"
+                v-model="selectMethodValue"
+                :options="selectOptions"
+                clearable
+                filterable
+                data-test-id="base-select-native-ref"
+                placeholder="实例方法选择"
+                aria-label="实例方法选择"
+                @visible-change="selectMethodStatus = $event ? '下拉已打开' : '下拉已关闭'"
+              />
+              <div class="select-method-demo__actions">
+                <BaseButton type="primary" size="xs" @click="focusNativeSelect">Focus</BaseButton>
+                <BaseButton type="neutral" size="xs" outline @click="toggleNativeSelect">Toggle</BaseButton>
+                <BaseButton type="neutral" size="xs" outline @click="blurNativeSelect">Blur</BaseButton>
+                <BaseBadge type="neutral" variant="outline">{{ selectMethodStatus }}</BaseBadge>
+              </div>
+            </div>
             <div class="input-demo-row">
               <BaseSelect model-value="tauri" :options="selectOptions" size="xs" placeholder="迷你尺寸" />
               <BaseSelect model-value="tauri" :options="selectOptions" size="sm" placeholder="紧凑尺寸" />
@@ -390,12 +491,28 @@ const longSegmentedOptions = [
               aria-label="错误态选择"
             />
             <BaseSegmented
+              ref="segmentedMethodRef"
               id="density-segmented"
               v-model="segmentedValue"
+              data-native-segmented-ref="base-segmented-instance"
               :options="segmentedOptions"
               aria-label="密度分段"
               aria-describedby="segmented-keyboard-hint"
             />
+            <div class="choice-method-demo">
+              <div class="choice-method-demo__copy">
+                <BaseIcon name="Workflow" size="14" aria-hidden="true" />
+                <span>实例能力</span>
+                <strong>{{ choiceMethodStatus }}</strong>
+              </div>
+              <div class="choice-method-demo__actions">
+                <BaseButton type="neutral" size="xs" outline @click="readSegmentedElement">Segmented DOM</BaseButton>
+                <BaseButton type="neutral" size="xs" outline @click="focusSegmentedCurrent">Segmented Focus</BaseButton>
+                <BaseButton type="neutral" size="xs" outline @click="focusCheckbox">Checkbox Focus</BaseButton>
+                <BaseButton type="neutral" size="xs" outline @click="focusSwitch">Switch Focus</BaseButton>
+                <BaseButton type="neutral" size="xs" outline @click="focusRadioCurrent">Radio Focus</BaseButton>
+              </div>
+            </div>
             <BaseSegmented
               v-model="segmentedValue"
               :options="segmentedOptions.slice(0, 3)"
@@ -463,8 +580,10 @@ const longSegmentedOptions = [
             <p id="checkbox-keyboard-hint" class="sr-only">勾选框支持 Space 和 Enter 切换，只读、加载和禁用状态不会改值。</p>
             <p id="switch-aria-only-hint" class="sr-only">无可见标签开关依赖 aria-label 提供可访问名称。</p>
             <BaseCheckbox
+              ref="checkboxMethodRef"
               id="component-cache-checkbox"
               v-model="checkboxValue"
+              data-native-checkbox-ref="base-checkbox-instance"
               name="componentCache"
               value="enabled"
               label="启用组件缓存"
@@ -494,12 +613,43 @@ const longSegmentedOptions = [
             <BaseCheckbox :model-value="false" success label="未勾选但校验通过" description="关闭当前能力仍然符合策略。" />
             <BaseCheckbox :model-value="false" error label="未勾选存在冲突" description="用于提示必选项、依赖项或权限配置缺失。" />
             <BaseSwitch
+              ref="switchMethodRef"
               v-model="switchValue"
+              data-native-switch-ref="base-switch-instance"
               label="自动保存"
               description="修改配置后自动写入本地状态。"
               active-text="已开启"
               inactive-text="已关闭"
             />
+            <BaseSwitch
+              v-model="inlineSwitchValue"
+              label="原生内联提示"
+              description="透出 Element Plus inlinePrompt、图标、宽度和颜色能力。"
+              inline-prompt
+              :active-icon="Check"
+              :inactive-icon="X"
+              :width="58"
+              active-text="开"
+              inactive-text="关"
+              active-color="#2563eb"
+              inactive-color="#cbd5e1"
+            />
+            <BaseSwitch
+              v-model="guardedSwitchValue"
+              label="切换前拦截"
+              :description="switchEventText"
+              active-text="允许"
+              inactive-text="锁定"
+              :before-change="guardSwitchChange"
+            />
+            <div class="switch-demo-actions">
+              <BaseButton type="neutral" size="xs" outline @click="guardedSwitchLocked = !guardedSwitchLocked">
+                {{ guardedSwitchLocked ? "解除拦截" : "恢复拦截" }}
+              </BaseButton>
+              <BaseBadge :type="guardedSwitchLocked ? 'warning' : 'success'" size="xs">
+                {{ guardedSwitchLocked ? "已锁定" : "可切换" }}
+              </BaseBadge>
+            </div>
             <BaseSwitch model-value success label="同步可用" description="成功态适合展示策略已生效。" active-text="正常" />
             <BaseSwitch :model-value="false" error label="同步失败" description="错误态适合展示开关不可用或依赖失败。" inactive-text="异常" />
             <BaseSwitch model-value label="只读开关" description="当前继承自系统策略，不能在此处修改。" readonly />
@@ -532,8 +682,10 @@ const longSegmentedOptions = [
         <div class="field-stack">
           <p id="radio-keyboard-hint" class="sr-only">支持方向键、Home 和 End 在可用选项之间切换。</p>
           <BaseRadioGroup
+            ref="radioMethodRef"
             id="density-radio-group"
             v-model="radioValue"
+            data-native-radio-ref="base-radio-group-instance"
             :options="radioOptions"
             size="lg"
             success
@@ -573,5 +725,33 @@ const longSegmentedOptions = [
 
 .input-demo-row {
   @apply grid min-w-0 gap-3 md:grid-cols-2;
+}
+
+.switch-demo-actions {
+  @apply flex min-w-0 flex-wrap items-center gap-2 rounded-xl border border-dashed border-slate-200 bg-slate-50 p-2 dark:border-slate-800 dark:bg-slate-950;
+}
+
+.select-method-demo {
+  @apply grid min-w-0 gap-2 rounded-xl border border-dashed border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950;
+}
+
+.select-method-demo__actions {
+  @apply flex min-w-0 flex-wrap items-center gap-2;
+}
+
+.choice-method-demo {
+  @apply flex min-w-0 flex-col gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950;
+}
+
+.choice-method-demo__copy {
+  @apply flex min-w-0 items-center gap-2 text-[11px] font-black text-slate-500 dark:text-slate-400;
+}
+
+.choice-method-demo__copy strong {
+  @apply min-w-0 truncate text-slate-800 dark:text-slate-100;
+}
+
+.choice-method-demo__actions {
+  @apply flex min-w-0 flex-wrap items-center gap-2;
 }
 </style>

@@ -1,8 +1,12 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref, useAttrs } from "vue";
 import { Pane, Splitpanes } from "splitpanes";
 import "splitpanes/dist/splitpanes.css";
 import { useI18n } from "../../composables/useI18n";
+
+defineOptions({
+  inheritAttrs: false,
+});
 
 type ResizablePanelSize = number | string;
 type ResizablePanelVisualSize = "sm" | "md" | "lg";
@@ -79,6 +83,9 @@ const emit = defineEmits<{
 }>();
 
 const isVerticalStack = computed(() => props.direction === "vertical");
+const attrs = useAttrs();
+const rootRef = ref<HTMLElement | null>(null);
+const splitpanesRef = ref<unknown>(null);
 const { t } = useI18n();
 const resolvedPaneRole = computed(() => (props.paneRole === "none" ? undefined : props.paneRole));
 
@@ -91,10 +98,19 @@ const normalizedPanes = computed(() =>
     fallback: pane.fallback || pane.label || pane.key,
   }))
 );
+
+defineExpose({
+  getElement: () => rootRef.value,
+  getSplitpanes: () => splitpanesRef.value,
+  getPaneElements: () => Array.from(rootRef.value?.querySelectorAll<HTMLElement>(".base-resizable-panels__pane") ?? []),
+  getSplitterElements: () => Array.from(rootRef.value?.querySelectorAll<HTMLElement>(".splitpanes__splitter") ?? []),
+});
 </script>
 
 <template>
   <section
+    v-bind="attrs"
+    ref="rootRef"
     class="base-resizable-panels"
     :class="[
       `base-resizable-panels--${size}`,
@@ -107,6 +123,7 @@ const normalizedPanes = computed(() =>
     :aria-label="ariaLabel || t('common.resizablePanels')"
   >
     <Splitpanes
+      ref="splitpanesRef"
       class="base-resizable-panels__splitpanes"
       :horizontal="isVerticalStack"
       :push-other-panes="pushOtherPanes"

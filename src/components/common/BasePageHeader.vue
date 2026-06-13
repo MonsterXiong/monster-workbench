@@ -1,6 +1,10 @@
 <script setup lang="ts">
-import { computed, useId } from "vue";
+import { computed, ref, useAttrs, useId } from "vue";
 import type { BreadcrumbItem } from "./BaseBreadcrumb.vue";
+
+defineOptions({
+  inheritAttrs: false,
+});
 
 type PageHeaderSize = "sm" | "md" | "lg";
 type PageHeaderLevel = 1 | 2 | 3 | 4 | 5 | 6;
@@ -51,6 +55,9 @@ const emit = defineEmits<{
   (e: "back"): void;
 }>();
 
+const attrs = useAttrs();
+const rootRef = ref<HTMLElement | null>(null);
+const backButtonRef = ref<{ focus?: () => HTMLElement | null; click?: () => HTMLElement | null } | null>(null);
 const headerId = useId();
 const titleId = `${headerId}-title`;
 const descriptionId = `${headerId}-description`;
@@ -59,10 +66,23 @@ const isInteractiveDisabled = computed(() => props.disabled || props.loading);
 const headingTag = computed(() => `h${props.level}`);
 const resolvedMetaLabel = computed(() => props.metaLabel || `${props.title} 状态`);
 const resolvedActionsLabel = computed(() => props.actionsLabel || `${props.title} 操作`);
+const back = () => {
+  if (!props.backable || isInteractiveDisabled.value) return;
+  emit("back");
+};
+
+defineExpose({
+  back,
+  getElement: () => rootRef.value,
+  getBackButton: () => backButtonRef.value,
+  focusBackButton: () => backButtonRef.value?.focus?.() ?? null,
+});
 </script>
 
 <template>
   <header
+    v-bind="attrs"
+    ref="rootRef"
     class="base-page-header"
     :class="[
       `base-page-header--${size}`,
@@ -94,6 +114,7 @@ const resolvedActionsLabel = computed(() => props.actionsLabel || `${props.title
       <div class="base-page-header__title-line">
         <BaseButton
           v-if="backable"
+          ref="backButtonRef"
           class="base-page-header__back"
           type="neutral"
           size="md"
@@ -103,7 +124,7 @@ const resolvedActionsLabel = computed(() => props.actionsLabel || `${props.title
           :disabled="isInteractiveDisabled"
           :aria-label="backLabel"
           :title="backLabel"
-          @click="emit('back')"
+          @click="back"
         >
           <template #icon>
             <BaseIcon name="ArrowLeft" size="16" aria-hidden="true" />

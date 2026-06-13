@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref } from "vue";
-import type { BaseTableColumn } from "../../../../../components/common/BaseTable.vue";
+import BaseTable, { type BaseTableColumn } from "../../../../../components/common/BaseTable.vue";
 import PlaygroundDemoSection from "../../PlaygroundDemoSection.vue";
 
 const simpleTableColumns = [
@@ -61,10 +61,119 @@ const interactiveTableColumns: BaseTableColumn[] = [
   { key: "owner", title: "维护", width: "140px", align: "right" as const, fixed: "right" as const },
 ];
 
+const nativeTableColumns: BaseTableColumn[] = [
+  {
+    key: "selection",
+    title: "",
+    type: "selection",
+    width: "48px",
+    fixed: "left",
+    selectable: (row: { state: string }) => row.state !== "stable",
+    reserveSelection: true,
+  },
+  { key: "index", title: "#", type: "index", width: "56px", fixed: "left", align: "center", index: (index) => index + 1 },
+  { key: "detail", title: "", type: "expand", width: "48px" },
+  { key: "name", title: "组件", minWidth: 180, fixed: "left", sortable: true, resizable: true },
+  {
+    key: "status",
+    title: "状态",
+    width: "150px",
+    columnKey: "status",
+    filterMultiple: false,
+    filters: [
+      { text: "稳定", value: "stable" },
+      { text: "增强中", value: "enhancing" },
+    ],
+    filterMethod: (value: string, row: { state: string }) => row.state === value,
+  },
+  { key: "usage", title: "用途", minWidth: 240, formatter: (row: { usage: string }) => row.usage },
+  { key: "owner", title: "维护", width: "140px", align: "right" as const },
+];
+
+const nativeTableRows = [
+  { name: "BaseTable", usage: "过滤、当前行和原生表格能力透传", status: "增强中", state: "enhancing", owner: "数据组" },
+  { name: "BaseDataTable", usage: "组合工具条、表格和分页", status: "增强中", state: "enhancing", owner: "数据组" },
+  { name: "BasePagination", usage: "页码、跳页和页容量", status: "稳定", state: "stable", owner: "数据组" },
+  { name: "BaseSearchInput", usage: "检索输入与清空", status: "稳定", state: "stable", owner: "基础组" },
+];
+
+const nativeTableRef = ref<InstanceType<typeof BaseTable> | null>(null);
 const lastSortText = ref("默认按组件名升序");
+const currentNativeRow = ref("BaseTable");
+const lastFilterText = ref("未过滤");
+const selectedNativeCount = ref(0);
+const expandedNativeText = ref("未展开详情");
+const hoveredNativeCellText = ref("未悬停单元格");
+const nativeMethodText = ref("实例方法待触发");
 
 const handleSortChange = ({ prop, order }: { prop: string; order: "ascending" | "descending" | null }) => {
   lastSortText.value = order ? `${prop} / ${order}` : "已清除排序";
+};
+
+const handleFilterChange = (payload: Record<string, string[]>) => {
+  const status = payload.status?.[0];
+  lastFilterText.value = status ? `状态过滤：${status}` : "未过滤";
+};
+
+const handleCurrentChange = (row: { name?: string } | null) => {
+  currentNativeRow.value = row?.name || "未选择";
+};
+
+const handleRowClick = (row: { name?: string }) => {
+  if (row.name) currentNativeRow.value = row.name;
+};
+
+const handleRowDblclick = (row: { name?: string }) => {
+  currentNativeRow.value = row.name ? `${row.name} / 双击` : "双击行";
+};
+
+const handleSelectionChange = (selection: Array<{ name?: string }>) => {
+  selectedNativeCount.value = selection.length;
+};
+
+const handleCellMouseEnter = (row: { name?: string }, column: unknown) => {
+  const tableColumn = column as { label?: string; property?: string };
+  hoveredNativeCellText.value = `${row.name || "当前行"} / ${tableColumn.label || tableColumn.property || "单元格"}`;
+};
+
+const handleCellMouseLeave = () => {
+  hoveredNativeCellText.value = "已离开单元格";
+};
+
+const handleExpandChange = (row: { name?: string }, expanded: Array<unknown> | boolean) => {
+  const expandedText = Array.isArray(expanded) ? `${expanded.length} 行展开` : expanded ? "已展开" : "已收起";
+  expandedNativeText.value = `${row.name || "当前行"}：${expandedText}`;
+};
+
+const getNativeSummary = ({ columns, data }: { columns: Array<{ property?: string }>; data: typeof nativeTableRows }) => {
+  return columns.map((column, index) => {
+    if (index === 0) return "汇总";
+    if (column.property === "status") return `${data.length} 项`;
+    if (column.property === "owner") return "2 组";
+    return "";
+  });
+};
+
+const toggleNativeSelection = () => {
+  nativeTableRef.value?.toggleAllSelection();
+  nativeMethodText.value = "已调用 toggleAllSelection";
+};
+
+const clearNativeSelection = () => {
+  nativeTableRef.value?.clearSelection();
+  nativeMethodText.value = "已调用 clearSelection";
+};
+
+const setSecondNativeRow = () => {
+  const nextRow = nativeTableRows[1];
+  nativeTableRef.value?.setCurrentRow(nextRow);
+  currentNativeRow.value = nextRow.name;
+  nativeMethodText.value = `已定位到 ${nextRow.name}`;
+};
+
+const clearNativeSort = () => {
+  nativeTableRef.value?.clearSort();
+  nativeMethodText.value = "已调用 clearSort";
 };
 </script>
 
@@ -119,6 +228,71 @@ const handleSortChange = ({ prop, order }: { prop: string; order: "ascending" | 
           </BaseTable>
           <div class="table-sort-summary">
             <BaseStatusDot type="primary" :label="lastSortText" orientation="horizontal" />
+          </div>
+        </BasePanel>
+        <BasePanel title="过滤与当前行" subtitle="透传 Element Plus 的 filter、highlight-current-row、tableLayout、maxHeight 和行事件。">
+          <BaseTable
+            ref="nativeTableRef"
+            data-playground-table="native-capabilities"
+            caption="原生表格能力透传示例"
+            :columns="nativeTableColumns"
+            :data="nativeTableRows"
+            row-key="name"
+            :current-row-key="currentNativeRow"
+            highlight-current-row
+            table-layout="auto"
+            max-height="220px"
+            min-width="760px"
+            :show-overflow-tooltip="true"
+            tooltip-effect="light"
+            surface="muted"
+            show-summary
+            :summary-method="getNativeSummary"
+            @selection-change="handleSelectionChange"
+            @expand-change="handleExpandChange"
+            @filter-change="handleFilterChange"
+            @current-change="handleCurrentChange"
+            @row-click="handleRowClick"
+            @row-dblclick="handleRowDblclick"
+            @cell-mouse-enter="handleCellMouseEnter"
+            @cell-mouse-leave="handleCellMouseLeave"
+          >
+            <template #nameHeader>
+              <span class="table-header-chip">组件 / 可调整列宽</span>
+            </template>
+            <template #detail="{ row }">
+              <div class="table-expand-panel">
+                <BaseStatusDot type="primary" :label="`${row.name} 已接入原生展开列`" orientation="horizontal" />
+                <span>{{ row.usage }}</span>
+              </div>
+            </template>
+            <template #name="{ row }">
+              <strong class="simple-table-name">{{ row.name }}</strong>
+            </template>
+            <template #status="{ row }">
+              <BaseBadge :type="row.state === 'stable' ? 'success' : 'warning'" variant="outline">
+                {{ row.status }}
+              </BaseBadge>
+            </template>
+            <template #append>
+              <div class="table-append-row">
+                append 插槽：稳定项不可被选择，索引列、展开列、hover 事件和实例方法均由 Element Plus 表格能力透传。
+              </div>
+            </template>
+          </BaseTable>
+          <div class="table-action-row" aria-label="表格实例方法">
+            <BaseButton type="neutral" size="sm" @click="toggleNativeSelection">切换全选</BaseButton>
+            <BaseButton type="neutral" size="sm" @click="clearNativeSelection">清空选择</BaseButton>
+            <BaseButton type="neutral" size="sm" @click="setSecondNativeRow">定位第二行</BaseButton>
+            <BaseButton type="neutral" size="sm" @click="clearNativeSort">清空排序</BaseButton>
+          </div>
+          <div class="table-sort-summary">
+            <BaseStatusDot type="primary" :label="`当前行：${currentNativeRow}`" orientation="horizontal" />
+            <BaseStatusDot type="neutral" :label="lastFilterText" orientation="horizontal" />
+            <BaseStatusDot type="success" :label="`已选择：${selectedNativeCount}`" orientation="horizontal" />
+            <BaseStatusDot type="warning" :label="expandedNativeText" orientation="horizontal" />
+            <BaseStatusDot type="primary" :label="hoveredNativeCellText" orientation="horizontal" />
+            <BaseStatusDot type="neutral" :label="nativeMethodText" orientation="horizontal" />
           </div>
         </BasePanel>
         <BasePanel title="长字段表格" subtitle="支持嵌套 key、列级换行和自定义最小宽度。">
@@ -183,6 +357,22 @@ const handleSortChange = ({ prop, order }: { prop: string; order: "ascending" | 
 }
 
 .table-sort-summary {
-  @apply mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-950;
+  @apply mt-3 flex min-w-0 flex-wrap gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-950;
+}
+
+.table-action-row {
+  @apply mt-3 flex min-w-0 flex-wrap items-center gap-2;
+}
+
+.table-expand-panel {
+  @apply flex min-w-0 flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs font-bold text-slate-500 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-400;
+}
+
+.table-append-row {
+  @apply border-t border-slate-100 bg-slate-50/80 px-4 py-3 text-xs font-bold text-slate-500 dark:border-slate-800 dark:bg-slate-950/80 dark:text-slate-400;
+}
+
+.table-header-chip {
+  @apply inline-flex max-w-full items-center rounded-md bg-white px-2 py-1 text-[11px] font-black text-slate-600 shadow-sm ring-1 ring-slate-200 dark:bg-slate-900 dark:text-slate-300 dark:ring-slate-700;
 }
 </style>

@@ -1,12 +1,34 @@
 <script setup lang="ts">
-import { onBeforeUnmount } from "vue";
+import { onBeforeUnmount, ref } from "vue";
 import { useLoading } from "../../../../../composables/useLoading";
 import { clearTimeoutHandle, resetTimeoutHandle, type TimeoutHandle } from "../../../../../utils";
 import PlaygroundDemoSection from "../../PlaygroundDemoSection.vue";
 
 const { showLoading, hideLoading } = useLoading();
+const loadingInstanceText = ref("等待实例操作");
+const loadingInstanceRef = ref<{
+  getNativeSkeleton: () => unknown;
+  getElement: () => HTMLElement | null;
+  getIndicatorElement: () => HTMLElement | null;
+  focusStatus: () => HTMLElement | null;
+} | null>(null);
 
 let loadingTimer: TimeoutHandle | null = null;
+
+const readLoadingElement = () => {
+  const element = loadingInstanceRef.value?.getElement();
+  loadingInstanceText.value = element ? `DOM: ${element.tagName.toLowerCase()}.${element.classList[0] || "root"}` : "未读取到 DOM";
+};
+
+const readLoadingIndicator = () => {
+  const element = loadingInstanceRef.value?.getIndicatorElement();
+  loadingInstanceText.value = element ? `Indicator: ${element.tagName.toLowerCase()}.${element.classList[0] || "indicator"}` : "未读取到指示器";
+};
+
+const focusLoadingStatus = () => {
+  const element = loadingInstanceRef.value?.focusStatus();
+  loadingInstanceText.value = element ? `聚焦: ${element.getAttribute("role") || element.tagName.toLowerCase()}` : "未找到状态容器";
+};
 
 const triggerGlobalLoading = () => {
   showLoading("正在同步组件状态...");
@@ -36,7 +58,30 @@ onBeforeUnmount(() => {
           <BaseLoading type="dots" size="lg" text="处理中" surface="plain" min-height="180px" />
         </BasePanel>
         <BasePanel title="Skeleton" subtitle="块状内容预占，可配置行数。">
-          <BaseLoading type="skeleton" text="正在载入详情" surface="muted" bordered :skeleton-lines="5" min-height="180px" />
+          <div class="loading-instance-stack">
+            <BaseLoading
+              ref="loadingInstanceRef"
+              data-native-loading-ref="base-loading-instance"
+              type="skeleton"
+              text="正在载入详情"
+              surface="muted"
+              bordered
+              :skeleton-lines="5"
+              min-height="180px"
+            />
+            <div class="loading-instance-panel">
+              <div class="loading-instance-copy">
+                <BaseIcon name="Workflow" size="14" aria-hidden="true" />
+                <span>实例能力</span>
+                <strong>{{ loadingInstanceText }}</strong>
+              </div>
+              <div class="loading-instance-actions">
+                <BaseButton size="xs" type="secondary" outline @click="readLoadingElement">读取 DOM</BaseButton>
+                <BaseButton size="xs" type="secondary" outline @click="readLoadingIndicator">读取指示器</BaseButton>
+                <BaseButton size="xs" type="secondary" outline @click="focusLoadingStatus">聚焦状态</BaseButton>
+              </div>
+            </div>
+          </div>
         </BasePanel>
       </div>
     </PlaygroundDemoSection>
@@ -88,6 +133,33 @@ onBeforeUnmount(() => {
             <BaseLoading type="skeleton" text="静态骨架" :skeleton-lines="3" :animated="false" surface="card" bordered compact />
           </div>
         </BasePanel>
+        <BasePanel title="Element Plus 底座" subtitle="Spinner 与 Skeleton 继续走稳定原生能力，外层保持项目视觉。">
+          <div class="loading-inline-demo">
+            <BaseLoading
+              type="spinner"
+              text="原生 Loading 图标"
+              description="默认旋转图标来自 @element-plus/icons-vue。"
+              indicator-label="Element Plus Loading"
+              direction="horizontal"
+              wrap-text
+              compact
+              surface="muted"
+              bordered
+            />
+            <BaseLoading
+              type="skeleton"
+              text="骨架节流"
+              description="透传 Skeleton throttle，避免快速切换时闪动。"
+              :skeleton-lines="3"
+              skeleton-variant="text"
+              :skeleton-throttle="240"
+              wrap-text
+              surface="card"
+              bordered
+              compact
+            />
+          </div>
+        </BasePanel>
       </div>
     </PlaygroundDemoSection>
 
@@ -112,6 +184,26 @@ onBeforeUnmount(() => {
 
 .loading-grid {
   @apply grid min-w-0 gap-4 lg:grid-cols-2 xl:grid-cols-4;
+}
+
+.loading-instance-stack {
+  @apply grid min-w-0 gap-3;
+}
+
+.loading-instance-panel {
+  @apply flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-950;
+}
+
+.loading-instance-copy {
+  @apply flex min-w-0 items-center gap-2 text-[11px] font-black text-slate-500 dark:text-slate-400;
+}
+
+.loading-instance-copy strong {
+  @apply min-w-0 truncate text-slate-800 dark:text-slate-100;
+}
+
+.loading-instance-actions {
+  @apply flex shrink-0 flex-wrap items-center gap-2;
 }
 
 .size-row {

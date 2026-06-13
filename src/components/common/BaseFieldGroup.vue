@@ -1,6 +1,11 @@
 <script setup lang="ts">
-import { computed, ref, useId, watch } from "vue";
+import { computed, ref, useAttrs, useId, watch } from "vue";
 import { useI18n } from "../../composables/useI18n";
+import { getElementPlusControlRoot, type ElementPlusControlRef } from "./elementPlusDom";
+
+defineOptions({
+  inheritAttrs: false,
+});
 
 type FieldGroupSize = "sm" | "md" | "lg";
 type FieldGroupLevel = 2 | 3 | 4 | 5 | 6;
@@ -73,7 +78,9 @@ const emit = defineEmits<{
   (e: "toggle", value: boolean): void;
 }>();
 
+const attrs = useAttrs();
 const { t } = useI18n();
+const cardRef = ref<ElementPlusControlRef>(null);
 const groupId = useId();
 const titleId = `${groupId}-title`;
 const descriptionId = `${groupId}-description`;
@@ -91,11 +98,27 @@ const resolvedBodyLabel = computed(() => props.bodyLabel || `${props.title || pr
 const resolvedFooterLabel = computed(() => props.footerLabel || `${props.title || props.ariaLabel || "字段分组"} 页脚`);
 const resolvedLoadingText = computed(() => props.loadingText || t("common.loading"));
 
-const toggleCollapsed = () => {
+const setCollapsed = (value: boolean) => {
   if (!props.collapsible || isDisabled.value) return;
-  localCollapsed.value = !localCollapsed.value;
+  if (localCollapsed.value === value) return;
+  localCollapsed.value = value;
   emit("update:collapsed", localCollapsed.value);
   emit("toggle", localCollapsed.value);
+};
+
+const toggleCollapsed = () => {
+  setCollapsed(!localCollapsed.value);
+  return localCollapsed.value;
+};
+
+const expand = () => {
+  setCollapsed(false);
+  return localCollapsed.value;
+};
+
+const collapse = () => {
+  setCollapsed(true);
+  return localCollapsed.value;
 };
 
 watch(
@@ -104,10 +127,23 @@ watch(
     localCollapsed.value = value;
   }
 );
+
+const getElement = () => getElementPlusControlRoot(cardRef.value);
+
+defineExpose({
+  expand,
+  collapse,
+  toggleCollapsed,
+  getNativeCard: () => cardRef.value,
+  getElement,
+  getCardElement: getElement,
+});
 </script>
 
 <template>
   <el-card
+    v-bind="attrs"
+    ref="cardRef"
     class="base-field-group"
     shadow="never"
     :body-style="cardBodyStyle"

@@ -1,8 +1,12 @@
 <script setup lang="ts">
+import { ref } from "vue";
 import { useToast } from "../../../../../composables/useToast";
+import BaseActionMenu from "../../../../../components/common/BaseActionMenu.vue";
 import PlaygroundDemoSection from "../../PlaygroundDemoSection.vue";
 
 const { triggerToast } = useToast();
+const instanceActionMenuRef = ref<InstanceType<typeof BaseActionMenu> | null>(null);
+const actionMenuMethodText = ref("等待实例方法触发");
 
 const actionMenuItems = [
   { key: "copy", label: "复制名称", description: "写入剪贴板。", icon: "Copy", shortcut: "Ctrl C" },
@@ -62,6 +66,22 @@ const statusActionMenuItems = [
   { key: "syncing", label: "同步中", description: "异步动作执行期间保持可见但不可点击。", icon: "RefreshCw", loading: true, meta: "保存" },
   { key: "readonly", label: "只读模式", description: "权限不足时禁用入口。", icon: "Lock", disabled: true },
 ];
+
+const openActionMenuViaRef = () => {
+  actionMenuMethodText.value = "通过 open() 打开菜单";
+  instanceActionMenuRef.value?.open();
+};
+
+const readActionMenuElement = () => {
+  actionMenuMethodText.value = instanceActionMenuRef.value?.getElement()
+    ? "已读取菜单触发根节点"
+    : "菜单触发根节点尚未挂载";
+};
+
+const closeActionMenuViaRef = () => {
+  actionMenuMethodText.value = "通过 close() 关闭菜单";
+  instanceActionMenuRef.value?.close();
+};
 </script>
 
 <template>
@@ -107,9 +127,33 @@ const statusActionMenuItems = [
         </BasePanel>
 
         <BasePanel title="状态菜单" subtitle="支持当前项、元信息和加载中的异步动作。">
-          <div class="action-row">
-            <BaseActionMenu :actions="statusActionMenuItems" label="视图状态" align="left" @select="triggerToast(`状态菜单：${$event.label}`, 'info')" />
-            <BaseActionMenu :actions="statusActionMenuItems" icon="ListChecks" aria-label="状态更多操作" />
+          <div class="action-menu-instance">
+            <div class="action-row">
+              <BaseActionMenu
+                ref="instanceActionMenuRef"
+                data-native-action-menu-ref="base-action-menu-instance"
+                :actions="statusActionMenuItems"
+                label="视图状态"
+                align="left"
+                @select="triggerToast(`状态菜单：${$event.label}`, 'info')"
+              />
+              <BaseActionMenu :actions="statusActionMenuItems" icon="ListChecks" aria-label="状态更多操作" />
+              <BaseActionMenu
+                :actions="statusActionMenuItems"
+                label="悬停菜单"
+                trigger="hover"
+                :show-arrow="true"
+                popper-class="action-menu-demo-popper"
+              />
+            </div>
+            <div class="action-menu-instance__footer">
+              <BaseBadge type="neutral" variant="outline">{{ actionMenuMethodText }}</BaseBadge>
+              <div class="action-row">
+                <BaseButton type="neutral" size="sm" outline @click="openActionMenuViaRef">实例打开</BaseButton>
+                <BaseButton type="neutral" size="sm" outline @click="readActionMenuElement">读取 DOM</BaseButton>
+                <BaseButton type="neutral" size="sm" outline @click="closeActionMenuViaRef">实例关闭</BaseButton>
+              </div>
+            </div>
           </div>
         </BasePanel>
 
@@ -148,6 +192,14 @@ const statusActionMenuItems = [
   @apply flex min-w-0 flex-wrap items-center gap-2;
 }
 
+.action-menu-instance {
+  @apply flex min-w-0 flex-col gap-3;
+}
+
+.action-menu-instance__footer {
+  @apply flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-slate-50 p-2 dark:border-slate-800 dark:bg-slate-950;
+}
+
 .action-edge-demo {
   @apply flex min-h-[220px] flex-col justify-between rounded-lg border border-dashed border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950;
 }
@@ -166,5 +218,9 @@ const statusActionMenuItems = [
 
 .action-clip-demo__bar {
   @apply mb-3 flex min-w-0 items-center justify-between gap-3;
+}
+
+:global(.action-menu-demo-popper .el-dropdown-menu) {
+  min-width: 210px;
 }
 </style>

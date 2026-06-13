@@ -1,7 +1,12 @@
 <script setup lang="ts">
-import { computed, ref, useId, watch } from "vue";
+import { computed, ref, useAttrs, useId, watch } from "vue";
 import { useI18n } from "../../composables/useI18n";
 import { createLineClampStyle } from "../../utils";
+import { getElementPlusControlRoot, type ElementPlusControlRef } from "./elementPlusDom";
+
+defineOptions({
+  inheritAttrs: false,
+});
 
 type AlertType = "info" | "success" | "warning" | "danger";
 type AlertVariant = "soft" | "solid" | "plain" | "outline";
@@ -68,7 +73,9 @@ const emit = defineEmits<{
   (e: "close"): void;
 }>();
 
+const attrs = useAttrs();
 const visible = ref(props.modelValue);
+const alertRef = ref<ElementPlusControlRef>(null);
 const { t } = useI18n();
 const alertId = useId();
 const titleId = computed(() => `${alertId}-title`);
@@ -114,12 +121,23 @@ const close = () => {
   emit("update:modelValue", false);
   emit("close");
 };
+
+const getElement = () => getElementPlusControlRoot(alertRef.value);
+
+defineExpose({
+  close,
+  getNativeAlert: () => alertRef.value,
+  getElement,
+  getAlertElement: getElement,
+});
 </script>
 
 <template>
   <Transition name="base-alert">
     <el-alert
       v-if="visible"
+      v-bind="attrs"
+      ref="alertRef"
       class="base-alert"
       :class="[
         `base-alert--${type}`,

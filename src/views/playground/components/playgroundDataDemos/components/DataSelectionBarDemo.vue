@@ -1,20 +1,59 @@
 <script setup lang="ts">
 import { ref } from "vue";
+import BaseSelectionBar from "../../../../../components/common/BaseSelectionBar.vue";
 import PlaygroundDemoSection from "../../PlaygroundDemoSection.vue";
 
 const selectionCount = ref(3);
+const selectionInstanceText = ref("等待实例操作");
+const selectionInstanceRef = ref<InstanceType<typeof BaseSelectionBar> | null>(null);
+
+const readSelectionElement = () => {
+  const element = selectionInstanceRef.value?.getElement();
+  selectionInstanceText.value = element ? `DOM: ${element.tagName.toLowerCase()}.${element.classList[0] || "root"}` : "未读取到 DOM";
+};
+
+const focusSelectionClear = () => {
+  const element = selectionInstanceRef.value?.focusClearButton();
+  selectionInstanceText.value = element ? "已聚焦清空按钮" : "清空按钮不可用";
+};
+
+const clearSelectionByRef = () => {
+  selectionInstanceRef.value?.clear();
+  selectionInstanceText.value = "已通过实例清空选择";
+};
 </script>
 
 <template>
   <section class="detail-stack">
     <PlaygroundDemoSection title="批量操作栏" subtitle="表格、多选列表和文件管理都可以直接复用。" icon="ListChecks">
       <div class="demo-grid">
-        <BaseSelectionBar :count="selectionCount" description="批量动作 and 已选上下文固定在同一处。" actions-label="已选组件批量操作" @clear="selectionCount = 0">
+        <BaseSelectionBar
+          ref="selectionInstanceRef"
+          data-native-selection-bar-ref="base-selection-bar-instance"
+          :count="selectionCount"
+          description="批量动作 and 已选上下文固定在同一处。"
+          actions-label="已选组件批量操作"
+          @clear="selectionCount = 0"
+        >
           <template #default="{ interactiveDisabled }">
             <BaseButton type="neutral" size="sm" :disabled="interactiveDisabled">批量归档</BaseButton>
             <BaseButton type="danger" size="sm" outline :disabled="interactiveDisabled">删除</BaseButton>
           </template>
         </BaseSelectionBar>
+
+        <BasePanel title="实例能力" subtitle="批量操作栏可以读取根节点、聚焦清空按钮和触发清空。">
+          <div class="selection-instance-panel">
+            <div class="selection-instance-copy">
+              <BaseIcon name="Workflow" size="14" aria-hidden="true" />
+              <span>{{ selectionInstanceText }}</span>
+            </div>
+            <div class="selection-instance-actions">
+              <BaseButton size="xs" type="secondary" outline @click="readSelectionElement">DOM</BaseButton>
+              <BaseButton size="xs" type="secondary" outline @click="focusSelectionClear">聚焦清空</BaseButton>
+              <BaseButton size="xs" type="secondary" outline @click="clearSelectionByRef">清空</BaseButton>
+            </div>
+          </div>
+        </BasePanel>
 
         <BaseSelectionBar :count="0" compact description="没有选中项时清空按钮自动禁用。" surface="muted" />
 
@@ -107,5 +146,21 @@ const selectionCount = ref(3);
 
 .selection-pressure-box {
   @apply max-w-[320px] min-w-0;
+}
+
+.selection-instance-panel {
+  @apply flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-950;
+}
+
+.selection-instance-copy {
+  @apply flex min-w-0 items-center gap-2 text-[11px] font-black text-slate-500 dark:text-slate-400;
+}
+
+.selection-instance-copy span {
+  @apply min-w-0 truncate;
+}
+
+.selection-instance-actions {
+  @apply flex shrink-0 flex-wrap items-center gap-2;
 }
 </style>

@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUpdated, ref } from "vue";
+import { computed, nextTick, onMounted, onUpdated, ref, useAttrs } from "vue";
+import type { InputNumberInstance } from "element-plus";
 import { LoaderCircle } from "lucide-vue-next";
 import { useI18n } from "../../composables/useI18n";
 import {
@@ -12,6 +13,10 @@ import {
   parseFormattedNumber,
 } from "../../utils";
 import { toElementPlusSize, type ProjectControlSize } from "./elementPlusDom";
+
+defineOptions({
+  inheritAttrs: false,
+});
 
 type NumberInputAlign = "left" | "center" | "right";
 type NumberInputControlsPosition = "" | "right";
@@ -48,6 +53,7 @@ interface Props {
   ariaDescribedby?: string;
   decrementLabel?: string;
   incrementLabel?: string;
+  validateEvent?: boolean;
   size?: ProjectControlSize;
   block?: boolean;
 }
@@ -81,6 +87,7 @@ const props = withDefaults(defineProps<Props>(), {
   ariaDescribedby: "",
   decrementLabel: "",
   incrementLabel: "",
+  validateEvent: false,
   size: "md",
   block: false,
 });
@@ -96,8 +103,9 @@ const emit = defineEmits<{
 }>();
 
 const { t } = useI18n();
-type NumberControlRef = HTMLElement | { $el?: Element | null } | null;
+type NumberControlRef = InputNumberInstance | HTMLElement | { $el?: Element | null } | null;
 const numberControlRef = ref<NumberControlRef>(null);
+const attrs = useAttrs();
 
 const isReadonly = computed(() => props.readonly || props.disabled || props.loading);
 const resolvedLoadingText = computed(() => props.loadingText || t("common.loading"));
@@ -111,6 +119,11 @@ const normalizedMax = computed(() => Math.max(rawMin.value, rawMax.value));
 const normalizedStep = computed(() => normalizeNumberStep(props.step));
 const normalizedPrecision = computed(() => Math.max(props.precision, getNumberPrecision(normalizedStep.value)));
 const elementSize = computed(() => toElementPlusSize(props.size));
+const rootClass = computed(() => attrs.class);
+const rootStyle = computed(() => attrs.style);
+const inputNumberPassthroughAttrs = computed(() =>
+  Object.fromEntries(Object.entries(attrs).filter(([key]) => key !== "class" && key !== "style"))
+);
 
 const clamp = (nextValue: number) => {
   return clampNumber(nextValue, normalizedMin.value, normalizedMax.value, 0, normalizedPrecision.value);
@@ -186,6 +199,8 @@ const getNumberElement = () => {
   return current.$el instanceof HTMLElement ? current.$el : null;
 };
 
+const getNativeInput = () => getNumberElement()?.querySelector<HTMLInputElement>("input") ?? null;
+
 const setOptionalAttribute = (element: HTMLElement, name: string, value?: string | null) => {
   if (value) {
     element.setAttribute(name, value);
@@ -232,6 +247,15 @@ onMounted(() => {
 onUpdated(() => {
   void syncNumberInputDom();
 });
+
+defineExpose({
+  getNativeInputNumber: () => numberControlRef.value,
+  getElement: getNumberElement,
+  getInputElement: getNativeInput,
+  focus: () => getNativeInput()?.focus(),
+  blur: () => getNativeInput()?.blur(),
+  select: () => getNativeInput()?.select(),
+});
 </script>
 
 <template>
@@ -250,14 +274,17 @@ onUpdated(() => {
         'base-number-input--block': block,
         'base-number-input--no-controls': !controls,
         'base-number-input--controls-right': controls && controlsPosition === 'right'
-      }
+      },
+      rootClass
     ]"
+    :style="rootStyle"
     role="group"
     :aria-disabled="resolvedAriaDisabled"
     :aria-readonly="resolvedAriaReadonly"
     :aria-busy="loading ? 'true' : undefined"
   >
     <el-input-number
+      v-bind="inputNumberPassthroughAttrs"
       :id="id || undefined"
       ref="numberControlRef"
       :name="name || undefined"
@@ -280,7 +307,7 @@ onUpdated(() => {
       :formatter="formatText"
       :parser="parseInput"
       :placeholder="placeholder || t('common.inputPlaceholder')"
-      :validate-event="false"
+      :validate-event="validateEvent"
       :aria-label="ariaLabelledby ? undefined : resolvedAriaLabel"
       :tabindex="0"
       @update:model-value="handleValueUpdate"

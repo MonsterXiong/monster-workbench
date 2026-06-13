@@ -1,9 +1,11 @@
 <script setup lang="ts">
+import type { InputInstance } from "element-plus";
+import type { StyleValue } from "vue";
 import { computed, ref, useAttrs, watchEffect } from "vue";
 import { useI18n } from "../../composables/useI18n";
 import BaseIcon from "./BaseIcon.vue";
 import { omit } from "../../utils";
-import { syncElementPlusClearButtonLabel, toElementPlusSize, type ProjectControlSize } from "./elementPlusDom";
+import { getElementPlusControlRoot, syncElementPlusClearButtonLabel, toElementPlusSize, type ProjectControlSize } from "./elementPlusDom";
 
 defineOptions({
   inheritAttrs: false,
@@ -19,13 +21,23 @@ interface Props {
   size?: ProjectControlSize;
   clearable?: boolean;
   maxlength?: string | number;
+  minlength?: string | number;
   showWordLimit?: boolean;
+  wordLimitPosition?: "inside" | "outside";
   autocomplete?: string;
+  inputmode?: "none" | "text" | "decimal" | "numeric" | "tel" | "search" | "email" | "url";
   prefixIcon?: string;
   suffixIcon?: string;
   loading?: boolean;
   loadingText?: string;
   showPassword?: boolean;
+  formatter?: (value: string) => string;
+  parser?: (value: string) => string;
+  inputStyle?: StyleValue;
+  autofocus?: boolean;
+  containerRole?: string;
+  validateEvent?: boolean;
+  countGraphemes?: (value: string) => number;
   block?: boolean;
   clearText?: string;
   ariaLabel?: string;
@@ -40,13 +52,23 @@ const props = withDefaults(defineProps<Props>(), {
   size: "md",
   clearable: false,
   maxlength: undefined,
+  minlength: undefined,
   showWordLimit: false,
+  wordLimitPosition: "inside",
   autocomplete: "off",
+  inputmode: undefined,
   prefixIcon: "",
   suffixIcon: "",
   loading: false,
   loadingText: "",
   showPassword: false,
+  formatter: undefined,
+  parser: undefined,
+  inputStyle: undefined,
+  autofocus: false,
+  containerRole: "",
+  validateEvent: false,
+  countGraphemes: undefined,
   block: false,
   clearText: "",
   ariaLabel: "",
@@ -66,8 +88,7 @@ const emit = defineEmits<{
 
 const attrs = useAttrs();
 const { t } = useI18n();
-type InputRef = HTMLElement | { $el?: Element | null } | null;
-const inputRef = ref<InputRef>(null);
+const inputRef = ref<InputInstance | null>(null);
 
 const filteredAttrs = computed(() => {
   return omit(attrs, ["size", "type"]);
@@ -97,6 +118,35 @@ watchEffect(() => {
   void resolvedClearText.value;
   void syncClearButtonLabel();
 });
+
+const getElement = () => getElementPlusControlRoot(inputRef.value);
+const getInputElement = () => getElement()?.querySelector<HTMLInputElement>("input") ?? null;
+const focus = () => {
+  inputRef.value?.focus?.();
+  return getInputElement();
+};
+const blur = () => {
+  inputRef.value?.blur?.();
+  return getInputElement();
+};
+const select = () => {
+  inputRef.value?.select?.();
+  return getInputElement();
+};
+const clear = () => {
+  inputRef.value?.clear?.();
+  return getInputElement();
+};
+
+defineExpose({
+  focus,
+  blur,
+  select,
+  clear,
+  getNativeInput: () => inputRef.value,
+  getElement,
+  getInputElement,
+});
 </script>
 
 <template>
@@ -114,10 +164,19 @@ watchEffect(() => {
     :size="elSize"
     :clearable="canClear"
     :maxlength="maxlength"
+    :minlength="minlength"
     :show-word-limit="showWordLimit"
+    :word-limit-position="wordLimitPosition"
     :show-password="showPassword"
     :autocomplete="autocomplete"
-    :validate-event="false"
+    :inputmode="inputmode"
+    :formatter="formatter"
+    :parser="parser"
+    :input-style="inputStyle"
+    :autofocus="autofocus"
+    :container-role="containerRole || undefined"
+    :validate-event="validateEvent"
+    :count-graphemes="countGraphemes"
     :class="[
       'base-input',
       `base-input--${size}`,

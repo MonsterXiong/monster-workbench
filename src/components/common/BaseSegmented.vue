@@ -1,9 +1,14 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUpdate, ref, useId } from "vue";
+import type { SegmentedInstance } from "element-plus";
+import { computed, nextTick, onBeforeUpdate, ref, useAttrs, useId } from "vue";
 import type { ComponentPublicInstance } from "vue";
-import { filterByFalsyValue, findByValue, findIndexByValue, findNextCircularItem, firstItem, getBoundaryItem, getKeyboardBoundaryPosition, getKeyboardNavigationDirection } from "../../utils";
+import { filterByFalsyValue, findByValue, findIndexByValue, findNextCircularItem, firstItem, getBoundaryItem, getKeyboardBoundaryPosition, getKeyboardNavigationDirection, omit } from "../../utils";
 import BaseIcon from "./BaseIcon.vue";
-import { toElementPlusSize, type ProjectControlSize } from "./elementPlusDom";
+import { getElementPlusControlRoot, toElementPlusSize, type ProjectControlSize } from "./elementPlusDom";
+
+defineOptions({
+  inheritAttrs: false,
+});
 
 export interface SegmentedOption {
   label: string;
@@ -29,6 +34,7 @@ interface Props {
   error?: boolean;
   success?: boolean;
   loadingText?: string;
+  validateEvent?: boolean;
   ariaLabel?: string;
   ariaLabelledby?: string;
   ariaDescribedby?: string;
@@ -47,6 +53,7 @@ const props = withDefaults(defineProps<Props>(), {
   error: false,
   success: false,
   loadingText: "",
+  validateEvent: false,
   ariaLabel: "",
   ariaLabelledby: "",
   ariaDescribedby: "",
@@ -60,11 +67,15 @@ const emit = defineEmits<{
   (e: "keydown", value: KeyboardEvent): void;
 }>();
 
+const attrs = useAttrs();
 const groupId = useId();
+const nativeSegmentedRef = ref<SegmentedInstance | null>(null);
+const customSegmentedRef = ref<HTMLElement | null>(null);
 const optionRefs = ref<Array<HTMLButtonElement | null>>([]);
 const isReadonly = computed(() => props.disabled || props.readonly || props.loading);
 const usesNativeSegmented = computed(() => !props.detailed && !props.wrap && !props.readonly && !props.loading);
 const enabledOptions = computed(() => filterByFalsyValue(props.options, (option) => option.disabled));
+const rootAttrs = computed(() => omit(attrs, ["class", "style"]));
 const focusableValue = computed(() => {
   if (props.disabled || props.loading || !enabledOptions.value.length) return undefined;
   return findByValue(enabledOptions.value, (option) => option.value, props.modelValue)?.value ?? firstItem(enabledOptions.value)?.value;
@@ -89,9 +100,19 @@ const setOptionRef = (element: Element | ComponentPublicInstance | null, index: 
 
 const focusOptionByValue = async (value: string | number) => {
   const optionIndex = findIndexByValue(props.options, (option) => option.value, value);
-  if (optionIndex < 0) return;
+  if (optionIndex < 0) return null;
   await nextTick();
-  optionRefs.value[optionIndex]?.focus();
+  const customOption = optionRefs.value[optionIndex];
+  if (customOption) {
+    customOption.focus();
+    return customOption;
+  }
+
+  const nativeRoot = getElementPlusControlRoot(nativeSegmentedRef.value);
+  const nativeItems = nativeRoot ? Array.from(nativeRoot.querySelectorAll<HTMLElement>(".el-segmented__item")) : [];
+  const nativeOption = nativeItems[optionIndex] ?? null;
+  nativeOption?.focus();
+  return nativeOption;
 };
 
 const selectOption = (option: SegmentedOption) => {
@@ -163,14 +184,31 @@ const iconSize = computed(() => {
 const optionLabelId = (index: number) => `${groupId}-label-${index}`;
 const optionDescriptionId = (index: number) => `${groupId}-description-${index}`;
 const optionButtonId = (index: number) => `${groupId}-option-${index}`;
+const getElement = () => getElementPlusControlRoot(nativeSegmentedRef.value) ?? customSegmentedRef.value;
+const focusCurrentOption = () => focusOptionByValue(props.modelValue);
+const focusFirstOption = () => {
+  const firstEnabled = enabledOptions.value[0];
+  return firstEnabled ? focusOptionByValue(firstEnabled.value) : Promise.resolve(null);
+};
+
+defineExpose({
+  focusOptionByValue,
+  focusCurrentOption,
+  focusFirstOption,
+  getNativeSegmented: () => nativeSegmentedRef.value,
+  getElement,
+});
 </script>
 
 <template>
   <el-segmented
     v-if="usesNativeSegmented"
+    v-bind="rootAttrs"
+    ref="nativeSegmentedRef"
     :id="id || undefined"
     class="base-segmented base-segmented--native"
     :class="[
+      attrs.class,
       `base-segmented--${size}`,
       {
         'base-segmented--disabled': disabled,
@@ -180,13 +218,14 @@ const optionButtonId = (index: number) => `${groupId}-option-${index}`;
         'base-segmented--success': success
       }
     ]"
+    :style="attrs.style"
     :model-value="currentValue"
     :options="options"
     :props="nativeSegmentedProps"
     :block="block"
     :size="elementSize"
     :disabled="disabled"
-    :validate-event="false"
+    :validate-event="validateEvent"
     :aria-label="ariaLabelledby ? undefined : ariaLabel || undefined"
     :aria-labelledby="ariaLabelledby || undefined"
     :aria-describedby="ariaDescribedby || undefined"
@@ -209,9 +248,12 @@ const optionButtonId = (index: number) => `${groupId}-option-${index}`;
 
   <div
     v-else
+    v-bind="rootAttrs"
+    ref="customSegmentedRef"
     :id="id || undefined"
     class="base-segmented"
     :class="[
+      attrs.class,
       `base-segmented--${size}`,
       {
         'base-segmented--disabled': disabled,
@@ -225,6 +267,7 @@ const optionButtonId = (index: number) => `${groupId}-option-${index}`;
         'base-segmented--success': success
       }
     ]"
+    :style="attrs.style"
     role="radiogroup"
     :aria-label="ariaLabelledby ? undefined : ariaLabel || undefined"
     :aria-labelledby="ariaLabelledby || undefined"

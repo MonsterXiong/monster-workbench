@@ -13,8 +13,10 @@ const scrollTab = ref("assets");
 const customTab = ref("preview");
 const dynamicTab = ref("draft");
 const verticalTab = ref("profile");
+const nativeEventTab = ref("preview");
 const guardLocked = ref(true);
 const nextDynamicIndex = ref(3);
+const nativeEventText = ref("等待标签事件");
 
 const tabs = [
   { key: "overview", title: "概览", icon: "LayoutDashboard", badge: "New", badgeColor: "bg-primary text-white" },
@@ -49,6 +51,12 @@ const customTabs = [
   { key: "preview", title: "预览", icon: "Monitor", badge: "Live", badgeColor: "bg-emerald-500 text-white" },
   { key: "schema", title: "结构", icon: "Braces", badge: "JSON" },
   { key: "history", title: "历史", icon: "History" },
+];
+
+const nativeEventTabs = [
+  { key: "preview", title: "预览", icon: "Monitor", lazy: false },
+  { key: "schema", title: "结构", icon: "Braces", lazy: false },
+  { key: "history", title: "历史", icon: "History", lazy: false },
 ];
 
 const dynamicTabs = ref([
@@ -98,6 +106,14 @@ const guardBeforeLeave = (newKey: string | number, oldKey: string | number) => {
     return false;
   }
   return true;
+};
+
+const handleNativeTabClick = (payload: { key?: string | number; tab?: { title: string } }) => {
+  nativeEventText.value = `tab-click：${payload.tab?.title || payload.key || "未知"}`;
+};
+
+const handleNativeTabChange = (payload: { key: string | number; tab: { title: string } }) => {
+  nativeEventText.value = `tab-change：${payload.tab.title}`;
 };
 </script>
 
@@ -172,6 +188,29 @@ const guardBeforeLeave = (newKey: string | number, oldKey: string | number) => {
               :items="[
                 { key: 'count', label: '标签数量', value: `${dynamicTabs.length}`, status: 'primary' },
                 { key: 'mode', label: 'Element Plus', value: 'editable / closable' },
+              ]"
+              compact
+            />
+          </BaseDataState>
+        </BasePanel>
+
+        <BasePanel title="原生事件" subtitle="tab-click / tab-change 事件透出给业务侧，仍保留 BaseTab 的统一样式。">
+          <BaseTab
+            v-model="nativeEventTab"
+            :tabs="nativeEventTabs"
+            surface="muted"
+            full-width
+            :lazy="false"
+            :tabindex="0"
+            aria-label="原生事件标签页"
+            @tab-click="handleNativeTabClick"
+            @tab-change="handleNativeTabChange"
+          />
+          <BaseDataState class="mt-4" state="ready" title="事件输出" :description="nativeEventText">
+            <BaseDescriptionList
+              :items="[
+                { key: 'active', label: '当前项', value: nativeEventTab, status: 'primary' },
+                { key: 'event', label: '透传事件', value: 'tab-click / tab-change' },
               ]"
               compact
             />

@@ -1,6 +1,12 @@
 <script setup lang="ts">
-import { computed, getCurrentInstance, ref, useSlots, watch } from "vue";
-import { clampNumberToBounds, createDomId, formatCssPixelValue, toNonNegativeNumber } from "../../utils";
+import type { TooltipInstance } from "element-plus";
+import type { CSSProperties, StyleValue } from "vue";
+import { computed, getCurrentInstance, ref, useAttrs, useSlots, watch } from "vue";
+import { clampNumberToBounds, createDomId, formatCssPixelValue, omit, toNonNegativeNumber } from "../../utils";
+
+defineOptions({
+  inheritAttrs: false,
+});
 
 type TooltipPlacement =
   | "auto"
@@ -21,6 +27,8 @@ type TooltipPlacement =
 type TooltipTrigger = "hover" | "focus" | "click" | "contextmenu";
 type TooltipEffect = "dark" | "light";
 type TooltipStrategy = "absolute" | "fixed";
+type TooltipPopperOptions = Record<string, unknown> & { modifiers?: unknown[] };
+type TooltipTriggerRef = HTMLElement | null;
 
 interface Props {
   content?: string;
@@ -43,6 +51,14 @@ interface Props {
   teleported?: boolean;
   persistent?: boolean;
   strategy?: TooltipStrategy;
+  appendTo?: string | HTMLElement;
+  popperClass?: string;
+  popperStyle?: StyleValue;
+  popperOptions?: TooltipPopperOptions;
+  transition?: string;
+  triggerKeys?: string[];
+  tabindex?: number | string;
+  manual?: boolean;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -65,18 +81,36 @@ const props = withDefaults(defineProps<Props>(), {
   teleported: true,
   persistent: false,
   strategy: "absolute",
+  appendTo: "",
+  popperClass: "",
+  popperStyle: undefined,
+  popperOptions: undefined,
+  transition: "",
+  triggerKeys: undefined,
+  tabindex: 0,
+  manual: false,
 });
 
 const emit = defineEmits<{
   (e: "update:open", value: boolean): void;
+  (e: "before-show"): void;
+  (e: "before-hide"): void;
   (e: "show"): void;
   (e: "hide"): void;
+  (e: "open"): void;
+  (e: "close"): void;
 }>();
 
 const instance = getCurrentInstance();
+const attrs = useAttrs();
 const slots = useSlots();
 const localOpen = ref(false);
+const tooltipRef = ref<TooltipInstance | null>(null);
+const triggerRef = ref<TooltipTriggerRef>(null);
 const tooltipId = createDomId("base-tooltip");
+const rootClass = computed(() => attrs.class);
+const rootStyle = computed(() => attrs.style as StyleValue | undefined);
+const tooltipPassthroughAttrs = computed(() => omit(attrs, ["class", "style"]));
 const isControlled = computed(() => Boolean(instance?.vnode.props && "open" in instance.vnode.props));
 const hasContent = computed(() => Boolean(props.content || slots.content));
 const canRender = computed(() => !props.disabled && hasContent.value);
@@ -89,6 +123,7 @@ const normalizedHideDelay = computed(() => Math.max(0, toNonNegativeNumber(props
 const normalizedAutoClose = computed(() => Math.max(0, toNonNegativeNumber(props.autoClose)));
 const normalizedTrigger = computed(() => props.trigger);
 const resolvedFallbackPlacements = computed(() => (props.fallbackPlacements.length ? props.fallbackPlacements : undefined));
+const resolvedTriggerKeys = computed(() => (props.triggerKeys?.length ? props.triggerKeys : undefined));
 const resolvedPlacement = computed(() => props.placement);
 const resolvedPopperClass = computed(() =>
   [
@@ -96,25 +131,34 @@ const resolvedPopperClass = computed(() =>
     `base-tooltip-popper--${props.effect}`,
     props.multiline ? "base-tooltip-popper--multiline" : "",
     props.showArrow ? "" : "base-tooltip-popper--no-arrow",
+    props.popperClass,
   ]
     .filter(Boolean)
     .join(" ")
 );
-const popperStyle = computed(() => ({
-  maxWidth: formatCssPixelValue(normalizedMaxWidth.value),
-}));
-const popperOptions = computed(() => ({
-  modifiers: [
-    { name: "preventOverflow", options: { padding: normalizedViewportPadding.value } },
-    {
-      name: "flip",
-      options: {
-        padding: normalizedViewportPadding.value,
-        fallbackPlacements: resolvedFallbackPlacements.value,
+const popperStyle = computed<StyleValue>(() => {
+  const baseStyle: CSSProperties = {
+    maxWidth: formatCssPixelValue(normalizedMaxWidth.value),
+  };
+  return props.popperStyle ? [baseStyle, props.popperStyle] : baseStyle;
+});
+const popperOptions = computed<TooltipPopperOptions>(() => {
+  const customModifiers = Array.isArray(props.popperOptions?.modifiers) ? props.popperOptions.modifiers : [];
+  return {
+    ...props.popperOptions,
+    modifiers: [
+      { name: "preventOverflow", options: { padding: normalizedViewportPadding.value } },
+      {
+        name: "flip",
+        options: {
+          padding: normalizedViewportPadding.value,
+          fallbackPlacements: resolvedFallbackPlacements.value,
+        },
       },
-    },
-  ],
-}));
+      ...customModifiers,
+    ],
+  };
+});
 
 const isOpen = computed(() => (isControlled.value ? Boolean(props.open) : localOpen.value) && canRender.value);
 
@@ -131,11 +175,44 @@ watch(canRender, (enabled) => {
     setOpen(false);
   }
 });
+
+const openTooltip = () => {
+  setOpen(true);
+  tooltipRef.value?.onOpen?.();
+};
+
+const closeTooltip = () => {
+  setOpen(false);
+  tooltipRef.value?.onClose?.();
+  tooltipRef.value?.hide?.();
+};
+
+const getElement = () => triggerRef.value;
+
+const focusTrigger = () => {
+  const triggerElement = getElement();
+  const focusableElement = triggerElement?.querySelector<HTMLElement>(
+    "button, [href], input, select, textarea, [tabindex]:not([tabindex='-1'])"
+  );
+  (focusableElement ?? triggerElement)?.focus();
+};
+
+defineExpose({
+  getNativeTooltip: () => tooltipRef.value,
+  getElement,
+  focusTrigger,
+  open: openTooltip,
+  close: closeTooltip,
+  updatePopper: () => tooltipRef.value?.updatePopper?.(),
+});
 </script>
 
 <template>
   <el-tooltip
+    ref="tooltipRef"
     class="base-tooltip"
+    :class="rootClass"
+    :style="rootStyle"
     :visible="isOpen"
     :content="content"
     :placement="resolvedPlacement"
@@ -156,11 +233,25 @@ watch(canRender, (enabled) => {
     :enterable="enterable"
     :strategy="strategy"
     :trigger="normalizedTrigger"
+    :append-to="appendTo || undefined"
+    :transition="transition || undefined"
+    :trigger-keys="resolvedTriggerKeys"
+    :tabindex="tabindex"
+    :manual="manual"
     @update:visible="setOpen"
+    @before-show="emit('before-show')"
+    @before-hide="emit('before-hide')"
     @show="emit('show')"
     @hide="emit('hide')"
+    @open="emit('open')"
+    @close="emit('close')"
   >
-    <span class="base-tooltip__trigger" :aria-describedby="canRender ? tooltipId : undefined">
+    <span
+      ref="triggerRef"
+      v-bind="tooltipPassthroughAttrs"
+      class="base-tooltip__trigger"
+      :aria-describedby="canRender ? tooltipId : undefined"
+    >
       <slot :tooltip-id="tooltipId" :open="isOpen"></slot>
     </span>
 

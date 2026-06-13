@@ -1,6 +1,13 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
-import { hasItem } from "../../utils";
+import type { CollapseInstance } from "element-plus";
+import type { StyleValue } from "vue";
+import { computed, ref, useAttrs, watch } from "vue";
+import { hasItem, omit } from "../../utils";
+import { getElementPlusControlRoot } from "./elementPlusDom";
+
+defineOptions({
+  inheritAttrs: false,
+});
 
 type Awaitable<T> = T | Promise<T>;
 type AccordionSize = "sm" | "md" | "lg";
@@ -59,6 +66,7 @@ const props = withDefaults(defineProps<Props>(), {
 const emit = defineEmits<{
   (e: "update:modelValue", value: string[]): void;
   (e: "change", value: string[]): void;
+  (e: "native-change", value: CollapseModelValue): void;
   (e: "toggle", payload: { key: string; expanded: boolean }): void;
 }>();
 
@@ -70,10 +78,15 @@ defineSlots<{
 
 const internalValue = ref<string[]>([...props.defaultValue]);
 const pendingToggleKey = ref("");
+const attrs = useAttrs();
+const collapseRef = ref<CollapseInstance | null>(null);
 
 const activeKeys = computed(() => props.modelValue ?? internalValue.value);
 const isExpanded = (key: string) => hasItem(activeKeys.value, key);
 const isItemDisabled = (item: AccordionItem) => Boolean(props.disabled || item.disabled);
+const rootClass = computed(() => attrs.class);
+const rootStyle = computed(() => attrs.style as StyleValue | undefined);
+const accordionPassthroughAttrs = computed(() => omit(attrs, ["class", "style", "aria-label", "aria-disabled"]));
 
 const normalizeCollapseValue = (value: CollapseModelValue): string[] => {
   const values = Array.isArray(value) ? value : [value];
@@ -103,6 +116,7 @@ const collapseValue = computed<CollapseModelValue>({
 
     emit("update:modelValue", nextValue);
     emit("change", nextValue);
+    emit("native-change", value);
     if (changedKey) {
       emit("toggle", { key: changedKey, expanded: hasItem(nextValue, changedKey) });
     }
@@ -128,13 +142,44 @@ watch(
     }
   }
 );
+
+const getElement = () => getElementPlusControlRoot(collapseRef.value);
+
+const getItemElement = (key: string) => {
+  return getElement()?.querySelector<HTMLElement>(`.base-accordion__item[data-accordion-key="${CSS.escape(key)}"]`) ?? null;
+};
+
+const focusFirstHeader = () => {
+  const target = getElement()?.querySelector<HTMLElement>(
+    ".base-accordion__item:not(.is-disabled) .el-collapse-item__header"
+  );
+  target?.focus();
+  return target ?? null;
+};
+
+const focusItemHeader = (key: string) => {
+  const target = getItemElement(key)?.querySelector<HTMLElement>(".el-collapse-item__header");
+  target?.focus();
+  return target ?? null;
+};
+
+defineExpose({
+  getNativeCollapse: () => collapseRef.value,
+  getElement,
+  getItemElement,
+  focusFirstHeader,
+  focusItemHeader,
+});
 </script>
 
 <template>
   <el-collapse
+    ref="collapseRef"
+    v-bind="accordionPassthroughAttrs"
     v-model="collapseValue"
     class="base-accordion"
     :class="[
+      rootClass,
       `base-accordion--${size}`,
       `base-accordion--${surface}`,
       {
@@ -147,6 +192,7 @@ watch(
         'is-disabled': disabled,
       },
     ]"
+    :style="rootStyle"
     :accordion="!multiple"
     :before-collapse="handleBeforeCollapse"
     :expand-icon-position="expandIconPosition"
@@ -159,6 +205,7 @@ watch(
       class="base-accordion__item"
       :class="{ 'is-disabled': isItemDisabled(item), 'is-expanded': isExpanded(item.key) }"
       :name="item.key"
+      :data-accordion-key="item.key"
       :disabled="isItemDisabled(item)"
     >
       <template #title>

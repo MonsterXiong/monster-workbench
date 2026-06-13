@@ -1,9 +1,13 @@
 <script setup lang="ts">
+import { ref } from "vue";
+import BaseCodeBlock from "../../../../../components/common/BaseCodeBlock.vue";
 import { useToast } from "../../../../../composables/useToast";
 import { joinLines } from "../../../../../utils";
 import PlaygroundDemoSection from "../../PlaygroundDemoSection.vue";
 
 const { triggerToast } = useToast();
+const codeBlockInstanceText = ref("等待实例操作");
+const codeBlockInstanceRef = ref<InstanceType<typeof BaseCodeBlock> | null>(null);
 
 const codeSnippet = `const panel = {
   component: "BaseResizablePanels",
@@ -37,6 +41,16 @@ const commandSnippet =
 const handleCopyError = () => {
   triggerToast("复制失败，请检查浏览器权限", "warning");
 };
+
+const readCodeBlockElement = () => {
+  const element = codeBlockInstanceRef.value?.getElement();
+  codeBlockInstanceText.value = element ? `DOM: ${element.tagName.toLowerCase()}.${element.classList[0] || "root"}` : "未读取到 DOM";
+};
+
+const focusCodeBlock = () => {
+  const element = codeBlockInstanceRef.value?.focusCode();
+  codeBlockInstanceText.value = element ? "已聚焦代码区" : "代码区尚未挂载";
+};
 </script>
 
 <template>
@@ -44,7 +58,15 @@ const handleCopyError = () => {
     <PlaygroundDemoSection title="代码复制" subtitle="代码片段、命令、配置预览和一键复制常常一起出现。" icon="Code2">
       <div class="demo-grid">
         <BasePanel title="配置片段" subtitle="标题、语言、行号、高亮行和内置复制。">
+          <template #actions>
+            <div class="code-instance-actions" aria-label="代码块实例方法">
+              <BaseButton size="xs" type="secondary" outline @click="readCodeBlockElement">DOM</BaseButton>
+              <BaseButton size="xs" type="secondary" outline @click="focusCodeBlock">聚焦代码</BaseButton>
+            </div>
+          </template>
           <BaseCodeBlock
+            ref="codeBlockInstanceRef"
+            data-native-code-block-ref="base-code-block-instance"
             :code="codeSnippet"
             language="ts"
             title="panel.config.ts"
@@ -54,6 +76,10 @@ const handleCopyError = () => {
             @copied="triggerToast('代码已复制', 'success')"
             @copy-error="handleCopyError"
           />
+          <div class="code-instance-copy">
+            <BaseIcon name="Workflow" size="14" aria-hidden="true" />
+            <span>{{ codeBlockInstanceText }}</span>
+          </div>
         </BasePanel>
 
         <BasePanel title="长行换行" subtitle="wrap=true 时长行不会撑出内容区域。">
@@ -151,5 +177,17 @@ const handleCopyError = () => {
 
 .copy-button-demo-row {
   @apply flex min-w-0 flex-wrap items-center gap-3;
+}
+
+.code-instance-actions {
+  @apply flex shrink-0 flex-wrap items-center gap-2;
+}
+
+.code-instance-copy {
+  @apply mt-3 flex min-w-0 items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] font-black text-slate-500 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-400;
+}
+
+.code-instance-copy span {
+  @apply min-w-0 truncate;
 }
 </style>

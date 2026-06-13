@@ -34,6 +34,10 @@ const datePresets = [
           size="lg"
           preset-mode="panel"
           unlink-panels
+          :editable="false"
+          placement="bottom-start"
+          :fallback-placements="['bottom-start', 'top-start', 'bottom-end', 'top-end']"
+          popper-class="date-range-demo-popper"
           @preset="triggerToast(`已选择：${$event.label}`, 'info')"
         />
         <BaseDateRange
@@ -63,6 +67,7 @@ const datePresets = [
           min="2026-06-01"
           max="2026-06-30"
           surface="muted"
+          range-separator="到"
         />
         <BaseDateRange
           v-model="boundaryOverflowDateRangeValue"
@@ -115,5 +120,9 @@ const datePresets = [
 
 .demo-grid {
   @apply grid gap-4 lg:grid-cols-2;
+}
+
+:global(.date-range-demo-popper .el-date-range-picker__header div) {
+  letter-spacing: 0;
 }
 </style>

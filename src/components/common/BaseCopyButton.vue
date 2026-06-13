@@ -1,8 +1,13 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref } from "vue";
+import { computed, onBeforeUnmount, ref, useAttrs } from "vue";
 import { Check, Copy, LoaderCircle, XCircle } from "lucide-vue-next";
 import { useI18n } from "../../composables/useI18n";
 import { clearTimeoutHandle, copyTextToClipboardResult, resetTimeoutHandle, toNonNegativeNumber, type TimeoutHandle } from "../../utils";
+import BaseButton from "./BaseButton.vue";
+
+defineOptions({
+  inheritAttrs: false,
+});
 
 interface Props {
   text: string;
@@ -41,7 +46,9 @@ const emit = defineEmits<{
 const copied = ref(false);
 const copying = ref(false);
 const failed = ref(false);
+const buttonRef = ref<InstanceType<typeof BaseButton> | null>(null);
 let resetTimer: TimeoutHandle | null = null;
+const attrs = useAttrs();
 const { t } = useI18n();
 
 const canCopy = computed(() => !props.disabled && !copying.value && (props.allowEmpty || props.text.length > 0));
@@ -95,6 +102,25 @@ const handleCopy = async () => {
   }
 };
 
+const getElement = () => buttonRef.value?.getElement() ?? null;
+const focus = () => buttonRef.value?.focus() ?? null;
+const click = () => {
+  buttonRef.value?.click();
+  return getElement();
+};
+
+defineExpose({
+  copy: handleCopy,
+  focus,
+  click,
+  getNativeButton: () => buttonRef.value?.getNativeButton() ?? null,
+  getElement,
+  getButtonElement: () => buttonRef.value?.getButtonElement() ?? null,
+  isCopied: () => copied.value,
+  isCopying: () => copying.value,
+  hasError: () => failed.value,
+});
+
 onBeforeUnmount(() => {
   clearTimeoutHandle(resetTimer);
   resetTimer = null;
@@ -103,6 +129,8 @@ onBeforeUnmount(() => {
 
 <template>
   <BaseButton
+    v-bind="attrs"
+    ref="buttonRef"
     class="base-copy-button"
     :class="[
       `base-copy-button--${size}`,

@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, useId, watch, watchEffect } from "vue";
+import type { DatePickerInstance } from "element-plus";
+import type { StyleValue } from "vue";
+import { computed, nextTick, ref, useAttrs, useId, watch, watchEffect } from "vue";
 import dayjs from "dayjs";
 import dayjsEnLocale from "dayjs/locale/en";
 import dayjsZhCnLocale from "dayjs/locale/zh-cn";
@@ -18,11 +20,17 @@ import {
   isEscapeKey,
   isKeyboardKey,
   isSameDateRange,
+  joinNonEmptyStrings,
   joinAriaIds,
   normalizeDateOnlyValue,
+  omit,
   parseDateOnlyValue,
 } from "../../utils";
-import { toElementPlusSize } from "./elementPlusDom";
+import { getElementPlusControlRoot, toElementPlusSize } from "./elementPlusDom";
+
+defineOptions({
+  inheritAttrs: false,
+});
 
 export interface DateRangeValue {
   start: string;
@@ -40,6 +48,19 @@ type DateRangeField = "start" | "end";
 type DateRangeSize = "sm" | "md" | "lg";
 type DateRangePresetMode = "inline" | "panel" | "both";
 type DateRangeSurface = "card" | "muted" | "plain";
+type DateRangePlacement =
+  | "top"
+  | "top-start"
+  | "top-end"
+  | "bottom"
+  | "bottom-start"
+  | "bottom-end"
+  | "left"
+  | "left-start"
+  | "left-end"
+  | "right"
+  | "right-start"
+  | "right-end";
 type DatePickerModelValue = string[] | Date[] | string | Date | number | null | undefined;
 type DatePickerShortcut = {
   text: string;
@@ -68,6 +89,14 @@ interface Props {
   singlePanel?: boolean;
   panelLabel?: string;
   firstDayOfWeek?: 0 | 1;
+  editable?: boolean;
+  validateEvent?: boolean;
+  teleported?: boolean;
+  placement?: DateRangePlacement;
+  fallbackPlacements?: DateRangePlacement[];
+  popperClass?: string;
+  popperStyle?: StyleValue;
+  rangeSeparator?: string;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -91,6 +120,14 @@ const props = withDefaults(defineProps<Props>(), {
   singlePanel: false,
   panelLabel: "",
   firstDayOfWeek: 1,
+  editable: true,
+  validateEvent: false,
+  teleported: true,
+  placement: "bottom-start",
+  fallbackPlacements: () => ["bottom-start", "top-start", "bottom-end", "top-end"],
+  popperClass: "",
+  popperStyle: undefined,
+  rangeSeparator: "",
 });
 
 const emit = defineEmits<{
@@ -101,14 +138,17 @@ const emit = defineEmits<{
   (e: "focus", field: DateRangeField, event: FocusEvent): void;
   (e: "blur", field: DateRangeField, event: FocusEvent): void;
   (e: "input", field: DateRangeField, value: string): void;
+  (e: "visible-change", value: boolean): void;
 }>();
 
 const { t, locale } = useI18n();
+const attrs = useAttrs();
 const rangeId = useId();
 const labelId = `${rangeId}-label`;
 const errorId = `${rangeId}-error`;
 const hintId = `${rangeId}-hint`;
-const pickerRef = ref<HTMLElement | { $el?: Element | null } | null>(null);
+const rootRef = ref<HTMLElement | null>(null);
+const pickerRef = ref<DatePickerInstance | null>(null);
 const inputValue = ref<DateRangeValue>({ start: props.modelValue.start, end: props.modelValue.end });
 
 const parseDateValue = parseDateOnlyValue;
@@ -196,17 +236,17 @@ const elementShortcuts = computed<DatePickerShortcut[]>(() => {
   }));
 });
 const resolvedPopperClass = computed(() =>
-  [
+  joinNonEmptyStrings([
     "base-date-range-popper",
     `base-date-range-popper--${props.size}`,
     showPanelPresets.value ? "base-date-range-popper--shortcuts" : "",
     props.singlePanel ? "base-date-range-popper--single" : "",
-  ]
-    .filter(Boolean)
-    .join(" ")
+    props.popperClass,
+  ])
 );
 const datePickerIds = computed(() => [`${rangeId}-start`, `${rangeId}-end`]);
 const datePickerNames = computed(() => [`${rangeId}-start`, `${rangeId}-end`]);
+const rootAttrs = computed(() => omit(attrs, ["class", "style"]));
 
 const disabledDate = (date: Date) => {
   return !isDateValueInRange(date, boundaryMin.value || null, boundaryMax.value || null);
@@ -282,11 +322,23 @@ const handleInputKeydown = (field: DateRangeField, event: KeyboardEvent) => {
 };
 
 const getPickerElement = () => {
-  const current = pickerRef.value;
-  if (!current) return null;
-  if (current instanceof HTMLElement) return current;
-  return current.$el instanceof HTMLElement ? current.$el : null;
+  const pickerElement = rootRef.value?.querySelector<HTMLElement>(".base-date-range__picker");
+  if (pickerElement) return pickerElement;
+
+  return getElementPlusControlRoot(pickerRef.value);
 };
+
+const focusField = async (field: DateRangeField = "start") => {
+  await nextTick();
+  const pickerElement = getPickerElement();
+  const inputs = pickerElement ? Array.from(pickerElement.querySelectorAll<HTMLInputElement>(".el-range-input")) : [];
+  const input = field === "end" ? inputs[1] : inputs[0];
+  input?.focus();
+  return input ?? null;
+};
+
+const focusStart = () => focusField("start");
+const focusEnd = () => focusField("end");
 
 const getFieldFromEvent = (event: FocusEvent): DateRangeField => {
   const target = event.target;
@@ -297,10 +349,16 @@ const getFieldFromEvent = (event: FocusEvent): DateRangeField => {
 
 const handlePickerFocus = (event: FocusEvent) => {
   emit("focus", getFieldFromEvent(event), event);
+  void syncPickerAria();
 };
 
 const handlePickerBlur = (event: FocusEvent) => {
   emit("blur", getFieldFromEvent(event), event);
+};
+
+const handlePickerVisibleChange = (visible: boolean) => {
+  emit("visible-change", visible);
+  void syncPickerAria();
 };
 
 const setOptionalAttribute = (element: HTMLElement, name: string, value?: string | null) => {
@@ -322,6 +380,12 @@ const syncPickerAria = async () => {
     setOptionalAttribute(input, "aria-invalid", resolvedError.value ? "true" : undefined);
     setOptionalAttribute(input, "aria-errormessage", resolvedError.value ? errorId : undefined);
     setOptionalAttribute(input, "aria-readonly", props.readonly ? "true" : undefined);
+  });
+  const clearButtons = pickerElement ? Array.from(pickerElement.querySelectorAll<HTMLElement>(".el-range__close-icon")) : [];
+  clearButtons.forEach((button) => {
+    setOptionalAttribute(button, "aria-label", clearLabel.value);
+    setOptionalAttribute(button, "title", clearLabel.value);
+    setOptionalAttribute(button, "role", "button");
   });
 };
 
@@ -361,27 +425,44 @@ watchEffect(() => {
   void props.showCalendar;
   void props.readonly;
   void props.disabled;
+  void props.clearable;
+  void clearLabel.value;
   void inputValue.value.start;
   void inputValue.value.end;
   void describedBy.value;
   void resolvedError.value;
   void syncPickerAria();
 });
+
+defineExpose({
+  clear,
+  focusStart,
+  focusEnd,
+  getNativeDatePicker: () => pickerRef.value,
+  getElement: () => rootRef.value,
+  getPickerElement,
+});
 </script>
 
 <template>
   <div
+    v-bind="rootAttrs"
+    ref="rootRef"
     class="base-date-range"
-    :class="{
-      'base-date-range--compact': compact,
-      [`base-date-range--${size}`]: true,
-      [`base-date-range--surface-${surface}`]: true,
-      'base-date-range--picker': showCalendar,
-      'base-date-range--manual': !showCalendar,
-      'is-disabled': disabled,
-      'is-readonly': readonly,
-      'is-error': resolvedError
-    }"
+    :class="[
+      attrs.class,
+      {
+        'base-date-range--compact': compact,
+        [`base-date-range--${size}`]: true,
+        [`base-date-range--surface-${surface}`]: true,
+        'base-date-range--picker': showCalendar,
+        'base-date-range--manual': !showCalendar,
+        'is-disabled': disabled,
+        'is-readonly': readonly,
+        'is-error': resolvedError
+      }
+    ]"
+    :style="attrs.style"
     role="group"
     :aria-labelledby="label ? labelId : undefined"
     :aria-describedby="describedBy"
@@ -421,22 +502,26 @@ watchEffect(() => {
         :disabled="disabled"
         :readonly="readonly"
         :clearable="clearable"
-        :editable="true"
+        :editable="editable"
         :disabled-date="disabledDate"
         :shortcuts="elementShortcuts"
         :unlink-panels="unlinkPanels"
         :single-panel="singlePanel"
-        :range-separator="t('common.to')"
+        :range-separator="rangeSeparator || t('common.to')"
         :start-placeholder="startPlaceholder || t('common.startDate')"
         :end-placeholder="endPlaceholder || t('common.endDate')"
         :aria-label="panelLabelText"
-        :validate-event="false"
+        :validate-event="validateEvent"
+        :teleported="teleported"
+        :placement="placement"
+        :fallback-placements="fallbackPlacements"
         :popper-class="resolvedPopperClass"
-        placement="bottom-start"
+        :popper-style="popperStyle"
         @update:model-value="handlePickerUpdate"
         @clear="clear"
         @focus="handlePickerFocus"
         @blur="handlePickerBlur"
+        @visible-change="handlePickerVisibleChange"
       />
     </el-config-provider>
 
@@ -717,16 +802,25 @@ watchEffect(() => {
 
 :global(.base-date-range-popper.el-popper) {
   --el-color-primary: rgb(var(--color-primary));
+  --el-datepicker-border-color: #e2e8f0;
+  --el-datepicker-inner-border-color: #e2e8f0;
+  --el-datepicker-hover-text-color: rgb(var(--color-primary));
+  --el-datepicker-active-color: rgb(var(--color-primary));
 }
 
 :global(.base-date-range-popper .el-date-range-picker) {
   overflow: hidden;
   border: 1px solid #e2e8f0;
-  border-radius: 16px;
+  border-radius: 18px;
   background: #ffffff;
   box-shadow:
-    0 18px 42px rgba(15, 23, 42, 0.14),
+    0 22px 48px rgba(15, 23, 42, 0.16),
     inset 0 1px 0 rgba(255, 255, 255, 0.86);
+}
+
+:global(.base-date-range-popper .el-popper__arrow::before) {
+  border-color: #e2e8f0;
+  background: #ffffff;
 }
 
 :global(.base-date-range-popper .el-picker-panel__body) {
@@ -734,7 +828,9 @@ watchEffect(() => {
 }
 
 :global(.base-date-range-popper .el-picker-panel__body-wrapper) {
-  background: linear-gradient(180deg, #ffffff, #f8fafc);
+  background:
+    linear-gradient(135deg, rgb(var(--color-primary) / 0.045), transparent 36%),
+    linear-gradient(180deg, #ffffff, #f8fafc);
 }
 
 :global(.base-date-range-popper .el-picker-panel__sidebar) {
@@ -771,7 +867,7 @@ watchEffect(() => {
 }
 
 :global(.base-date-range-popper .el-date-range-picker__content) {
-  padding: 14px;
+  padding: 16px;
 }
 
 :global(.base-date-range-popper .el-date-range-picker__content.is-left) {
@@ -806,6 +902,10 @@ watchEffect(() => {
   font-weight: 900;
 }
 
+:global(.base-date-range-popper .el-date-table td.disabled .el-date-table-cell) {
+  background: transparent;
+}
+
 :global(.base-date-range-popper .el-date-table td) {
   height: 34px;
   padding: 2px 0;
@@ -820,20 +920,25 @@ watchEffect(() => {
   border-radius: 9px;
   font-size: 12px;
   font-weight: 800;
+  transition:
+    background-color 0.16s ease,
+    color 0.16s ease,
+    box-shadow 0.16s ease;
 }
 
 :global(.base-date-range-popper .el-date-table td.available:hover .el-date-table-cell__text) {
   background: #f1f5f9;
   color: #0f172a;
+  box-shadow: inset 0 0 0 1px #e2e8f0;
 }
 
 :global(.base-date-range-popper .el-date-table td.in-range .el-date-table-cell) {
-  background: rgb(var(--color-primary) / 0.1);
+  background: rgb(var(--color-primary) / 0.095);
 }
 
 :global(.base-date-range-popper .el-date-table td.start-date .el-date-table-cell),
 :global(.base-date-range-popper .el-date-table td.end-date .el-date-table-cell) {
-  background: rgb(var(--color-primary) / 0.1);
+  background: rgb(var(--color-primary) / 0.12);
 }
 
 :global(.base-date-range-popper .el-date-table td.start-date .el-date-table-cell__text),
@@ -841,6 +946,9 @@ watchEffect(() => {
 :global(.base-date-range-popper .el-date-table td.current:not(.disabled) .el-date-table-cell__text) {
   background: rgb(var(--color-primary));
   color: #ffffff;
+  box-shadow:
+    0 8px 18px rgb(var(--color-primary) / 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.24);
 }
 
 :global(.base-date-range-popper .el-date-table td.today .el-date-table-cell__text) {
@@ -861,8 +969,15 @@ watchEffect(() => {
     inset 0 1px 0 rgba(148, 163, 184, 0.08);
 }
 
+:global(.dark .base-date-range-popper .el-popper__arrow::before) {
+  border-color: #1e293b;
+  background: #0f172a;
+}
+
 :global(.dark .base-date-range-popper .el-picker-panel__body-wrapper) {
-  background: linear-gradient(180deg, #0f172a, #020617);
+  background:
+    linear-gradient(135deg, rgb(var(--color-primary) / 0.08), transparent 38%),
+    linear-gradient(180deg, #0f172a, #020617);
 }
 
 :global(.dark .base-date-range-popper .el-picker-panel__sidebar) {

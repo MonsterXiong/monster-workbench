@@ -1,11 +1,17 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount } from "vue";
+import { computed, onBeforeUnmount, ref, useAttrs } from "vue";
 import { useMessage } from "../../composables/useMessage";
 import { useI18n } from "../../composables/useI18n";
 import BaseIcon from "./BaseIcon.vue";
 
+defineOptions({
+  inheritAttrs: false,
+});
+
 const { messages, removeMessage, clearMessages } = useMessage();
 const { t } = useI18n();
+const attrs = useAttrs();
+const rootRef = ref<HTMLElement | null>(null);
 
 onBeforeUnmount(() => {
   clearMessages();
@@ -25,10 +31,17 @@ const handleAction = (item: { id: string; onAction?: () => void }) => {
   item.onAction?.();
   removeMessage(item.id);
 };
+
+defineExpose({
+  clear: clearMessages,
+  getElement: () => rootRef.value,
+});
 </script>
 
 <template>
   <div
+    v-bind="attrs"
+    ref="rootRef"
     class="base-message"
     role="status"
     aria-live="polite"

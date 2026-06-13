@@ -1,11 +1,17 @@
 <script setup lang="ts">
-import type { FormItemProp, FormItemRule } from "element-plus";
-import { computed, useId } from "vue";
+import type { FormItemInstance, FormItemProp, FormItemRule } from "element-plus";
+import { computed, ref, useAttrs, useId } from "vue";
 import { useI18n } from "../../composables/useI18n";
 import { joinAriaIds } from "../../utils";
 
+defineOptions({
+  inheritAttrs: false,
+});
+
 type FormItemSpan = 1 | 2 | 3 | 4;
 type FormItemStatus = "" | "error" | "validating" | "success";
+type FormItemValidateTrigger = Parameters<FormItemInstance["validate"]>[0];
+type FormItemValidateCallback = Parameters<FormItemInstance["validate"]>[1];
 
 interface Props {
   label?: string;
@@ -27,6 +33,8 @@ interface Props {
   hideLabel?: boolean;
   labelAlign?: "start" | "center";
   labelWidth?: string;
+  showMessage?: boolean;
+  inlineMessage?: boolean;
   truncateLabel?: boolean;
   wrapDescription?: boolean;
   forId?: string;
@@ -54,6 +62,8 @@ const props = withDefaults(defineProps<Props>(), {
   hideLabel: false,
   labelAlign: "start",
   labelWidth: "160px",
+  showMessage: false,
+  inlineMessage: false,
   truncateLabel: false,
   wrapDescription: false,
   forId: "",
@@ -61,7 +71,9 @@ const props = withDefaults(defineProps<Props>(), {
   ariaLabel: "",
 });
 
+const attrs = useAttrs();
 const { t } = useI18n();
+const formItemRef = ref<FormItemInstance>();
 const fieldId = useId();
 const labelId = `${fieldId}-label`;
 const descriptionId = `${fieldId}-description`;
@@ -81,10 +93,26 @@ const resolvedValidateStatus = computed<FormItemStatus>(() => {
   if (props.success) return "success";
   return "";
 });
+
+const validate = (trigger: FormItemValidateTrigger = "", callback?: FormItemValidateCallback) => formItemRef.value?.validate(trigger, callback);
+const resetField = () => formItemRef.value?.resetField();
+const clearValidate = () => formItemRef.value?.clearValidate();
+const setInitialValue = (value: unknown) => formItemRef.value?.setInitialValue(value);
+
+defineExpose({
+  validate,
+  resetField,
+  clearValidate,
+  setInitialValue,
+  getNativeFormItem: () => formItemRef.value,
+  getElement: () => (formItemRef.value?.$el instanceof HTMLElement ? formItemRef.value.$el : null),
+});
 </script>
 
 <template>
   <el-form-item
+    ref="formItemRef"
+    v-bind="attrs"
     class="base-form-item"
     :class="[
       {
@@ -114,8 +142,8 @@ const resolvedValidateStatus = computed<FormItemStatus>(() => {
     :error="error || undefined"
     :validate-status="resolvedValidateStatus || undefined"
     :for="forId || undefined"
-    :show-message="false"
-    :inline-message="false"
+    :show-message="showMessage"
+    :inline-message="inlineMessage"
     :size="compact ? 'small' : undefined"
     role="group"
     :aria-label="ariaLabel || undefined"
@@ -219,6 +247,16 @@ const resolvedValidateStatus = computed<FormItemStatus>(() => {
 .base-form-item :deep(.el-form-item__content) {
   @apply min-w-0 flex-1 items-start;
   line-height: normal;
+}
+
+.base-form-item :deep(.el-form-item__error) {
+  @apply mt-1 text-xs font-bold text-red-500 dark:text-red-300;
+  position: static;
+  line-height: 1.4;
+}
+
+.base-form-item :deep(.el-form-item__error--inline) {
+  @apply ml-2 mt-0 inline-flex items-center;
 }
 
 .base-form-item :deep(.el-form-item__label-wrap) {

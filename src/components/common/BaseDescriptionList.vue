@@ -1,7 +1,12 @@
 <script setup lang="ts">
-import { computed, useSlots } from "vue";
+import { computed, ref, useAttrs, useSlots } from "vue";
 import { useI18n } from "../../composables/useI18n";
 import { clampNumber, createLineClampStyle, isEmptyArray, toIntegerAtLeast } from "../../utils";
+import { getElementPlusControlRoot, type ElementPlusControlRef } from "./elementPlusDom";
+
+defineOptions({
+  inheritAttrs: false,
+});
 
 type DescriptionStatus = "primary" | "success" | "warning" | "danger" | "neutral";
 type DescriptionDirection = "horizontal" | "vertical";
@@ -84,8 +89,11 @@ const props = withDefaults(defineProps<Props>(), {
   ariaLabel: "",
 });
 
+const attrs = useAttrs();
 const { t } = useI18n();
 const slots = useSlots();
+const rootRef = ref<HTMLElement | null>(null);
+const descriptionsRef = ref<ElementPlusControlRef>(null);
 const resolvedSize = computed(() => (props.compact ? "sm" : props.size));
 const resolvedColumns = computed(() => clampNumber(props.columns, 1, 3, 2, 0) as 1 | 2 | 3);
 const elementSize = computed(() => (resolvedSize.value === "sm" ? "small" : resolvedSize.value === "lg" ? "large" : "default"));
@@ -118,10 +126,21 @@ const getItemStatusLabel = (item: DescriptionListItem) => {
   if (!item.status) return "";
   return `${item.label}状态：${item.statusLabel || statusLabels[item.status]}`;
 };
+
+const getElement = () => rootRef.value;
+const getDescriptionsElement = () => getElementPlusControlRoot(descriptionsRef.value);
+
+defineExpose({
+  getNativeDescriptions: () => descriptionsRef.value,
+  getElement,
+  getDescriptionsElement,
+});
 </script>
 
 <template>
   <div
+    v-bind="attrs"
+    ref="rootRef"
     class="base-description-list"
     :class="[
       `base-description-list--cols-${resolvedColumns}`,
@@ -162,6 +181,7 @@ const getItemStatusLabel = (item: DescriptionListItem) => {
     </div>
 
     <el-descriptions
+      ref="descriptionsRef"
       v-else
       class="base-description-list__descriptions"
       :column="resolvedColumns"

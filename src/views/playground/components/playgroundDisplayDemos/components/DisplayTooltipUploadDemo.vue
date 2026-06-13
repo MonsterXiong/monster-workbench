@@ -1,8 +1,37 @@
 <script setup lang="ts">
 import { ref } from "vue";
+import BaseTooltip from "../../../../../components/common/BaseTooltip.vue";
 import PlaygroundDemoSection from "../../PlaygroundDemoSection.vue";
 
-const controlledTooltipOpen = ref(true);
+const controlledTooltipOpen = ref(false);
+const tooltipEventText = ref("等待事件");
+const instanceTooltipRef = ref<InstanceType<typeof BaseTooltip> | null>(null);
+const tooltipMethodText = ref("等待实例方法触发");
+
+const updateTooltipEvent = (eventName: string) => {
+  tooltipEventText.value = eventName;
+};
+
+const openTooltipViaRef = () => {
+  tooltipMethodText.value = "通过 open() 打开提示";
+  instanceTooltipRef.value?.open();
+};
+
+const readTooltipElement = () => {
+  tooltipMethodText.value = instanceTooltipRef.value?.getElement()
+    ? "已读取提示触发节点"
+    : "提示触发节点尚未挂载";
+};
+
+const updateTooltipPopper = () => {
+  tooltipMethodText.value = "已调用 updatePopper()";
+  instanceTooltipRef.value?.updatePopper();
+};
+
+const closeTooltipViaRef = () => {
+  tooltipMethodText.value = "通过 close() 关闭提示";
+  instanceTooltipRef.value?.close();
+};
 </script>
 
 <template>
@@ -102,6 +131,58 @@ const controlledTooltipOpen = ref(true);
             </BaseTooltip>
           </div>
         </BasePanel>
+
+        <BasePanel title="原生透传与实例" subtitle="补齐 appendTo、popper 样式、键盘触发、生命周期事件和公开实例方法。">
+          <div class="tooltip-native-demo">
+            <div class="tooltip-row">
+              <BaseTooltip
+                content="这个提示通过 popperClass / popperStyle 接入业务样式，同时继续保持项目主题。"
+                placement="top"
+                effect="light"
+                popper-class="base-tooltip-demo-popper"
+                :popper-style="{ maxWidth: '280px' }"
+                :trigger-keys="['Enter', 'Space']"
+                append-to="body"
+                multiline
+                @before-show="updateTooltipEvent('before-show')"
+                @show="updateTooltipEvent('show')"
+                @before-hide="updateTooltipEvent('before-hide')"
+                @hide="updateTooltipEvent('hide')"
+              >
+                <BaseButton type="primary" size="sm">事件提示</BaseButton>
+              </BaseTooltip>
+              <BaseBadge type="neutral" variant="outline">{{ tooltipEventText }}</BaseBadge>
+            </div>
+            <BaseDivider compact dashed label="实例能力" />
+            <div class="tooltip-row">
+              <BaseTooltip
+                ref="instanceTooltipRef"
+                data-native-tooltip-ref="base-tooltip-instance"
+                content="这个提示通过组件公开方法打开、更新位置和关闭。"
+                placement="bottom"
+                effect="light"
+                trigger="click"
+                :show-delay="0"
+                multiline
+              >
+                <BaseButton type="neutral" size="sm" outline>实例提示</BaseButton>
+              </BaseTooltip>
+              <BaseBadge type="neutral" variant="outline">{{ tooltipMethodText }}</BaseBadge>
+            </div>
+            <div class="tooltip-native-demo__actions">
+              <BaseButton type="neutral" size="sm" outline @click="openTooltipViaRef">实例打开</BaseButton>
+              <BaseButton type="neutral" size="sm" outline @click="readTooltipElement">读取 DOM</BaseButton>
+              <BaseButton type="neutral" size="sm" outline @click="updateTooltipPopper">更新位置</BaseButton>
+              <BaseButton type="neutral" size="sm" outline @click="closeTooltipViaRef">实例关闭</BaseButton>
+            </div>
+            <BaseAlert
+              type="info"
+              title="保持统一入口"
+              description="业务侧只使用 BaseTooltip API；定位、键盘和浮层样式由 Element Plus 底座承接。"
+              compact
+            />
+          </div>
+        </BasePanel>
       </div>
     </PlaygroundDemoSection>
   </section>
@@ -126,5 +207,18 @@ const controlledTooltipOpen = ref(true);
 
 .tooltip-narrow-demo {
   @apply w-full max-w-[180px];
+}
+
+.tooltip-native-demo {
+  @apply grid min-w-0 gap-3;
+}
+
+.tooltip-native-demo__actions {
+  @apply flex min-w-0 flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 p-2 dark:border-slate-800 dark:bg-slate-950;
+}
+
+:global(.base-tooltip-demo-popper.el-popper) {
+  border-color: rgb(var(--color-primary) / 0.2);
+  box-shadow: 0 16px 34px rgba(37, 99, 235, 0.14);
 }
 </style>

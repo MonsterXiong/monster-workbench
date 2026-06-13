@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref } from "vue";
+import BaseCommandPalette from "../../../../../components/common/BaseCommandPalette.vue";
 import { useToast } from "../../../../../composables/useToast";
 import PlaygroundDemoSection from "../../PlaygroundDemoSection.vue";
 
@@ -7,6 +8,8 @@ const { triggerToast } = useToast();
 
 const commandPaletteOpen = ref(false);
 const selectedCommand = ref("尚未选择命令");
+const commandPaletteInstanceText = ref("等待实例操作");
+const commandPaletteInstanceRef = ref<InstanceType<typeof BaseCommandPalette> | null>(null);
 
 const commandItems = [
   { key: "open-settings", label: "打开设置", description: "进入全局设置页查看主题与运行时配置。", icon: "Settings2", group: "跳转", shortcut: "Ctrl ," },
@@ -18,6 +21,11 @@ const commandItems = [
 const handleCommandSelect = (command: { label: string }) => {
   selectedCommand.value = command.label;
   triggerToast(`已选择命令：${command.label}`, "success");
+};
+
+const openCommandPaletteByRef = async () => {
+  const element = await commandPaletteInstanceRef.value?.open();
+  commandPaletteInstanceText.value = element ? `已打开: ${element.tagName.toLowerCase()}` : "未找到面板";
 };
 </script>
 
@@ -35,7 +43,20 @@ const handleCommandSelect = (command: { label: string }) => {
           <BaseBadge type="neutral">{{ selectedCommand }}</BaseBadge>
         </div>
       </BasePanel>
+      <BasePanel title="实例能力" subtitle="外部可以通过 ref 打开、关闭和聚焦搜索框。">
+        <div class="command-instance-panel">
+          <div class="command-instance-copy">
+            <BaseIcon name="Workflow" size="14" aria-hidden="true" />
+            <span>{{ commandPaletteInstanceText }}</span>
+          </div>
+          <div class="command-instance-actions">
+            <BaseButton size="xs" type="secondary" outline @click="openCommandPaletteByRef">打开</BaseButton>
+          </div>
+        </div>
+      </BasePanel>
       <BaseCommandPalette
+        ref="commandPaletteInstanceRef"
+        data-native-command-palette-ref="base-command-palette-instance"
         v-model="commandPaletteOpen"
         title="组件命令"
         placeholder="搜索组件动作"
@@ -53,5 +74,21 @@ const handleCommandSelect = (command: { label: string }) => {
 
 .action-row {
   @apply flex min-w-0 flex-wrap items-center gap-2;
+}
+
+.command-instance-panel {
+  @apply flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-950;
+}
+
+.command-instance-copy {
+  @apply flex min-w-0 items-center gap-2 text-[11px] font-black text-slate-500 dark:text-slate-400;
+}
+
+.command-instance-copy span {
+  @apply min-w-0 truncate;
+}
+
+.command-instance-actions {
+  @apply flex shrink-0 flex-wrap items-center gap-2;
 }
 </style>

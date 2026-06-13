@@ -1,7 +1,11 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref, useAttrs } from "vue";
 import { useI18n } from "../../composables/useI18n";
 import { clampNumber } from "../../utils";
+
+defineOptions({
+  inheritAttrs: false,
+});
 
 type SkeletonSurface = "card" | "muted" | "plain";
 type SkeletonSize = "sm" | "md" | "lg";
@@ -49,6 +53,8 @@ const props = withDefaults(defineProps<Props>(), {
   ariaLabel: "",
 });
 
+const attrs = useAttrs();
+const rootRef = ref<HTMLElement | null>(null);
 const { t } = useI18n();
 const resolvedLines = computed(() => clampNumber(props.lines, 1, 8, 3, 0));
 const resolvedTitleLines = computed(() => clampNumber(props.titleLines, 0, 2, 2, 0));
@@ -56,10 +62,16 @@ const resolvedActionCount = computed(() => clampNumber(props.actionCount, 1, 4, 
 const resolvedSize = computed(() => (props.compact ? "sm" : props.size));
 const resolvedLabel = computed(() => props.ariaLabel || t("common.skeletonLoading"));
 const hasHeader = computed(() => props.showHeader && (props.avatar || resolvedTitleLines.value > 0));
+
+defineExpose({
+  getElement: () => rootRef.value,
+});
 </script>
 
 <template>
   <section
+    v-bind="attrs"
+    ref="rootRef"
     class="base-skeleton-card"
     :class="[
       `base-skeleton-card--${resolvedSize}`,

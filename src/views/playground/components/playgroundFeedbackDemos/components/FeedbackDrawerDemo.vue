@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref } from "vue";
 import { useToast } from "../../../../../composables/useToast";
+import BaseDrawer from "../../../../../components/common/BaseDrawer.vue";
 import PlaygroundDemoSection from "../../PlaygroundDemoSection.vue";
 
 const { triggerToast } = useToast();
@@ -10,6 +11,11 @@ const leftDrawerOpen = ref(false);
 const loadingDrawerOpen = ref(false);
 const actionDrawerOpen = ref(false);
 const lockedDrawerOpen = ref(false);
+const resizableDrawerOpen = ref(false);
+const bottomDrawerOpen = ref(false);
+const resizableDrawerRef = ref<InstanceType<typeof BaseDrawer> | null>(null);
+const resizeSummary = ref("等待拖拽调整抽屉宽度");
+const drawerMethodText = ref("等待实例方法触发");
 
 const searchValue = ref("组件");
 const selectVal = ref("vue");
@@ -25,6 +31,34 @@ const detailCardItems = [
   { key: "category", label: "分类", value: "反馈浮层" },
   { key: "updated", label: "更新时间", value: "2026-06-08" },
 ];
+
+const formatDrawerSize = (size: number) => `${Math.round(size)}px`;
+
+const handleDrawerResizeStart = (_event: MouseEvent, size: number) => {
+  resizeSummary.value = `开始调整：${formatDrawerSize(size)}`;
+};
+
+const handleDrawerResize = (_event: MouseEvent, size: number) => {
+  resizeSummary.value = `调整中：${formatDrawerSize(size)}`;
+};
+
+const handleDrawerResizeEnd = (_event: MouseEvent, size: number) => {
+  resizeSummary.value = `调整完成：${formatDrawerSize(size)}`;
+};
+
+const openResizableDrawerViaRef = () => {
+  drawerMethodText.value = "通过 open() 打开，并保持 v-model 同步";
+  resizableDrawerRef.value?.open();
+};
+
+const readResizableDrawerElement = () => {
+  drawerMethodText.value = resizableDrawerRef.value?.getElement() ? "已读取抽屉 DOM 根节点" : "抽屉 DOM 尚未挂载";
+};
+
+const closeResizableDrawerViaRef = () => {
+  drawerMethodText.value = "通过 handleClose() 请求关闭";
+  resizableDrawerRef.value?.handleClose();
+};
 </script>
 
 <template>
@@ -36,6 +70,8 @@ const detailCardItems = [
         <BaseButton type="neutral" @click="loadingDrawerOpen = true">加载抽屉</BaseButton>
         <BaseButton type="neutral" @click="actionDrawerOpen = true">头部动作</BaseButton>
         <BaseButton type="neutral" @click="lockedDrawerOpen = true">关闭锁定</BaseButton>
+        <BaseButton type="neutral" @click="openResizableDrawerViaRef">可调整尺寸</BaseButton>
+        <BaseButton type="neutral" @click="bottomDrawerOpen = true">底部抽屉</BaseButton>
       </div>
       <div class="dialog-demo-stack">
         <BaseDetailCard
@@ -191,6 +227,57 @@ const detailCardItems = [
         <template #footer>
           <BaseBadge type="warning" variant="outline">confirmLoading</BaseBadge>
           <BaseButton type="primary" size="sm" @click="lockedDrawerOpen = false">完成并关闭</BaseButton>
+        </template>
+      </BaseDrawer>
+
+      <BaseDrawer
+        ref="resizableDrawerRef"
+        v-model="resizableDrawerOpen"
+        title="可调整尺寸抽屉"
+        description="透传 Element Plus resizable、resize-start、resize 和 resize-end，适合资源详情、属性面板和配置侧栏。"
+        class="feedback-drawer-demo__resizable"
+        data-native-drawer-ref="base-drawer-instance"
+        icon="PanelRightOpen"
+        show-icon
+        size="lg"
+        resizable
+        draggable
+        overflow
+        trap-focus
+        footer-align="between"
+        body-label="可调整尺寸抽屉内容"
+        footer-label="可调整尺寸抽屉操作"
+        @resize-start="handleDrawerResizeStart"
+        @resize="handleDrawerResize"
+        @resize-end="handleDrawerResizeEnd"
+      >
+        <BaseAlert type="info" title="拖拽边缘调整宽度" :description="resizeSummary" compact />
+        <BaseAlert type="success" title="实例方法" :description="drawerMethodText" compact />
+        <BaseDescriptionList aria-label="可调整抽屉能力摘要" :items="detailCardItems" :columns="2" compact />
+        <template #footer>
+          <BaseBadge type="primary" variant="outline">resizable</BaseBadge>
+          <BaseButton type="neutral" size="sm" @click="readResizableDrawerElement">读取 DOM</BaseButton>
+          <BaseButton type="primary" size="sm" @click="closeResizableDrawerViaRef">实例关闭</BaseButton>
+        </template>
+      </BaseDrawer>
+
+      <BaseDrawer
+        v-model="bottomDrawerOpen"
+        title="底部快速面板"
+        description="placement 支持 top / bottom，适合命令输出、批量操作进度和轻量配置。"
+        icon="PanelBottomOpen"
+        show-icon
+        placement="bottom"
+        width="320px"
+        :close-delay="60"
+        modal-class="base-drawer-modal--playground"
+        body-label="底部快速面板内容"
+        footer-label="底部快速面板操作"
+      >
+        <BaseAlert type="success" title="底部方向" description="底部抽屉沿用相同 header、body、footer 结构和主题样式。" compact />
+        <template #footer>
+          <BaseButton type="neutral" size="sm" @click="bottomDrawerOpen = false">关闭</BaseButton>
+          <BaseButton type="primary" size="sm" @click="bottomDrawerOpen = false">应用</BaseButton>
         </template>
       </BaseDrawer>
     </PlaygroundDemoSection>

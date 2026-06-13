@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref } from "vue";
 import { useToast } from "../../../../../composables/useToast";
+import BaseDialog from "../../../../../components/common/BaseDialog.vue";
 import PlaygroundDemoSection from "../../PlaygroundDemoSection.vue";
 
 const { triggerToast } = useToast();
@@ -11,6 +12,9 @@ const loadingDialogOpen = ref(false);
 const fullscreenDialogOpen = ref(false);
 const actionDialogOpen = ref(false);
 const lockedDialogOpen = ref(false);
+const nativeDialogOpen = ref(false);
+const nativeDialogRef = ref<InstanceType<typeof BaseDialog> | null>(null);
+const nativeDialogMethodText = ref("等待实例方法触发");
 
 const formItemName = ref("Monster Workbench");
 const formItemDescription = ref("用于承载高频表单字段的标签、说明、校验反馈和辅助信息。");
@@ -27,6 +31,25 @@ const detailCardItems = [
   { key: "category", label: "分类", value: "反馈浮层" },
   { key: "updated", label: "更新时间", value: "2026-06-08" },
 ];
+
+const openNativeDialogViaRef = () => {
+  nativeDialogMethodText.value = "通过 open() 打开，并保持 v-model 同步";
+  nativeDialogRef.value?.open();
+};
+
+const resetNativeDialogPosition = () => {
+  nativeDialogRef.value?.resetPosition();
+  nativeDialogMethodText.value = "已调用 resetPosition() 重置拖拽位置";
+};
+
+const readNativeDialogElement = () => {
+  nativeDialogMethodText.value = nativeDialogRef.value?.getElement() ? "已读取弹窗 DOM 根节点" : "弹窗 DOM 尚未挂载";
+};
+
+const closeNativeDialogViaRef = () => {
+  nativeDialogMethodText.value = "通过 handleClose() 请求关闭";
+  nativeDialogRef.value?.handleClose();
+};
 </script>
 
 <template>
@@ -38,6 +61,7 @@ const detailCardItems = [
         <BaseButton type="neutral" @click="loadingDialogOpen = true">加载弹窗</BaseButton>
         <BaseButton type="neutral" @click="actionDialogOpen = true">头部动作</BaseButton>
         <BaseButton type="neutral" @click="lockedDialogOpen = true">关闭锁定</BaseButton>
+        <BaseButton type="neutral" @click="openNativeDialogViaRef">原生能力</BaseButton>
         <BaseButton type="neutral" @click="fullscreenDialogOpen = true">全屏弹窗</BaseButton>
         <BaseBadge type="neutral">open: {{ dialogOpen ? "true" : "false" }}</BaseBadge>
       </div>
@@ -150,6 +174,44 @@ const detailCardItems = [
         <template #footer>
           <BaseBadge type="warning" variant="outline">confirmLoading</BaseBadge>
           <BaseButton type="primary" size="sm" @click="lockedDialogOpen = false">完成并关闭</BaseButton>
+        </template>
+      </BaseDialog>
+      <BaseDialog
+        ref="nativeDialogRef"
+        v-model="nativeDialogOpen"
+        title="原生能力对话框"
+        description="透传 Element Plus alignCenter、draggable、overflow、openDelay、closeDelay、appendTo 和焦点控制。"
+        class="feedback-dialog-demo__native"
+        data-native-dialog-ref="base-dialog-instance"
+        icon="Move"
+        show-icon
+        size="lg"
+        align-center
+        draggable
+        overflow
+        trap-focus
+        :open-delay="80"
+        :close-delay="60"
+        append-to="body"
+        modal-class="base-dialog-modal--playground"
+        body-label="原生能力对话框内容"
+        footer-label="原生能力对话框操作"
+        @open="triggerToast('原生能力对话框开始打开', 'info')"
+        @opened="triggerToast('原生能力对话框已打开', 'success')"
+      >
+        <BaseAlert
+          type="info"
+          title="可拖拽与居中"
+          description="标题区域可拖拽，overflow 打开后可拖出视窗边界，适合调试或对比窗口。"
+          compact
+        />
+        <BaseAlert type="success" title="实例方法" :description="nativeDialogMethodText" compact />
+        <BaseDescriptionList aria-label="原生对话框能力" :items="detailCardItems" :columns="3" compact />
+        <template #footer>
+          <BaseBadge type="primary" variant="outline">draggable</BaseBadge>
+          <BaseButton type="neutral" size="sm" @click="readNativeDialogElement">读取 DOM</BaseButton>
+          <BaseButton type="neutral" size="sm" @click="resetNativeDialogPosition">重置位置</BaseButton>
+          <BaseButton type="primary" size="sm" @click="closeNativeDialogViaRef">实例关闭</BaseButton>
         </template>
       </BaseDialog>
       <BaseDialog

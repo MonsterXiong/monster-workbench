@@ -1,26 +1,65 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref, useAttrs } from "vue";
+import type { VNodeChild } from "vue";
+import type {
+  CellCls,
+  CellStyle,
+  ColumnCls,
+  ColumnStyle,
+  SummaryMethod,
+  TableInstance,
+  TableProps,
+  TreeNode,
+} from "element-plus";
 import BaseIcon from "./BaseIcon.vue";
 import { useI18n } from "../../composables/useI18n";
 import { getByPath, hasSelectionKey, toIntegerAtLeast } from "../../utils";
 
+defineOptions({
+  inheritAttrs: false,
+});
+
 export type BaseTableSortOrder = "ascending" | "descending" | null;
 export type BaseTableFixedColumn = boolean | "left" | "right";
 export type BaseTableSortable = boolean | "custom";
+export type BaseTableLayout = "fixed" | "auto";
+type BaseTableManualSortOrder = Exclude<BaseTableSortOrder, null> | "";
+
+export interface BaseTableColumnFilter {
+  text: string;
+  value: string;
+}
 
 export interface BaseTableColumn {
   key: string;
   title: string;
+  type?: "default" | "selection" | "index" | "expand";
   width?: string;
+  minWidth?: string | number;
   align?: "left" | "center" | "right";
   headerAlign?: "left" | "center" | "right";
   wrap?: boolean;
   ariaLabel?: string;
+  headerSlot?: string;
   fixed?: BaseTableFixedColumn;
   sortable?: BaseTableSortable;
+  resizable?: boolean;
+  selectable?: (row: any, index: number) => boolean;
+  reserveSelection?: boolean;
+  index?: number | ((index: number) => number | string);
+  renderHeader?: (data: { column: unknown; $index: number }) => VNodeChild;
+  columnKey?: string;
   sortMethod?: (a: any, b: any) => number;
   sortBy?: string | string[];
   sortOrders?: BaseTableSortOrder[];
+  formatter?: (row: any, column: unknown, cellValue: unknown, index: number) => string;
+  tooltipFormatter?: (data: unknown) => string;
+  filters?: BaseTableColumnFilter[];
+  filteredValue?: string[];
+  filterPlacement?: string;
+  filterMultiple?: boolean;
+  filterClassName?: string;
+  filterMethod?: (value: string, row: any, column: unknown) => boolean;
 }
 
 export interface BaseTableSort {
@@ -56,6 +95,44 @@ interface Props {
   wrapCells?: boolean;
   minWidth?: string;
   defaultSort?: BaseTableSort;
+  height?: string | number;
+  maxHeight?: string | number;
+  showHeader?: boolean;
+  highlightCurrentRow?: boolean;
+  currentRowKey?: string | number;
+  tableLayout?: BaseTableLayout;
+  fit?: boolean;
+  scrollbarAlwaysOn?: boolean;
+  flexible?: boolean;
+  nativeScrollbar?: boolean;
+  showOverflowTooltip?: boolean;
+  tooltipEffect?: string;
+  tooltipOptions?: TableProps<any>["tooltipOptions"];
+  tooltipFormatter?: TableProps<any>["tooltipFormatter"];
+  showSummary?: boolean;
+  sumText?: string;
+  summaryMethod?: SummaryMethod<any>;
+  rowClassName?: ColumnCls<any>;
+  rowStyle?: ColumnStyle<any>;
+  cellClassName?: CellCls<any>;
+  cellStyle?: CellStyle<any>;
+  headerRowClassName?: ColumnCls<any>;
+  headerRowStyle?: ColumnStyle<any>;
+  headerCellClassName?: CellCls<any>;
+  headerCellStyle?: CellStyle<any>;
+  spanMethod?: TableProps<any>["spanMethod"];
+  selectOnIndeterminate?: boolean;
+  expandRowKeys?: string[];
+  defaultExpandAll?: boolean;
+  rowExpandable?: (row: any, index: number) => boolean;
+  indent?: number;
+  treeProps?: TableProps<any>["treeProps"];
+  lazy?: boolean;
+  load?: (row: any, treeNode: TreeNode, resolve: (data: any[]) => void) => void;
+  appendFilterPanelTo?: string;
+  scrollbarTabindex?: string | number;
+  allowDragLastColumn?: boolean;
+  preserveExpandedContent?: boolean;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -78,18 +155,81 @@ const props = withDefaults(defineProps<Props>(), {
   wrapCells: false,
   minWidth: "520px",
   defaultSort: undefined,
+  height: undefined,
+  maxHeight: undefined,
+  showHeader: true,
+  highlightCurrentRow: false,
+  currentRowKey: undefined,
+  tableLayout: "fixed",
+  fit: true,
+  scrollbarAlwaysOn: true,
+  flexible: true,
+  nativeScrollbar: false,
+  showOverflowTooltip: undefined,
+  tooltipEffect: "",
+  tooltipOptions: undefined,
+  tooltipFormatter: undefined,
+  showSummary: false,
+  sumText: "",
+  summaryMethod: undefined,
+  rowClassName: "",
+  rowStyle: undefined,
+  cellClassName: "",
+  cellStyle: undefined,
+  headerRowClassName: "",
+  headerRowStyle: undefined,
+  headerCellClassName: "",
+  headerCellStyle: undefined,
+  spanMethod: undefined,
+  selectOnIndeterminate: true,
+  expandRowKeys: undefined,
+  defaultExpandAll: false,
+  rowExpandable: undefined,
+  indent: 16,
+  treeProps: undefined,
+  lazy: false,
+  load: undefined,
+  appendFilterPanelTo: "",
+  scrollbarTabindex: undefined,
+  allowDragLastColumn: true,
+  preserveExpandedContent: false,
 });
 
 const emit = defineEmits<{
+  (e: "select", selection: any[], row: any): void;
+  (e: "select-all", selection: any[]): void;
+  (e: "selection-change", selection: any[]): void;
   (e: "sort-change", payload: BaseTableSortChangePayload): void;
+  (e: "filter-change", payload: Record<string, string[]>): void;
+  (e: "row-click", row: any, column: unknown, event: MouseEvent): void;
+  (e: "row-dblclick", row: any, column: unknown, event: MouseEvent): void;
+  (e: "row-contextmenu", row: any, column: unknown, event: PointerEvent): void;
+  (e: "cell-click", row: any, column: unknown, cell: HTMLTableCellElement, event: PointerEvent): void;
+  (e: "cell-dblclick", row: any, column: unknown, cell: HTMLTableCellElement, event: MouseEvent): void;
+  (e: "cell-contextmenu", row: any, column: unknown, cell: HTMLTableCellElement, event: PointerEvent): void;
+  (e: "cell-mouse-enter", row: any, column: unknown, cell: HTMLTableCellElement, event: MouseEvent): void;
+  (e: "cell-mouse-leave", row: any, column: unknown, cell: HTMLTableCellElement, event: MouseEvent): void;
+  (e: "header-click", column: unknown, event: PointerEvent): void;
+  (e: "header-contextmenu", column: unknown, event: PointerEvent): void;
+  (e: "current-change", currentRow: any | null, oldCurrentRow: any | null): void;
+  (e: "header-dragend", newWidth: number, oldWidth: number, column: unknown, event: MouseEvent): void;
+  (e: "expand-change", row: any, expanded: any[] | boolean): void;
+  (e: "scroll", payload: { scrollLeft: number; scrollTop: number }): void;
 }>();
 
 const { t } = useI18n();
+const tableRef = ref<TableInstance | null>(null);
+const attrs = useAttrs();
 
 const tableLabel = computed(() => props.ariaLabel || props.caption || t("common.table"));
 const skeletonCount = computed(() => toIntegerAtLeast(props.skeletonRows, 1, 3));
 const resolvedLoadingText = computed(() => props.loadingText || t("common.loading"));
 const tableStyle = computed(() => ({ "--base-table-min-width": props.minWidth } as Record<string, string>));
+const rootClass = computed(() => attrs.class);
+const rootStyle = computed(() => attrs.style);
+const tablePassthroughAttrs = computed(() =>
+  Object.fromEntries(Object.entries(attrs).filter(([key]) => key !== "class" && key !== "style"))
+);
 const minWidthPixels = computed(() => {
   const parsed = Number.parseFloat(props.minWidth);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 520;
@@ -105,6 +245,7 @@ const elementSize = computed(() => {
   if (props.size === "lg") return "large";
   return "default";
 });
+const hasResizableColumns = computed(() => props.columns.some((column) => column.resizable));
 
 const isSkeletonRow = (row: any) => Boolean(row?.__baseTableSkeleton !== undefined);
 
@@ -129,6 +270,11 @@ const isRowSelected = (row: any, index: number) => {
 
 const getCellValue = (row: any, key: string) => getByPath(row, key, "");
 
+const getFormattedCellValue = (column: BaseTableColumn, scope: any) => {
+  const cellValue = getCellValue(scope.row, column.key);
+  return column.formatter ? column.formatter(scope.row, scope.column, cellValue, scope.$index) : cellValue;
+};
+
 const getColumnWidth = (column: BaseTableColumn) => {
   if (!column.width) return undefined;
   const width = String(column.width).trim();
@@ -147,6 +293,7 @@ const getColumnWidth = (column: BaseTableColumn) => {
 };
 
 const getColumnMinWidth = (column: BaseTableColumn) => {
+  if (column.minWidth !== undefined) return column.minWidth;
   if (!column.width) return 120;
   const width = String(column.width).trim();
 
@@ -159,13 +306,12 @@ const getColumnMinWidth = (column: BaseTableColumn) => {
 const getRowClassName = ({ row, rowIndex }: { row: any; rowIndex: number }) => {
   if (isSkeletonRow(row)) return "base-table__row base-table__row--loading";
 
-  return [
+  return joinClassNames([
     "base-table__row",
     props.striped && rowIndex % 2 === 1 ? "is-striped" : "",
     isRowSelected(row, rowIndex) ? "is-selected" : "",
-  ]
-    .filter(Boolean)
-    .join(" ");
+    getClassName(props.rowClassName, { row, rowIndex }),
+  ]);
 };
 
 const getColumnCellClass = (column: BaseTableColumn) => {
@@ -187,14 +333,119 @@ const getColumnHeaderClass = (column: BaseTableColumn) => {
     .join(" ");
 };
 
+const getColumnHeaderSlotName = (column: BaseTableColumn) => column.headerSlot || `${column.key}Header`;
+
 const getColumnSortable = (column: BaseTableColumn) => {
   if (column.sortable === "custom") return "custom";
   return Boolean(column.sortable);
 };
 
+const getColumnOverflowTooltip = (column: BaseTableColumn) => {
+  if (props.showOverflowTooltip !== undefined) return props.showOverflowTooltip;
+  return !props.wrapCells && !column.wrap;
+};
+
+const getClassName = <TPayload,>(className: string | ((payload: TPayload) => string) | undefined, payload: TPayload) => {
+  if (!className) return "";
+  return typeof className === "function" ? className(payload) : className;
+};
+
+const joinClassNames = (classNames: Array<string | undefined>) => classNames.filter(Boolean).join(" ");
+
 const handleSortChange = (payload: BaseTableSortChangePayload) => {
   emit("sort-change", payload);
 };
+
+const handleFilterChange = (payload: Record<string, string[]>) => {
+  emit("filter-change", payload);
+};
+
+const handleRowClick = (row: any, column: unknown, event: MouseEvent) => {
+  emit("row-click", row, column, event);
+};
+
+const handleSelect = (selection: any[], row: any) => {
+  emit("select", selection, row);
+};
+
+const handleSelectAll = (selection: any[]) => {
+  emit("select-all", selection);
+};
+
+const handleSelectionChange = (selection: any[]) => {
+  emit("selection-change", selection);
+};
+
+const handleRowDblclick = (row: any, column: unknown, event: MouseEvent) => {
+  emit("row-dblclick", row, column, event);
+};
+
+const handleRowContextmenu = (row: any, column: unknown, event: PointerEvent) => {
+  emit("row-contextmenu", row, column, event);
+};
+
+const handleCellClick = (row: any, column: unknown, cell: HTMLTableCellElement, event: PointerEvent) => {
+  emit("cell-click", row, column, cell, event);
+};
+
+const handleCellDblclick = (row: any, column: unknown, cell: HTMLTableCellElement, event: MouseEvent) => {
+  emit("cell-dblclick", row, column, cell, event);
+};
+
+const handleCellContextmenu = (row: any, column: unknown, cell: HTMLTableCellElement, event: PointerEvent) => {
+  emit("cell-contextmenu", row, column, cell, event);
+};
+
+const handleCellMouseEnter = (row: any, column: unknown, cell: HTMLTableCellElement, event: MouseEvent) => {
+  emit("cell-mouse-enter", row, column, cell, event);
+};
+
+const handleCellMouseLeave = (row: any, column: unknown, cell: HTMLTableCellElement, event: MouseEvent) => {
+  emit("cell-mouse-leave", row, column, cell, event);
+};
+
+const handleHeaderClick = (column: unknown, event: PointerEvent) => {
+  emit("header-click", column, event);
+};
+
+const handleHeaderContextmenu = (column: unknown, event: PointerEvent) => {
+  emit("header-contextmenu", column, event);
+};
+
+const handleCurrentChange = (currentRow: any | null, oldCurrentRow: any | null) => {
+  emit("current-change", currentRow, oldCurrentRow);
+};
+
+const handleHeaderDragend = (newWidth: number, oldWidth: number, column: unknown, event: MouseEvent) => {
+  emit("header-dragend", newWidth, oldWidth, column, event);
+};
+
+const handleExpandChange = (row: any, expanded: any[] | boolean) => {
+  emit("expand-change", row, expanded);
+};
+
+const handleScroll = (payload: { scrollLeft: number; scrollTop: number }) => {
+  emit("scroll", payload);
+};
+
+defineExpose({
+  getNativeTable: () => tableRef.value,
+  clearSelection: () => tableRef.value?.clearSelection(),
+  getSelectionRows: () => tableRef.value?.getSelectionRows() ?? [],
+  toggleRowSelection: (row: any, selected?: boolean, ignoreSelectable?: boolean) =>
+    tableRef.value?.toggleRowSelection(row, selected, ignoreSelectable),
+  toggleAllSelection: () => tableRef.value?.toggleAllSelection(),
+  toggleRowExpansion: (row: any, expanded?: boolean) => tableRef.value?.toggleRowExpansion(row, expanded),
+  setCurrentRow: (row?: any) => tableRef.value?.setCurrentRow(row),
+  clearSort: () => tableRef.value?.clearSort(),
+  clearFilter: (columnKeys?: string[] | string) => tableRef.value?.clearFilter(columnKeys),
+  doLayout: () => tableRef.value?.doLayout(),
+  sort: (prop: string, order: BaseTableManualSortOrder) => tableRef.value?.sort(prop, order),
+  scrollTo: (options: ScrollToOptions | number, yCoord?: number) => tableRef.value?.scrollTo(options, yCoord),
+  setScrollLeft: (left?: number) => tableRef.value?.setScrollLeft(left),
+  setScrollTop: (top?: number) => tableRef.value?.setScrollTop(top),
+  updateKeyChildren: (key: string, data: any[]) => tableRef.value?.updateKeyChildren(key, data),
+});
 </script>
 
 <template>
@@ -210,8 +461,9 @@ const handleSortChange = (payload: BaseTableSortChangePayload) => {
         'base-table--wrap-cells': wrapCells,
         'is-disabled': disabled,
       },
+      rootClass,
     ]"
-    :style="tableStyle"
+    :style="[tableStyle, rootStyle]"
     role="region"
     :aria-label="tableLabel"
     :aria-busy="loading ? 'true' : 'false'"
@@ -223,25 +475,77 @@ const handleSortChange = (payload: BaseTableSortChangePayload) => {
     </span>
 
     <el-table
+      ref="tableRef"
+      v-bind="tablePassthroughAttrs"
       class="base-table__table"
       :data="tableData"
       :size="elementSize"
       :row-key="getElementRowKey"
       :row-class-name="getRowClassName"
-      :show-header="true"
+      :row-style="rowStyle"
+      :cell-class-name="cellClassName"
+      :cell-style="cellStyle"
+      :header-row-class-name="headerRowClassName"
+      :header-row-style="headerRowStyle"
+      :header-cell-class-name="headerCellClassName"
+      :header-cell-style="headerCellStyle"
+      :height="height"
+      :max-height="maxHeight"
+      :show-header="showHeader"
+      :show-summary="showSummary"
+      :sum-text="sumText || undefined"
+      :summary-method="summaryMethod"
+      :span-method="spanMethod"
       :stripe="false"
-      :border="false"
-      :fit="true"
-      :scrollbar-always-on="true"
-      table-layout="fixed"
-      :highlight-current-row="false"
+      :border="hasResizableColumns"
+      :fit="fit"
+      :scrollbar-always-on="scrollbarAlwaysOn"
+      :table-layout="tableLayout"
+      :highlight-current-row="highlightCurrentRow"
+      :current-row-key="currentRowKey"
+      :flexible="flexible"
+      :native-scrollbar="nativeScrollbar"
+      :select-on-indeterminate="selectOnIndeterminate"
+      :expand-row-keys="expandRowKeys"
+      :default-expand-all="defaultExpandAll"
+      :row-expandable="rowExpandable"
+      :indent="indent"
+      :tree-props="treeProps"
+      :lazy="lazy"
+      :load="load"
       :default-sort="defaultSort"
+      :tooltip-effect="tooltipEffect || undefined"
+      :tooltip-options="tooltipOptions"
+      :tooltip-formatter="tooltipFormatter"
+      :append-filter-panel-to="appendFilterPanelTo || undefined"
+      :scrollbar-tabindex="scrollbarTabindex"
+      :allow-drag-last-column="allowDragLastColumn"
+      :preserve-expanded-content="preserveExpandedContent"
       :aria-label="tableLabel"
+      @select="handleSelect"
+      @select-all="handleSelectAll"
+      @selection-change="handleSelectionChange"
       @sort-change="handleSortChange"
+      @filter-change="handleFilterChange"
+      @row-click="handleRowClick"
+      @row-dblclick="handleRowDblclick"
+      @row-contextmenu="handleRowContextmenu"
+      @cell-click="handleCellClick"
+      @cell-dblclick="handleCellDblclick"
+      @cell-contextmenu="handleCellContextmenu"
+      @cell-mouse-enter="handleCellMouseEnter"
+      @cell-mouse-leave="handleCellMouseLeave"
+      @header-click="handleHeaderClick"
+      @header-contextmenu="handleHeaderContextmenu"
+      @current-change="handleCurrentChange"
+      @header-dragend="handleHeaderDragend"
+      @expand-change="handleExpandChange"
+      @scroll="handleScroll"
     >
       <el-table-column
         v-for="column in columns"
         :key="column.key"
+        :type="column.type === 'default' ? undefined : column.type"
         :prop="column.key"
         :label="column.title"
         :width="getColumnWidth(column)"
@@ -252,18 +556,34 @@ const handleSortChange = (payload: BaseTableSortChangePayload) => {
         :label-class-name="getColumnHeaderClass(column)"
         :fixed="column.fixed"
         :sortable="getColumnSortable(column)"
+        :resizable="column.resizable"
+        :selectable="column.selectable"
+        :reserve-selection="column.reserveSelection"
+        :index="column.index"
+        :render-header="column.renderHeader"
+        :column-key="column.columnKey || column.key"
         :sort-method="column.sortMethod"
         :sort-by="column.sortBy"
         :sort-orders="column.sortOrders"
-        :show-overflow-tooltip="!wrapCells && !column.wrap"
+        :formatter="column.formatter"
+        :show-overflow-tooltip="getColumnOverflowTooltip(column)"
+        :tooltip-formatter="column.tooltipFormatter"
+        :filters="column.filters"
+        :filtered-value="column.filteredValue"
+        :filter-placement="column.filterPlacement"
+        :filter-multiple="column.filterMultiple"
+        :filter-class-name="column.filterClassName"
+        :filter-method="column.filterMethod"
       >
-        <template #header>
-          <span :aria-label="column.ariaLabel || undefined">{{ column.title }}</span>
+        <template v-if="!column.renderHeader" #header="scope">
+          <slot :name="getColumnHeaderSlotName(column)" :column="scope.column" :index="scope.$index">
+            <span :aria-label="column.ariaLabel || undefined">{{ column.title }}</span>
+          </slot>
         </template>
-        <template #default="scope">
+        <template v-if="column.type !== 'selection' && column.type !== 'index'" #default="scope">
           <div v-if="isSkeletonRow(scope.row)" class="base-table__skeleton" aria-hidden="true"></div>
           <slot v-else :name="column.key" :row="scope.row" :index="scope.$index">
-            {{ getCellValue(scope.row, column.key) }}
+            {{ getFormattedCellValue(column, scope) }}
           </slot>
         </template>
       </el-table-column>
@@ -273,6 +593,10 @@ const handleSortChange = (payload: BaseTableSortChangePayload) => {
           <BaseIcon :name="emptyIcon" size="28" aria-hidden="true" />
           <span>{{ emptyText || t("common.noData") }}</span>
         </div>
+      </template>
+
+      <template v-if="$slots.append" #append>
+        <slot name="append"></slot>
       </template>
     </el-table>
   </div>

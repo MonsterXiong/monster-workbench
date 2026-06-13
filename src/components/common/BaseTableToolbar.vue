@@ -1,7 +1,11 @@
 <script setup lang="ts">
-import { computed, useId } from "vue";
+import { computed, ref, useAttrs, useId } from "vue";
 import { useI18n } from "../../composables/useI18n";
 import { joinAriaIds } from "../../utils";
+
+defineOptions({
+  inheritAttrs: false,
+});
 
 interface Props {
   title: string;
@@ -46,6 +50,8 @@ const props = withDefaults(defineProps<Props>(), {
   loadingText: "",
 });
 
+const attrs = useAttrs();
+const rootRef = ref<HTMLElement | null>(null);
 const { t } = useI18n();
 const toolbarId = useId();
 const titleId = `base-table-toolbar-title-${toolbarId}`;
@@ -69,10 +75,31 @@ const slotState = computed(() => ({
   loading: props.loading,
   interactiveDisabled: isInteractiveDisabled.value,
 }));
+
+const focusableSelector =
+  "button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex='-1'])";
+const getFocusableElements = () => Array.from(rootRef.value?.querySelectorAll<HTMLElement>(focusableSelector) ?? []);
+
+defineExpose({
+  getElement: () => rootRef.value,
+  getActionElements: () =>
+    Array.from(
+      rootRef.value?.querySelectorAll<HTMLElement>(
+        ".base-table-toolbar__actions button, .base-table-toolbar__actions [tabindex]:not([tabindex='-1'])"
+      ) ?? []
+    ),
+  focusFirstAction: () => {
+    const element = getFocusableElements()[0] ?? null;
+    element?.focus();
+    return element;
+  },
+});
 </script>
 
 <template>
   <section
+    v-bind="attrs"
+    ref="rootRef"
     class="base-table-toolbar"
     :class="[
       `base-table-toolbar--${resolvedSize}`,

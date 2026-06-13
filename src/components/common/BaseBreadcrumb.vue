@@ -1,9 +1,15 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch, watchEffect } from "vue";
+import type { BreadcrumbInstance } from "element-plus";
+import type { StyleValue } from "vue";
+import { computed, nextTick, ref, useAttrs, watch, watchEffect } from "vue";
 import { ArrowLeft, ChevronRight, MoreHorizontal } from "lucide-vue-next";
 import { useI18n } from "../../composables/useI18n";
-import { collapseMiddleItems, dropRight, findLastItem, isLastIndex, joinBy, preventAndStopDomEvent } from "../../utils";
-import { getElementPlusControlRoot, type ElementPlusControlRef } from "./elementPlusDom";
+import { collapseMiddleItems, dropRight, findLastItem, isLastIndex, joinBy, omit, preventAndStopDomEvent } from "../../utils";
+import { getElementPlusControlRoot } from "./elementPlusDom";
+
+defineOptions({
+  inheritAttrs: false,
+});
 
 type BreadcrumbSize = "sm" | "md" | "lg";
 type BreadcrumbSurface = "plain" | "muted" | "card";
@@ -55,7 +61,8 @@ const props = withDefaults(defineProps<Props>(), {
 });
 
 const { t } = useI18n();
-const breadcrumbRef = ref<ElementPlusControlRef>(null);
+const attrs = useAttrs();
+const breadcrumbRef = ref<BreadcrumbInstance | null>(null);
 
 const emit = defineEmits<{
   (e: "select", item: BreadcrumbItem): void;
@@ -101,6 +108,9 @@ const separatorIcon = computed(() => (props.separator === "chevron" ? ChevronRig
 const resolvedAriaLabel = computed(() => props.ariaLabel || t("common.breadcrumb"));
 const resolvedEllipsisMode = computed(() => (props.expandableEllipsis ? props.ellipsisMode : "expand"));
 const breadcrumbPopperClass = computed(() => `base-breadcrumb-popper base-breadcrumb-popper--${props.size}`);
+const rootClass = computed(() => attrs.class);
+const rootStyle = computed(() => attrs.style as StyleValue | undefined);
+const breadcrumbPassthroughAttrs = computed(() => omit(attrs, ["class", "style", "aria-label", "aria-disabled"]));
 
 const itemsFingerprint = computed(() => joinBy(props.items, (item) => item.key, "|"));
 
@@ -183,13 +193,38 @@ watchEffect(() => {
   void renderedItems.value.length;
   void syncBreadcrumbAttributes();
 });
+
+const getElement = () => getElementPlusControlRoot(breadcrumbRef.value);
+
+const focusFirstItem = () => {
+  const target = getElement()?.querySelector<HTMLElement>(
+    ".base-breadcrumb__back:not(:disabled), .base-breadcrumb__button:not(:disabled):not(.is-disabled), .base-breadcrumb__ellipsis:not(.base-breadcrumb__ellipsis--static)"
+  );
+  target?.focus();
+  return target ?? null;
+};
+
+const focusCurrentItem = () => {
+  const target = getElement()?.querySelector<HTMLElement>("[aria-current='page']");
+  target?.focus();
+  return target ?? null;
+};
+
+defineExpose({
+  getNativeBreadcrumb: () => breadcrumbRef.value,
+  getElement,
+  focusFirstItem,
+  focusCurrentItem,
+});
 </script>
 
 <template>
   <el-breadcrumb
     ref="breadcrumbRef"
+    v-bind="breadcrumbPassthroughAttrs"
     class="base-breadcrumb"
     :class="[
+      rootClass,
       `base-breadcrumb--${size}`,
       `base-breadcrumb--${surface}`,
       `base-breadcrumb--separator-${separator}`,
@@ -199,6 +234,7 @@ watchEffect(() => {
         'is-expanded': expanded,
       },
     ]"
+    :style="rootStyle"
     :separator="separatorText"
     :separator-icon="separatorIcon"
   >
@@ -215,7 +251,7 @@ watchEffect(() => {
     </button>
     <el-breadcrumb-item
       v-for="crumb in renderedItems"
-      :key="crumb.type === 'item' ? crumb.item.key : crumb.key"
+      :key="crumb.type === 'item' ? `${crumb.item.key}-${crumb.index}` : crumb.key"
     >
       <el-dropdown
         v-if="crumb.type === 'ellipsis' && resolvedEllipsisMode === 'dropdown' && !disabled"
@@ -241,7 +277,7 @@ watchEffect(() => {
           <el-dropdown-menu class="base-breadcrumb__hidden-menu" :aria-label="getEllipsisLabel(crumb.hiddenCount)">
             <el-dropdown-item
               v-for="{ item, index } in hiddenItems"
-              :key="item.key"
+              :key="`${item.key}-${index}`"
               class="base-breadcrumb__hidden-item"
               :command="{ item, index }"
               :disabled="item.disabled"

@@ -1,28 +1,36 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from "vue";
+import type {
+  AllowDragFunction,
+  AllowDropFunction,
+  CheckedInfo,
+  LoadFunction,
+  NodeDropType,
+  TreeInstance,
+  TreeKey,
+  TreeNodeData,
+} from "element-plus";
+import type { ComponentInternalInstance } from "vue";
+import { computed, nextTick, ref, useAttrs, watch } from "vue";
 import { filterTreeNodeKeys, getFirstTruthyRecordValue, hasItem, setSelectionKey, uniqueArray } from "../../utils";
+import { getElementPlusControlRoot } from "./elementPlusDom";
+
+defineOptions({
+  inheritAttrs: false,
+});
 
 type TreeSize = "sm" | "md" | "lg";
 type TreeSurface = "card" | "muted" | "plain";
 type BadgeType = "primary" | "success" | "warning" | "danger" | "neutral";
-type TreeKey = string | number;
+type ElementTreeNode = ReturnType<TreeInstance["getNode"]>;
 
-interface ElementTreeRef {
-  filter: (value: string) => void;
-  setCheckedKeys: (keys: TreeKey[], leafOnly?: boolean) => void;
-  getCheckedKeys: (leafOnly?: boolean) => TreeKey[];
-  getCheckedNodes: (leafOnly?: boolean, includeHalfChecked?: boolean) => TreeNode[];
-  getHalfCheckedKeys: () => TreeKey[];
-  getHalfCheckedNodes: () => TreeNode[];
-}
-
-export interface TreeNode {
+export interface TreeNode extends TreeNodeData {
   name: string;
   isDir: boolean;
   path: string;
   children?: TreeNode[];
   expanded?: boolean;
   disabled?: boolean;
+  isLeaf?: boolean;
   icon?: string;
   badge?: string;
   badgeType?: BadgeType;
@@ -43,8 +51,9 @@ interface Props {
   size?: TreeSize;
   surface?: TreeSurface;
   bordered?: boolean;
-  activeKey?: string;
-  nodeKey?: "path" | "name";
+  activeKey?: TreeKey | "";
+  currentNodeKey?: TreeKey;
+  nodeKey?: string;
   expandOnClick?: boolean;
   showLines?: boolean;
   leafIcon?: string;
@@ -56,8 +65,16 @@ interface Props {
   checkStrictly?: boolean;
   checkOnClick?: boolean;
   checkOnClickLeaf?: boolean;
+  checkDescendants?: boolean;
+  autoExpandParent?: boolean;
   defaultExpandAll?: boolean;
+  renderAfterExpand?: boolean;
   accordion?: boolean;
+  lazy?: boolean;
+  load?: LoadFunction;
+  draggable?: boolean;
+  allowDrag?: AllowDragFunction;
+  allowDrop?: AllowDropFunction;
   emptyText?: string;
   filterText?: string;
   filterNodeMethod?: (query: string, node: TreeNode) => boolean;
@@ -86,21 +103,39 @@ const props = withDefaults(defineProps<Props>(), {
   checkStrictly: false,
   checkOnClick: false,
   checkOnClickLeaf: true,
+  checkDescendants: false,
+  autoExpandParent: true,
   defaultExpandAll: false,
+  renderAfterExpand: false,
   accordion: false,
+  lazy: false,
+  load: undefined,
+  draggable: false,
+  allowDrag: undefined,
+  allowDrop: undefined,
   emptyText: "",
   filterText: "",
   filterNodeMethod: undefined,
 });
 
 const emit = defineEmits<{
-  (e: "node-click", node: TreeNode): void;
+  (e: "node-click", node: TreeNode, treeNode: ElementTreeNode, nodeInstance: ComponentInternalInstance | null, event: MouseEvent): void;
   (e: "node-toggle", payload: { node: TreeNode; expanded: boolean }): void;
+  (e: "node-expand", node: TreeNode, treeNode: ElementTreeNode, nodeInstance: ComponentInternalInstance | null): void;
+  (e: "node-collapse", node: TreeNode, treeNode: ElementTreeNode, nodeInstance: ComponentInternalInstance | null): void;
   (e: "select", node: TreeNode): void;
-  (e: "update:expandedKeys", keys: string[]): void;
-  (e: "update:checkedKeys", keys: string[]): void;
-  (e: "check", payload: { node: TreeNode; checkedKeys: string[]; checkedNodes: TreeNode[]; halfCheckedKeys: string[]; halfCheckedNodes: TreeNode[] }): void;
+  (e: "update:expandedKeys", keys: TreeKey[]): void;
+  (e: "update:checkedKeys", keys: TreeKey[]): void;
+  (e: "check", payload: { node: TreeNode; checkedKeys: TreeKey[]; checkedNodes: TreeNode[]; halfCheckedKeys: TreeKey[]; halfCheckedNodes: TreeNode[] }): void;
   (e: "check-change", payload: { node: TreeNode; checked: boolean; indeterminate: boolean }): void;
+  (e: "current-change", node: TreeNode | null, treeNode: ElementTreeNode | null): void;
+  (e: "node-contextmenu", event: Event, node: TreeNode, treeNode: ElementTreeNode, nodeInstance: ComponentInternalInstance | null): void;
+  (e: "node-drag-start", treeNode: ElementTreeNode, event: DragEvent): void;
+  (e: "node-drag-enter", draggingNode: ElementTreeNode, dropNode: ElementTreeNode, event: DragEvent): void;
+  (e: "node-drag-leave", draggingNode: ElementTreeNode, oldDropNode: ElementTreeNode, event: DragEvent): void;
+  (e: "node-drag-over", draggingNode: ElementTreeNode, dropNode: ElementTreeNode, event: DragEvent): void;
+  (e: "node-drag-end", draggingNode: ElementTreeNode, dropNode: ElementTreeNode | null, dropType: NodeDropType, event: DragEvent): void;
+  (e: "node-drop", draggingNode: ElementTreeNode, dropNode: ElementTreeNode, dropType: Exclude<NodeDropType, "none">, event: DragEvent): void;
 }>();
 
 defineSlots<{
@@ -108,17 +143,26 @@ defineSlots<{
   actions?: (props: { node: TreeNode; level: number; active: boolean; expanded: boolean }) => any;
 }>();
 
-const getNodeKey = (node: TreeNode) => String(getFirstTruthyRecordValue(node, [props.nodeKey, "path", "name"], ""));
-const collectExpandedKeys = (nodes: TreeNode[]): string[] => {
+const attrs = useAttrs();
+const getNodeKey = (node: TreeNode): TreeKey => {
+  const value = getFirstTruthyRecordValue<TreeKey | "">(node, [props.nodeKey, "path", "name"], "");
+  return typeof value === "number" ? value : String(value ?? "");
+};
+
+const collectExpandedKeys = (nodes: TreeNode[]): TreeKey[] => {
   return filterTreeNodeKeys(nodes, (node) => Boolean(node.expanded), (node) => node.children, getNodeKey);
 };
 
 const initialExpandedKeys = () => uniqueArray([...collectExpandedKeys(props.data), ...props.defaultExpandedKeys]);
-const internalExpandedKeys = ref<string[]>(initialExpandedKeys());
-const internalCheckedKeys = ref<string[]>(uniqueArray(props.defaultCheckedKeys));
+const internalExpandedKeys = ref<TreeKey[]>(initialExpandedKeys());
+const internalCheckedKeys = ref<TreeKey[]>(uniqueArray(props.defaultCheckedKeys));
 const expandedKeysSource = computed(() => props.expandedKeys ?? internalExpandedKeys.value);
 const checkedKeysSource = computed(() => props.checkedKeys ?? internalCheckedKeys.value);
-const treeRef = ref<ElementTreeRef | null>(null);
+const treeRef = ref<TreeInstance | null>(null);
+const resolvedCurrentNodeKey = computed(() => {
+  const key = props.currentNodeKey ?? props.activeKey;
+  return key === "" || key === undefined ? undefined : key;
+});
 
 const rootClasses = computed(() => [
   `base-tree--${props.size}`,
@@ -134,15 +178,15 @@ const treeProps = computed(() => ({
   children: "children",
   label: "name",
   disabled: (node: TreeNode) => isNodeDisabled(node),
-  isLeaf: (node: TreeNode) => !node.isDir,
+  isLeaf: (node: TreeNode) => node.isLeaf ?? !node.isDir,
 }));
 
 const treeStyle = computed(() => ({
   "--base-tree-indent": `${props.indent}px`,
 }));
 
-const normalizeTreeKeys = (keys: TreeKey[]) => uniqueArray(keys.map(String));
-const isActive = (node: TreeNode) => Boolean(props.activeKey && getNodeKey(node) === props.activeKey);
+const normalizeTreeKeys = (keys: TreeKey[]) => uniqueArray(keys);
+const isActive = (node: TreeNode) => resolvedCurrentNodeKey.value !== undefined && getNodeKey(node) === resolvedCurrentNodeKey.value;
 const isNodeDisabled = (node: TreeNode) => Boolean(props.disabled || node.disabled);
 const isNodeExpanded = (node: TreeNode) => hasItem(expandedKeysSource.value, getNodeKey(node));
 const resolvedIcon = (node: TreeNode) => {
@@ -166,7 +210,7 @@ const resolvedFilterNodeMethod = (query: string, node: TreeNode) => {
   return getNodeSearchText(node).includes(normalizedQuery);
 };
 
-const syncCheckedKeys = async (keys: string[]) => {
+const syncCheckedKeys = async (keys: TreeKey[]) => {
   if (!props.showCheckbox) return;
 
   await nextTick();
@@ -213,7 +257,7 @@ watch(
   { immediate: true },
 );
 
-const commitExpandedKeys = (keys: string[]) => {
+const commitExpandedKeys = (keys: TreeKey[]) => {
   const nextKeys = uniqueArray(keys);
   if (props.expandedKeys === undefined) {
     internalExpandedKeys.value = nextKeys;
@@ -222,7 +266,7 @@ const commitExpandedKeys = (keys: string[]) => {
   emit("update:expandedKeys", nextKeys);
 };
 
-const commitCheckedKeys = (keys: string[]) => {
+const commitCheckedKeys = (keys: TreeKey[]) => {
   const nextKeys = uniqueArray(keys);
   if (props.checkedKeys === undefined) {
     internalCheckedKeys.value = nextKeys;
@@ -231,33 +275,35 @@ const commitCheckedKeys = (keys: string[]) => {
   emit("update:checkedKeys", nextKeys);
 };
 
-const handleNodeClick = (node: TreeNode) => {
+const handleNodeClick = (node: TreeNode, treeNode: ElementTreeNode, nodeInstance: ComponentInternalInstance | null, event: MouseEvent) => {
   if (isNodeDisabled(node)) return;
 
-  emit("node-click", node);
+  emit("node-click", node, treeNode, nodeInstance, event);
 
   if (props.selectable) {
     emit("select", node);
   }
 };
 
-const handleNodeExpand = (node: TreeNode) => {
+const handleNodeExpand = (node: TreeNode, treeNode: ElementTreeNode, nodeInstance: ComponentInternalInstance | null) => {
   if (isNodeDisabled(node)) return;
 
   commitExpandedKeys(setSelectionKey(expandedKeysSource.value, getNodeKey(node), true));
   emit("node-toggle", { node, expanded: true });
+  emit("node-expand", node, treeNode, nodeInstance);
 };
 
-const handleNodeCollapse = (node: TreeNode) => {
+const handleNodeCollapse = (node: TreeNode, treeNode: ElementTreeNode, nodeInstance: ComponentInternalInstance | null) => {
   if (isNodeDisabled(node)) return;
 
   commitExpandedKeys(setSelectionKey(expandedKeysSource.value, getNodeKey(node), false));
   emit("node-toggle", { node, expanded: false });
+  emit("node-collapse", node, treeNode, nodeInstance);
 };
 
 const handleCheck = (
   node: TreeNode,
-  payload: { checkedKeys: TreeKey[]; checkedNodes: TreeNode[]; halfCheckedKeys: TreeKey[]; halfCheckedNodes: TreeNode[] },
+  payload: CheckedInfo,
 ) => {
   const checkedKeys = normalizeTreeKeys(payload.checkedKeys);
   const halfCheckedKeys = normalizeTreeKeys(payload.halfCheckedKeys);
@@ -266,19 +312,117 @@ const handleCheck = (
   emit("check", {
     node,
     checkedKeys,
-    checkedNodes: payload.checkedNodes,
+    checkedNodes: payload.checkedNodes as TreeNode[],
     halfCheckedKeys,
-    halfCheckedNodes: payload.halfCheckedNodes,
+    halfCheckedNodes: payload.halfCheckedNodes as TreeNode[],
   });
 };
 
 const handleCheckChange = (node: TreeNode, checked: boolean, indeterminate: boolean) => {
   emit("check-change", { node, checked, indeterminate });
 };
+
+const handleCurrentChange = (node: TreeNode | null, treeNode: ElementTreeNode | null) => {
+  emit("current-change", node, treeNode);
+};
+
+const handleNodeContextMenu = (
+  event: Event,
+  node: TreeNode,
+  treeNode: ElementTreeNode,
+  nodeInstance: ComponentInternalInstance | null,
+) => {
+  emit("node-contextmenu", event, node, treeNode, nodeInstance);
+};
+
+const handleNodeDragStart = (treeNode: ElementTreeNode, event: DragEvent) => {
+  emit("node-drag-start", treeNode, event);
+};
+
+const handleNodeDragEnter = (draggingNode: ElementTreeNode, dropNode: ElementTreeNode, event: DragEvent) => {
+  emit("node-drag-enter", draggingNode, dropNode, event);
+};
+
+const handleNodeDragLeave = (draggingNode: ElementTreeNode, oldDropNode: ElementTreeNode, event: DragEvent) => {
+  emit("node-drag-leave", draggingNode, oldDropNode, event);
+};
+
+const handleNodeDragOver = (draggingNode: ElementTreeNode, dropNode: ElementTreeNode, event: DragEvent) => {
+  emit("node-drag-over", draggingNode, dropNode, event);
+};
+
+const handleNodeDragEnd = (
+  draggingNode: ElementTreeNode,
+  dropNode: ElementTreeNode | null,
+  dropType: NodeDropType,
+  event: DragEvent,
+) => {
+  emit("node-drag-end", draggingNode, dropNode, dropType, event);
+};
+
+const handleNodeDrop = (
+  draggingNode: ElementTreeNode,
+  dropNode: ElementTreeNode,
+  dropType: Exclude<NodeDropType, "none">,
+  event: DragEvent,
+) => {
+  emit("node-drop", draggingNode, dropNode, dropType, event);
+};
+
+const getElement = () => getElementPlusControlRoot(treeRef.value);
+
+const getCurrentNodeElement = () =>
+  getElement()?.querySelector<HTMLElement>(".el-tree-node.is-current > .el-tree-node__content") ?? null;
+
+const focusTreeNodeElement = (element: HTMLElement | null) => {
+  if (!element) return null;
+  element.focus();
+  return element;
+};
+
+const focusCurrentNode = async () => {
+  await nextTick();
+  return focusTreeNodeElement(getCurrentNodeElement());
+};
+
+const focusNode = async (key: TreeKey, shouldAutoExpandParent = true) => {
+  treeRef.value?.setCurrentKey(key, shouldAutoExpandParent);
+  await nextTick();
+  return focusTreeNodeElement(getCurrentNodeElement());
+};
+
+defineExpose({
+  getNativeTree: () => treeRef.value,
+  getElement,
+  getTreeElement: getElement,
+  focusCurrentNode,
+  focusNode,
+  filter: (value: string) => treeRef.value?.filter(value),
+  getNode: (data: TreeKey | TreeNodeData) => treeRef.value?.getNode(data),
+  getNodePath: (data: TreeKey | TreeNodeData) => treeRef.value?.getNodePath(data),
+  getCheckedKeys: (leafOnly?: boolean) => treeRef.value?.getCheckedKeys(leafOnly) ?? [],
+  getCheckedNodes: (leafOnly?: boolean, includeHalfChecked?: boolean) =>
+    (treeRef.value?.getCheckedNodes(leafOnly, includeHalfChecked) ?? []) as TreeNode[],
+  getHalfCheckedKeys: () => treeRef.value?.getHalfCheckedKeys() ?? [],
+  getHalfCheckedNodes: () => (treeRef.value?.getHalfCheckedNodes() ?? []) as TreeNode[],
+  setCheckedKeys: (keys: TreeKey[], leafOnly?: boolean) => treeRef.value?.setCheckedKeys(keys, leafOnly),
+  setChecked: (data: TreeKey | TreeNodeData, checked: boolean, deep?: boolean) => treeRef.value?.setChecked(data, checked, deep),
+  getCurrentNode: () => (treeRef.value?.getCurrentNode() ?? null) as TreeNode | null,
+  getCurrentKey: () => treeRef.value?.getCurrentKey(),
+  setCurrentNode: (node: ElementTreeNode, shouldAutoExpandParent?: boolean) => treeRef.value?.setCurrentNode(node, shouldAutoExpandParent),
+  setCurrentKey: (key?: TreeKey | null, shouldAutoExpandParent?: boolean) => treeRef.value?.setCurrentKey(key, shouldAutoExpandParent),
+  setCurrentNodeKey: (key?: TreeKey | null, shouldAutoExpandParent?: boolean) => treeRef.value?.setCurrentKey(key, shouldAutoExpandParent),
+  append: (data: TreeNodeData, parentNode: TreeKey | TreeNodeData | ElementTreeNode) => treeRef.value?.append(data, parentNode),
+  remove: (data: TreeNodeData | ElementTreeNode) => treeRef.value?.remove(data),
+  insertBefore: (data: TreeNodeData, refNode: TreeKey | TreeNodeData | ElementTreeNode) => treeRef.value?.insertBefore(data, refNode),
+  insertAfter: (data: TreeNodeData, refNode: TreeKey | TreeNodeData | ElementTreeNode) => treeRef.value?.insertAfter(data, refNode),
+  updateKeyChildren: (key: TreeKey, data: TreeNodeData[]) => treeRef.value?.updateKeyChildren(key, data),
+});
 </script>
 
 <template>
   <el-tree
+    v-bind="attrs"
     ref="treeRef"
     class="base-tree"
     :class="rootClasses"
@@ -289,17 +433,24 @@ const handleCheckChange = (node: TreeNode, checked: boolean, indeterminate: bool
     :node-key="nodeKey"
     :default-expanded-keys="expandedKeysSource"
     :default-checked-keys="checkedKeysSource"
-    :current-node-key="activeKey || undefined"
+    :current-node-key="resolvedCurrentNodeKey"
     :indent="indentStep"
     :expand-on-click-node="!disabled && expandOnClick"
     :show-checkbox="showCheckbox"
     :check-strictly="checkStrictly"
     :check-on-click-node="!disabled && checkOnClick"
     :check-on-click-leaf="!disabled && checkOnClickLeaf"
+    :check-descendants="checkDescendants"
+    :auto-expand-parent="autoExpandParent"
     :default-expand-all="defaultExpandAll"
     :accordion="accordion"
-    :highlight-current="Boolean(activeKey)"
-    :render-after-expand="false"
+    :render-after-expand="renderAfterExpand"
+    :lazy="lazy"
+    :load="load"
+    :draggable="!disabled && draggable"
+    :allow-drag="allowDrag"
+    :allow-drop="allowDrop"
+    :highlight-current="resolvedCurrentNodeKey !== undefined"
     :filter-node-method="resolvedFilterNodeMethod"
     :aria-label="ariaLabel || undefined"
     :aria-disabled="disabled ? 'true' : undefined"
@@ -308,6 +459,14 @@ const handleCheckChange = (node: TreeNode, checked: boolean, indeterminate: bool
     @node-collapse="handleNodeCollapse"
     @check="handleCheck"
     @check-change="handleCheckChange"
+    @current-change="handleCurrentChange"
+    @node-contextmenu="handleNodeContextMenu"
+    @node-drag-start="handleNodeDragStart"
+    @node-drag-enter="handleNodeDragEnter"
+    @node-drag-leave="handleNodeDragLeave"
+    @node-drag-over="handleNodeDragOver"
+    @node-drag-end="handleNodeDragEnd"
+    @node-drop="handleNodeDrop"
   >
     <template #default="{ data: node }">
       <span

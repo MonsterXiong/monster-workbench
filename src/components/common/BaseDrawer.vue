@@ -1,13 +1,19 @@
 <script setup lang="ts">
-import { computed, useId, useSlots } from "vue";
+import type { DialogBeforeCloseFn, DialogTransition, DrawerInstance } from "element-plus";
+import { computed, ref, useAttrs, useId, useSlots } from "vue";
 import { useI18n } from "../../composables/useI18n";
 import { joinAriaIds, resolveCssSizeAlias } from "../../utils";
+
+defineOptions({
+  inheritAttrs: false,
+});
 
 type DrawerSize = "sm" | "md" | "lg" | "xl";
 type DrawerLevel = 2 | 3 | 4 | 5 | 6;
 type DrawerFooterAlign = "start" | "end" | "between";
 type DrawerRole = "dialog" | "alertdialog";
-type DrawerDirection = "ltr" | "rtl";
+type DrawerPlacement = "left" | "right" | "top" | "bottom";
+type DrawerDirection = "ltr" | "rtl" | "ttb" | "btt";
 
 interface Props {
   modelValue: boolean;
@@ -16,7 +22,8 @@ interface Props {
   level?: DrawerLevel;
   icon?: string;
   showIcon?: boolean;
-  placement?: "left" | "right";
+  placement?: DrawerPlacement;
+  direction?: DrawerDirection;
   width?: string;
   size?: DrawerSize;
   closeOnOverlay?: boolean;
@@ -24,6 +31,31 @@ interface Props {
   showClose?: boolean;
   closeDisabled?: boolean;
   lockCloseOnLoading?: boolean;
+  beforeClose?: DialogBeforeCloseFn;
+  destroyOnClose?: boolean;
+  appendToBody?: boolean;
+  appendTo?: string | HTMLElement;
+  lockScroll?: boolean;
+  modal?: boolean;
+  modalPenetrable?: boolean;
+  modalFade?: boolean;
+  openDelay?: number;
+  closeDelay?: number;
+  modalClass?: string;
+  headerClass?: string;
+  bodyClass?: string;
+  footerClass?: string;
+  zIndex?: number;
+  trapFocus?: boolean;
+  transition?: DialogTransition;
+  center?: boolean;
+  alignCenter?: boolean;
+  draggable?: boolean;
+  overflow?: boolean;
+  fullscreen?: boolean;
+  resizable?: boolean;
+  withHeader?: boolean;
+  headerAriaLevel?: string;
   loading?: boolean;
   loadingText?: string;
   confirmLoading?: boolean;
@@ -47,6 +79,7 @@ const props = withDefaults(defineProps<Props>(), {
   icon: "",
   showIcon: false,
   placement: "right",
+  direction: undefined,
   width: "",
   size: "md",
   closeOnOverlay: true,
@@ -54,6 +87,31 @@ const props = withDefaults(defineProps<Props>(), {
   showClose: true,
   closeDisabled: false,
   lockCloseOnLoading: false,
+  beforeClose: undefined,
+  destroyOnClose: true,
+  appendToBody: true,
+  appendTo: "body",
+  lockScroll: true,
+  modal: true,
+  modalPenetrable: false,
+  modalFade: true,
+  openDelay: 0,
+  closeDelay: 0,
+  modalClass: "",
+  headerClass: "",
+  bodyClass: "",
+  footerClass: "",
+  zIndex: undefined,
+  trapFocus: false,
+  transition: undefined,
+  center: false,
+  alignCenter: undefined,
+  draggable: false,
+  overflow: false,
+  fullscreen: false,
+  resizable: false,
+  withHeader: true,
+  headerAriaLevel: undefined,
   loading: false,
   loadingText: "",
   confirmLoading: false,
@@ -72,12 +130,22 @@ const props = withDefaults(defineProps<Props>(), {
 
 const emit = defineEmits<{
   (e: "update:modelValue", val: boolean): void;
+  (e: "open"): void;
+  (e: "opened"): void;
   (e: "close"): void;
+  (e: "closed"): void;
+  (e: "open-auto-focus"): void;
+  (e: "close-auto-focus"): void;
+  (e: "resize-start", event: MouseEvent, size: number): void;
+  (e: "resize", event: MouseEvent, size: number): void;
+  (e: "resize-end", event: MouseEvent, size: number): void;
 }>();
 
 const { t } = useI18n();
 const slots = useSlots();
 const instanceId = useId();
+const attrs = useAttrs();
+const drawerRef = ref<DrawerInstance | null>(null);
 const titleId = `${instanceId}-title`;
 const descriptionId = `${instanceId}-description`;
 const bodyId = `${instanceId}-body`;
@@ -104,7 +172,13 @@ const resolvedWidth = computed(() => {
   return sizeMap[props.size];
 });
 
-const drawerDirection = computed<DrawerDirection>(() => (props.placement === "left" ? "ltr" : "rtl"));
+const drawerDirection = computed<DrawerDirection>(() => {
+  if (props.direction) return props.direction;
+  if (props.placement === "left") return "ltr";
+  if (props.placement === "top") return "ttb";
+  if (props.placement === "bottom") return "btt";
+  return "rtl";
+});
 const hasCustomHeader = computed(() => Boolean(slots.header));
 const fallbackLabel = computed(() => props.ariaLabel || props.title || t("common.dialog"));
 const headingTag = computed(() => `h${props.level}`);
@@ -122,24 +196,95 @@ const describedBy = computed(() =>
   joinAriaIds([!hasCustomHeader.value && props.description ? descriptionId : undefined, props.ariaDescribedby])
 );
 const resolvedActionsLabel = computed(() => props.actionsLabel || `${props.title || props.ariaLabel || t("common.dialog")} 操作`);
+const rootClass = computed(() => attrs.class);
+const rootStyle = computed(() => attrs.style);
+const drawerPassthroughAttrs = computed(() =>
+  Object.fromEntries(Object.entries(attrs).filter(([key]) => key !== "class" && key !== "style"))
+);
 
-const requestClose = () => {
+const open = () => {
+  computedValue.value = true;
+};
+
+const close = () => {
   if (isCloseDisabled.value) return;
+
+  if (drawerRef.value?.handleClose) {
+    drawerRef.value.handleClose();
+    return;
+  }
+
   computedValue.value = false;
+};
+
+const escapeCssName = (value: string) =>
+  typeof CSS !== "undefined" && CSS.escape ? CSS.escape(value) : value.replace(/[^a-zA-Z0-9_-]/g, "\\$&");
+const escapeCssAttributeValue = (value: string) => value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+
+const getDrawerElementFromAttrs = () => {
+  if (typeof document === "undefined") return null;
+
+  const id = drawerPassthroughAttrs.value.id;
+  if (typeof id === "string" && id) {
+    return document.getElementById(id);
+  }
+
+  const dataEntry = Object.entries(drawerPassthroughAttrs.value).find(
+    ([key, value]) => key.startsWith("data-") && (typeof value === "string" || typeof value === "number")
+  );
+  if (!dataEntry) return null;
+
+  const [key, value] = dataEntry;
+  return document.querySelector<HTMLElement>(`[${escapeCssName(key)}="${escapeCssAttributeValue(String(value))}"]`);
+};
+
+const getDrawerElement = () => {
+  const element = drawerRef.value?.$el;
+  if (element instanceof HTMLElement) return element;
+
+  if (typeof document === "undefined") return null;
+  return getDrawerElementFromAttrs() ?? document.querySelector<HTMLElement>(".base-drawer.open");
 };
 
 const handleBeforeClose = (done: () => void) => {
   if (isCloseDisabled.value) return;
+  if (props.beforeClose) {
+    props.beforeClose(done);
+    return;
+  }
   done();
 };
 
 const handleClosed = () => {
   emit("close");
+  emit("closed");
 };
+
+const handleResizeStart = (event: MouseEvent, size: number) => {
+  emit("resize-start", event, size);
+};
+
+const handleResize = (event: MouseEvent, size: number) => {
+  emit("resize", event, size);
+};
+
+const handleResizeEnd = (event: MouseEvent, size: number) => {
+  emit("resize-end", event, size);
+};
+
+defineExpose({
+  getNativeDrawer: () => drawerRef.value,
+  getElement: getDrawerElement,
+  handleClose: close,
+  open,
+  close,
+});
 </script>
 
 <template>
   <el-drawer
+    ref="drawerRef"
+    v-bind="drawerPassthroughAttrs"
     v-model="computedValue"
     class="base-drawer"
     :class="[
@@ -151,24 +296,53 @@ const handleClosed = () => {
         'base-drawer--wrap-title': wrapTitle,
         'base-drawer--wrap-description': wrapDescription,
       },
+      rootClass,
     ]"
+    :style="rootStyle"
     :size="resolvedWidth"
     :direction="drawerDirection"
     :close-on-click-modal="closeOnOverlay"
     :close-on-press-escape="closeOnEsc"
     :show-close="false"
     :before-close="handleBeforeClose"
-    :destroy-on-close="true"
-    :lock-scroll="true"
-    :modal="true"
-    :append-to-body="true"
+    :destroy-on-close="destroyOnClose"
+    :append-to-body="appendToBody"
+    :append-to="appendTo"
+    :lock-scroll="lockScroll"
+    :modal="modal"
+    :modal-penetrable="modalPenetrable"
+    :modal-fade="modalFade"
+    :open-delay="openDelay"
+    :close-delay="closeDelay"
+    :modal-class="modalClass || undefined"
+    :header-class="headerClass || undefined"
+    :body-class="bodyClass || undefined"
+    :footer-class="footerClass || undefined"
+    :z-index="zIndex"
+    :trap-focus="trapFocus"
+    :transition="transition"
+    :center="center"
+    :align-center="alignCenter"
+    :draggable="draggable"
+    :overflow="overflow"
+    :fullscreen="fullscreen"
+    :resizable="resizable"
+    :with-header="withHeader"
+    :header-aria-level="headerAriaLevel || String(level)"
     :role="role"
     aria-modal="true"
     :aria-busy="loading || confirmLoading ? 'true' : undefined"
     :aria-label="resolvedPanelLabel || undefined"
     :aria-labelledby="labelledBy"
     :aria-describedby="describedBy"
+    @open="emit('open')"
+    @opened="emit('opened')"
     @closed="handleClosed"
+    @open-auto-focus="emit('open-auto-focus')"
+    @close-auto-focus="emit('close-auto-focus')"
+    @resize-start="handleResizeStart"
+    @resize="handleResize"
+    @resize-end="handleResizeEnd"
   >
     <template #header>
       <header class="base-drawer__header">
@@ -198,7 +372,7 @@ const handleClosed = () => {
             :aria-label="resolvedCloseLabel"
             :title="resolvedCloseLabel"
             data-ignore-container-click
-            @click.stop="requestClose"
+            @click.stop="close"
           >
             <template #icon>
               <BaseIcon name="X" size="16" aria-hidden="true" />
@@ -238,12 +412,25 @@ const handleClosed = () => {
   @apply max-w-[calc(100vw-1rem)] bg-white shadow-2xl dark:bg-slate-900;
 }
 
+:deep(.base-drawer.base-drawer--top.el-drawer),
+:deep(.base-drawer.base-drawer--bottom.el-drawer) {
+  @apply max-h-[calc(100vh-1rem)] max-w-none;
+}
+
 :deep(.base-drawer.base-drawer--right.el-drawer) {
   @apply border-l border-slate-200 dark:border-slate-800;
 }
 
 :deep(.base-drawer.base-drawer--left.el-drawer) {
   @apply border-r border-slate-200 dark:border-slate-800;
+}
+
+:deep(.base-drawer.base-drawer--top.el-drawer) {
+  @apply border-b border-slate-200 dark:border-slate-800;
+}
+
+:deep(.base-drawer.base-drawer--bottom.el-drawer) {
+  @apply border-t border-slate-200 dark:border-slate-800;
 }
 
 :deep(.base-drawer .el-drawer__header) {

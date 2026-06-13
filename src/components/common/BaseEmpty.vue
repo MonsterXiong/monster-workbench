@@ -1,7 +1,12 @@
 <script setup lang="ts">
-import { computed, useId } from "vue";
+import { computed, ref, useAttrs, useId } from "vue";
 import { useI18n } from "../../composables/useI18n";
 import BaseIcon from "./BaseIcon.vue";
+import { getElementPlusControlRoot, type ElementPlusControlRef } from "./elementPlusDom";
+
+defineOptions({
+  inheritAttrs: false,
+});
 
 type EmptySurface = "card" | "muted" | "plain";
 type EmptySize = "sm" | "md" | "lg";
@@ -44,7 +49,9 @@ const props = withDefaults(defineProps<Props>(), {
   ariaLabel: "",
 });
 
+const attrs = useAttrs();
 const { t } = useI18n();
+const emptyRef = ref<ElementPlusControlRef>(null);
 const emptyId = useId();
 const titleId = computed(() => `${emptyId}-title`);
 const descriptionId = computed(() => `${emptyId}-description`);
@@ -63,10 +70,20 @@ const imageSize = computed(() => {
 });
 const labelledBy = computed(() => (!props.ariaLabel && props.title ? titleId.value : undefined));
 const resolvedActionsLabel = computed(() => props.actionsLabel || `${props.title || props.ariaLabel || "空态"} 操作`);
+
+const getElement = () => getElementPlusControlRoot(emptyRef.value);
+
+defineExpose({
+  getNativeEmpty: () => emptyRef.value,
+  getElement,
+  getEmptyElement: getElement,
+});
 </script>
 
 <template>
   <el-empty
+    v-bind="attrs"
+    ref="emptyRef"
     class="base-empty"
     :class="[
       `base-empty--${resolvedSize}`,

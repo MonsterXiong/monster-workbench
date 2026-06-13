@@ -86,19 +86,19 @@ const emit = defineEmits<{
             </p>
 
             <div class="mt-4 grid grid-cols-4 gap-2 text-center">
-              <div class="rounded-md bg-slate-50 px-2 py-2 dark:bg-slate-950">
+              <div class="rounded-xl bg-slate-50 px-2 py-2 dark:bg-slate-950">
                 <div class="text-sm font-black text-slate-900 dark:text-white">{{ doc.functions.length }}</div>
                 <div class="text-[9px] font-bold text-slate-400">函数</div>
               </div>
-              <div class="rounded-md bg-slate-50 px-2 py-2 dark:bg-slate-950">
+              <div class="rounded-xl bg-slate-50 px-2 py-2 dark:bg-slate-950">
                 <div class="text-sm font-black text-slate-900 dark:text-white">{{ doc.examples.length }}</div>
                 <div class="text-[9px] font-bold text-slate-400">示例</div>
               </div>
-              <div class="rounded-md bg-slate-50 px-2 py-2 dark:bg-slate-950">
+              <div class="rounded-xl bg-slate-50 px-2 py-2 dark:bg-slate-950">
                 <div class="text-sm font-black text-slate-900 dark:text-white">{{ doc.boundaryCases.length }}</div>
                 <div class="text-[9px] font-bold text-slate-400">边界</div>
               </div>
-              <div class="rounded-md bg-slate-50 px-2 py-2 dark:bg-slate-950">
+              <div class="rounded-xl bg-slate-50 px-2 py-2 dark:bg-slate-950">
                 <div class="text-sm font-black text-slate-900 dark:text-white">{{ qualityReports[doc.key].sandboxReadyCount }}</div>
                 <div class="text-[9px] font-bold text-slate-400">沙箱</div>
               </div>
@@ -108,7 +108,7 @@ const emit = defineEmits<{
               <span
                 v-for="fn in doc.functions.slice(0, 4)"
                 :key="fn.name"
-                class="inline-flex max-w-full items-center gap-1 rounded-md border border-slate-200 bg-slate-50 px-1.5 py-0.5 font-mono text-[10px] font-bold text-slate-600 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-300"
+                class="inline-flex max-w-full items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-1.5 py-0.5 font-mono text-[10px] font-bold text-slate-600 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-300"
               >
                 <CheckCircle2 v-if="fn.sandbox?.enabled !== false" class="h-2.5 w-2.5 shrink-0 text-emerald-500" />
                 <Gauge v-else class="h-2.5 w-2.5 shrink-0 text-slate-300" />
@@ -125,7 +125,7 @@ const emit = defineEmits<{
 <style scoped>
 .utils-docs-metric {
   border: 1px solid rgba(203, 213, 225, 0.82);
-  border-radius: 8px;
+  border-radius: 16px;
   background: rgba(248, 250, 252, 0.86);
   padding: 10px 12px;
 }

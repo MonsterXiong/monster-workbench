@@ -1,6 +1,20 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, useId, useSlots, watchEffect } from "vue";
-import type { ListType, UploadFile, UploadFiles, UploadInstance, UploadStatus, UploadUserFile } from "element-plus";
+import type { StyleValue } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, useAttrs, useId, useSlots, watchEffect } from "vue";
+import type {
+  Crossorigin,
+  ListType,
+  UploadData,
+  UploadFile,
+  UploadFiles,
+  UploadHooks,
+  UploadInstance,
+  UploadProgressEvent,
+  UploadRawFile,
+  UploadRequestHandler,
+  UploadStatus,
+  UploadUserFile,
+} from "element-plus";
 import { useI18n } from "../../composables/useI18n";
 import BaseIcon from "./BaseIcon.vue";
 import {
@@ -14,9 +28,15 @@ import {
   isRelatedTargetInsideCurrentTarget,
   joinAriaIds,
   joinTextList,
+  omit,
   validateFileList,
   type FileValidationRejectReason,
 } from "../../utils";
+import { getElementPlusControlRoot } from "./elementPlusDom";
+
+defineOptions({
+  inheritAttrs: false,
+});
 
 type UploadSize = "sm" | "md" | "lg";
 
@@ -27,6 +47,16 @@ interface UploadRejectPayload {
 
 interface Props {
   id?: string;
+  action?: string;
+  method?: string;
+  headers?: Headers | Record<string, unknown>;
+  data?: UploadData | Promise<UploadData> | ((rawFile: UploadRawFile) => UploadData | Promise<UploadData>);
+  withCredentials?: boolean;
+  autoUpload?: boolean;
+  httpRequest?: UploadRequestHandler;
+  beforeUpload?: UploadHooks["beforeUpload"];
+  beforeRemove?: UploadHooks["beforeRemove"];
+  crossorigin?: Crossorigin;
   name?: string;
   accept?: string;
   multiple?: boolean;
@@ -61,6 +91,16 @@ interface Props {
 
 const props = withDefaults(defineProps<Props>(), {
   id: "",
+  action: "#",
+  method: "post",
+  headers: undefined,
+  data: undefined,
+  withCredentials: false,
+  autoUpload: false,
+  httpRequest: undefined,
+  beforeUpload: undefined,
+  beforeRemove: undefined,
+  crossorigin: "",
   name: "",
   accept: "*",
   multiple: false,
@@ -100,12 +140,14 @@ const emit = defineEmits<{
   (e: "preview", file: UploadFile): void;
   (e: "remove", file: UploadFile, files: UploadFiles): void;
   (e: "exceed", files: File[], uploadFiles: UploadUserFile[]): void;
+  (e: "progress", event: UploadProgressEvent, file: UploadFile, files: UploadFiles): void;
+  (e: "success", response: unknown, file: UploadFile, files: UploadFiles): void;
+  (e: "error", error: Error, file: UploadFile, files: UploadFiles): void;
 }>();
 
-type UploadRef = (UploadInstance & { $el?: Element | null }) | null;
-
+const attrs = useAttrs();
 const isDragActive = ref(false);
-const uploadRef = ref<UploadRef>(null);
+const uploadRef = ref<UploadInstance | null>(null);
 
 const { t } = useI18n();
 const slots = useSlots();
@@ -133,7 +175,7 @@ const effectiveMaxFiles = computed(() => {
   return props.limit > 0 ? props.limit : 0;
 });
 const elementLimit = computed(() => (props.limit > 0 ? props.limit : effectiveMaxFiles.value));
-const shouldClearFiles = computed(() => props.clearAfterSelect ?? !props.showFileList);
+const shouldClearFiles = computed(() => props.clearAfterSelect ?? (!props.showFileList && !props.autoUpload));
 const visibleMaxFiles = computed(() => (props.multiple || props.maxFiles > 0 ? effectiveMaxFiles.value : 0));
 const constraintsText = computed(() => {
   const constraints: string[] = [];
@@ -165,6 +207,11 @@ const iconSize = computed(() => {
   if (props.size === "lg") return 36;
   return 32;
 });
+const rootClass = computed(() => attrs.class);
+const rootStyle = computed(() => attrs.style as StyleValue | undefined);
+const uploadPassthroughAttrs = computed(() =>
+  omit(attrs, ["class", "style", "aria-label", "aria-labelledby", "aria-describedby", "aria-busy", "aria-disabled", "aria-invalid"])
+);
 
 let pendingFiles: File[] = [];
 let pendingUploadFiles: UploadFiles = [];
@@ -180,8 +227,17 @@ const setOptionalAttribute = (element: HTMLElement, name: string, value?: string
 };
 
 const getUploadElement = () => {
-  const root = uploadRef.value?.$el;
-  return root instanceof HTMLElement ? root.querySelector<HTMLElement>(".el-upload") : null;
+  return getElementPlusControlRoot(uploadRef.value)?.querySelector<HTMLElement>(".el-upload") ?? null;
+};
+
+const getElement = () => getElementPlusControlRoot(uploadRef.value);
+
+const getTriggerElement = () => getUploadElement();
+
+const focusTrigger = () => {
+  const target = getTriggerElement();
+  target?.focus();
+  return target;
 };
 
 const syncUploadAria = async () => {
@@ -216,6 +272,11 @@ const validateFiles = (files: FileList) => {
   }
 
   return true;
+};
+
+const validateRawFile = (file: UploadRawFile) => {
+  const files = createFileList([file]);
+  return validateFiles(files);
 };
 
 const handleFiles = (files: FileList) => {
@@ -282,6 +343,15 @@ const onUploadChange = (_file: UploadFile, uploadFiles: UploadFiles) => {
   scheduleFileFlush(getRawFiles(uploadFiles), uploadFiles);
 };
 
+const onBeforeUpload: UploadHooks["beforeUpload"] = (file) => {
+  if (!validateRawFile(file)) return false;
+  return props.beforeUpload?.(file) ?? true;
+};
+
+const onBeforeRemove: UploadHooks["beforeRemove"] = (file, uploadFiles) => {
+  return props.beforeRemove?.(file, uploadFiles) ?? true;
+};
+
 const onUploadPreview = (file: UploadFile) => {
   emit("preview", file);
 };
@@ -294,6 +364,20 @@ const onUploadRemove = (file: UploadFile, uploadFiles: UploadFiles) => {
 const onUploadExceed = (files: File[], uploadFiles: UploadUserFile[]) => {
   rejectFiles("max-files", files);
   emit("exceed", files, uploadFiles);
+};
+
+const onUploadProgress = (event: UploadProgressEvent, file: UploadFile, uploadFiles: UploadFiles) => {
+  emit("progress", event, file, uploadFiles);
+};
+
+const onUploadSuccess = (response: unknown, file: UploadFile, uploadFiles: UploadFiles) => {
+  emit("update:fileList", uploadFiles);
+  emit("success", response, file, uploadFiles);
+};
+
+const onUploadError = (error: Error, file: UploadFile, uploadFiles: UploadFiles) => {
+  emit("update:fileList", uploadFiles);
+  emit("error", error, file, uploadFiles);
 };
 
 const onDragOver = (e: DragEvent) => {
@@ -356,30 +440,49 @@ onBeforeUnmount(() => {
 });
 
 defineExpose({
+  getNativeUpload: () => uploadRef.value,
+  getElement,
+  getTriggerElement,
+  focusTrigger,
   abort: (file?: UploadFile) => uploadRef.value?.abort(file),
   clearFiles: () => uploadRef.value?.clearFiles(),
+  handleRemove: (file: UploadFile | UploadRawFile) => uploadRef.value?.handleRemove(file),
+  handleStart: (file: UploadRawFile) => uploadRef.value?.handleStart(file),
   submit: () => uploadRef.value?.submit(),
 });
 </script>
 
 <template>
   <el-upload
+    v-bind="uploadPassthroughAttrs"
     :id="rootId"
     ref="uploadRef"
     class="base-upload"
-    :class="{
-      'base-upload--active': isActive,
-      'base-upload--disabled': disabled,
-      'base-upload--loading': loading,
-      'base-upload--error': error,
-      'base-upload--success': success && !error,
-      'base-upload--compact': compact,
-      'base-upload--with-list': showFileList,
-      'base-upload--dragless': !drag,
-      [`base-upload--${size}`]: true,
-    }"
-    action="#"
-    :auto-upload="false"
+    :class="[
+      rootClass,
+      {
+        'base-upload--active': isActive,
+        'base-upload--disabled': disabled,
+        'base-upload--loading': loading,
+        'base-upload--error': error,
+        'base-upload--success': success && !error,
+        'base-upload--compact': compact,
+        'base-upload--with-list': showFileList,
+        'base-upload--dragless': !drag,
+        [`base-upload--${size}`]: true,
+      },
+    ]"
+    :style="rootStyle"
+    :action="action"
+    :headers="headers"
+    :method="method"
+    :data="data"
+    :with-credentials="withCredentials"
+    :auto-upload="autoUpload"
+    :http-request="httpRequest"
+    :before-upload="onBeforeUpload"
+    :before-remove="onBeforeRemove"
+    :crossorigin="crossorigin || undefined"
     :show-file-list="showFileList"
     :drag="drag"
     :accept="inputAccept"
@@ -400,6 +503,9 @@ defineExpose({
     :on-preview="onUploadPreview"
     :on-remove="onUploadRemove"
     :on-exceed="onUploadExceed"
+    :on-progress="onUploadProgress"
+    :on-success="onUploadSuccess"
+    :on-error="onUploadError"
     @dragenter="onDragEnter"
     @dragover="onDragOver"
     @dragleave="onDragLeave"
@@ -444,6 +550,9 @@ defineExpose({
         </slot>
       </span>
     </div>
+    <template v-if="$slots.trigger" #trigger>
+      <slot name="trigger"></slot>
+    </template>
     <template v-if="$slots.file" #file="{ file, index }">
       <slot name="file" :file="file" :index="index"></slot>
     </template>
@@ -629,6 +738,18 @@ defineExpose({
 
 .base-upload :deep(.el-upload-list__item-status-label) {
   @apply text-emerald-500;
+}
+
+.base-upload :deep(.el-upload-list__item .el-progress) {
+  @apply mt-2;
+}
+
+.base-upload :deep(.el-upload-list__item .el-progress-bar__outer) {
+  @apply bg-slate-100 dark:bg-slate-800;
+}
+
+.base-upload :deep(.el-upload-list__item .el-progress-bar__inner) {
+  background-color: rgb(var(--color-primary));
 }
 
 .base-upload :deep(.el-upload-list__item-delete) {

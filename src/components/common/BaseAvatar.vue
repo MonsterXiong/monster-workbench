@@ -1,7 +1,12 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref, useAttrs } from "vue";
 import { useI18n } from "../../composables/useI18n";
 import { getInitials, joinNonEmptyStrings } from "../../utils";
+import { getElementPlusControlRoot, type ElementPlusControlRef } from "./elementPlusDom";
+
+defineOptions({
+  inheritAttrs: false,
+});
 
 type AvatarFit = "fill" | "contain" | "cover" | "none" | "scale-down";
 
@@ -46,7 +51,10 @@ const emit = defineEmits<{
   (e: "error", event: Event): void;
 }>();
 
+const attrs = useAttrs();
 const { t } = useI18n();
+const rootRef = ref<HTMLButtonElement | HTMLSpanElement | null>(null);
+const avatarRef = ref<ElementPlusControlRef>(null);
 const initials = computed(() => getInitials(props.name, props.fallback));
 const isInteractive = computed(() => props.clickable && !props.disabled && !props.loading);
 const avatarSrc = computed(() => (props.loading ? "" : props.src));
@@ -71,11 +79,28 @@ const handleClick = (event: MouseEvent) => {
   if (!isInteractive.value) return;
   emit("click", event);
 };
+
+const getElement = () => rootRef.value;
+const getAvatarElement = () => getElementPlusControlRoot(avatarRef.value);
+const focus = () => {
+  if (!isInteractive.value) return null;
+  rootRef.value?.focus();
+  return rootRef.value;
+};
+
+defineExpose({
+  focus,
+  getNativeAvatar: () => avatarRef.value,
+  getElement,
+  getAvatarElement,
+});
 </script>
 
 <template>
   <component
+    v-bind="attrs"
     :is="clickable ? 'button' : 'span'"
+    ref="rootRef"
     :type="clickable ? 'button' : undefined"
     class="base-avatar"
     :class="[
@@ -96,6 +121,7 @@ const handleClick = (event: MouseEvent) => {
     @click="handleClick"
   >
     <el-avatar
+      ref="avatarRef"
       class="base-avatar__core"
       :src="avatarSrc"
       :alt="alt"

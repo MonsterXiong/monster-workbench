@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref } from "vue";
+import BaseSearchInput from "../../../../../components/common/BaseSearchInput.vue";
 import { useToast } from "../../../../../composables/useToast";
 import PlaygroundDemoSection from "../../PlaygroundDemoSection.vue";
 
@@ -9,9 +10,53 @@ const searchValue = ref("组件");
 const resetOnlySearchValue = ref("清空仅重置输入");
 const foundationPage = ref(2);
 const foundationPageSize = ref(20);
+const searchInputInstanceText = ref("等待实例操作");
+const paginationEventText = ref("等待分页事件");
+const searchInputInstanceRef = ref<InstanceType<typeof BaseSearchInput> | null>(null);
+const paginationInstanceText = ref("等待实例操作");
+const paginationInstanceRef = ref<{
+  getNativePagination: () => unknown;
+  getElement: () => HTMLElement | null;
+  focusFirstControl: () => HTMLElement | null;
+  focusCurrentPage: () => HTMLElement | null;
+} | null>(null);
 
 const handleSearch = (value: string) => {
   triggerToast(`已执行筛选：${value || "空查询"}`, "info");
+};
+
+const recordPaginationEvent = (label: string, value: string | number) => {
+  paginationEventText.value = `${label}: ${value}`;
+};
+
+const readSearchInputElement = () => {
+  const element = searchInputInstanceRef.value?.getElement();
+  searchInputInstanceText.value = element ? `DOM: ${element.tagName.toLowerCase()}.${element.classList[0] || "root"}` : "未读取到 DOM";
+};
+
+const focusSearchInput = () => {
+  const element = searchInputInstanceRef.value?.focus();
+  searchInputInstanceText.value = element ? `Focus: ${element.tagName.toLowerCase()}` : "未找到搜索输入";
+};
+
+const selectSearchInput = () => {
+  const element = searchInputInstanceRef.value?.select();
+  searchInputInstanceText.value = element ? "已选择搜索文本" : "未找到搜索输入";
+};
+
+const readPaginationElement = () => {
+  const element = paginationInstanceRef.value?.getElement();
+  paginationInstanceText.value = element ? `DOM: ${element.tagName.toLowerCase()}.${element.classList[0] || "root"}` : "未读取到 DOM";
+};
+
+const focusPaginationFirstControl = () => {
+  const element = paginationInstanceRef.value?.focusFirstControl();
+  paginationInstanceText.value = element ? `聚焦: ${element.tagName.toLowerCase()}` : "未找到可聚焦控件";
+};
+
+const focusPaginationCurrentPage = () => {
+  const element = paginationInstanceRef.value?.focusCurrentPage();
+  paginationInstanceText.value = element ? `当前页: ${element.textContent?.trim() || "-"}` : "未找到当前页";
 };
 </script>
 
@@ -22,9 +67,11 @@ const handleSearch = (value: string) => {
         <p id="search-keyboard-hint" class="sr-only">搜索框支持回车提交，Escape 清空当前关键词。</p>
         <div class="search-pagination-demo">
           <BaseSearchInput
+            ref="searchInputInstanceRef"
             id="component-search-input"
             name="componentSearch"
             v-model="searchValue"
+            data-native-search-ref="base-search-input-instance"
             placeholder="搜索组件、分类或状态"
             autocomplete="off"
             enterkeyhint="search"
@@ -33,6 +80,18 @@ const handleSearch = (value: string) => {
             @search="handleSearch"
             @clear="triggerToast('搜索已清空', 'info')"
           />
+          <div class="search-instance-panel">
+            <div class="search-instance-copy">
+              <BaseIcon name="Workflow" size="14" aria-hidden="true" />
+              <span>实例能力</span>
+              <strong>{{ searchInputInstanceText }}</strong>
+            </div>
+            <div class="search-instance-actions">
+              <BaseButton size="xs" type="secondary" outline @click="readSearchInputElement">DOM</BaseButton>
+              <BaseButton size="xs" type="secondary" outline @click="focusSearchInput">Focus</BaseButton>
+              <BaseButton size="xs" type="secondary" outline @click="selectSearchInput">Select</BaseButton>
+            </div>
+          </div>
           <BaseSearchInput model-value="加载中" placeholder="加载态" loading loading-text="正在搜索组件" />
           <BaseSearchInput
             model-value="错误关键词"
@@ -96,7 +155,25 @@ const handleSearch = (value: string) => {
         </div>
         <BaseDivider compact />
         <div class="pagination-demo-stack">
+          <div class="pagination-event-output" role="status" aria-live="polite">
+            <BaseIcon name="Activity" size="14" aria-hidden="true" />
+            <span>{{ paginationEventText }}</span>
+          </div>
+          <div class="pagination-instance-panel">
+            <div class="pagination-instance-copy">
+              <BaseIcon name="Workflow" size="14" aria-hidden="true" />
+              <span>实例能力</span>
+              <strong>{{ paginationInstanceText }}</strong>
+            </div>
+            <div class="pagination-instance-actions">
+              <BaseButton size="xs" type="secondary" outline @click="readPaginationElement">读取 DOM</BaseButton>
+              <BaseButton size="xs" type="secondary" outline @click="focusPaginationFirstControl">聚焦控件</BaseButton>
+              <BaseButton size="xs" type="secondary" outline @click="focusPaginationCurrentPage">聚焦当前页</BaseButton>
+            </div>
+          </div>
           <BasePagination
+            ref="paginationInstanceRef"
+            data-native-pagination-ref="base-pagination-instance"
             v-model:page="foundationPage"
             v-model:page-size="foundationPageSize"
             :total="128"
@@ -104,7 +181,7 @@ const handleSearch = (value: string) => {
             show-jumper
             background
             aria-label="完整分页"
-            @change="triggerToast(`分页：${$event.page} / ${$event.pageSize}`, 'info')"
+            @change="recordPaginationEvent('change', `${$event.page} / ${$event.pageSize}`)"
           />
           <BasePagination
             v-model:page="foundationPage"
@@ -114,7 +191,10 @@ const handleSearch = (value: string) => {
             page-size-control="native"
             show-jumper
             background
+            popper-class="pagination-demo-native-popper"
             aria-label="Element Plus 原生页容量分页"
+            @current-change="recordPaginationEvent('current-change', $event)"
+            @size-change="recordPaginationEvent('size-change', $event)"
           />
           <BasePagination
             :page="18"
@@ -144,6 +224,8 @@ const handleSearch = (value: string) => {
             compact
             surface="muted"
             :show-page-size="false"
+            @prev-click="recordPaginationEvent('prev-click', $event)"
+            @next-click="recordPaginationEvent('next-click', $event)"
           />
           <BasePagination
             v-model:page="foundationPage"
@@ -235,11 +317,55 @@ const handleSearch = (value: string) => {
   @apply max-w-[280px] min-w-0;
 }
 
+.search-instance-panel {
+  @apply flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-950;
+}
+
+.search-instance-copy {
+  @apply flex min-w-0 items-center gap-2 text-[11px] font-black text-slate-500 dark:text-slate-400;
+}
+
+.search-instance-copy strong {
+  @apply min-w-0 truncate text-slate-800 dark:text-slate-100;
+}
+
+.search-instance-actions {
+  @apply flex shrink-0 flex-wrap items-center gap-2;
+}
+
 .pagination-demo-stack {
   @apply grid min-w-0 gap-3;
 }
 
+.pagination-event-output {
+  @apply inline-flex w-fit max-w-full items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] font-black text-slate-500 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-400;
+}
+
+.pagination-event-output span {
+  @apply min-w-0 truncate;
+}
+
+.pagination-instance-panel {
+  @apply flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2 shadow-sm dark:border-slate-800 dark:bg-slate-900;
+}
+
+.pagination-instance-copy {
+  @apply flex min-w-0 items-center gap-2 text-[11px] font-black text-slate-500 dark:text-slate-400;
+}
+
+.pagination-instance-copy strong {
+  @apply min-w-0 truncate text-slate-800 dark:text-slate-100;
+}
+
+.pagination-instance-actions {
+  @apply flex shrink-0 flex-wrap items-center gap-2;
+}
+
 .pagination-demo-narrow {
   @apply max-w-[320px] min-w-0;
+}
+
+:global(.pagination-demo-native-popper .el-select-dropdown__item.selected) {
+  font-weight: 900;
 }
 </style>

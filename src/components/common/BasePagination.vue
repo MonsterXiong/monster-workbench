@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import type { CSSProperties } from "vue";
-import { computed } from "vue";
+import type { ElPagination } from "element-plus";
+import type { CSSProperties, StyleValue } from "vue";
+import { computed, ref, useAttrs } from "vue";
 import { useI18n } from "../../composables/useI18n";
 import BaseSelect from "./BaseSelect.vue";
 import { toElementPlusSize } from "./elementPlusDom";
@@ -8,13 +9,20 @@ import {
   clampNumber,
   formatTemplate,
   getTotalPages,
+  joinNonEmptyStrings,
   normalizePage,
   normalizePageSizeOptions,
+  omit,
   toIntegerAtLeast,
   toNonNegativeInteger,
 } from "../../utils";
 
+defineOptions({
+  inheritAttrs: false,
+});
+
 type PageSizeControl = "base" | "native";
+type PaginationNativeInstance = InstanceType<typeof ElPagination>;
 
 interface Props {
   page: number;
@@ -75,9 +83,16 @@ const emit = defineEmits<{
   (e: "update:page", value: number): void;
   (e: "update:pageSize", value: number): void;
   (e: "change", payload: { page: number; pageSize: number }): void;
+  (e: "current-change", value: number): void;
+  (e: "size-change", value: number): void;
+  (e: "prev-click", value: number): void;
+  (e: "next-click", value: number): void;
 }>();
 
 const { t } = useI18n();
+const attrs = useAttrs();
+const rootRef = ref<HTMLElement | null>(null);
+const paginationRef = ref<PaginationNativeInstance | null>(null);
 
 const safeTotal = computed(() => toNonNegativeInteger(props.total));
 const safePageSize = computed(() => toIntegerAtLeast(props.pageSize, 1, 1));
@@ -125,12 +140,17 @@ const layoutUsesNativePageSize = computed(() => props.showPageSize && !props.sim
 const shouldShowPager = computed(() => !(props.hideOnSinglePage && isSinglePage.value));
 const shouldRenderBasePageSize = computed(() => props.showPageSize && !props.simple && !layoutUsesNativePageSize.value);
 const shouldRenderRoot = computed(() => shouldShowPager.value || props.showSummary || shouldRenderBasePageSize.value);
+const resolvedPopperClass = computed(() => joinNonEmptyStrings(["base-pagination-popper", props.popperClass]));
+const rootClass = computed(() => attrs.class);
+const rootStyle = computed(() => attrs.style as StyleValue | undefined);
+const paginationPassthroughAttrs = computed(() => omit(attrs, ["class", "style", "aria-label", "aria-busy", "aria-disabled"]));
 
 const emitPage = (page: number) => {
   if (isDisabled.value || !hasRecords.value) return;
   const nextPage = normalizePage(page, totalPages.value);
   if (nextPage === currentPage.value) return;
   emit("update:page", nextPage);
+  emit("current-change", nextPage);
   emit("change", { page: nextPage, pageSize: safePageSize.value });
 };
 
@@ -142,6 +162,14 @@ const handlePageSizeUpdate = (pageSize: number) => {
   emitPageSize(pageSize);
 };
 
+const handlePrevClick = (page: number) => {
+  emit("prev-click", normalizePage(page, totalPages.value));
+};
+
+const handleNextClick = (page: number) => {
+  emit("next-click", normalizePage(page, totalPages.value));
+};
+
 const emitPageSize = (value: unknown) => {
   if (isDisabled.value) return;
   const rawValue = Array.isArray(value) ? value[0] : value;
@@ -149,15 +177,51 @@ const emitPageSize = (value: unknown) => {
   const nextPage = hasRecords.value ? 1 : 0;
   emit("update:pageSize", nextPageSize);
   emit("update:page", nextPage);
+  emit("size-change", nextPageSize);
+  if (nextPage !== currentPage.value) {
+    emit("current-change", nextPage);
+  }
   emit("change", { page: nextPage, pageSize: nextPageSize });
 };
+
+const getElement = () => (rootRef.value instanceof HTMLElement ? rootRef.value : null);
+
+const focusFirstControl = () => {
+  const target = getElement()?.querySelector<HTMLElement>(
+    "button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex='-1'])"
+  );
+  target?.focus();
+  return target ?? null;
+};
+
+const focusCurrentPage = () => {
+  const target = getElement()?.querySelector<HTMLElement>(".el-pager li.is-active, [aria-current='page']");
+  if (!target) return null;
+
+  if (!target.hasAttribute("tabindex")) {
+    target.tabIndex = 0;
+  }
+
+  target.focus();
+  return target;
+};
+
+defineExpose({
+  getNativePagination: () => paginationRef.value,
+  getElement,
+  focusFirstControl,
+  focusCurrentPage,
+});
 </script>
 
 <template>
   <nav
     v-if="shouldRenderRoot"
+    ref="rootRef"
+    v-bind="paginationPassthroughAttrs"
     class="base-pagination"
     :class="[
+      rootClass,
       `base-pagination--${resolvedSize}`,
       `base-pagination--${surface}`,
       {
@@ -167,6 +231,7 @@ const emitPageSize = (value: unknown) => {
         'is-disabled': isDisabled,
       },
     ]"
+    :style="rootStyle"
     :aria-label="ariaLabel || t('common.pagination.label')"
     :aria-busy="loading ? 'true' : undefined"
     :aria-disabled="isDisabled ? 'true' : undefined"
@@ -187,6 +252,7 @@ const emitPageSize = (value: unknown) => {
         {{ currentPage }} / {{ displayTotalPages }}
       </span>
       <el-pagination
+        ref="paginationRef"
         class="base-pagination__pager"
         :current-page="elementCurrentPage"
         :page-size="safePageSize"
@@ -200,12 +266,14 @@ const emitPageSize = (value: unknown) => {
         :hide-on-single-page="hideOnSinglePage"
         :teleported="teleported"
         :append-size-to="appendSizeTo || undefined"
-        :popper-class="popperClass"
+        :popper-class="resolvedPopperClass"
         :popper-style="popperStyle"
         :prev-text="simple ? t('common.pagination.previous') : ''"
         :next-text="simple ? t('common.pagination.next') : ''"
         @update:current-page="handleCurrentPageUpdate"
         @update:page-size="handlePageSizeUpdate"
+        @prev-click="handlePrevClick"
+        @next-click="handleNextClick"
       />
     </div>
 
@@ -219,6 +287,7 @@ const emitPageSize = (value: unknown) => {
       :size="resolvedSize"
       :teleported="teleported"
       :fit-input-width="false"
+      :popper-class="resolvedPopperClass"
       @update:model-value="emitPageSize"
     />
   </nav>
@@ -413,6 +482,63 @@ const emitPageSize = (value: unknown) => {
 :deep(.base-pagination__pager .el-pagination__sizes .el-select__placeholder),
 :deep(.base-pagination__pager .el-pagination__sizes .el-select__selected-item) {
   @apply text-[11px] font-black text-slate-700 dark:text-slate-100;
+}
+
+:global(.base-pagination-popper.el-popper) {
+  --el-color-primary: rgb(var(--color-primary));
+}
+
+:global(.base-pagination-popper .el-select-dropdown) {
+  overflow: hidden;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #ffffff;
+  box-shadow:
+    0 16px 34px rgba(15, 23, 42, 0.13),
+    inset 0 1px 0 rgba(255, 255, 255, 0.86);
+}
+
+:global(.base-pagination-popper .el-select-dropdown__list) {
+  padding: 5px;
+}
+
+:global(.base-pagination-popper .el-select-dropdown__item) {
+  height: 30px;
+  border-radius: 8px;
+  padding: 0 9px;
+  color: #334155;
+  font-size: 11px;
+  font-weight: 850;
+  line-height: 30px;
+}
+
+:global(.base-pagination-popper .el-select-dropdown__item.hover),
+:global(.base-pagination-popper .el-select-dropdown__item:hover) {
+  background: #f1f5f9;
+  color: #0f172a;
+}
+
+:global(.base-pagination-popper .el-select-dropdown__item.selected) {
+  background: rgb(var(--color-primary) / 0.1);
+  color: rgb(var(--color-primary));
+}
+
+:global(.dark .base-pagination-popper .el-select-dropdown) {
+  border-color: #1e293b;
+  background: #0f172a;
+  box-shadow:
+    0 16px 34px rgba(0, 0, 0, 0.34),
+    inset 0 1px 0 rgba(148, 163, 184, 0.08);
+}
+
+:global(.dark .base-pagination-popper .el-select-dropdown__item) {
+  color: #cbd5e1;
+}
+
+:global(.dark .base-pagination-popper .el-select-dropdown__item.hover),
+:global(.dark .base-pagination-popper .el-select-dropdown__item:hover) {
+  background: #1e293b;
+  color: #f8fafc;
 }
 
 .base-pagination__simple {

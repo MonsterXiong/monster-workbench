@@ -40,7 +40,7 @@ const emit = defineEmits<{
         <div class="min-w-0">
           <div class="flex flex-wrap items-center gap-2">
             <h1 class="text-xl font-black text-slate-950 dark:text-white">{{ doc.title }}</h1>
-            <span class="rounded border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-black text-slate-500 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-300">{{ doc.group }}</span>
+            <span class="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-black text-slate-500 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-300">{{ doc.group }}</span>
             <UtilsDocsQualityBadge v-if="quality" :report="quality" variant="compact" />
           </div>
           <p class="mt-2 max-w-5xl text-sm font-semibold leading-6 text-slate-500 dark:text-slate-400">{{ doc.description }}</p>
@@ -154,7 +154,7 @@ const emit = defineEmits<{
   justify-content: space-between;
   gap: 8px;
   border: 1px solid rgba(203, 213, 225, 0.78);
-  border-radius: 8px;
+  border-radius: 16px;
   background: rgba(248, 250, 252, 0.8);
   padding: 8px 10px;
   font-size: 11px;

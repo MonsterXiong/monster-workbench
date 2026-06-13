@@ -1,9 +1,13 @@
 <script setup lang="ts">
-import { computed, useId } from "vue";
+import { computed, ref, useAttrs, useId } from "vue";
 import { useI18n } from "../../composables/useI18n";
 import { joinAriaIds, normalizeDomIdSegment, splitLines, toSet } from "../../utils";
 import BaseCopyButton from "./BaseCopyButton.vue";
 import BaseIcon from "./BaseIcon.vue";
+
+defineOptions({
+  inheritAttrs: false,
+});
 
 type CodeBlockSize = "sm" | "md" | "lg";
 
@@ -57,6 +61,9 @@ const emit = defineEmits<{
   (e: "copy-error", error: unknown): void;
 }>();
 
+const attrs = useAttrs();
+const rootRef = ref<HTMLElement | null>(null);
+const codeRef = ref<HTMLElement | null>(null);
 const { t } = useI18n();
 const blockId = useId();
 const titleId = `base-code-block-title-${blockId}`;
@@ -93,10 +100,22 @@ const lines = computed(() => {
     };
   });
 });
+
+defineExpose({
+  getElement: () => rootRef.value,
+  getCodeElement: () => codeRef.value,
+  getCopyText: () => copyValue.value,
+  focusCode: () => {
+    codeRef.value?.focus();
+    return codeRef.value;
+  },
+});
 </script>
 
 <template>
   <section
+    v-bind="attrs"
+    ref="rootRef"
     class="base-code-block"
     :class="[
       `base-code-block--${size}`,
@@ -140,6 +159,7 @@ const lines = computed(() => {
     <div class="base-code-block__body-wrap">
       <pre
         v-if="hasCode"
+        ref="codeRef"
         class="base-code-block__body"
         :style="{ maxHeight }"
         tabindex="0"

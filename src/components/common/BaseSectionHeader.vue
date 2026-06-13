@@ -1,5 +1,9 @@
 <script setup lang="ts">
-import { computed, useId } from "vue";
+import { computed, ref, useAttrs, useId } from "vue";
+
+defineOptions({
+  inheritAttrs: false,
+});
 
 type SectionHeaderSize = "sm" | "md" | "lg";
 type SectionHeaderLevel = 2 | 3 | 4 | 5 | 6;
@@ -47,6 +51,8 @@ const props = withDefaults(defineProps<Props>(), {
   ariaLabel: "",
 });
 
+const attrs = useAttrs();
+const rootRef = ref<HTMLElement | null>(null);
 const sectionHeaderId = useId();
 const titleId = computed(() => `${sectionHeaderId}-title`);
 const descriptionId = computed(() => `${sectionHeaderId}-description`);
@@ -54,10 +60,15 @@ const resolvedDescription = computed(() => props.subtitle || props.description);
 const headingTag = computed(() => `h${props.level}`);
 const resolvedMetaLabel = computed(() => props.metaLabel || `${props.title} 状态`);
 const resolvedActionsLabel = computed(() => props.actionsLabel || `${props.title} 操作`);
+defineExpose({
+  getElement: () => rootRef.value,
+});
 </script>
 
 <template>
   <header
+    v-bind="attrs"
+    ref="rootRef"
     class="base-section-header"
     :class="[
       `base-section-header--${size}`,

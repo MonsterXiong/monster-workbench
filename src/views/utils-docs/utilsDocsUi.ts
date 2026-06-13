@@ -6,7 +6,7 @@ import type {
 export function getQualityLabel(report: UtilityDocQualityReport): string {
   if (report.level === "excellent") return "优秀";
   if (report.level === "good") return "良好";
-  return "待审查";
+  return "需完善";
 }
 
 export function getQualityClasses(report: UtilityDocQualityReport): string {

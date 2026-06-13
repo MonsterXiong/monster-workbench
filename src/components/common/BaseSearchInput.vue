@@ -1,9 +1,10 @@
 <script setup lang="ts">
+import type { InputInstance } from "element-plus";
 import { computed, nextTick, onBeforeUnmount, ref, useAttrs, useId, watchEffect } from "vue";
 import { Search, X, LoaderCircle } from "lucide-vue-next";
 import { useI18n } from "../../composables/useI18n";
 import { createDebouncedFunction, isEscapeKey, isKeyboardKey, joinAriaIds, omit, toIntegerAtLeast } from "../../utils";
-import { syncElementPlusClearButtonLabel, toElementPlusSize, type ProjectControlSize } from "./elementPlusDom";
+import { getElementPlusControlRoot, syncElementPlusClearButtonLabel, toElementPlusSize, type ProjectControlSize } from "./elementPlusDom";
 
 defineOptions({
   inheritAttrs: false,
@@ -13,6 +14,7 @@ interface Props {
   id?: string;
   name?: string;
   modelValue: string;
+  nativeType?: "text" | "search";
   placeholder?: string;
   disabled?: boolean;
   readonly?: boolean;
@@ -33,6 +35,7 @@ interface Props {
   preventEnterDefault?: boolean;
   debounce?: number;
   minLength?: number;
+  validateEvent?: boolean;
   label?: string;
   description?: string;
   errorMessage?: string;
@@ -45,6 +48,7 @@ interface Props {
 const props = withDefaults(defineProps<Props>(), {
   id: "",
   name: "",
+  nativeType: "text",
   placeholder: "",
   disabled: false,
   readonly: false,
@@ -65,6 +69,7 @@ const props = withDefaults(defineProps<Props>(), {
   preventEnterDefault: true,
   debounce: 0,
   minLength: 0,
+  validateEvent: false,
   label: "",
   description: "",
   errorMessage: "",
@@ -86,8 +91,8 @@ const emit = defineEmits<{
 
 const attrs = useAttrs();
 const { t } = useI18n();
-type SearchInputRef = HTMLElement | { focus?: () => void; $el?: Element | null } | null;
-const inputRef = ref<SearchInputRef>(null);
+const rootRef = ref<HTMLElement | null>(null);
+const inputRef = ref<InputInstance | null>(null);
 const searchInputId = useId();
 const labelId = `${searchInputId}-label`;
 const descriptionId = `${searchInputId}-description`;
@@ -199,10 +204,36 @@ watchEffect(() => {
 onBeforeUnmount(() => {
   debouncedSearch.cancel();
 });
+
+const getElement = () => rootRef.value;
+const getInputElement = () => getElementPlusControlRoot(inputRef.value)?.querySelector<HTMLInputElement>("input") ?? null;
+const focus = () => {
+  inputRef.value?.focus?.();
+  return getInputElement();
+};
+const blur = () => {
+  inputRef.value?.blur?.();
+  return getInputElement();
+};
+const select = () => {
+  inputRef.value?.select?.();
+  return getInputElement();
+};
+
+defineExpose({
+  focus,
+  blur,
+  select,
+  clear: handleClear,
+  getNativeInput: () => inputRef.value,
+  getElement,
+  getInputElement,
+});
 </script>
 
 <template>
   <div
+    ref="rootRef"
     class="base-search-input"
     :class="[
       attrs.class,
@@ -229,7 +260,7 @@ onBeforeUnmount(() => {
       :model-value="modelValue"
       class="base-search-input__field"
       :class="{ 'base-search-input__field--with-text': hasFieldText }"
-      type="search"
+      :type="nativeType"
       :placeholder="placeholder || t('common.search')"
       :disabled="disabled"
       :readonly="isInputReadonly"
@@ -245,7 +276,7 @@ onBeforeUnmount(() => {
       :aria-busy="loading ? 'true' : undefined"
       :aria-readonly="isInputReadonly ? 'true' : undefined"
       :aria-controls="ariaControls || undefined"
-      :validate-event="false"
+      :validate-event="validateEvent"
       @update:model-value="handleInput"
       @clear="handleClear"
       @keydown="handleKeydown"
