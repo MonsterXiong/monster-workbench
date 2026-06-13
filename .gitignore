@@ -8,6 +8,7 @@ src-tauri/gen
 *.log
 .env
 .codex-tauri-dev.*.log
+.playwright-cli/
 __pycache__/
 *.pyc
 .gemini
