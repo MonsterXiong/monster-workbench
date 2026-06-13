@@ -261,7 +261,7 @@ Python step boundary
   -> return status cancelled
 ```
 
-当前 `WorkerQueueService::check_cancel_checkpoint(task_id)` 已具备 Rust 侧查询能力，`WorkerQueueService::complete_task` 也已具备运行中任务的受控终态收敛能力；`generate_image_prompt`、`image.prompt.batch` 与 `image.generate.batch` 已通过 Rust 暴露的 localhost checkpoint 让 Python 在步骤边界查询取消状态，而不是让 Python 直接查询 SQLite。
+当前 `WorkerQueueService::check_cancel_checkpoint(task_id)` 已具备 Rust 侧查询能力：task 自身为 `cancelling/cancelled` 时返回取消；若 task 归属的父 batch 已是 `cancelled`，也返回取消；父 batch `paused` 不打断已运行 worker，只停止继续调度。worker-control `/worker/checkpoint` 已要求 Python worker 带回 `workerId/runtimeInstanceId/claimToken` 并校验当前未过期 lease；token 不匹配或 lease 过期时返回 `cancelRequested: true` 与 `leaseValid: false`，让 worker 停止继续执行。`generate_image_prompt`、`image.prompt.batch` 与 `image.generate.batch` 已通过 Rust 暴露的 checkpoint 让 Python 在步骤边界查询取消状态，而不是让 Python 直接查询 SQLite。
 
 最低要求：
 
@@ -299,7 +299,7 @@ Python step boundary
 | 函数 / 区域 | 当前职责 | 边界判定 | 后续约束 |
 |---|---|---|---|
 | `create_batch_image_job` / `start_batch_job` / `pause_batch_job` / `resume_batch_job` / `cancel_batch_job` | batch 生命周期、任务创建、暂停/恢复/取消、事件广播 | Rust 控制面，保留 | 保持为状态控制，不下沉 provider 或业务 workflow 逻辑 |
-| `run_batch_supervisor_inner` | 轮询 snapshot、按 concurrency claim queued task、spawn worker、判断 completed | 短期保留 | sidecar recovery、runtime events polling 与诊断日志已有；但缺 worker identity、claim token、lease deadline、heartbeat 和 lease-aware complete，在这些稳定前不迁给 Python worker pool |
+| `run_batch_supervisor_inner` | 轮询 snapshot、按 concurrency claim queued task、spawn worker、判断 completed | 短期保留 | sidecar recovery、runtime events polling、诊断日志、worker lease 字段、repo API、`WorkerQueueService` lease 方法、localhost control API、通用/图片文件 complete settle 和启动过期 lease recovery 均已落地；迁移前仍需定义 supervisor 拥有权与产品语义 |
 | `run_mock_task_worker` | 本地 smoke worker、模拟耗时/失败/取消 | demo，本地验证可保留 | 只服务本地 smoke，不作为正式业务类型模板 |
 | `run_prompt_task_worker` / `run_generate_task_worker` | 检查取消、构造 sidecar request、提交 Python workflow、交给 settle 归档 | 过渡 worker shell | 不新增生产 worker 分支；新增正式 workflow 走 sidecar runtime |
 | `settle_batch_prompt_sidecar_response` / `settle_batch_image_sidecar_response` | 校验 protocol/taskId/status，写入 asset/model_runs/task_events/status | Rust 可信落库和审计面，保留 | protocol 校验、sidecar events、model_runs、普通 ready asset 与 batch failure/cancelled 状态映射已收口；image 文件 success settle 仍因路径授权和 thumbnail 生成保留在 batch 服务 |
@@ -348,11 +348,11 @@ Python step boundary
 
 | 缺口 | 当前代码事实 | 迁移前要求 |
 |---|---|---|
-| worker identity | `CreativeTask` / `creative_tasks` 没有 worker id 字段 | claim 后必须能识别任务当前归属的 runtime / worker |
-| lease / claim token | `claim_next_queued_task` 只把 queued 改 running | claim 必须产生 leaseId 或 claimToken，complete 时校验同一 token |
-| heartbeat | 当前没有续约字段或 API | Python worker 长任务必须定期续约，Rust 能回收过期 lease |
+| worker identity | `creative_tasks` 已有 worker 字段，但 `WorkerQueueService` / sidecar control API 尚未消费 | claim 后必须能识别任务当前归属的 runtime / worker |
+| lease / claim token | `claim_next_queued_task_with_lease` 已在 repo 层落地；旧 `claim_next_queued_task` 仍只给 Rust supervisor 使用 | Python worker claim 必须走带 token 的 control API，complete 时校验同一 token |
+| heartbeat | `heartbeat_task_lease` 已在 repo 层和 sidecar control API 落地 | Python worker 长任务必须定期续约，Rust 能回收过期 lease |
 | result settle | `complete_creative_task` 只能写 status/result/asset_id；batch prompt/image settle 仍在 Rust 内校验 sidecar result | 正式 workflow result 仍要经过 Rust 校验 outputs/modelRuns/events/授权文件路径 |
-| recovery | `recover_interrupted_tasks` 基于 running/cancelling 状态兜底 | worker-pool 模式需要区分过期 lease、进程退出、runtime 重启和主动取消 |
+| recovery | `recover_expired_task_leases` 已在 repo / service / control API 落地，worker control server 启动时也会先回收过期 lease；现有 Tauri recovery 仍是 legacy startup 兜底 | worker-pool 模式后续还需要定义 runtime 重启、worker 退出和主动取消的产品语义 |
 
 推荐下一步仍是 Rust-owned localhost sidecar control API，而不是 Python 直接访问 SQLite：
 
@@ -365,16 +365,16 @@ Python worker
 
 注意：这里的 localhost control API 不是当前前端可调用的 Tauri command。Python sidecar 不应通过前端 IPC 路径补齐 worker-pool 能力，而应走 Rust 暴露、带 runtime token 和 lease 校验的本地控制面。
 
-该 control API 的最小集合应先设计为：
+该 control API 的最小集合已经有 Rust 端首段骨架：
 
 | API | 目的 | Rust 可信职责 |
 |---|---|---|
 | `claim` | 获取可执行任务并生成 lease | 状态从 queued 到 running，写 worker identity / lease / started_at |
 | `checkpoint` | 查询取消或暂停 | 只暴露布尔或受控原因，不暴露 DB |
 | `heartbeat` | 续约 running task | 校验 worker identity 和 lease，刷新 lease deadline |
-| `complete` | 收敛终态 | 校验 lease 未过期，执行 result settle，写 task_events/model_runs/assets/status |
+| `complete` | 收敛终态 | 校验 lease 未过期；`sidecarResult` 已支持通用非文件输出和 `image.generate.batch` 图片文件输出，文件路径由 Rust 做授权目录 canonical 校验 |
 
-在这些协议和必要 schema migration 稳定前，`BatchJobService::run_batch_supervisor_inner` 继续保留在 Rust；`run_prompt_task_worker` / `run_generate_task_worker` 也继续作为过渡 shell，只负责提交 Python workflow 与 Rust settle，不新增正式业务 worker 分支。
+Python worker loop 已首段消费 control API 中的 `image.prompt.batch` 和 `image.generate.batch`。`BatchJobService::run_batch_supervisor_inner` 继续保留在 Rust；`run_prompt_task_worker` / `run_generate_task_worker` 也继续作为过渡 shell，只负责提交 Python workflow 与 Rust settle，不新增正式业务 worker 分支。
 
 ### 12.7 2026-06-12 继续评估：迁移门禁
 
@@ -386,12 +386,12 @@ Python worker
 | Rust 必须保留 | `settle_batch_image_sidecar_response` success 分支仍校验输出文件 canonical path、复制 thumbnail、创建 image asset、绑定 model_runs 并写 task status/event | image success settle 暂不迁 Python，也不应强抽成脱离权限上下文的通用 helper |
 | Rust 可继续抽象 | `workflow_settle_service.rs` 已承接 protocol/taskId 校验、sidecar events、model_runs、普通 ready asset 创建 | 后续可继续抽 submit/settle 公共骨架，但必须保持 Rust 写库和路径授权 |
 | 过渡壳层可保留 | `run_prompt_task_worker` / `run_generate_task_worker` 只做 checkpoint、sidecar submit、transport fallback 和 settle 分派 | 不新增正式生产 worker 分支；新增 workflow 继续走 sidecar request/result |
-| 不能提前迁移 | `BatchJobService::run_batch_supervisor_inner` 仍负责 concurrency slot、claim、暂停/取消/完成收敛 | 没有 worker identity、lease、heartbeat、lease-aware complete 前，不让 Python 直接拉队列或拥有 batch supervisor |
+| 不能提前迁移 | `BatchJobService::run_batch_supervisor_inner` 仍负责 concurrency slot、claim、暂停/取消/完成收敛 | 没有 Rust-owned sidecar control API、runtime token 和 trusted settle 接线前，不让 Python 直接拉队列或拥有 batch supervisor |
 
 因此下一步不是继续移动函数位置，而是先设计最小控制协议和 schema：
 
-1. `creative_tasks` 增加 worker ownership / lease 支撑字段前，继续把任务拥有权留在 Rust supervisor。
-2. localhost sidecar control API 必须先定义 `claim -> checkpoint -> heartbeat -> complete`，并复用 runtime token 或等价鉴权。
+1. `creative_tasks` worker ownership / lease 支撑字段已落地，但在 sidecar control API 接线前，继续把任务拥有权留在 Rust supervisor。
+2. localhost sidecar control API 必须定义并实现 `claim -> checkpoint -> heartbeat -> complete`，并复用 runtime token 或等价鉴权。
 3. `complete` 必须校验 worker identity、lease token 和 lease deadline，再进入 Rust settle helper；不能复用当前 Tauri IPC `complete_creative_task` 作为 Python worker 协议。
 4. Python workflow 只返回受控结果摘要、modelRuns、events 和授权输出目录内的文件引用；asset、model_runs、task_events、task status 仍由 Rust 可信写入。
 5. 在 control API 和 migration 通过旧库兼容回归前，`BatchJobService` 的 supervisor / worker shell 只做收窄和复用，不做所有权迁移。
@@ -425,19 +425,20 @@ flowchart TD
 | 文件与权限边界 | `validate_sidecar_output_file`、`copy_sidecar_thumbnail`、image asset 创建 | 保留 canonical path 校验、授权输出目录和缩略图生成 | 不信任 Python 返回的任意绝对路径 |
 | 未来 worker pool | 尚未具备，当前只有 Tauri IPC 形态的 claim/checkpoint/complete/recover 首段 | 先设计 localhost control API、worker identity、claim token、lease deadline、heartbeat、lease-aware complete | 不让 Python 直接拉 SQLite 队列，不把当前 `complete_creative_task` 当 sidecar complete 协议 |
 
-因此，下一批如果继续推进 Rust 后端，应优先产出两个可验证产物：
+因此，本轮后 Rust 后端已经产出两个可验证产物：
 
-1. `creative_tasks` worker ownership / lease 字段的 migration 草案和旧库兼容回归矩阵。
-2. Rust-owned localhost sidecar control API contract，至少覆盖 `claim`、`checkpoint`、`heartbeat`、`complete`、`recover_expired_leases`，并明确 runtime token、worker identity、claim token 和 result settle 责任。
+1. `creative_tasks` worker ownership / lease 字段的 migration 与旧库兼容回归矩阵。
+2. Rust-owned localhost sidecar control API 首段，覆盖 `claim`、`checkpoint`、`heartbeat`、`complete`、`recover-expired-leases`，并由 `SidecarLifecycleService` 用 runtime token 启动。
 
-只有这两项稳定后，才重新评估 `BatchJobService::run_batch_supervisor_inner` 是否迁出 Rust，或是否把 prompt/image worker shell 替换为 Python worker loop。
+图片文件输出已经接入专门 Rust trusted settle。下一步才重新评估 `BatchJobService::run_batch_supervisor_inner` 是否迁出 Rust，或是否把更多 prompt/image worker shell 替换为 Python worker loop。
 
-### 12.9 Worker ownership / lease migration 草案
+### 12.9 Worker ownership / lease migration 首段
 
-本节是下一步 schema / repo 变更前的草案，不表示当前代码已经具备租约能力。当前代码事实仍是：
+本节原本是下一步 schema / repo 变更前的草案；2026-06-13 已落地首段 schema、repo 行为和 sidecar control API，且 `/worker/complete` 已支持通用非文件 result settle。当前代码事实是：
 
-- `creative_tasks` 只有 `status`、`retry_count`、`max_retries`、`started_at`、`finished_at` 等任务状态字段，没有 worker identity、claim token、lease deadline 或 heartbeat 字段。
-- `creative_task_repo::claim_next_queued_task` 只在事务内把 `status = 'queued'` 的任务更新为 `running`，不会记录任务归属。
+- `creative_db_schema.rs` 已新增 migration v4 `add_creative_task_worker_lease_columns`，为 `creative_tasks` 补齐 worker identity、claim token、claimed/heartbeat 时间、lease deadline 和 renewal count 字段。
+- `creative_task_repo.rs` 已新增 lease-aware repo API：`claim_next_queued_task_with_lease`、`heartbeat_task_lease`、`complete_task_with_lease` 和 `recover_expired_task_leases`，并由 repo 测试覆盖 owner/token/过期租约路径。
+- 旧 `creative_task_repo::claim_next_queued_task` 仍保留为 Rust supervisor 内部原子 claim，不记录任务归属；这有意避免把现有 Tauri IPC 误当成 Python worker-pool 协议。
 - `WorkerQueueCompleteTaskInput` 只包含 `taskId/status/resultJson/errorMessage/assetId`，不能证明 complete 调用来自当前 lease owner。
 - `recover_interrupted_tasks` 当前只按 `running` / `cancelling` 状态做启动恢复，不区分 worker 过期、runtime 重启、进程退出和主动取消。
 
@@ -480,13 +481,13 @@ repo / service 迁移顺序建议：
 | 旧库缺少 lease 字段 | `init_schema()` 补字段；已有 task / asset / batch 数据保持不变 |
 | legacy `running` 且无 lease | 不允许 sidecar complete；继续由 startup recovery 标记 retrying/failed |
 | `running` 且 lease 未过期 | 不被重复 claim；heartbeat 可续约 |
-| `running` 且 lease 过期 | 只能由 Rust recovery 收敛；过期 worker complete 被拒绝 |
+| `running` 且 lease 过期 | `recover_expired_task_leases` 可由 Rust 回收；过期 worker complete 被拒绝 |
 | `cancelling` 且 lease 有效 | checkpoint 返回取消；complete 进入 Rust-controlled cancelled settle |
 | terminal 状态 | `succeeded/failed/cancelled/blocked` 不可 claim、heartbeat 或 complete |
 
-### 12.10 Rust-owned localhost control API contract 草案
+### 12.10 Rust-owned localhost control API 首段 contract
 
-本 contract 描述的是 Rust-owned sidecar worker 控制面，不是现有前端 Tauri IPC command，也不是 Python 直接访问 SQLite。实现方式在编码前还要遵守 `docs/rust-backend.md` 的依赖约束；如果需要本地 HTTP server，必须先评估是否会引入不必要的 Rust 重依赖。
+本 contract 描述的是 Rust-owned sidecar worker 控制面，不是现有前端 Tauri IPC command，也不是 Python 直接访问 SQLite。当前实现没有引入新的 Rust HTTP 依赖，而是沿用本项目已有的轻量 `TcpListener` 本地控制面模式。
 
 安全边界：
 
@@ -500,11 +501,11 @@ repo / service 迁移顺序建议：
 
 | API | 调用方 | 输入核心字段 | 输出核心字段 | Rust 可信职责 |
 |---|---|---|---|---|
-| `POST /worker/claim` | Python worker | `workerId`、`runtimeInstanceId`、`taskTypes`、`batchJobId?`、`maxLeaseMs?` | `task`、`claimToken`、`leaseExpiresAt`、`runtimeInstanceId` | 事务内 claim queued task，写 lease 字段，返回最小任务 payload |
-| `POST /worker/checkpoint` | Python worker | `taskId`、`workerId`、`runtimeInstanceId`、`claimToken` | `cancelRequested`、`pauseRequested?`、`reason?` | 校验 lease 后只返回受控 checkpoint，不暴露 DB |
-| `POST /worker/heartbeat` | Python worker | `taskId`、`workerId`、`runtimeInstanceId`、`claimToken`、`extendMs?` | `leaseExpiresAt`、`cancelRequested` | 校验 lease owner，刷新 lease deadline 和 heartbeat |
-| `POST /worker/complete` | Python worker | `taskId`、`workerId`、`runtimeInstanceId`、`claimToken`、`status`、`result` | `finalStatus`、`task`、`assetIds?`、`modelRunIds?` | 校验 lease 未过期后执行 Rust settle，写 status / events / model_runs / assets |
-| `POST /worker/recover-expired-leases` | Rust maintenance / supervisor | `runtimeInstanceId?`、`now?`、`limit?` | recovery summary | 回收过期 lease；不作为普通 Python worker 自助抢占入口 |
+| `POST /worker/claim` | Python worker | `workerId`、`runtimeInstanceId`、`taskType?`、`projectId?`、`batchJobId?`、`leaseDurationMs?` | `claimed.task`、`claimed.claimToken`、`claimed.leaseExpiresAt`、`claimed.runtimeInstanceId` | 事务内 claim queued task，写 lease 字段，返回最小任务 payload |
+| `POST /worker/checkpoint` | Python worker | `taskId`、`workerId`、`runtimeInstanceId`、`claimToken` | `cancelRequested`、`leaseValid` | 校验当前未过期 lease 后只返回受控 checkpoint，不暴露 DB；task 自身取消或父 batch `cancelled` 时返回 true，父 batch `paused` 不打断 in-flight worker；token 不匹配或 lease 过期时返回 `cancelRequested: true` / `leaseValid: false` |
+| `POST /worker/heartbeat` | Python worker | `taskId`、`workerId`、`runtimeInstanceId`、`claimToken`、`leaseDurationMs?` | `heartbeat.task`、`heartbeat.leaseExpiresAt`、`heartbeat.leaseRenewalCount` | 校验 lease owner，刷新 lease deadline 和 heartbeat |
+| `POST /worker/complete` | Python worker | `taskId`、`workerId`、`runtimeInstanceId`、`claimToken`、`status`、`sidecarResult?`、`resultJson?`、`errorMessage?`、`assetId?` | `completed.task`、`completed.finalStatus`、`completed.assetIds`、`completed.modelRunIds` | 校验 lease 未过期；有 `sidecarResult` 时执行 Rust trusted settle；通用非文件输出写 ready asset，`image.generate.batch` 文件输出走授权目录校验、thumbnail、asset/model_runs/task_events/status 写入 |
+| `POST /worker/recover-expired-leases` | Rust maintenance / supervisor | `limit?` | `summary.requeuedTasks`、`summary.failedTasks`、`summary.cancelledTasks` | 回收过期 lease；不作为普通 Python worker 自助抢占入口；worker control server 启动时也会先做一次同类 Rust maintenance recovery |
 
 `complete` 的 result settle contract：
 
@@ -518,7 +519,7 @@ repo / service 迁移顺序建议：
 
 明确不做：
 
-- 不把当前 `complete_creative_task` 直接改名给 Python worker 用；它缺少 runtime token、lease owner、claim token 和 lease deadline 校验。
+- 不把当前 `complete_creative_task` 直接改名给 Python worker 用；它缺少 runtime token、lease owner、claim token 和 lease deadline 校验。Python worker 应走 `/worker/complete`；该 endpoint 当前已能 settle 通用非文件 `sidecarResult`，并已为 `image.generate.batch` 文件输出接入带授权目录校验的专门 settle。
 - 不让 Python worker 直接读取或写入 `monster_workbench.db`。
 - 不在 `BatchJobService` 继续新增正式生产 worker 分支；新增正式 workflow 先走 sidecar request/result，再逐步迁到受控 worker loop。
 - 不在 lease migration 之前迁移 `run_batch_supervisor_inner` 的任务拥有权。
@@ -551,38 +552,39 @@ flowchart TD
 | `TaskService::settle_sidecar_non_success` | 将 sidecar 非成功状态映射为 retrying/blocked/cancelled/failed | Rust trusted settle，保留 | 与 batch failure/cancel helper 继续收敛映射规则，但不把复杂审查策略放入 Rust |
 | `TaskService::run_review_asset_quality_stub` | 本地生成 review result asset 与 revise draft task | demo/stub，冻结 | 正式 review、revision、一致性检查进入 Python workflow runtime |
 | `BatchJobService::create/start/pause/resume/cancel_batch_job` | batch 生命周期、任务生成、暂停/取消状态收敛、事件广播 | Rust 控制面，保留 | 保持状态控制；provider 调用和 prompt/image 业务不回流 |
-| `BatchJobService::run_batch_supervisor_inner` | 轮询 snapshot、计算并发槽、claim queued task、spawn worker、最终 completed 判定 | 任务拥有权仍在 Rust，不能迁移 | 必须等 worker identity、claim token、heartbeat、lease-aware complete 和 expired lease recovery 完成后再评估迁移 |
+| `BatchJobService::run_batch_supervisor_inner` | 轮询 snapshot、计算并发槽、claim queued task、spawn worker、最终 completed 判定 | 任务拥有权仍在 Rust，不能迁移 | 必须等图片文件输出 settle 边界稳定后再评估迁移 |
 | `run_prompt_task_worker` / `run_generate_task_worker` | 取消兜底、checkpoint server、sidecar submit、transport failure fallback、settle 分派 | 过渡 worker shell | 不新增正式生产 worker 分支；新增 workflow 继续走 sidecar request/result |
 | `settle_batch_prompt_sidecar_response` | 校验协议和 taskId，写 prompt asset、model_runs、task_events、task status | Rust trusted settle，保留 | 可继续抽普通 ready asset / model_runs / events helper |
 | `settle_batch_image_sidecar_response` | 校验协议、授权输出目录、thumbnail、image asset、model_runs、task_events、task status | Rust 权限边界和 trusted settle，必须保留 | 只抽不削弱 canonical path 校验的小 helper；不交给 Python 直接写 asset |
-| `WorkerQueueService::claim_next_task` | 调用 `claim_next_queued_task`，把 queued 原子更新为 running | Rust IPC 首段，不是 worker-pool claim 协议 | 新增 sidecar control API 前不能让 Python 直接消费 |
-| `WorkerQueueService::complete_task` | 接收终态并写 status/result/asset_id | Rust IPC 首段，不是 lease-aware complete | 后续需要单独实现带 runtime token、worker identity、claim token、lease deadline 校验的 complete |
+| `WorkerQueueService::claim_next_task` | 调用 `claim_next_queued_task`，把 queued 原子更新为 running | Rust IPC 首段，不是 worker-pool claim 协议 | Python worker 不消费该旧 IPC；新 worker loop 只能走 `/worker/claim` |
+| `WorkerQueueService::complete_task` | 接收终态并写 status/result/asset_id | Rust IPC 首段，不是 lease-aware complete | 不复用给 Python worker；带 runtime token、worker identity、claim token、lease deadline 校验的路径已由 `/worker/complete` 承担，且已支持通用非文件 `sidecarResult` trusted settle |
 
 不能把 `BatchJobService` supervisor 现在迁走的直接原因：
 
-1. `creative_tasks` schema 只有 `status`、`retry_count`、`started_at`、`finished_at` 等状态字段，没有 `worker_id`、`worker_claim_token`、`lease_expires_at` 或 `worker_heartbeat_at`。
-2. `creative_task_repo::claim_next_queued_task` 只在事务中选择一个 `queued` task 并更新为 `running`，没有记录任务当前 owner。
-3. `WorkerQueueCompleteTaskInput` 只有 `taskId/status/resultJson/errorMessage/assetId`，无法证明 complete 来自当前 worker。
-4. `recover_interrupted_tasks` 只按 `running` / `cancelling` 做启动恢复，不能区分 lease 过期、runtime 重启、worker 进程退出和主动取消。
+1. `BatchJobService::run_batch_supervisor_inner` 仍使用旧 `claim_next_queued_task`，不是 `/worker/claim`。
+2. Python worker loop 已首段消费 `/worker/*` endpoint 的 `image.prompt.batch` 与 `image.generate.batch`，但 batch supervisor 任务拥有权仍实际留在 Rust。
+3. `/worker/complete` 已支持带 lease 校验的通用非文件 `sidecarResult` trusted settle，也已支持 `image.generate.batch` 文件输出的专门路径校验与 thumbnail settle。
+4. `recover_expired_task_leases` 已由 worker control startup maintenance 和 `/worker/recover-expired-leases` 双路径接入；旧 `recover_interrupted_tasks` 仍只作为 legacy startup 兜底。
 5. image success settle 仍需要 Rust 做输出目录 canonical 校验和 thumbnail 落盘，Python result 不能直接成为 DB 资产。
 
 下一步实施顺序应保持为：
 
 1. 先补 `creative_tasks` worker ownership / lease migration，并用旧库 fixture 覆盖缺字段库、legacy running task、running 且 lease 过期、terminal task 等场景。
-2. 再新增 Rust-owned localhost sidecar control API：`claim`、`checkpoint`、`heartbeat`、`complete`、`recover-expired-leases`。
-3. 再把 `complete` 接到 Rust trusted settle helper，确保 asset/model_runs/task_events/task status 仍由 Rust 写入。
-4. 最后才评估是否把 `run_batch_supervisor_inner` 的任务拥有权迁到 Python worker loop，或仅把 worker shell 替换为 Python 拉取式执行。
+2. 已完成首段：新增 Rust-owned localhost sidecar control API：`claim`、`checkpoint`、`heartbeat`、`complete`、`recover-expired-leases`，并复用 sidecar runtime token。
+3. 已完成首段：`/worker/complete` 支持通用非文件 `sidecarResult` trusted settle，Rust 写入 ready asset、`model_runs`、sidecar events 和 task 终态。
+4. 已完成：图片文件输出接入带授权目录 canonical 校验的专门 complete settle，Rust 负责 thumbnail、image asset、model_runs、task_events 和 task status 写入。
+5. 最后才评估是否把 `run_batch_supervisor_inner` 的任务拥有权迁到 Python worker loop，或仅把 worker shell 替换为 Python 拉取式执行。
 
 ### 12.12 本轮复核后的迁移闸门
 
-本轮继续对照 `task_service.rs`、`batch_job_service.rs`、`worker_queue_service.rs`、`creative_task_repo.rs` 和 `creative_db_schema.rs` 后，结论保持收敛：当前可以继续抽小型 Rust helper，但不能以“尽快搬走 Rust supervisor”为目标。真正的下一刀应该先补 worker ownership / lease 和 Rust-owned control API，否则 Python worker loop 没有可信任务拥有权。
+本轮继续对照 `task_service.rs`、`batch_job_service.rs`、`worker_queue_service.rs`、`creative_task_repo.rs` 和 `creative_db_schema.rs` 后，结论保持收敛：当前可以继续抽小型 Rust helper，但不能以“尽快搬走 Rust supervisor”为目标。worker ownership / lease、Rust-owned control API、通用 complete、图片文件 complete 与 prompt/image worker loop 已具备首段闭环；真正的下一刀应是评估 worker shell / supervisor 的迁移边界。
 
 | 判断项 | 当前代码证据 | 架构含义 |
 |---|---|---|
-| task ownership | `creative_tasks` 只有 `status`、`retry_count`、`started_at`、`finished_at` 等字段，没有 worker / lease / heartbeat 字段 | Python 不能成为主动消费者；否则无法阻止过期 worker 或重复 worker 写回 |
-| claim 语义 | `claim_next_queued_task` 只在事务内把一个 `queued` task 改为 `running` | 这是 Rust supervisor 内部原子 claim，不是跨进程 worker-pool 协议 |
+| task ownership | `creative_tasks` 已有 worker / lease / heartbeat 字段，repo 层、`WorkerQueueService` 和 Rust localhost control API 都有 lease-aware 首段；`/worker/complete` 已支持通用非文件 sidecar result settle 和 `image.generate.batch` 文件输出 trusted settle；Python worker loop 已首段消费 `image.prompt.batch` 与 `image.generate.batch` | Python 已能通过 Rust control API 拥有 prompt/image 子任务；batch supervisor 任务拥有权仍在 Rust |
+| claim 语义 | 旧 `claim_next_queued_task` 仍是 Rust supervisor 内部 `queued -> running` 原子 claim，但已加父 batch `running` 状态与 `concurrency` 并发槽保护；`claim_next_queued_task_with_lease` 已接入 `WorkerQueueService::claim_next_task_with_lease`、`/worker/claim` 和 Python prompt/image worker loop | 旧 supervisor claim 与新 lease claim 不再绕过彼此的 batch 并发槽；新 lease claim 已由 Python 首段消费 `image.prompt.batch` 与 `image.generate.batch` |
 | complete 语义 | `WorkerQueueService::complete_task` 只校验当前状态为 `running` / `cancelling`，输入没有 worker identity / claim token | 现有 `complete_creative_task` 不能直接给 Python worker 使用 |
-| recovery 语义 | `recover_interrupted_tasks` 只按 `running` / `cancelling` 做启动兜底 | 还不能表达 lease 过期、runtime 重启、worker 退出和主动取消之间的差异 |
+| recovery 语义 | `recover_expired_task_leases` 已接入 `WorkerQueueService::recover_expired_task_leases`、worker control startup maintenance 与 `/worker/recover-expired-leases`；Tauri IPC 仍只有 legacy startup recovery | runtime 重启、worker 退出和主动取消之间的产品语义仍待收口 |
 | batch supervisor | `run_batch_supervisor_inner` 负责 snapshot 轮询、并发槽计算、claim、spawn worker 和 completed 判定 | 任务拥有权仍在 Rust；迁移前必须先有 lease-aware claim / heartbeat / complete / recovery |
 | sidecar settle | prompt/image worker 已把 provider 执行交给 Python，但 Rust 仍校验 result、写 `assets` / `model_runs` / `task_events` / status | 业务执行可在 Python，可信落库仍在 Rust |
 | image path boundary | `settle_batch_image_sidecar_response` 仍调用 `validate_sidecar_output_file` 和 `copy_sidecar_thumbnail` | Python 只能返回授权目录内文件引用，不能直接决定 DB 资产路径 |
@@ -592,18 +594,19 @@ flowchart TD
 | 层级 | 可以推进 | 暂不推进 |
 |---|---|---|
 | Rust helper 收敛 | 抽取重复的 sidecar result 校验、model_runs/events 持久化、失败/取消状态映射；保持行为不变 | 为了“瘦身”删掉 Rust canonical path 校验、task_events 写入或 event emit |
-| Worker ownership 设计 | 先按 `docs/ai/database-migration-policy.md` 设计 nullable lease 字段、旧库兼容 fixture、claim token 和索引 | 在没有 schema 支撑时让 Python 直接 claim/complete SQLite task |
-| Python worker loop | 等 Rust-owned localhost control API、runtime token、heartbeat 和 lease recovery 都稳定后，再评估替换 prompt/image worker shell | 现在迁移 `run_batch_supervisor_inner`，或把 `complete_creative_task` 当成 sidecar `complete` 协议 |
+| Worker ownership 设计 | nullable lease 字段、旧库兼容 fixture、claim token、索引、service 方法、Rust localhost control API、通用非文件 complete settle、图片文件 complete settle 和 prompt/image worker loop 已首段落地 | 仍不让 Python 直连 SQLite，也不把旧 Tauri IPC complete 当作 sidecar complete |
+| Python worker loop | 已首段消费 `image.prompt.batch` 与 `image.generate.batch` | 现在迁移 `run_batch_supervisor_inner`，或把 `complete_creative_task` 当成 sidecar `complete` 协议 |
 
 下一批若进入编码，验收门槛必须先覆盖：
 
-1. 新库、旧库、缺字段库都能通过 `init_schema()` 补齐 worker ownership / lease 字段，旧数据不丢失。
-2. `claim_next_queued_task_with_lease` 在同一事务内完成 `queued -> running` 和 lease 字段写入，并返回 claim token。
-3. `heartbeat_task_lease` 只允许当前 worker / runtime / token 续约，过期 lease 不能续。
-4. `complete_task_with_lease` 必须校验未过期 lease owner，然后进入 Rust trusted settle；token 不匹配或 lease 过期必须拒绝。
-5. `recover_expired_task_leases` 只回收过期 lease，并保留现有 startup recovery 作为 legacy 兜底。
-6. Python sidecar control API 只绑定 `127.0.0.1`、复用 runtime token、不暴露 SQL 或任意文件能力。
-7. image / asset settle 继续由 Rust 校验授权输出目录、生成 thumbnail、写 `assets` / `model_runs` / `task_events` 和 task status。
+1. 已完成：新库、旧库、缺字段库都能通过 `init_schema()` 补齐 worker ownership / lease 字段，旧数据不丢失。
+2. 已完成：`claim_next_queued_task_with_lease` 在同一事务内完成 `queued -> running` 和 lease 字段写入，并返回 claim token。
+3. 已完成：`heartbeat_task_lease` 只允许当前 worker / runtime / token 续约，过期 lease 不能续。
+4. 已完成首段：`complete_task_with_lease` 与 `/worker/complete` 校验未过期 lease owner，token 不匹配或 lease 过期会拒绝；`sidecarResult` 的通用非文件输出与 `image.generate.batch` 文件输出会由 Rust 写 asset / model_runs / task_events / status。
+5. 已完成首段：`recover_expired_task_leases` 只回收过期 lease，已接入 worker control startup maintenance 与 `/worker/recover-expired-leases`。
+6. 已完成首段：Rust-owned worker control API 只绑定 `127.0.0.1`、复用 runtime token、不暴露 SQL 或任意文件能力。
+7. 已完成：带 `filePath` / `thumbnailPath` 的 image settle 由 Rust 校验授权输出目录、生成 thumbnail、写 `assets` / `model_runs` / `task_events` 和 task status。
+8. 已完成：当 Rust trusted settle 最终判定 task cancelled 时，`TaskService`、`BatchJobService` 和通用 `/worker/complete` 会将 sidecar `modelRuns` 入库状态归一为 `cancelled`，避免出现 task 已取消但 `model_runs.status` 仍为 `succeeded` 的审计不一致。
 
 这也意味着 `TaskService` 当前不是优先拆分对象。它的问题主要是仍有 demo/stub 入口需要冻结边界，而不是需要整体迁移；`BatchJobService` 的 provider 执行已经明显收窄，真正的剩余风险是 supervisor 任务拥有权缺少租约模型。
 
@@ -619,21 +622,40 @@ flowchart TD
 | `generate_image_prompt` | Rust 创建 task、启动 checkpoint、提交 sidecar、校验 `SidecarWorkflowTaskResult`，再写 asset/model_runs/events/status | 业务生成逻辑可继续在 Python；最终 settle 继续由 Rust 做 |
 | review / revision | `run_review_asset_quality_stub` 仍在 Rust 本地构造 review result 和 revise draft | 继续冻结为 demo/stub；正式 review、revision、一致性检查必须进入 Python workflow runtime |
 | batch lifecycle | `create/start/pause/resume/cancel_batch_job` 管 batch 状态、子任务生成、暂停/取消收敛和事件广播 | 属于 Rust 控制面，可保留 |
-| batch supervisor | `run_batch_supervisor_inner` 做 snapshot 轮询、concurrency slot 计算、`claim_next_queued_task`、spawn worker 和 completed 判定 | 当前任务拥有权仍在 Rust；没有 lease 前不能迁给 Python worker loop |
+| batch supervisor | `run_batch_supervisor_inner` 做 snapshot 轮询、concurrency slot 计算、旧 `claim_next_queued_task`、spawn worker 和 completed 判定 | 当前任务拥有权仍在 Rust；即便图片文件输出 complete settle 已落地，迁移前仍要定义 supervisor 拥有权、恢复语义和产品交互 |
 | prompt / image worker shell | `run_prompt_task_worker` / `run_generate_task_worker` 做 checkpoint、sidecar submit、transport fallback 和 settle 分派 | 可作为过渡壳层保留；不要继续新增正式业务 worker 分支 |
 | trusted settle | `workflow_settle_service.rs` 已集中 protocol/taskId 校验、sidecar events、model_runs、ready asset 创建；image settle 还要校验输出目录和 thumbnail | 可以继续抽小 helper，但 asset/model_runs/task_events/status 仍由 Rust 写入 |
 | worker queue skeleton | `WorkerQueueCompleteTaskInput` 只有 taskId/status/resultJson/errorMessage/assetId，`complete_task` 只校验当前 status 为 running/cancelling | 这不是 sidecar worker-pool complete 协议，不能直接暴露给 Python worker |
-| schema | `creative_tasks` 只有 status/retry_count/max_retries/started_at/finished_at 等字段，没有 worker_id、claim_token、lease_expires_at、heartbeat | Python 暂不能成为可信 owner；迁移前必须先补 lease migration |
+| worker control lease | migration v4、lease-aware repo / service 方法、Rust-owned localhost control API、启动过期 lease recovery、通用非文件 `/worker/complete` trusted settle、`image.generate.batch` 文件输出 trusted settle 和 prompt/image worker loop 已落地 | Python 仍只能通过 Rust control API 成为任务 owner；不能直连 SQLite 或绕过 Rust settle |
 
 后续推进口径：
 
 1. 允许继续收敛 Rust helper：sidecar result 校验、失败/取消映射、model_runs/events 持久化、普通 ready asset 创建可以继续复用，但保持行为不变。
 2. 暂不迁移 `run_batch_supervisor_inner` 的任务拥有权；它现在仍承担并发槽、claim、spawn 和最终 completed 判定。
-3. 暂不把 `complete_creative_task` 当成 Python sidecar 的 complete API；未来 complete 必须带 runtime token、worker identity、claim token、lease deadline 校验，并进入 Rust trusted settle。
+3. 暂不把 `complete_creative_task` 当成 Python sidecar 的 complete API；sidecar worker complete 必须走 `/worker/complete`，带 runtime token、worker identity、claim token、lease deadline 校验，并由 Rust settle。
 4. 新增正式 workflow 时，优先走 sidecar request/result；不要在 `BatchJobService` 继续加第四、第五个正式生产 worker 分支。
-5. 下一批后端编码应先做 worker ownership / lease migration、旧库兼容 fixture、lease-aware repo 测试，再设计 Rust-owned localhost control API。
+5. 下一批后端编码应基于已落地的 worker ownership / lease migration、service 方法、Rust-owned localhost control API、通用非文件 complete settle、图片文件 complete settle 和 prompt/image worker loop，评估 worker shell 与 supervisor 的下一步迁移边界。
 
-面向架构升级的判定：`TaskService` 的主要问题是 demo/stub 边界要冻结，`BatchJobService` 的主要问题是任务所有权缺少租约模型。只有当 `claim -> checkpoint -> heartbeat -> complete -> recover_expired_leases` 形成 Rust-owned control API 后，才重新评估 Python worker loop 是否接管 prompt/image worker shell 或 batch supervisor。
+面向架构升级的判定：`TaskService` 的主要问题是 demo/stub 边界要冻结，`BatchJobService` 的主要问题已经从“缺租约字段 / 缺图片文件 settle”转为“supervisor 任务拥有权是否以及何时迁移”。后续评估 Python worker loop 是否接管更多 prompt/image worker shell 或 batch supervisor 时，不能削弱 Rust 的授权目录校验与可信落库职责。
+
+### 12.14 2026-06-13 实施补充：lease 与 control API 首段落地
+
+本轮已经完成 worker ownership / lease 的第一段实现，更新 12.6-12.13 中关于“schema 仍无 worker / lease 字段”的旧事实：
+
+- `creative_tasks` 现在有 nullable worker ownership / lease 字段和索引；新库、早期旧库、当前完整 schema 但缺 lease 字段的旧库都由 `init_schema()` 补齐。
+- `creative_task_repo` 与 `WorkerQueueService` 已具备 lease-aware claim / heartbeat / complete / expired lease recovery 的能力；测试验证了错误 claim token、过期 lease、续约和回收路径。
+- `start_worker_control_server` 已提供 Rust-owned localhost control API，endpoint 覆盖 `/worker/claim`、`/worker/checkpoint`、`/worker/heartbeat`、`/worker/complete`、`/worker/recover-expired-leases`；启动时会先执行一次 expired lease recovery；`SidecarLifecycleService::ensure_worker_control_endpoint` 会用 sidecar runtime token 启动该控制面。
+- 2026-06-13 继续实施：`/worker/complete` 新增 `sidecarResult` contract；通用非文件输出会由 Rust 校验 `protocolVersion/taskId/status`、创建 ready asset、写 `model_runs`、写 sidecar events 并完成 task 终态；`image.generate.batch` 文件输出会由 Rust 校验授权输出目录、复制 thumbnail、创建 image asset、写 `model_runs`、写 sidecar events 并完成 task 终态。
+- 2026-06-13 继续实施：sidecar 启动时会同步启动 Rust worker control server，并通过 `MONSTER_WORKER_CONTROL_URL` / `MONSTER_WORKER_CONTROL_TOKEN` / `MONSTER_WORKER_IMAGE_OUTPUT_DIR` 传给 Python；Python worker loop 已首段消费 `image.prompt.batch` 与 `image.generate.batch`，会 claim / lease-aware checkpoint / heartbeat / complete。
+- lease claim 已增加 batch 状态与并发保护：带 `batch_job_id` 的任务只有父 batch job 为 `running` 且当前 running task 数低于 `batch_jobs.concurrency` 时才能被 worker control claim，避免 draft / paused batch 被 Python worker 提前消费，也避免未来多个 Python worker 绕过 batch 并发槽。
+- legacy `claim_next_queued_task` 已同步增加父 batch `running` 状态与 `concurrency` 并发保护，避免 Rust supervisor 与 Python worker control claim 同时存在时绕过同一批次的并发槽。
+- checkpoint 已明确 batch pause/cancel 与 lease owner 语义：父 batch `cancelled` 可让仍为 `running` 的子任务在 checkpoint 处返回取消；父 batch `paused` 只停止继续 claim，不打断 in-flight worker；Python worker 必须带回 claim token，token 不匹配或 lease 过期时 Rust 返回 `cancelRequested: true` / `leaseValid: false`。该语义已有 `WorkerQueueService` 与 Python worker loop 回归测试覆盖。
+- lease complete 已增加父 batch drain 收敛：当 worker control 完成带 `batch_job_id` 的任务后，如果父 batch 已没有 queued / running / cancelling task，Rust 会通过 `creative_batch_repo` 将父 batch 收敛为 `completed`。这让 Python worker loop 即使脱离 Rust supervisor 执行最后一个子任务，也不会让 batch 长期停在 `running`。
+- expired lease recovery 已复用同一父 batch drain 收敛：当 `/worker/recover-expired-leases` 或 worker control server startup recovery 将最后一个 batch 子任务收敛为 failed / cancelled 且无 active task 时，Rust 会将父 batch 收敛为 `completed`，避免 worker 退出后 batch 卡在 `running`。
+- legacy `complete_creative_task` / startup `recover_interrupted_tasks` 也复用父 batch drain 收敛，作为非 worker-pool 兼容入口的兜底；它们仍不是 sidecar worker complete 协议，但不会再让 batch 终态只依赖 Rust supervisor 轮询。
+- cancelled settle 已做 `model_runs` 归一化：当 provider 调用返回后 Rust checkpoint / lease 状态判定最终取消，`persist_cancelled_sidecar_model_runs` 会把 sidecar 返回的 model run 入库状态写为 `cancelled`，不创建 cancelled 输出资产。
+- 这仍不是完整 Python worker pool：`complete_creative_task` 仍不是 sidecar complete API，Python 不能直连 SQLite 或拥有 batch supervisor。
+- 下一步应重新评估 worker shell / supervisor 的迁移边界，继续保持 asset / model_runs / task_events / task status 由 Rust 写入。
 
 ## 13. 不变量
 

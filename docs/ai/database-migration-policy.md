@@ -27,6 +27,7 @@
 | 1 | `bootstrap_creative_schema` |
 | 2 | `add_creative_task_goal_batch_columns` |
 | 3 | `add_creative_projects` |
+| 4 | `add_creative_task_worker_lease_columns` |
 
 ## 3. 破坏性操作
 
