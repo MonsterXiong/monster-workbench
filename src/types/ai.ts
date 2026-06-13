@@ -1,4 +1,14 @@
-export type AiProviderType = "openai" | "deepseek" | "siliconflow" | "anyrouter" | "custom";
+export type AiProviderType =
+  | "openai"
+  | "deepseek"
+  | "siliconflow"
+  | "kimi"
+  | "minimax"
+  | "glm"
+  | "ollama"
+  | "custom";
+export type AiProviderAdapterId = "openai-compatible" | "anthropic-messages";
+export type AiProviderCapability = "models" | "chat" | "image";
 export type AiProviderTestAction = "models" | "chat" | "image";
 export type AiProviderQueueMode = "serial" | "concurrent";
 export type AiProviderTestQueueStatus = "queued" | "running" | "success" | "failed" | "canceled";
@@ -19,6 +29,7 @@ export type AiImageFailureKind =
 
 export interface AiProviderConfig {
   provider: AiProviderType;
+  adapterId: AiProviderAdapterId;
   displayName: string;
   baseUrl: string;
   apiKey: string;

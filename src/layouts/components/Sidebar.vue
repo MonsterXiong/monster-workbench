@@ -8,21 +8,20 @@ import {
   Wrench,
   Compass,
   Bot,
-  Sparkles,
   FolderOpen,
   FlaskConical,
   BookOpen
 } from "lucide-vue-next";
 
 defineProps<{
-  activeTab: "workspace" | "system" | "tools" | "navigation" | "ai" | "creative" | "settings" | "file-manager" | "playground" | "utils-docs";
+  activeTab: "workspace" | "system" | "tools" | "navigation" | "ai" | "settings" | "file-manager" | "playground" | "utils-docs";
   collapsed: boolean;
   version: string;
   hasUpdate?: boolean;
 }>();
 
 const emit = defineEmits<{
-  (e: "changeTab", tab: "workspace" | "system" | "tools" | "navigation" | "ai" | "creative" | "settings" | "file-manager" | "playground" | "utils-docs"): void;
+  (e: "changeTab", tab: "workspace" | "system" | "tools" | "navigation" | "ai" | "settings" | "file-manager" | "playground" | "utils-docs"): void;
   (e: "toggleCollapse"): void;
   (e: "checkUpdateManual"): void;
 }>();
@@ -56,11 +55,6 @@ const items = [
     key: "ai",
     titleKey: "sidebar.ai",
     icon: Bot,
-  },
-  {
-    key: "creative",
-    titleKey: "sidebar.creative",
-    icon: Sparkles,
   },
 ] as const;
 </script>

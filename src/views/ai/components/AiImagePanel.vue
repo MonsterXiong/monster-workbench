@@ -1,6 +1,11 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
-import { AlertTriangle, Bot, ChevronDown, ChevronLeft, ChevronRight, FolderOpen, Image, Maximize2, Plus, RotateCcw, Send, Sparkles, UserRound, XCircle } from "lucide-vue-next";
+import { Image, Send } from "lucide-vue-next";
+import AiImageMessageList, { type AiImageMessageListActions, type ImageResultSummaryItem } from "./image/AiImageMessageList.vue";
+import AiImageComposerPromptTools, { type EmptyPromptStarter } from "./image/AiImageComposerPromptTools.vue";
+import AiImageComposerSettings from "./image/AiImageComposerSettings.vue";
+import AiImagePreviewDialog, { type ImagePreviewInspectorItem } from "./image/AiImagePreviewDialog.vue";
+import AiImageSessionList, { type ImageSessionStatusFilter } from "./image/AiImageSessionList.vue";
 import { useAiStore } from "../../../stores/ai";
 import { useAiPromptLibraryStore } from "../../../stores/ai-prompt-library";
 import { useI18n } from "../../../composables/useI18n";
@@ -9,14 +14,10 @@ import type { AiConversationSession, AiPromptItem } from "../../../types/ai";
 import {
   clearIntervalHandle,
   clampNumber,
-  countWhere,
   createInterval,
-  createTimeout,
-  addDomEventListener,
   extractTextBetween,
   findByValue,
   findIndexByValue,
-  findLastMapped,
   findLastItem,
   filterBySearchTextFields,
   firstItem,
@@ -27,58 +28,24 @@ import {
   formatTemplate,
   getDimensionsMaxSide,
   getDimensionsRatio,
-  getKeyboardNavigationDirection,
-  getNextCircularIndex,
   getCurrentTimestampMs,
   getErrorMessage,
   getElapsedMs,
   getItemAtOrOnly,
-  getLastIndex,
-  getScrollDistanceToBottom,
   includesAnyText,
-  isEditableEventTarget,
-  isPlainKeyboardEvent,
   isBlank,
   hasMultipleItems,
   joinBy,
   joinLines,
   joinMappedNonEmptyLines,
   parseDimensionsText,
-  preventAndStopDomEvent,
   replaceAllText,
-  removeAnyPrefix,
-  splitLines,
-  scrollElementToBottom,
-  startsWithAnyText,
   take,
   toTrimmedString,
-  truncateText,
-  type DomEventCleanup,
   type IntervalHandle,
 } from "../../../utils";
 
 type ImageMessage = AiConversationSession["messages"][number];
-type ImageSessionStatusKey = "empty" | "pending" | "canceled" | "failed" | "completed";
-type ImageSessionStatusFilter = "all" | "pending" | "failed" | "canceled" | "completed";
-type ImageResultSummaryItem = {
-  key: string;
-  label: string;
-  tone?: "success" | "info" | "warning" | "danger";
-};
-type PreviewInspectorItem = {
-  key: string;
-  label: string;
-  value: string;
-  tone?: "success" | "info" | "warning";
-};
-type EmptyPromptStarter = {
-  key: string;
-  title: string;
-  prompt: string;
-  size: string;
-  sizeLabel: string;
-};
-
 const STYLE_PROMPT_CATEGORY_ID = "image-quality-styles";
 const STYLE_PROMPT_SUBJECT_PLACEHOLDER = "{替换为你的主体}";
 const VERIFIED_IMAGE_SIZE_VALUES = [
@@ -148,19 +115,13 @@ const { t } = useI18n();
 const input = ref("");
 const imageDraftCount = ref(1);
 const imageInputRef = ref<{ focus?: () => void } | null>(null);
-const messageListRef = ref<HTMLElement | null>(null);
-const isHistoryAwayFromBottom = ref(false);
-const hasHistoryUpdateBelow = ref(false);
 const renameDialogVisible = ref(false);
 const renameDraft = ref("");
 const renamingSessionId = ref("");
 const sessionSearch = ref("");
 const previewDialogVisible = ref(false);
-const previewImageUrl = ref("");
-const previewImageTitle = ref("");
 const previewImageIndex = ref(0);
 const previewMessage = ref<ImageMessage | null>(null);
-const previewThumbnailRefs = ref<Array<HTMLElement | null>>([]);
 const selectedStylePromptId = ref("");
 const stylePromptSearch = ref("");
 const promptStartersExpanded = ref(false);
@@ -170,9 +131,6 @@ const promptBeforeEnhance = ref("");
 const stylePromptIdBeforeEnhance = ref("");
 const nowMs = ref(getCurrentTimestampMs());
 let clockTimer: IntervalHandle | null = null;
-let stopPreviewKeydown: DomEventCleanup | null = null;
-let lastPreviewPointerActionAt = 0;
-let lastPreviewPointerActionKey = "";
 
 function getImageSizeTierLabel(size: string) {
   const mappedTier = IMAGE_SIZE_TIER_LABELS.get(size);
@@ -241,6 +199,25 @@ const emit = defineEmits<{
 const session = computed(() => aiStore.activeImageSession);
 const messages = computed(() => session.value?.messages || []);
 const isBusy = computed(() => aiStore.isActionBusy("image", aiStore.activeModelConfigIds.image));
+const imageSupported = computed(() => aiStore.modelConfigSupportsCapability(aiStore.activeModelConfigIds.image, "image"));
+const imageUnavailableTitle = computed(() =>
+  formatTemplate(t("settings.aiProvider.capabilityUnsupported"), {
+    capability: t("settings.aiProvider.capabilityImage"),
+  })
+);
+const imageModelConfigOptions = computed(() =>
+  aiStore.modelConfigs.map((item) => {
+    const supported = aiStore.modelConfigSupportsCapability(item.id, "image");
+    return {
+      label: item.name || item.displayName || item.imageModel || item.model,
+      selectedLabel: item.name || item.displayName || item.imageModel || item.model,
+      value: item.id,
+      description: item.imageModel || item.model,
+      meta: supported ? t("settings.aiProvider.capabilityImage") : t("common.disabled"),
+      disabled: !supported,
+    };
+  })
+);
 const queueStatus = computed(() => aiStore.getActionQueueStatus("image"));
 const activeSizeOption = computed(() => findByValue(imageSizeOptions.value, (item) => item.value, aiStore.imageDraftSize) ?? firstItem(imageSizeOptions.value));
 const activeSizeLabel = computed(() => activeSizeOption.value?.selectedLabel || aiStore.imageDraftSize);
@@ -288,7 +265,16 @@ const canEnhancePrompt = computed(() => !isBlank(input.value));
 const canUndoPromptEnhance = computed(() => !isBlank(promptBeforeEnhance.value));
 const draftPromptLength = computed(() => toTrimmedString(input.value).length);
 const draftHasStyleSubjectPlaceholder = computed(() => toTrimmedString(input.value).includes(STYLE_PROMPT_SUBJECT_PLACEHOLDER));
-const canGenerateImage = computed(() => !isBlank(input.value) && !isBusy.value && !draftHasStyleSubjectPlaceholder.value);
+const canGenerateImage = computed(() => imageSupported.value && !isBlank(input.value) && !isBusy.value && !draftHasStyleSubjectPlaceholder.value);
+const imageGenerateButtonTitle = computed(() => {
+  if (!imageSupported.value) {
+    return imageUnavailableTitle.value;
+  }
+  if (draftHasStyleSubjectPlaceholder.value) {
+    return t("aiPage.image.subjectPlaceholderButtonTitle");
+  }
+  return undefined;
+});
 const draftMetaItems = computed(() => {
   if (!draftPromptLength.value) {
     return [];
@@ -343,46 +329,11 @@ const imageStatusLabel = computed(() => {
   }
   return isBusy.value ? t("aiPage.image.generating") : t("aiPage.image.ready");
 });
-const scrollAnchor = computed(() => joinBy(messages.value, (message) => `${message.id}:${message.status}`, "|"));
 const sessionActions = computed<ActionMenuItem[]>(() => [
   { key: "rename", label: t("aiPage.sessions.rename"), icon: "Pencil" },
   { key: "duplicate", label: t("aiPage.sessions.duplicate"), icon: "Copy" },
   { key: "delete", label: t("common.delete"), icon: "Trash2", type: "danger", divided: true },
 ]);
-const searchableImageSessions = computed(() => {
-  return filterBySearchTextFields(aiStore.imageSessions, sessionSearch.value, [
-    (target) => target.title,
-    (target) => target.modelConfigId,
-    (target) => target.imageSize || "",
-    (target) => getSessionSizeLabel(target),
-    (target) => getSessionStatusLabel(target),
-    (target) => target.messages.map((message) => [message.content, message.model, message.imageSize || ""]),
-  ]);
-});
-const sessionStatusFilterOptions = computed(() => {
-  const sessions = searchableImageSessions.value;
-  const countByFilter = (filter: ImageSessionStatusFilter) =>
-    countWhere(sessions, (item) => matchesSessionStatusFilter(item, filter));
-  return [
-    { key: "all" as const, label: t("aiPage.image.filterAll"), count: sessions.length },
-    { key: "pending" as const, label: t("aiPage.image.filterGenerating"), count: countByFilter("pending") },
-    { key: "failed" as const, label: t("aiPage.image.filterFailed"), count: countByFilter("failed") },
-    { key: "canceled" as const, label: t("aiPage.image.filterCanceled"), count: countByFilter("canceled") },
-    { key: "completed" as const, label: t("aiPage.image.filterCompleted"), count: countByFilter("completed") },
-  ];
-});
-const filteredImageSessions = computed(() => {
-  return searchableImageSessions.value.filter((item) => matchesSessionStatusFilter(item, sessionStatusFilter.value));
-});
-const filteredImageSessionEmptyText = computed(() => {
-  if (sessionSearch.value) {
-    return t("aiPage.image.sessionSearchEmpty");
-  }
-  if (sessionStatusFilter.value !== "all") {
-    return t("aiPage.image.sessionFilterEmpty");
-  }
-  return t("aiPage.image.sessionListEmpty");
-});
 const activeImageHeaderMeta = computed(() => [
   aiStore.activeImageConfig?.name || aiStore.activeImageConfig?.displayName,
   activeImageModelName.value,
@@ -390,7 +341,6 @@ const activeImageHeaderMeta = computed(() => [
 ].filter(Boolean).join(" · "));
 
 onMounted(async () => {
-  stopPreviewKeydown = addDomEventListener(window, "keydown", handlePreviewKeydown);
   clockTimer = createInterval(() => {
     nowMs.value = getCurrentTimestampMs();
   }, 1000);
@@ -412,8 +362,6 @@ onMounted(async () => {
 onUnmounted(() => {
   clearIntervalHandle(clockTimer);
   clockTimer = null;
-  stopPreviewKeydown?.();
-  stopPreviewKeydown = null;
 });
 
 watch(
@@ -429,45 +377,6 @@ watch(input, (value) => {
     selectedStylePromptId.value = "";
   }
 });
-
-watch(
-  () => scrollAnchor.value,
-  async () => {
-    const shouldFollow = !isHistoryAwayFromBottom.value || isHistoryNearBottom();
-    await nextTick();
-    if (shouldFollow) {
-      scrollHistoryToBottom("auto");
-      return;
-    }
-    hasHistoryUpdateBelow.value = true;
-    updateHistoryScrollState();
-  }
-);
-
-function isHistoryNearBottom() {
-  return getScrollDistanceToBottom(messageListRef.value) < 96;
-}
-
-function updateHistoryScrollState() {
-  const awayFromBottom = !isHistoryNearBottom();
-  isHistoryAwayFromBottom.value = awayFromBottom;
-  if (!awayFromBottom) {
-    hasHistoryUpdateBelow.value = false;
-  }
-}
-
-function scrollHistoryToBottom(behavior: ScrollBehavior = "smooth") {
-  const target = messageListRef.value;
-  if (!target) {
-    return;
-  }
-  scrollElementToBottom(target, behavior);
-  if (behavior === "auto") {
-    updateHistoryScrollState();
-    return;
-  }
-  createTimeout(updateHistoryScrollState, 220);
-}
 
 function consumePendingPrompt() {
   const content = promptStore.consumePendingPrompt("image");
@@ -523,15 +432,6 @@ function formatStylePromptContent(preset: AiPromptItem, subject: string) {
     return replaceAllText(presetContent, STYLE_PROMPT_SUBJECT_PLACEHOLDER, subject || STYLE_PROMPT_SUBJECT_PLACEHOLDER);
   }
   return subject ? `${subject}\n\n${presetContent}` : presetContent;
-}
-
-function getStylePromptSummary(preset: AiPromptItem) {
-  const lines = splitLines(preset.content, { trim: true, keepEmpty: false });
-  const styleLine = lines.find((line) => startsWithAnyText(line, ["风格：", "Style:"])) ?? lines[1] ?? firstItem(lines);
-  if (!styleLine) {
-    return "";
-  }
-  return truncateText(removeAnyPrefix(styleLine, ["风格：", "Style:"], { trimStart: true }), 54, "");
 }
 
 function applyStylePrompt(preset: AiPromptItem) {
@@ -631,12 +531,26 @@ function clearDraftPrompt() {
   void focusImageInput();
 }
 
+function handleImageModelConfigChange(value: unknown) {
+  const configId = String(value);
+  if (!aiStore.modelConfigSupportsCapability(configId, "image")) {
+    emit("failed", imageUnavailableTitle.value);
+    return;
+  }
+  aiStore.setActiveModelConfig("image", configId);
+}
+
 async function handleGenerate() {
   const content = toTrimmedString(input.value);
-  if (!content || isBusy.value || draftHasStyleSubjectPlaceholder.value) {
-    if (draftHasStyleSubjectPlaceholder.value) {
-      void focusImageInput();
-    }
+  if (!content || isBusy.value) {
+    return;
+  }
+  if (!imageSupported.value) {
+    emit("failed", imageUnavailableTitle.value);
+    return;
+  }
+  if (draftHasStyleSubjectPlaceholder.value) {
+    void focusImageInput();
     return;
   }
   input.value = "";
@@ -665,7 +579,14 @@ function findRetryPrompt(messageId: string) {
 }
 
 function canRetryImageMessage(message: AiConversationSession["messages"][number]) {
-  return message.role !== "user" && (message.status === "failed" || message.status === "canceled") && Boolean(findRetryPrompt(message.id)) && !isBusy.value;
+  const configId = message.modelConfigId || aiStore.activeModelConfigIds.image;
+  return (
+    message.role !== "user" &&
+    (message.status === "failed" || message.status === "canceled") &&
+    Boolean(findRetryPrompt(message.id)) &&
+    !isBusy.value &&
+    aiStore.modelConfigSupportsCapability(configId, "image")
+  );
 }
 
 function canUsePromptFromMessage(message: ImageMessage) {
@@ -673,7 +594,14 @@ function canUsePromptFromMessage(message: ImageMessage) {
 }
 
 function canRegenerateImageMessage(message: ImageMessage) {
-  return message.role !== "user" && message.status === "success" && Boolean(findRetryPrompt(message.id)) && !isBusy.value;
+  const configId = message.modelConfigId || aiStore.activeModelConfigIds.image;
+  return (
+    message.role !== "user" &&
+    message.status === "success" &&
+    Boolean(findRetryPrompt(message.id)) &&
+    !isBusy.value &&
+    aiStore.modelConfigSupportsCapability(configId, "image")
+  );
 }
 
 function canCancelImageMessage(message: ImageMessage) {
@@ -704,10 +632,15 @@ async function retryImageMessage(message: AiConversationSession["messages"][numb
   if (!prompt || isBusy.value) {
     return;
   }
+  const configId = message.modelConfigId || aiStore.activeModelConfigIds.image;
+  if (!aiStore.modelConfigSupportsCapability(configId, "image")) {
+    emit("failed", imageUnavailableTitle.value);
+    return;
+  }
   try {
     await aiStore.generateImageMessage(
       prompt,
-      message.modelConfigId || aiStore.activeModelConfigIds.image,
+      configId,
       getMessageRegenerateSize(message),
       getMessageImageCount(message)
     );
@@ -721,10 +654,15 @@ async function regenerateImageMessage(message: ImageMessage) {
   if (!prompt || isBusy.value) {
     return;
   }
+  const configId = message.modelConfigId || aiStore.activeModelConfigIds.image;
+  if (!aiStore.modelConfigSupportsCapability(configId, "image")) {
+    emit("failed", imageUnavailableTitle.value);
+    return;
+  }
   try {
     await aiStore.generateImageMessage(
       prompt,
-      message.modelConfigId || aiStore.activeModelConfigIds.image,
+      configId,
       getMessageRegenerateSize(message),
       getMessageImageCount(message)
     );
@@ -850,7 +788,8 @@ async function openGeneratedImageLocation(message: ImageMessage, index: number) 
 }
 
 async function openPreviewSavedFileLocation() {
-  const path = previewSavedFile.value?.path;
+  const files = previewMessage.value?.savedFiles || [];
+  const path = getItemAtOrOnly(files, previewImageIndex.value)?.path || "";
   if (!path) {
     return;
   }
@@ -866,28 +805,33 @@ function hasGeneratedImages(message: ImageMessage) {
 }
 
 const previewPrompt = computed(() => (previewMessage.value ? getMessagePrompt(previewMessage.value) : ""));
-const previewItems = computed(() => (previewMessage.value ? getPreviewItems(previewMessage.value) : []));
-const previewSavedFile = computed(() => {
-  const files = previewMessage.value?.savedFiles || [];
-  return getItemAtOrOnly(files, previewImageIndex.value) ?? null;
-});
-const previewHasMultipleImages = computed(() => hasMultipleItems(previewItems.value));
-const previewInspectorItems = computed<PreviewInspectorItem[]>(() => {
+const previewImageTitle = computed(() => (previewMessage.value ? getImagePreviewTitle(previewMessage.value) : ""));
+const previewActualSize = computed(() => (previewMessage.value ? getMessageActualSize(previewMessage.value) : ""));
+const previewRequestedSize = computed(() => (previewMessage.value ? getMessageRequestedSize(previewMessage.value) : ""));
+const previewLatencyLabel = computed(() => (previewMessage.value ? getMessageLatencyLabel(previewMessage.value) : ""));
+const previewIsSizeFallback = computed(() => Boolean(previewMessage.value && isImageSizeFallback(previewMessage.value)));
+const previewIsSizeCompatibility = computed(() => Boolean(previewMessage.value && isImageSizeCompatibility(previewMessage.value)));
+const previewFallbackNotice = computed(() => (previewMessage.value ? getFallbackNotice(previewMessage.value) : ""));
+const previewCompatibilityNotice = computed(() => (previewMessage.value ? getCompatibilityNotice(previewMessage.value) : ""));
+const previewCanUsePrompt = computed(() => Boolean(previewMessage.value && canUsePromptFromMessage(previewMessage.value)));
+const previewCanRegenerate = computed(() => Boolean(previewMessage.value && canRegenerateImageMessage(previewMessage.value)));
+const previewInspectorItems = computed<ImagePreviewInspectorItem[]>(() => {
   const message = previewMessage.value;
   if (!message) {
     return [];
   }
 
-  const items: PreviewInspectorItem[] = [];
-  if (previewItems.value.length) {
+  const previewItems = getPreviewItems(message);
+  const items: ImagePreviewInspectorItem[] = [];
+  if (previewItems.length) {
     items.push({
       key: "image-index",
       label: t("aiPage.image.previewImage"),
       value: formatTemplate(t("aiPage.image.previewCount"), {
         current: previewImageIndex.value + 1,
-        total: previewItems.value.length,
+        total: previewItems.length,
       }),
-      tone: previewHasMultipleImages.value ? "info" : undefined,
+      tone: hasMultipleItems(previewItems) ? "info" : undefined,
     });
   }
 
@@ -913,13 +857,11 @@ const previewInspectorItems = computed<PreviewInspectorItem[]>(() => {
 
   return items;
 });
-function openImagePreview(url: string, message: ImageMessage, index = 0) {
-  previewImageUrl.value = url;
-  previewImageTitle.value = getImagePreviewTitle(message);
+
+function openImagePreview(_url: string, message: ImageMessage, index = 0) {
   previewImageIndex.value = index;
   previewMessage.value = message;
   previewDialogVisible.value = true;
-  scrollPreviewThumbnailIntoView(index);
 }
 
 async function usePromptFromPreview() {
@@ -940,100 +882,6 @@ async function regeneratePreviewImage() {
   previewDialogVisible.value = false;
   await nextTick();
   await regenerateImageMessage(message);
-}
-
-function selectPreviewImage(index: number) {
-  if (!previewMessage.value || !previewItems.value.length) {
-    return;
-  }
-  const nextIndex = clampNumber(index, 0, getLastIndex(previewItems.value), 0, 0);
-  previewImageIndex.value = nextIndex;
-  previewImageUrl.value = previewItems.value[nextIndex] || previewImageUrl.value;
-  previewImageTitle.value = getImagePreviewTitle(previewMessage.value);
-  scrollPreviewThumbnailIntoView(nextIndex);
-}
-
-function switchPreviewImage(offset: number) {
-  if (!previewItems.value.length) {
-    return;
-  }
-  const nextIndex = getNextCircularIndex(previewItems.value.length, previewImageIndex.value, offset);
-  selectPreviewImage(nextIndex);
-}
-
-function handlePreviewKeydown(event: KeyboardEvent) {
-  if (!previewDialogVisible.value || !previewHasMultipleImages.value || event.defaultPrevented || !isPlainKeyboardEvent(event)) {
-    return;
-  }
-  if (isEditableEventTarget(event.target)) {
-    return;
-  }
-  if (event.key === "Home") {
-    preventAndStopDomEvent(event);
-    selectPreviewImage(0);
-    return;
-  }
-  if (event.key === "End") {
-    preventAndStopDomEvent(event);
-    selectPreviewImage(getLastIndex(previewItems.value));
-    return;
-  }
-  const direction = getKeyboardNavigationDirection(event, {
-    forwardKeys: ["ArrowRight"],
-    backwardKeys: ["ArrowLeft"],
-  });
-  if (!direction) {
-    return;
-  }
-  preventAndStopDomEvent(event);
-  switchPreviewImage(direction);
-}
-
-function markPreviewPointerAction(actionKey: string) {
-  lastPreviewPointerActionAt = getCurrentTimestampMs();
-  lastPreviewPointerActionKey = actionKey;
-}
-
-function shouldSkipPreviewClickAction(actionKey: string) {
-  return lastPreviewPointerActionKey === actionKey && getCurrentTimestampMs() - lastPreviewPointerActionAt < 450;
-}
-
-function handlePreviewNavPointer(offset: number) {
-  markPreviewPointerAction(`nav:${offset}`);
-  switchPreviewImage(offset);
-}
-
-function handlePreviewNavClick(offset: number) {
-  if (shouldSkipPreviewClickAction(`nav:${offset}`)) {
-    return;
-  }
-  switchPreviewImage(offset);
-}
-
-function handlePreviewThumbnailPointer(index: number) {
-  markPreviewPointerAction(`thumb:${index}`);
-  selectPreviewImage(index);
-}
-
-function handlePreviewThumbnailClick(index: number) {
-  if (shouldSkipPreviewClickAction(`thumb:${index}`)) {
-    return;
-  }
-  selectPreviewImage(index);
-}
-
-function setPreviewThumbnailRef(element: unknown, index: number) {
-  previewThumbnailRefs.value[index] = element instanceof HTMLElement ? element : null;
-}
-
-function scrollPreviewThumbnailIntoView(index = previewImageIndex.value) {
-  void nextTick(() => {
-    previewThumbnailRefs.value[index]?.scrollIntoView({
-      behavior: "smooth",
-      block: "nearest",
-      inline: "center",
-    });
-  });
 }
 
 function findImageTaskItem(message: ImageMessage) {
@@ -1271,137 +1119,57 @@ function getMessagePrompt(message: ImageMessage) {
   return findRetryPrompt(message.id);
 }
 
-function getSessionPreviewUrl(target: AiConversationSession) {
-  return findLastMapped(target.messages, (message) => firstItem(message.imageUrls || [])) || "";
-}
-
-function getSessionPreviewCount(target: AiConversationSession) {
-  return findLastMapped(target.messages, (message) => message.imageUrls?.length || undefined) || 0;
-}
-
-function getSessionStatusKey(target: AiConversationSession): ImageSessionStatusKey {
-  const latestResult = findLastItem(target.messages, (message) => message.role !== "user");
-  if (!latestResult) {
-    return "empty";
-  }
-  if (latestResult.status === "pending") {
-    return "pending";
-  }
-  if (latestResult.status === "canceled" || latestResult.failureKind === "canceled") {
-    return "canceled";
-  }
-  if (latestResult.status === "failed") {
-    return "failed";
-  }
-  return "completed";
-}
-
-function matchesSessionStatusFilter(target: AiConversationSession, filter: ImageSessionStatusFilter) {
-  if (filter === "all") {
-    return true;
-  }
-  return getSessionStatusKey(target) === filter;
-}
-
-function getSessionStatusLabel(target: AiConversationSession) {
-  const status = getSessionStatusKey(target);
-  if (status === "empty") {
-    return t("aiPage.image.emptyShort");
-  }
-  if (status === "pending") {
-    return t("aiPage.image.generating");
-  }
-  if (status === "canceled") {
-    return t("aiPage.image.canceled");
-  }
-  if (status === "failed") {
-    return t("aiPage.image.failed");
-  }
-  return t("aiPage.image.completed");
-}
-
-function getSessionSizeLabel(target: AiConversationSession) {
-  const latestSizeMessage = findLastItem(target.messages, (message) => Boolean(getMessageActualSize(message)));
-  if (!latestSizeMessage) {
-    return target.imageSize || "";
-  }
-  if (isImageSizeFallback(latestSizeMessage)) {
-    return `${getMessageRequestedSize(latestSizeMessage)} -> ${getMessageActualSize(latestSizeMessage)}`;
-  }
-  return getMessageActualSize(latestSizeMessage);
-}
+const messageListActions: AiImageMessageListActions = {
+  parseImageSize,
+  applyEmptyPromptStarter,
+  getMessageSizeMeta,
+  getMessageLatencyLabel,
+  getImagePreviewStyle,
+  getPendingImageStatusLabel,
+  getPendingImageElapsedLabel,
+  getMessageRequestedSize,
+  cancelImageMessage,
+  getImageMessageText,
+  isImageSizeFallback,
+  getFallbackNotice,
+  isImageSizeCompatibility,
+  getCompatibilityNotice,
+  getImageFailureTitle,
+  getFailureHint,
+  canUsePromptFromMessage,
+  usePromptFromMessage,
+  canRetryImageMessage,
+  retryImageMessage,
+  getImageFailureText,
+  getImageResultSummaryItems,
+  getPreviewItems,
+  hasMultiplePreviewItems,
+  hasMultipleSavedFiles,
+  getGeneratedImageUrlsText,
+  getGeneratedImageSavedFilePathsText,
+  openImagePreview,
+  canRegenerateImageMessage,
+  regenerateImageMessage,
+  hasGeneratedImageSavedFile,
+  getGeneratedImageSavedFilePath,
+  openGeneratedImageLocation,
+  hasGeneratedImages,
+};
 
 </script>
 
 <template>
   <section class="image-panel">
-    <aside class="session-list">
-      <div class="session-list__head">
-        <span>{{ t("aiPage.image.sessions") }}</span>
-        <button type="button" class="icon-btn" @click="aiStore.createSession('image')">
-          <Plus class="h-4 w-4" />
-        </button>
-      </div>
-      <BaseSearchInput
-        v-model="sessionSearch"
-        size="sm"
-        surface="muted"
-        class="session-search"
-        :placeholder="t('aiPage.image.sessionSearchPlaceholder')"
-        search-on-input
-      />
-      <div class="session-filters" :aria-label="t('aiPage.image.sessionFilterLabel')">
-        <button
-          v-for="option in sessionStatusFilterOptions"
-          :key="option.key"
-          type="button"
-          class="session-filter-chip"
-          :class="{ 'session-filter-chip--active': sessionStatusFilter === option.key }"
-          :aria-pressed="sessionStatusFilter === option.key"
-          @click="sessionStatusFilter = option.key"
-        >
-          <span>{{ option.label }}</span>
-          <strong>{{ option.count }}</strong>
-        </button>
-      </div>
-      <div
-        v-for="item in filteredImageSessions"
-        :key="item.id"
-        role="button"
-        tabindex="0"
-        class="session-item"
-        :class="{ 'session-item--active': item.id === aiStore.activeSessionIds.image }"
-        @click="aiStore.selectSession('image', item.id)"
-        @keydown.enter.prevent="aiStore.selectSession('image', item.id)"
-      >
-        <div class="session-thumb">
-          <img v-if="getSessionPreviewUrl(item)" :src="getSessionPreviewUrl(item)" alt="" />
-          <Image v-else class="h-4 w-4" />
-          <span v-if="getSessionPreviewCount(item) > 1" class="session-thumb__badge" aria-hidden="true">
-            {{ getSessionPreviewCount(item) }}
-          </span>
-        </div>
-        <div class="session-item__content">
-          <span class="session-item__title">{{ item.title }}</span>
-          <span class="session-item__meta">
-            {{ item.messages.length }} {{ t("aiPage.image.messageUnit") }}
-          </span>
-        </div>
-        <BaseActionMenu
-          :actions="sessionActions"
-          class="session-action-menu"
-          icon="MoreHorizontal"
-          :min-width="150"
-          :max-width="220"
-          :aria-label="t('common.moreActions')"
-          @click.stop
-          @select="handleSessionAction($event, item)"
-        />
-      </div>
-      <div v-if="!filteredImageSessions.length" class="session-list__empty">
-        {{ filteredImageSessionEmptyText }}
-      </div>
-    </aside>
+    <AiImageSessionList
+      v-model:search-text="sessionSearch"
+      v-model:status-filter="sessionStatusFilter"
+      :sessions="aiStore.imageSessions"
+      :active-session-id="aiStore.activeSessionIds.image"
+      :actions="sessionActions"
+      @create="aiStore.createSession('image')"
+      @select="aiStore.selectSession('image', $event)"
+      @action="handleSessionAction"
+    />
 
     <div class="image-workspace">
       <header class="image-header">
@@ -1414,434 +1182,56 @@ function getSessionSizeLabel(target: AiConversationSession) {
         </div>
       </header>
 
-      <div class="image-history-shell">
-        <div ref="messageListRef" class="image-history" @scroll.passive="updateHistoryScrollState">
-        <div v-if="!messages.length" class="empty-state">
-          <div class="empty-state__preview" :style="{ aspectRatio: parseImageSize(aiStore.imageDraftSize).width + ' / ' + parseImageSize(aiStore.imageDraftSize).height }">
-            <Sparkles class="h-6 w-6" />
-            <span>{{ activeSizeLabel }}</span>
-          </div>
-          <div class="empty-state__title">{{ t("aiPage.image.empty") }}</div>
-          <div class="empty-state__hint">{{ activeImageModelName }} · {{ activeSizeDetail }}</div>
-          <div class="empty-state__starters" :aria-label="t('aiPage.image.starterLabel')">
-            <button
-              v-for="starter in emptyPromptStarters"
-              :key="starter.key"
-              type="button"
-              class="empty-starter"
-              :title="starter.prompt"
-              @click="applyEmptyPromptStarter(starter)"
-            >
-              <span>{{ starter.title }}</span>
-              <small>{{ starter.sizeLabel }}</small>
-            </button>
-          </div>
-        </div>
-        <div
-          v-for="message in messages"
-          :key="message.id"
-          class="image-row"
-          :class="[`image-row--${message.role}`, { 'image-row--failed': message.status === 'failed' || message.status === 'canceled' }]"
-        >
-          <div class="image-avatar">
-            <UserRound v-if="message.role === 'user'" class="h-4 w-4" />
-            <AlertTriangle v-else-if="message.role === 'error'" class="h-4 w-4" />
-            <Bot v-else class="h-4 w-4" />
-          </div>
-          <div class="image-message">
-            <div class="image-message__meta">
-              <span>{{ message.role === "user" ? t("aiPage.image.user") : message.role === "error" ? t("aiPage.image.error") : t("aiPage.image.assistant") }}</span>
-              <span>{{ message.model }}</span>
-              <span v-if="getMessageSizeMeta(message)">{{ getMessageSizeMeta(message) }}</span>
-              <span v-if="message.role !== 'user' && getMessageLatencyLabel(message)">
-                {{ t("aiPage.image.latency") }} {{ getMessageLatencyLabel(message) }}
-              </span>
-            </div>
-            <div class="image-bubble">
-              <div v-if="message.status === 'pending' && !message.content" class="image-loading">
-                <div class="image-loading__preview" :style="getImagePreviewStyle(message)">
-                  <div class="image-loading__shine"></div>
-                  <Image class="h-7 w-7" />
-                </div>
-                <div class="image-loading__text">
-                  <div class="image-loading__head">
-                    <span class="image-loading__title">{{ getPendingImageStatusLabel(message) }}</span>
-                    <span class="image-loading__elapsed">{{ getPendingImageElapsedLabel(message) }}</span>
-                  </div>
-                  <div class="image-loading__meta-grid">
-                    <span>
-                      <strong>{{ t("aiPage.image.previewModel") }}</strong>
-                      <em>{{ message.model || activeImageModelName }}</em>
-                    </span>
-                    <span>
-                      <strong>{{ t("aiPage.image.requestedSize") }}</strong>
-                      <em>{{ getMessageRequestedSize(message) || message.imageSize || aiStore.imageDraftSize }}</em>
-                    </span>
-                  </div>
-                  <div class="image-loading__progress" aria-hidden="true">
-                    <span></span>
-                  </div>
-                  <div class="image-loading__footer">
-                    <span class="image-loading__dots" aria-label="loading">
-                      <i></i>
-                      <i></i>
-                      <i></i>
-                    </span>
-                    <BaseButton
-                      v-if="message.requestId"
-                      type="neutral"
-                      outline
-                      size="sm"
-                      class="cancel-generate-btn"
-                      @click="cancelImageMessage(message)"
-                    >
-                      <template #icon><XCircle class="h-3.5 w-3.5" /></template>
-                      {{ t("aiPage.image.cancel") }}
-                    </BaseButton>
-                  </div>
-                </div>
-              </div>
-              <pre v-else>{{ getImageMessageText(message) }}</pre>
-              <div v-if="message.role !== 'user' && isImageSizeFallback(message)" class="image-size-notice">
-                <AlertTriangle class="h-3.5 w-3.5" />
-                <span>{{ getFallbackNotice(message) }}</span>
-              </div>
-              <div v-else-if="message.role !== 'user' && isImageSizeCompatibility(message)" class="image-size-notice image-size-notice--info">
-                <Image class="h-3.5 w-3.5" />
-                <span>{{ getCompatibilityNotice(message) }}</span>
-              </div>
-              <div v-if="message.role !== 'user' && (message.status === 'failed' || message.status === 'canceled')" class="image-failure-card">
-                <div class="image-failure-card__head">
-                  <AlertTriangle class="h-4 w-4" />
-                  <div>
-                    <strong>{{ getImageFailureTitle(message) }}</strong>
-                    <span>{{ getFailureHint(message) }}</span>
-                  </div>
-                </div>
-                <div class="image-failure-card__actions">
-                  <BaseButton
-                    v-if="canUsePromptFromMessage(message)"
-                    type="neutral"
-                    outline
-                    size="sm"
-                    @click="usePromptFromMessage(message)"
-                  >
-                    <template #icon><Sparkles class="h-3.5 w-3.5" /></template>
-                    {{ t("aiPage.image.usePrompt") }}
-                  </BaseButton>
-                  <BaseButton v-if="canRetryImageMessage(message)" type="success" size="sm" @click="retryImageMessage(message)">
-                    <template #icon><RotateCcw class="h-3.5 w-3.5" /></template>
-                    {{ t("aiPage.image.retry") }}
-                  </BaseButton>
-                  <BaseCopyButton :text="getImageFailureText(message)" :label="t('aiPage.image.copyError')" size="xs" />
-                </div>
-              </div>
-              <div v-if="getImageResultSummaryItems(message).length" class="image-result-summary">
-                <span
-                  v-for="item in getImageResultSummaryItems(message)"
-                  :key="item.key"
-                  class="image-result-summary__item"
-                  :class="item.tone ? `image-result-summary__item--${item.tone}` : undefined"
-                >
-                  {{ item.label }}
-                </span>
-              </div>
-              <div v-if="getPreviewItems(message).length" class="generated-gallery">
-                <div v-if="hasMultiplePreviewItems(message) || hasMultipleSavedFiles(message)" class="generated-gallery__toolbar">
-                  <strong>{{ formatTemplate(t("aiPage.image.gallerySummary"), { count: getPreviewItems(message).length }) }}</strong>
-                  <div class="generated-gallery__toolbar-actions">
-                    <BaseCopyButton
-                      v-if="hasMultiplePreviewItems(message)"
-                      :text="getGeneratedImageUrlsText(message)"
-                      :label="t('aiPage.image.copyAllImageUrls')"
-                      size="xs"
-                    />
-                    <BaseCopyButton
-                      v-if="(message.savedFiles?.length || 0) > 1"
-                      :text="getGeneratedImageSavedFilePathsText(message)"
-                      :label="t('aiPage.image.copyAllPaths')"
-                      size="xs"
-                    />
-                  </div>
-                </div>
-                <div
-                  v-for="(url, index) in getPreviewItems(message)"
-                  :key="url"
-                  class="generated-frame"
-                >
-                  <div class="generated-frame__media" :style="getImagePreviewStyle(message)">
-                    <button
-                      type="button"
-                      class="generated-preview-button"
-                      @click="openImagePreview(url, message, index)"
-                    >
-                      <img :src="url" alt="AI generated preview" class="generated-image" />
-                      <span v-if="hasMultiplePreviewItems(message)" class="generated-frame__index">
-                        {{ formatTemplate(t("aiPage.image.previewCount"), { current: index + 1, total: getPreviewItems(message).length }) }}
-                      </span>
-                      <span class="generated-frame__action">
-                        <Maximize2 class="h-3.5 w-3.5" />
-                        {{ t("aiPage.image.preview") }}
-                      </span>
-                    </button>
-                  </div>
-                  <div class="generated-frame__footer">
-                    <div class="generated-frame__primary-actions">
-                      <BaseButton
-                        v-if="canUsePromptFromMessage(message)"
-                        type="neutral"
-                        outline
-                        size="xs"
-                        :title="t('aiPage.image.usePrompt')"
-                        @click.stop="usePromptFromMessage(message)"
-                      >
-                        <template #icon><Sparkles class="h-3 w-3" /></template>
-                        {{ t("aiPage.image.usePrompt") }}
-                      </BaseButton>
-                      <BaseButton
-                        v-if="canRegenerateImageMessage(message)"
-                        type="neutral"
-                        outline
-                        size="xs"
-                        :title="t('aiPage.image.regenerate')"
-                        @click.stop="regenerateImageMessage(message)"
-                      >
-                        <template #icon><RotateCcw class="h-3 w-3" /></template>
-                        {{ t("aiPage.image.regenerate") }}
-                      </BaseButton>
-                    </div>
-                    <div class="generated-frame__secondary-actions">
-                      <BaseCopyButton
-                        :text="url"
-                        :label="t('aiPage.image.copyImageUrlShort')"
-                        :aria-label="t('aiPage.image.copyImageUrl')"
-                        size="xs"
-                      />
-                      <BaseCopyButton
-                        v-if="hasGeneratedImageSavedFile(message, index)"
-                        :text="getGeneratedImageSavedFilePath(message, index)"
-                        :label="t('aiPage.image.copyPathShort')"
-                        :aria-label="t('aiPage.image.copyPath')"
-                        size="xs"
-                      />
-                      <BaseButton
-                        v-if="hasGeneratedImageSavedFile(message, index)"
-                        type="neutral"
-                        outline
-                        size="xs"
-                        :title="t('aiPage.image.openFileLocation')"
-                        @click.stop="openGeneratedImageLocation(message, index)"
-                      >
-                        <template #icon><FolderOpen class="h-3 w-3" /></template>
-                        {{ t("aiPage.image.openFileLocationShort") }}
-                      </BaseButton>
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <div
-                v-if="message.status !== 'failed' && (!hasGeneratedImages(message) && (canRegenerateImageMessage(message) || canUsePromptFromMessage(message)))"
-                class="image-message__actions"
-              >
-                <BaseButton
-                  v-if="!hasGeneratedImages(message) && canUsePromptFromMessage(message)"
-                  type="neutral"
-                  outline
-                  size="sm"
-                  @click="usePromptFromMessage(message)"
-                >
-                  <template #icon><Sparkles class="h-3.5 w-3.5" /></template>
-                  {{ t("aiPage.image.usePrompt") }}
-                </BaseButton>
-                <BaseButton
-                  v-if="!hasGeneratedImages(message) && canRegenerateImageMessage(message)"
-                  type="success"
-                  size="sm"
-                  @click="regenerateImageMessage(message)"
-                >
-                  <template #icon><RotateCcw class="h-3.5 w-3.5" /></template>
-                  {{ t("aiPage.image.regenerate") }}
-                </BaseButton>
-              </div>
-            </div>
-          </div>
-        </div>
-        </div>
-        <button
-          v-if="messages.length && (isHistoryAwayFromBottom || hasHistoryUpdateBelow)"
-          type="button"
-          class="history-jump-button"
-          @click="scrollHistoryToBottom()"
-        >
-          <ChevronDown class="h-3.5 w-3.5" />
-          {{ hasHistoryUpdateBelow ? t("aiPage.image.historyNewUpdate") : t("aiPage.image.historyJumpLatest") }}
-        </button>
-      </div>
+      <AiImageMessageList
+        :messages="messages"
+        :image-draft-size="aiStore.imageDraftSize"
+        :active-size-label="activeSizeLabel"
+        :active-size-detail="activeSizeDetail"
+        :active-image-model-name="activeImageModelName"
+        :empty-prompt-starters="emptyPromptStarters"
+        :actions="messageListActions"
+      />
 
       <footer class="image-composer">
         <div class="composer-shell">
-          <div class="composer-top">
-            <div class="composer-controls">
-              <BaseSelect
-                :model-value="aiStore.activeModelConfigIds.image"
-                :options="aiStore.modelConfigOptions"
-                size="sm"
-                class="model-select"
-                @update:model-value="aiStore.setActiveModelConfig('image', String($event))"
-              />
-              <BaseSelect
-                :model-value="aiStore.imageDraftSize"
-                :options="imageSizeOptions"
-                size="sm"
-                class="size-select"
-                :fit-input-width="false"
-                @update:model-value="aiStore.imageDraftSize = String($event)"
-              />
-              <BaseSelect
-                :model-value="imageDraftCount"
-                :options="imageCountOptions"
-                size="sm"
-                class="count-select"
-                :fit-input-width="false"
-                @update:model-value="imageDraftCount = clampNumber(Number($event), 1, 4, 1, 0)"
-              />
-            </div>
-            <div
-              class="composer-size-detail"
-              :title="activeSizeDetail"
-            >
-              <strong>{{ activeSizeLabel }}</strong>
-              <span>{{ activeSizeDetail }}</span>
-            </div>
-          </div>
-          <div
-            v-if="emptyPromptStarters.length || stylePromptPresets.length"
-            class="composer-size-presets composer-size-presets--tools-only"
-            :aria-label="t('aiPage.image.promptToolsLabel')"
-          >
-            <div v-if="emptyPromptStarters.length || stylePromptPresets.length" class="composer-tools">
-              <template v-if="emptyPromptStarters.length">
-                <button
-                  type="button"
-                  class="starter-toggle-chip"
-                  :class="{ 'starter-toggle-chip--active': promptStartersExpanded }"
-                  :aria-expanded="promptStartersExpanded"
-                  :title="t('aiPage.image.starterLabel')"
-                  @click="togglePromptStarters"
-                >
-                  <Sparkles class="h-3 w-3" />
-                  {{ t("aiPage.image.starterToggle") }}
-                </button>
-              </template>
-              <span v-if="emptyPromptStarters.length && stylePromptPresets.length" class="composer-tools-divider"></span>
-              <template v-if="stylePromptPresets.length">
-                <button
-                  type="button"
-                  class="style-toggle-chip"
-                  :class="{ 'style-toggle-chip--active': stylePresetsExpanded || selectedStylePrompt }"
-                  :aria-expanded="stylePresetsExpanded"
-                  :title="selectedStylePrompt?.content || t('aiPage.image.stylePresetLabel')"
-                  @click="toggleStylePresets"
-                >
-                  <Sparkles class="h-3 w-3" />
-                  {{ stylePickerLabel }}
-                </button>
-                <button
-                  type="button"
-                  class="style-tool-chip"
-                  :disabled="!canEnhancePrompt"
-                  @click="enhancePrompt"
-                >
-                  {{ t("aiPage.image.promptEnhance") }}
-                </button>
-                <button
-                  v-if="canUndoPromptEnhance"
-                  type="button"
-                  class="style-undo-chip"
-                  @click="undoPromptEnhance"
-                >
-                  {{ t("aiPage.image.promptEnhanceUndo") }}
-                </button>
-                <button
-                  v-if="selectedStylePrompt"
-                  type="button"
-                  class="style-clear-chip"
-                  @click="clearStylePrompt"
-                >
-                  {{ t("aiPage.image.stylePresetClear") }}
-                </button>
-              </template>
-            </div>
-          </div>
-          <div v-if="stylePromptPresets.length && stylePresetsExpanded" class="composer-presets" :aria-label="t('aiPage.image.stylePresetLabel')">
-            <div class="composer-presets__head">
-              <div class="composer-presets__title">
-                <Sparkles class="h-3.5 w-3.5" />
-                <span>{{ t("aiPage.image.stylePresetLabel") }}</span>
-                <strong>{{ stylePresetCountLabel }}</strong>
-              </div>
-              <BaseSearchInput
-                v-model="stylePromptSearch"
-                size="sm"
-                surface="muted"
-                class="composer-presets__search"
-                :placeholder="t('aiPage.image.styleSearchPlaceholder')"
-                search-on-input
-              />
-            </div>
-            <div v-if="filteredStylePromptPresets.length" class="composer-presets__grid">
-              <button
-                v-for="preset in filteredStylePromptPresets"
-                :key="preset.id"
-                type="button"
-                class="style-preset-chip"
-                :class="{ 'style-preset-chip--active': preset.id === selectedStylePromptId }"
-                :aria-pressed="preset.id === selectedStylePromptId"
-                :title="preset.content"
-                @click="applyStylePrompt(preset)"
-              >
-                <span>{{ preset.title }}</span>
-                <small>{{ getStylePromptSummary(preset) }}</small>
-              </button>
-            </div>
-            <div v-else class="composer-presets__empty">
-              {{ t("aiPage.image.styleSearchEmpty") }}
-            </div>
-          </div>
-          <div v-if="promptStartersExpanded" class="composer-starters" :aria-label="t('aiPage.image.starterLabel')">
-            <button
-              v-for="starter in emptyPromptStarters"
-              :key="starter.key"
-              type="button"
-              class="starter-preset-chip"
-              :title="starter.prompt"
-              @click="applyEmptyPromptStarter(starter)"
-            >
-              <span>{{ starter.title }}</span>
-              <small>{{ starter.sizeLabel }}</small>
-            </button>
-          </div>
-          <div
-            v-if="activeSizeNotice"
-            class="composer-size-warning"
-            role="status"
-          >
-            <AlertTriangle class="h-3.5 w-3.5" />
-            <span>{{ activeSizeNotice }}</span>
-          </div>
-          <div v-if="draftMetaItems.length" class="composer-draft-bar">
-            <div class="composer-draft-tags">
-              <span v-for="item in draftMetaItems" :key="item">{{ item }}</span>
-            </div>
-            <button type="button" class="composer-draft-clear" @click="clearDraftPrompt">
-              <XCircle class="h-3 w-3" />
-              {{ t("aiPage.image.clearDraft") }}
-            </button>
-          </div>
-          <div v-if="draftHasStyleSubjectPlaceholder" class="composer-subject-warning" role="status">
-            <AlertTriangle class="h-3.5 w-3.5" />
-            <span>{{ t("aiPage.image.subjectPlaceholderWarning") }}</span>
-          </div>
+          <AiImageComposerSettings
+            :model-config-id="aiStore.activeModelConfigIds.image"
+            :model-config-options="imageModelConfigOptions"
+            :image-draft-size="aiStore.imageDraftSize"
+            :image-size-options="imageSizeOptions"
+            :image-draft-count="imageDraftCount"
+            :image-count-options="imageCountOptions"
+            :active-size-label="activeSizeLabel"
+            :active-size-detail="activeSizeDetail"
+            @update:model-config-id="handleImageModelConfigChange"
+            @update:image-draft-size="aiStore.imageDraftSize = $event"
+            @update:image-draft-count="imageDraftCount = $event"
+          />
+          <AiImageComposerPromptTools
+            v-model:style-prompt-search="stylePromptSearch"
+            :empty-prompt-starters="emptyPromptStarters"
+            :style-prompt-presets="stylePromptPresets"
+            :filtered-style-prompt-presets="filteredStylePromptPresets"
+            :selected-style-prompt="selectedStylePrompt"
+            :selected-style-prompt-id="selectedStylePromptId"
+            :style-picker-label="stylePickerLabel"
+            :style-preset-count-label="stylePresetCountLabel"
+            :prompt-starters-expanded="promptStartersExpanded"
+            :style-presets-expanded="stylePresetsExpanded"
+            :can-enhance-prompt="canEnhancePrompt"
+            :can-undo-prompt-enhance="canUndoPromptEnhance"
+            :active-size-notice="activeSizeNotice"
+            :draft-meta-items="draftMetaItems"
+            :draft-has-style-subject-placeholder="draftHasStyleSubjectPlaceholder"
+            @toggle-prompt-starters="togglePromptStarters"
+            @toggle-style-presets="toggleStylePresets"
+            @enhance-prompt="enhancePrompt"
+            @undo-prompt-enhance="undoPromptEnhance"
+            @clear-style-prompt="clearStylePrompt"
+            @apply-style-prompt="applyStylePrompt"
+            @apply-empty-prompt-starter="applyEmptyPromptStarter"
+            @clear-draft-prompt="clearDraftPrompt"
+          />
           <div class="composer-bottom">
             <el-input
               ref="imageInputRef"
@@ -1850,7 +1240,9 @@ function getSessionSizeLabel(target: AiConversationSession) {
               type="textarea"
               :rows="2"
               resize="none"
+              :disabled="!imageSupported"
               :placeholder="t('aiPage.image.inputPlaceholder')"
+              :title="imageSupported ? undefined : imageUnavailableTitle"
               @keydown.enter.exact.prevent="handleGenerate"
             />
             <BaseButton
@@ -1859,7 +1251,7 @@ function getSessionSizeLabel(target: AiConversationSession) {
               class="generate-btn"
               :loading="Boolean(isBusy)"
               :disabled="!canGenerateImage"
-              :title="draftHasStyleSubjectPlaceholder ? t('aiPage.image.subjectPlaceholderButtonTitle') : undefined"
+              :title="imageGenerateButtonTitle"
               @click="handleGenerate"
             >
               <template #icon><Send class="h-3.5 w-3.5" /></template>
@@ -1891,236 +1283,32 @@ function getSessionSizeLabel(target: AiConversationSession) {
       </template>
     </BaseDialog>
 
-    <BaseDialog
-      v-model="previewDialogVisible"
-      :title="t('aiPage.image.previewTitle')"
-      width="min(1120px, 94vw)"
-      :show-close="false"
-    >
-      <div class="preview-dialog">
-        <div class="preview-dialog__media">
-          <div class="preview-dialog__image-stage">
-            <img v-if="previewImageUrl" :src="previewImageUrl" :alt="previewImageTitle" />
-            <span v-if="previewHasMultipleImages" class="preview-image-counter">
-              {{ formatTemplate(t("aiPage.image.previewCount"), { current: previewImageIndex + 1, total: previewItems.length }) }}
-            </span>
-            <button
-              v-if="previewHasMultipleImages"
-              type="button"
-              class="preview-nav-button preview-nav-button--prev"
-              :aria-label="t('aiPage.image.previewPrevious')"
-              aria-keyshortcuts="ArrowLeft"
-              @pointerdown.stop.prevent="handlePreviewNavPointer(-1)"
-              @click.stop.prevent="handlePreviewNavClick(-1)"
-            >
-              <ChevronLeft class="h-4 w-4" />
-            </button>
-            <button
-              v-if="previewHasMultipleImages"
-              type="button"
-              class="preview-nav-button preview-nav-button--next"
-              :aria-label="t('aiPage.image.previewNext')"
-              aria-keyshortcuts="ArrowRight"
-              @pointerdown.stop.prevent="handlePreviewNavPointer(1)"
-              @click.stop.prevent="handlePreviewNavClick(1)"
-            >
-              <ChevronRight class="h-4 w-4" />
-            </button>
-          </div>
-          <div v-if="previewInspectorItems.length" class="preview-inspector">
-            <span
-              v-for="item in previewInspectorItems"
-              :key="item.key"
-              class="preview-inspector__item"
-              :class="item.tone ? `preview-inspector__item--${item.tone}` : undefined"
-            >
-              <strong>{{ item.label }}</strong>
-              <em :title="item.value">{{ item.value }}</em>
-            </span>
-          </div>
-          <div v-if="previewHasMultipleImages" class="preview-thumbnails">
-            <button
-              v-for="(url, index) in previewItems"
-              :key="url"
-              :ref="(element) => setPreviewThumbnailRef(element, index)"
-              type="button"
-              class="preview-thumbnail"
-              :class="{ 'preview-thumbnail--active': index === previewImageIndex }"
-              :aria-label="formatTemplate(t('aiPage.image.previewSelect'), { index: index + 1 })"
-              :aria-current="index === previewImageIndex ? 'true' : undefined"
-              @pointerdown.stop.prevent="handlePreviewThumbnailPointer(index)"
-              @click.stop.prevent="handlePreviewThumbnailClick(index)"
-            >
-              <img :src="url" alt="" />
-            </button>
-          </div>
-        </div>
-        <aside v-if="previewMessage" class="preview-dialog__details">
-          <div class="preview-dialog__head">
-            <div class="min-w-0">
-              <span class="preview-dialog__eyebrow">{{ t("aiPage.image.previewTitle") }}</span>
-              <strong>{{ previewImageTitle }}</strong>
-              <small>{{ previewMessage.model }}</small>
-            </div>
-            <div class="preview-dialog__actions">
-              <BaseButton
-                v-if="canUsePromptFromMessage(previewMessage)"
-                type="neutral"
-                outline
-                size="xs"
-                @click="usePromptFromPreview"
-              >
-                <template #icon><Sparkles class="h-3 w-3" /></template>
-                {{ t("aiPage.image.usePrompt") }}
-              </BaseButton>
-              <BaseButton
-                v-if="canRegenerateImageMessage(previewMessage)"
-                type="neutral"
-                outline
-                size="xs"
-                @click="regeneratePreviewImage"
-              >
-                <template #icon><RotateCcw class="h-3 w-3" /></template>
-                {{ t("aiPage.image.regenerate") }}
-              </BaseButton>
-              <BaseCopyButton
-                :text="previewImageUrl"
-                :label="t('aiPage.image.copyImageUrlShort')"
-                :aria-label="t('aiPage.image.copyImageUrl')"
-                size="xs"
-              />
-            </div>
-          </div>
-
-          <div class="preview-meta-grid">
-            <div class="preview-meta-item">
-              <span>{{ t("aiPage.image.actualSize") }}</span>
-              <strong>{{ getMessageActualSize(previewMessage) || "-" }}</strong>
-            </div>
-            <div class="preview-meta-item">
-              <span>{{ t("aiPage.image.latency") }}</span>
-              <strong>{{ getMessageLatencyLabel(previewMessage) || "-" }}</strong>
-            </div>
-            <div class="preview-meta-item">
-              <span>{{ t("aiPage.image.requestedSize") }}</span>
-              <strong>{{ getMessageRequestedSize(previewMessage) || "-" }}</strong>
-            </div>
-          </div>
-
-          <div v-if="isImageSizeFallback(previewMessage)" class="image-size-notice preview-size-notice">
-            <AlertTriangle class="h-3.5 w-3.5" />
-            <span>{{ getFallbackNotice(previewMessage) }}</span>
-          </div>
-          <div v-else-if="isImageSizeCompatibility(previewMessage)" class="image-size-notice image-size-notice--info preview-size-notice">
-            <Image class="h-3.5 w-3.5" />
-            <span>{{ getCompatibilityNotice(previewMessage) }}</span>
-          </div>
-
-          <div v-if="previewPrompt" class="preview-section preview-section--prompt">
-            <div class="preview-section__head">
-              <span>{{ t("aiPage.image.previewPrompt") }}</span>
-            </div>
-            <p>{{ previewPrompt }}</p>
-          </div>
-
-          <div v-if="previewSavedFile" class="preview-file-actions">
-            <BaseCopyButton
-              :text="previewSavedFile.path"
-              :label="t('aiPage.image.copyPathShort')"
-              :aria-label="t('aiPage.image.copyPath')"
-              size="xs"
-            />
-            <BaseButton
-              type="neutral"
-              outline
-              size="xs"
-              :title="t('aiPage.image.openFileLocation')"
-              @click="openPreviewSavedFileLocation"
-            >
-              <template #icon><FolderOpen class="h-3 w-3" /></template>
-              {{ t("aiPage.image.openFileLocationShort") }}
-            </BaseButton>
-          </div>
-        </aside>
-      </div>
-    </BaseDialog>
+    <AiImagePreviewDialog
+      v-model:visible="previewDialogVisible"
+      v-model:image-index="previewImageIndex"
+      :message="previewMessage"
+      :title="previewImageTitle"
+      :prompt="previewPrompt"
+      :inspector-items="previewInspectorItems"
+      :actual-size="previewActualSize"
+      :requested-size="previewRequestedSize"
+      :latency-label="previewLatencyLabel"
+      :is-size-fallback="previewIsSizeFallback"
+      :is-size-compatibility="previewIsSizeCompatibility"
+      :fallback-notice="previewFallbackNotice"
+      :compatibility-notice="previewCompatibilityNotice"
+      :can-use-prompt="previewCanUsePrompt"
+      :can-regenerate="previewCanRegenerate"
+      @use-prompt="usePromptFromPreview"
+      @regenerate="regeneratePreviewImage"
+      @open-saved-file-location="openPreviewSavedFileLocation"
+    />
   </section>
 </template>
 
 <style scoped>
 .image-panel {
   @apply grid h-full min-h-0 grid-cols-1 gap-4 overflow-hidden lg:grid-cols-[260px_minmax(0,1fr)];
-}
-.session-list {
-  @apply flex min-h-0 flex-col gap-2 overflow-auto rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-800/30;
-}
-.session-list__head {
-  @apply flex h-8 items-center justify-between text-[11px] font-black uppercase tracking-wider text-slate-700 dark:text-slate-300;
-}
-.session-search {
-  @apply shrink-0;
-}
-.session-filters {
-  @apply grid grid-cols-5 gap-1 rounded-xl border border-slate-200 bg-white p-1 shadow-sm dark:border-slate-800 dark:bg-slate-950;
-}
-.session-filter-chip {
-  @apply flex h-7 min-w-0 items-center justify-center gap-1 rounded-lg text-[10px] font-black text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100;
-}
-.session-filter-chip span {
-  @apply min-w-0 truncate;
-}
-.session-filter-chip strong {
-  @apply inline-flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-slate-100 px-1 text-[9px] font-black text-slate-500 dark:bg-slate-800 dark:text-slate-300;
-}
-.session-filter-chip--active {
-  @apply bg-emerald-50 text-emerald-700 shadow-sm ring-1 ring-emerald-500 dark:bg-emerald-950/50 dark:text-emerald-200;
-}
-.session-filter-chip--active strong {
-  @apply bg-emerald-600 text-white dark:bg-emerald-400 dark:text-emerald-950;
-}
-.session-list__empty {
-  @apply flex min-h-16 items-center justify-center rounded-xl border border-dashed border-slate-200 px-3 text-center text-[11px] font-bold text-slate-400 dark:border-slate-800 dark:text-slate-500;
-}
-.icon-btn {
-  @apply flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 transition-colors hover:border-emerald-500 hover:text-emerald-600 dark:border-slate-800 dark:bg-slate-950;
-}
-.session-item {
-  @apply flex min-h-12 items-center gap-2 rounded-xl border border-transparent px-2 py-1.5 text-left transition-colors hover:border-slate-200 hover:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 dark:hover:border-slate-800 dark:hover:bg-slate-950;
-}
-.session-item--active {
-  @apply border-emerald-500 bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300;
-}
-.session-thumb {
-  @apply relative flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-slate-200 bg-white text-slate-400 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-500;
-}
-.session-thumb img {
-  @apply h-full w-full object-cover;
-}
-.session-thumb__badge {
-  @apply absolute bottom-0.5 right-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-slate-950 px-1 text-[9px] font-black leading-none text-white shadow-sm ring-1 ring-white/80 dark:bg-white dark:text-slate-950 dark:ring-slate-950/80;
-}
-.session-item__title {
-  @apply truncate text-[11px] font-black leading-4 text-slate-800 dark:text-slate-100;
-}
-.session-item__content {
-  @apply flex min-w-0 flex-1 flex-col justify-center gap-0.5;
-}
-.session-item__prompt {
-  @apply min-w-0 truncate text-[10px] font-semibold leading-3 text-slate-400 dark:text-slate-500;
-}
-.session-item__meta {
-  @apply text-[9px] font-bold text-slate-500 dark:text-slate-400;
-}
-.session-action-menu {
-  @apply shrink-0 opacity-70 transition-opacity;
-}
-.session-item:hover .session-action-menu,
-.session-item:focus-within .session-action-menu,
-.session-item--active .session-action-menu {
-  @apply opacity-100;
-}
-.session-action-menu :deep(.base-action-menu__trigger) {
-  @apply h-6 w-6 rounded-md border-transparent bg-transparent p-0 text-slate-400 shadow-none hover:border-slate-200 hover:bg-white hover:text-slate-700 dark:hover:border-slate-700 dark:hover:bg-slate-900 dark:hover:text-slate-100;
 }
 .image-workspace {
   @apply flex min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950;
@@ -2137,503 +1325,11 @@ function getSessionSizeLabel(target: AiConversationSession) {
 .image-header p {
   @apply mt-0.5 truncate text-[10px] font-semibold text-slate-500 dark:text-slate-400;
 }
-.image-history-shell {
-  @apply relative flex min-h-0 flex-1;
-}
-.image-history {
-  @apply flex min-h-0 flex-1 flex-col gap-4 overflow-auto px-5 py-5 dark:bg-slate-900;
-  background: #f8fafc;
-}
-.history-jump-button {
-  @apply absolute bottom-4 left-1/2 z-20 inline-flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-emerald-200 bg-white/95 px-3 py-1.5 text-[11px] font-black text-emerald-700 shadow-lg shadow-slate-900/10 backdrop-blur transition hover:border-emerald-400 hover:bg-emerald-50 focus:outline-none focus:ring-2 focus:ring-emerald-500 dark:border-emerald-900 dark:bg-slate-950/95 dark:text-emerald-300 dark:hover:border-emerald-500 dark:hover:bg-emerald-950/40;
-}
-.history-jump-button svg {
-  @apply shrink-0;
-}
-.empty-state {
-  @apply m-auto flex w-full max-w-lg flex-col items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-white px-6 py-8 text-center shadow-sm dark:border-slate-800 dark:bg-slate-950;
-}
-.empty-state__preview {
-  @apply mb-4 flex w-full max-w-52 flex-col items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 text-emerald-600 dark:border-slate-800 dark:bg-slate-900 dark:text-emerald-300;
-  min-height: 132px;
-}
-.empty-state__preview span {
-  @apply rounded-full bg-white px-3 py-1 text-[11px] font-black text-slate-700 shadow-sm dark:bg-slate-950 dark:text-slate-200;
-}
-.empty-state__title {
-  @apply text-sm font-black text-slate-700 dark:text-slate-200;
-}
-.empty-state__hint {
-  @apply mt-1 max-w-full truncate text-[11px] font-bold text-slate-400 dark:text-slate-500;
-}
-.empty-state__starters {
-  @apply mt-4 grid w-full grid-cols-2 gap-2;
-}
-.empty-starter {
-  @apply flex min-w-0 items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-left shadow-sm transition hover:border-emerald-400 hover:bg-emerald-50 focus:outline-none focus:ring-2 focus:ring-emerald-500 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-emerald-500 dark:hover:bg-emerald-950/30;
-}
-.empty-starter span {
-  @apply min-w-0 truncate text-[11px] font-black text-slate-700 dark:text-slate-200;
-}
-.empty-starter small {
-  @apply shrink-0 rounded-full bg-white px-2 py-0.5 text-[10px] font-black text-emerald-700 shadow-sm dark:bg-slate-950 dark:text-emerald-300;
-}
-.image-row {
-  @apply flex items-start gap-3;
-}
-.image-row--user {
-  @apply flex-row-reverse;
-}
-.image-row--assistant,
-.image-row--error {
-  @apply justify-start;
-}
-.image-avatar {
-  @apply mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 shadow-sm dark:border-slate-800 dark:bg-slate-950 dark:text-slate-400;
-}
-.image-row--assistant .image-avatar {
-  @apply border-emerald-200 bg-emerald-50 text-emerald-600 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-300;
-}
-.image-row--user .image-avatar {
-  @apply border-slate-300 bg-slate-900 text-white dark:border-slate-700 dark:bg-slate-100 dark:text-slate-900;
-}
-.image-row--failed .image-avatar {
-  @apply border-rose-300 bg-rose-50 text-rose-600 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-300;
-}
-.image-message {
-  @apply flex max-w-[82%] min-w-0 flex-col gap-1.5;
-}
-.image-row--assistant .image-message,
-.image-row--error .image-message {
-  @apply w-full;
-}
-.image-row--user .image-message {
-  @apply items-end;
-}
-.image-message__meta {
-  @apply flex max-w-full flex-wrap items-center gap-2 px-1 text-[10px] font-black text-slate-500 dark:text-slate-400;
-}
-.image-row--user .image-message__meta {
-  @apply flex-row-reverse;
-}
-.image-bubble {
-  @apply min-w-0 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm dark:border-slate-800 dark:bg-slate-950;
-}
-.image-row--user .image-bubble {
-  @apply border-emerald-600 bg-emerald-600 text-white shadow-md shadow-emerald-600/10;
-}
-.image-row--failed .image-bubble {
-  @apply border-rose-300 bg-rose-50 text-rose-700 dark:border-rose-900 dark:bg-rose-950/30 dark:text-rose-300;
-}
-.image-message pre {
-  @apply whitespace-pre-wrap break-words text-[12px] font-medium leading-relaxed text-slate-800 dark:text-slate-200;
-}
-.image-row--user .image-message pre {
-  @apply text-white;
-}
-.image-size-notice {
-  @apply mt-3 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-bold leading-relaxed text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200;
-}
-.image-size-notice--info {
-  @apply border-sky-200 bg-sky-50 text-sky-800 dark:border-sky-900 dark:bg-sky-950/30 dark:text-sky-200;
-}
-.image-size-notice svg {
-  @apply mt-0.5 shrink-0;
-}
-.image-failure-card {
-  @apply mt-3 flex min-w-0 flex-col gap-3 rounded-xl border border-rose-200 bg-white px-3 py-3 shadow-sm dark:border-rose-900 dark:bg-slate-950;
-}
-.image-failure-card__head {
-  @apply flex min-w-0 items-start gap-2.5;
-}
-.image-failure-card__head svg {
-  @apply mt-0.5 shrink-0 text-rose-600 dark:text-rose-300;
-}
-.image-failure-card__head div {
-  @apply flex min-w-0 flex-col gap-0.5;
-}
-.image-failure-card__head strong {
-  @apply text-xs font-black text-rose-700 dark:text-rose-200;
-}
-.image-failure-card__head span {
-  @apply text-[11px] font-bold leading-relaxed text-rose-600 dark:text-rose-300;
-}
-.image-failure-card__actions {
-  @apply flex min-w-0 flex-wrap items-center gap-2;
-}
-.image-result-summary {
-  @apply mt-3 flex min-w-0 flex-wrap items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-2 dark:border-slate-800 dark:bg-slate-900/70;
-}
-.image-result-summary__item {
-  @apply inline-flex h-6 min-w-0 max-w-full items-center rounded-full border border-slate-200 bg-white px-2.5 text-[10px] font-black text-slate-600 shadow-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300;
-}
-.image-result-summary__item--success {
-  @apply border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-200;
-}
-.image-result-summary__item--info {
-  @apply border-sky-200 bg-sky-50 text-sky-800 dark:border-sky-900 dark:bg-sky-950/30 dark:text-sky-200;
-}
-.image-result-summary__item--warning {
-  @apply border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200;
-}
-.image-result-summary__item--danger {
-  @apply border-rose-200 bg-rose-50 text-rose-800 dark:border-rose-900 dark:bg-rose-950/30 dark:text-rose-200;
-}
-.image-message__tools {
-  @apply mt-3 flex flex-wrap items-center gap-2;
-}
-.image-row--user .image-message__tools {
-  @apply justify-end;
-}
-.image-row--user .image-message__tools :deep(.base-copy-button) {
-  border-color: rgba(255, 255, 255, 0.28);
-  background: rgba(255, 255, 255, 0.12);
-  color: #ffffff;
-  box-shadow: none;
-}
-.image-row--user .image-message__tools :deep(.base-copy-button:hover) {
-  background: rgba(255, 255, 255, 0.18);
-}
-.image-loading {
-  @apply flex min-w-0 items-center gap-3;
-}
-.image-loading__preview {
-  @apply relative flex h-28 max-w-44 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-emerald-200 bg-white text-emerald-500 dark:border-emerald-900 dark:bg-slate-950 dark:text-emerald-300;
-  width: min(176px, 42vw);
-}
-.image-loading__shine {
-  @apply absolute inset-0;
-  background: linear-gradient(110deg, transparent 0%, rgba(16, 185, 129, 0.16) 45%, transparent 70%);
-  animation: image-shine 1.2s ease-in-out infinite;
-}
-.image-loading__text {
-  @apply flex min-w-0 flex-1 flex-col gap-2;
-}
-.image-loading__head {
-  @apply flex min-w-0 flex-wrap items-center justify-between gap-2;
-}
-.image-loading__title {
-  @apply text-sm font-black text-emerald-700 dark:text-emerald-200;
-}
-.image-loading__elapsed {
-  @apply rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-black text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-300;
-}
-.image-loading__meta-grid {
-  @apply grid min-w-0 grid-cols-1 gap-1.5 sm:grid-cols-3;
-}
-.image-loading__meta-grid span {
-  @apply min-w-0 rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-2 dark:border-slate-800 dark:bg-slate-900;
-}
-.image-loading__meta-grid strong {
-  @apply block text-[9px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500;
-}
-.image-loading__meta-grid em {
-  @apply mt-0.5 block truncate text-[11px] not-italic font-black text-slate-700 dark:text-slate-200;
-}
-.image-loading__progress {
-  @apply h-1.5 overflow-hidden rounded-full bg-emerald-100 dark:bg-emerald-950;
-}
-.image-loading__progress span {
-  @apply block h-full w-1/3 rounded-full bg-emerald-500;
-  animation: image-progress 1.35s ease-in-out infinite;
-}
-.image-loading__footer {
-  @apply flex min-w-0 flex-wrap items-center justify-between gap-2;
-}
-.image-loading__dots {
-  @apply flex h-4 items-center gap-1;
-}
-.image-loading__dots i {
-  @apply h-1.5 w-1.5 rounded-full bg-emerald-400;
-  animation: image-dot 1s infinite ease-in-out;
-}
-.image-loading__dots i:nth-child(2) {
-  animation-delay: 0.15s;
-}
-.image-loading__dots i:nth-child(3) {
-  animation-delay: 0.3s;
-}
-.cancel-generate-btn.el-button {
-  @apply shrink-0;
-}
-@keyframes image-shine {
-  0% {
-    transform: translateX(-100%);
-  }
-  100% {
-    transform: translateX(100%);
-  }
-}
-@keyframes image-dot {
-  0%,
-  80%,
-  100% {
-    transform: translateY(0);
-    opacity: 0.45;
-  }
-  40% {
-    transform: translateY(-3px);
-    opacity: 1;
-  }
-}
-@keyframes image-progress {
-  0% {
-    transform: translateX(-110%);
-  }
-  50% {
-    transform: translateX(115%);
-  }
-  100% {
-    transform: translateX(260%);
-  }
-}
-.generated-gallery {
-  @apply mt-3 grid grid-cols-1 gap-3 md:grid-cols-2;
-}
-.generated-gallery__toolbar {
-  @apply col-span-full flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm dark:border-slate-800 dark:bg-slate-950;
-}
-.generated-gallery__toolbar strong {
-  @apply min-w-0 truncate text-[11px] font-black text-slate-600 dark:text-slate-300;
-}
-.generated-gallery__toolbar-actions {
-  @apply flex shrink-0 flex-wrap items-center justify-end gap-1.5;
-}
-.generated-frame {
-  @apply relative flex min-w-0 flex-col overflow-hidden rounded-2xl bg-white text-left shadow-sm ring-1 ring-slate-200/70 transition hover:-translate-y-0.5 hover:shadow-lg hover:shadow-slate-900/5 hover:ring-emerald-300 focus-within:ring-2 focus-within:ring-emerald-500 dark:bg-slate-950 dark:ring-slate-800 dark:hover:shadow-black/20;
-  width: 100%;
-}
-.generated-frame__media {
-  @apply relative min-w-0 overflow-hidden bg-[conic-gradient(from_90deg_at_1px_1px,#e2e8f0_90deg,transparent_0)] dark:bg-[conic-gradient(from_90deg_at_1px_1px,#1e293b_90deg,transparent_0)];
-  background-size: 18px 18px;
-  max-height: min(340px, 42vh);
-  min-height: 164px;
-}
-.generated-preview-button {
-  @apply relative flex h-full w-full items-center justify-center bg-white/70 p-0 text-left dark:bg-slate-950/70;
-  min-height: 164px;
-}
-.generated-image {
-  @apply h-full w-full object-contain;
-}
-.generated-frame__action {
-  @apply absolute bottom-2 right-2 inline-flex items-center gap-1 rounded-full bg-slate-950/85 px-2.5 py-1 text-[10px] font-black text-white opacity-0 shadow-sm backdrop-blur transition;
-}
-.generated-frame__index {
-  @apply pointer-events-none absolute left-1/2 top-2 z-10 inline-flex -translate-x-1/2 items-center rounded-full border border-white/20 bg-slate-950/85 px-2.5 py-1 text-[10px] font-black text-white shadow-lg backdrop-blur;
-}
-.generated-frame__footer {
-  @apply flex min-w-0 flex-wrap items-center justify-between gap-2.5 border-t border-slate-200 bg-slate-50/90 px-2.5 py-2.5 dark:border-slate-800 dark:bg-slate-900/90;
-}
-.generated-frame__primary-actions,
-.generated-frame__secondary-actions {
-  @apply flex min-w-0 max-w-full flex-wrap items-center gap-1.5;
-}
-.generated-frame__primary-actions {
-  @apply flex-1;
-}
-.generated-frame__secondary-actions {
-  @apply ml-auto justify-end rounded-full border border-slate-200 bg-white/90 px-1.5 py-1 dark:border-slate-700 dark:bg-slate-950/90;
-}
-.generated-frame__primary-actions :deep(.el-button) {
-  @apply border-slate-200 bg-slate-50 text-slate-700 hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:border-emerald-800 dark:hover:bg-emerald-950/40 dark:hover:text-emerald-200;
-}
-.generated-frame__secondary-actions :deep(.el-button),
-.generated-frame__secondary-actions :deep(.base-copy-button) {
-  @apply border-slate-200 bg-slate-50 text-slate-500 hover:border-slate-300 hover:bg-white hover:text-slate-800 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-slate-600 dark:hover:bg-slate-950 dark:hover:text-slate-100;
-}
-.generated-frame__primary-actions :deep(.el-button),
-.generated-frame__secondary-actions :deep(.el-button),
-.generated-frame__secondary-actions :deep(.base-copy-button) {
-  height: 28px !important;
-  min-width: 0 !important;
-  border-radius: 999px !important;
-  font-size: 10px !important;
-  font-weight: 900 !important;
-  box-shadow: none !important;
-}
-.generated-frame:hover .generated-frame__action,
-.generated-frame:focus-within .generated-frame__action {
-  opacity: 1;
-}
-.image-message__actions {
-  @apply mt-3 flex flex-wrap justify-end gap-2;
-}
 .image-composer {
   @apply shrink-0 border-t border-slate-200 bg-white p-2.5 dark:border-slate-800 dark:bg-slate-950;
 }
 .composer-shell {
   @apply flex flex-col gap-1.5 rounded-2xl border border-slate-200 bg-slate-50 p-2 shadow-sm transition-colors focus-within:border-emerald-500 focus-within:bg-white focus-within:shadow-md dark:border-slate-800 dark:bg-slate-900 dark:focus-within:bg-slate-950;
-}
-.composer-top {
-  @apply flex min-w-0 flex-wrap items-center justify-between gap-2;
-}
-.composer-controls {
-  @apply flex min-w-[220px] flex-1 items-center gap-2;
-}
-.model-select {
-  @apply min-w-0 flex-1 shrink;
-}
-.size-select {
-  @apply w-20 shrink-0;
-}
-.count-select {
-  @apply shrink-0;
-  width: 76px;
-}
-.size-select :deep(.base-select__selected-label) {
-  @apply w-full text-center font-black;
-}
-.count-select :deep(.base-select__selected-label) {
-  @apply w-full text-center font-black;
-}
-.composer-size-detail {
-  @apply flex min-w-0 max-w-64 shrink-0 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-bold text-slate-500 shadow-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-400;
-}
-.composer-size-detail strong {
-  @apply shrink-0 text-[12px] font-black text-slate-800 dark:text-slate-100;
-}
-.composer-size-detail span {
-  @apply min-w-0 truncate;
-}
-.composer-size-presets {
-  @apply flex min-w-0 items-center justify-end gap-2 border-t border-slate-200 pt-1.5 dark:border-slate-800;
-}
-.composer-size-presets--tools-only {
-  @apply justify-end;
-}
-.composer-tools {
-  @apply flex min-w-0 shrink-0 flex-wrap items-center justify-end gap-1.5;
-}
-.composer-tools-divider {
-  @apply h-4 w-px shrink-0 bg-slate-200 dark:bg-slate-700;
-}
-.style-toggle-chip {
-  @apply inline-flex h-6 max-w-28 shrink-0 items-center justify-center gap-1 overflow-hidden text-ellipsis whitespace-nowrap rounded-full border border-emerald-200 bg-emerald-50 px-2.5 text-[10px] font-black text-emerald-700 shadow-sm transition hover:border-emerald-400 hover:text-emerald-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-300 dark:hover:border-emerald-500 dark:hover:text-emerald-200;
-}
-.style-toggle-chip svg {
-  @apply shrink-0;
-}
-.style-toggle-chip--active {
-  @apply border-emerald-500 bg-emerald-100 text-emerald-800 ring-1 ring-emerald-500 dark:border-emerald-400 dark:bg-emerald-950/50 dark:text-emerald-100;
-}
-.starter-toggle-chip {
-  @apply inline-flex h-6 max-w-24 shrink-0 items-center justify-center gap-1 overflow-hidden text-ellipsis whitespace-nowrap rounded-full border border-sky-200 bg-sky-50 px-2.5 text-[10px] font-black text-sky-700 shadow-sm transition hover:border-sky-400 hover:text-sky-800 focus:outline-none focus:ring-2 focus:ring-sky-500 dark:border-sky-900 dark:bg-sky-950/30 dark:text-sky-300 dark:hover:border-sky-500 dark:hover:text-sky-200;
-}
-.starter-toggle-chip svg {
-  @apply shrink-0;
-}
-.starter-toggle-chip--active {
-  @apply border-sky-500 bg-sky-100 text-sky-800 ring-1 ring-sky-500 dark:border-sky-400 dark:bg-sky-950/50 dark:text-sky-100;
-}
-.composer-presets {
-  @apply flex max-h-48 min-w-0 flex-col gap-2 overflow-hidden border-t border-slate-200 pt-2 dark:border-slate-800;
-}
-.composer-presets__head {
-  @apply flex min-w-0 shrink-0 flex-wrap items-center justify-between gap-2;
-}
-.composer-presets__title {
-  @apply flex min-w-0 items-center gap-1.5 text-[11px] font-black text-emerald-700 dark:text-emerald-300;
-}
-.composer-presets__title svg {
-  @apply shrink-0;
-}
-.composer-presets__title span {
-  @apply shrink-0;
-}
-.composer-presets__title strong {
-  @apply min-w-0 truncate rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-200;
-}
-.composer-presets__search {
-  @apply min-w-36 max-w-56 flex-1;
-}
-.composer-presets__grid {
-  @apply grid min-h-0 flex-1 grid-cols-2 gap-1.5 overflow-y-auto pr-1;
-  scrollbar-width: thin;
-}
-.composer-presets__label {
-  @apply inline-flex shrink-0 items-center gap-1 text-[11px] font-black text-emerald-700 dark:text-emerald-300;
-}
-.composer-presets__empty {
-  @apply rounded-xl border border-dashed border-slate-200 bg-slate-50 px-3 py-4 text-center text-[11px] font-bold text-slate-400 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-500;
-}
-.style-preset-chip {
-  @apply flex min-h-11 min-w-0 flex-col items-start justify-center gap-0.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-left shadow-sm transition hover:border-emerald-500 hover:bg-emerald-50 focus:outline-none focus:ring-2 focus:ring-emerald-500 dark:border-slate-700 dark:bg-slate-950 dark:hover:border-emerald-400 dark:hover:bg-emerald-950/30;
-}
-.style-preset-chip span {
-  @apply max-w-full truncate text-[11px] font-black text-slate-800 dark:text-slate-100;
-}
-.style-preset-chip small {
-  @apply max-w-full truncate text-[10px] font-bold leading-4 text-slate-500 dark:text-slate-400;
-}
-.style-preset-chip--active {
-  @apply border-emerald-500 bg-emerald-50 ring-1 ring-emerald-500 dark:border-emerald-400 dark:bg-emerald-950/40;
-}
-.style-preset-chip--active span {
-  @apply text-emerald-800 dark:text-emerald-100;
-}
-.style-preset-chip--active small {
-  @apply text-emerald-700 dark:text-emerald-200;
-}
-.composer-starters {
-  @apply grid grid-cols-2 gap-1.5 border-t border-slate-200 pt-1.5 dark:border-slate-800;
-}
-.starter-preset-chip {
-  @apply flex h-7 min-w-0 items-center justify-between gap-2 rounded-full border border-slate-200 bg-white px-3 text-left shadow-sm transition hover:border-sky-400 hover:bg-sky-50 focus:outline-none focus:ring-2 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-950 dark:hover:border-sky-500 dark:hover:bg-sky-950/30;
-}
-.starter-preset-chip span {
-  @apply min-w-0 truncate text-[10px] font-black text-slate-700 dark:text-slate-200;
-}
-.starter-preset-chip small {
-  @apply shrink-0 text-[10px] font-black text-sky-700 dark:text-sky-300;
-}
-.style-tool-chip,
-.style-undo-chip,
-.style-clear-chip {
-  @apply inline-flex h-6 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-slate-100 px-2.5 text-[10px] font-black text-slate-500 transition hover:border-slate-300 hover:bg-white hover:text-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-400 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-950 dark:hover:text-slate-100;
-}
-.style-tool-chip {
-  @apply border-emerald-200 bg-emerald-50 text-emerald-700 hover:border-emerald-400 hover:text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-300 dark:hover:border-emerald-500 dark:hover:text-emerald-200;
-}
-.style-tool-chip:disabled {
-  @apply cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400 opacity-70 hover:border-slate-200 hover:bg-slate-100 hover:text-slate-400 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-600 dark:hover:border-slate-800 dark:hover:bg-slate-900 dark:hover:text-slate-600;
-}
-.style-undo-chip {
-  @apply border-amber-200 bg-amber-50 text-amber-700 hover:border-amber-400 hover:text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-300 dark:hover:border-amber-500 dark:hover:text-amber-200;
-}
-.composer-size-warning {
-  @apply flex min-w-0 items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-bold leading-relaxed text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200;
-}
-.composer-size-warning svg {
-  @apply mt-0.5 shrink-0;
-}
-.composer-size-warning span {
-  @apply min-w-0 break-words;
-}
-.composer-draft-bar {
-  @apply flex min-w-0 items-center justify-between gap-2 border-t border-slate-200 pt-1.5 dark:border-slate-800;
-}
-.composer-draft-tags {
-  @apply flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto;
-  scrollbar-width: thin;
-}
-.composer-draft-tags span {
-  @apply inline-flex h-5 shrink-0 items-center rounded-full border border-slate-200 bg-white px-2 text-[10px] font-black text-slate-500 shadow-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300;
-}
-.composer-draft-clear {
-  @apply inline-flex h-6 shrink-0 items-center justify-center gap-1 rounded-full border border-slate-200 bg-white px-2.5 text-[10px] font-black text-slate-500 shadow-sm transition hover:border-rose-300 hover:text-rose-600 focus:outline-none focus:ring-2 focus:ring-rose-400 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:border-rose-700 dark:hover:text-rose-300;
-}
-.composer-draft-clear svg {
-  @apply shrink-0;
-}
-.composer-subject-warning {
-  @apply flex min-w-0 items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-bold leading-relaxed text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200;
-}
-.composer-subject-warning svg {
-  @apply mt-0.5 shrink-0;
-}
-.composer-subject-warning span {
-  @apply min-w-0 break-words;
 }
 .composer-bottom {
   @apply flex items-end gap-2 border-t border-slate-200 pt-1.5 dark:border-slate-800;
@@ -2693,26 +1389,6 @@ function getSessionSizeLabel(target: AiConversationSession) {
     @apply gap-3 lg:grid-cols-[236px_minmax(0,1fr)];
   }
 
-  .session-list {
-    @apply p-2.5;
-  }
-
-  .session-filter-chip {
-    @apply text-[9px];
-  }
-
-  .session-item {
-    @apply min-h-12 px-2;
-  }
-
-  .session-thumb {
-    @apply h-8 w-8 rounded-lg;
-  }
-
-  .image-history {
-    @apply px-4 py-4;
-  }
-
   .image-composer {
     @apply p-2;
   }
@@ -2723,304 +1399,15 @@ function getSessionSizeLabel(target: AiConversationSession) {
     @apply grid-cols-1;
   }
 
-  .session-list {
-    @apply max-h-36;
-  }
-
-  .session-item {
-    @apply min-h-12;
-  }
-
-  .session-search {
-    @apply hidden;
-  }
-
-  .session-list__head {
-    @apply h-7;
-  }
-
-  .composer-size-detail {
-    @apply max-w-36;
-  }
-
-  .composer-size-presets {
-    @apply justify-start overflow-visible;
-  }
-
-  .composer-tools {
-    @apply justify-start;
-  }
-
-  .generated-gallery {
-    @apply grid-cols-1;
-  }
-
-  .generated-frame__media {
-    max-height: min(300px, 38vh);
-  }
-
-  .generated-frame__action {
-    opacity: 1;
-  }
 }
 
 @media (max-width: 520px) {
-  .composer-top,
   .composer-bottom {
     @apply flex-col items-stretch;
   }
 
-  .composer-size-detail {
-    @apply max-w-full;
-  }
-
-  .composer-presets__head {
-    @apply flex-col items-stretch;
-  }
-
-  .composer-presets__search {
-    @apply max-w-full;
-  }
-
-  .composer-presets__grid {
-    @apply grid-cols-1 overflow-y-auto;
-  }
-
-  .composer-starters {
-    @apply grid-cols-1;
-  }
-
-  .composer-size-presets {
-    @apply justify-start overflow-visible;
-  }
-
-  .composer-tools {
-    @apply justify-start;
-  }
-
-  .composer-draft-bar {
-    @apply flex-col items-stretch;
-  }
-
-  .composer-draft-tags {
-    @apply flex-wrap overflow-visible;
-  }
-
-  .composer-draft-clear {
-    align-self: flex-end;
-  }
-
   .generate-btn.el-button {
     align-self: flex-end;
-  }
-
-  .image-loading {
-    @apply flex-col items-stretch;
-  }
-
-  .image-loading__preview {
-    @apply max-w-none;
-    width: 100%;
-  }
-
-  .image-loading__meta-grid {
-    @apply grid-cols-1;
-  }
-
-  .empty-state__starters {
-    @apply grid-cols-1;
-  }
-}
-.preview-dialog {
-  @apply grid min-h-0 gap-4 lg:grid-cols-[minmax(0,1fr)_320px];
-}
-.preview-dialog__media {
-  @apply flex min-h-0 flex-col items-center justify-center gap-3 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-900;
-  max-height: 72vh;
-}
-.preview-dialog__image-stage {
-  @apply relative flex min-h-0 w-full flex-1 items-center justify-center overflow-hidden rounded-xl;
-}
-.preview-dialog__image-stage img {
-  @apply max-h-[70vh] max-w-full rounded-xl object-contain;
-  pointer-events: none;
-}
-.preview-image-counter {
-  @apply absolute right-3 top-3 z-10 rounded-full bg-slate-950 px-2.5 py-1 text-[10px] font-black text-white shadow-sm;
-}
-.preview-nav-button {
-  @apply absolute top-1/2 z-30 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full border border-white/30 bg-slate-950/85 text-white shadow-lg transition hover:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-400;
-  pointer-events: auto;
-}
-.preview-nav-button--prev {
-  @apply left-5;
-}
-.preview-nav-button--next {
-  @apply right-5;
-}
-.preview-inspector {
-  @apply flex max-w-full shrink-0 flex-wrap items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-2.5 py-2 dark:border-slate-800 dark:bg-slate-950;
-}
-.preview-inspector__item {
-  @apply inline-flex h-7 min-w-0 max-w-full items-center gap-1.5 rounded-full border border-slate-200 bg-slate-50 px-2.5 text-[10px] font-black text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300;
-}
-.preview-inspector__item strong {
-  @apply shrink-0 text-slate-400 dark:text-slate-500;
-}
-.preview-inspector__item em {
-  @apply min-w-0 truncate not-italic;
-}
-.preview-inspector__item--success {
-  @apply border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-200;
-}
-.preview-inspector__item--info {
-  @apply border-sky-200 bg-sky-50 text-sky-800 dark:border-sky-900 dark:bg-sky-950/30 dark:text-sky-200;
-}
-.preview-inspector__item--warning {
-  @apply border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200;
-}
-.preview-thumbnails {
-  @apply flex max-w-full shrink-0 gap-2 overflow-x-auto rounded-xl border border-slate-200 bg-white p-2 dark:border-slate-800 dark:bg-slate-950;
-}
-.preview-thumbnail {
-  @apply h-14 w-14 shrink-0 overflow-hidden rounded-lg border border-slate-200 bg-slate-100 p-0.5 transition hover:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 dark:border-slate-800 dark:bg-slate-900;
-}
-.preview-thumbnail--active {
-  @apply border-emerald-500 ring-2 ring-emerald-500;
-}
-.preview-thumbnail img {
-  @apply h-full w-full rounded-md object-cover;
-}
-.preview-dialog__details {
-  @apply flex min-h-0 flex-col gap-2.5 overflow-hidden rounded-2xl border border-slate-200 bg-white p-3.5 dark:border-slate-800 dark:bg-slate-950;
-  max-height: 72vh;
-}
-.preview-dialog__head {
-  @apply flex flex-col items-stretch gap-2 border-b border-slate-200 pb-2.5 dark:border-slate-800;
-}
-.preview-dialog__head strong {
-  @apply block truncate text-sm font-black text-slate-800 dark:text-slate-100;
-}
-.preview-dialog__head small {
-  @apply mt-0.5 block truncate text-[10px] font-bold text-slate-400 dark:text-slate-500;
-}
-.preview-dialog__actions {
-  @apply flex shrink-0 flex-wrap items-center justify-start gap-1.5;
-}
-.preview-dialog__actions :deep(.el-button) {
-  height: 24px !important;
-  font-size: 10px !important;
-  font-weight: 900 !important;
-}
-.preview-dialog__actions :deep(.base-copy-button) {
-  height: 24px;
-  font-size: 10px;
-}
-.preview-file-actions {
-  @apply flex min-w-0 flex-wrap items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 p-2 dark:border-slate-800 dark:bg-slate-900;
-}
-.preview-file-actions :deep(.base-copy-button) {
-  height: 26px;
-  border-radius: 999px;
-  font-size: 10px;
-  box-shadow: none;
-}
-.preview-dialog__eyebrow {
-  @apply mb-0.5 block text-[10px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500;
-}
-.preview-meta-grid {
-  @apply grid grid-cols-2 gap-1.5;
-}
-.preview-meta-item {
-  @apply min-w-0 rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-2 dark:border-slate-800 dark:bg-slate-900;
-}
-.preview-meta-item span {
-  @apply block text-[10px] font-black text-slate-400 dark:text-slate-500;
-}
-.preview-meta-item strong {
-  @apply mt-0.5 block truncate text-[12px] font-black text-slate-700 dark:text-slate-200;
-}
-.preview-size-notice {
-  @apply mt-0;
-}
-.preview-section {
-  @apply min-w-0 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 dark:border-slate-800 dark:bg-slate-900;
-}
-.preview-section__head {
-  @apply mb-1.5 flex items-center justify-between gap-2;
-}
-.preview-section__head span {
-  @apply text-[11px] font-black text-slate-500 dark:text-slate-400;
-}
-.preview-section p {
-  @apply max-h-32 overflow-auto whitespace-pre-wrap break-words text-[12px] font-medium leading-relaxed text-slate-700 dark:text-slate-200;
-  scrollbar-width: thin;
-}
-.preview-section code {
-  @apply block truncate rounded-lg bg-white px-2 py-1.5 text-[11px] font-bold text-slate-600 dark:bg-slate-950 dark:text-slate-300;
-}
-.preview-section small {
-  @apply mt-1 block text-[10px] font-bold text-slate-400 dark:text-slate-500;
-}
-.preview-section--compact {
-  @apply py-2.5;
-}
-.preview-section--prompt {
-  @apply flex min-h-0 flex-col;
-}
-
-@media (max-width: 1024px) {
-  .preview-dialog {
-    @apply grid-cols-1;
-    max-height: 78vh;
-    overflow: auto;
-  }
-
-  .preview-dialog__media,
-  .preview-dialog__details {
-    max-height: none;
-  }
-
-  .preview-dialog__image-stage img {
-    max-height: min(44vh, 420px);
-  }
-
-  .preview-dialog__details {
-    @apply overflow-auto;
-    max-height: 38vh;
-  }
-}
-
-@media (max-width: 640px) {
-  .preview-dialog {
-    max-height: none;
-    overflow: visible;
-  }
-
-  .preview-dialog__media {
-    @apply p-2;
-    max-height: none;
-  }
-
-  .preview-dialog__image-stage img {
-    max-height: min(52vh, 420px);
-  }
-
-  .preview-dialog__head {
-    @apply flex-col;
-  }
-
-  .preview-dialog__actions {
-    @apply justify-start;
-  }
-
-  .preview-meta-grid {
-    @apply grid-cols-1;
-  }
-
-  .preview-dialog__details {
-    max-height: none;
-    overflow: visible;
   }
 }
 </style>

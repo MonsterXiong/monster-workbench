@@ -18,7 +18,7 @@ import type {
   AiConversationSession,
   AiProviderTestResult,
 } from "../types/ai";
-import { useAiProviderStore } from "./ai-provider";
+import { supportsAiProviderCapability, useAiProviderStore } from "./ai-provider";
 import { useAiProviderRuntimeStore } from "./ai-provider-runtime";
 import { useAiQueueStore } from "./ai-queue";
 import { useAiSessionStore } from "./ai-session";
@@ -37,6 +37,7 @@ const AI_CHAT_EXPORT_META: Record<
 const currentTime = () => getCurrentTimestampMs();
 const createId = (prefix: string) => createTimestampId(prefix);
 const AI_CHAT_CANCELLED_MESSAGE = "Chat request canceled";
+const AI_CHAT_PROVIDER_UNSUPPORTED_MESSAGE = "当前模型配置不支持模型对话";
 
 export const useAiChatRuntimeStore = defineStore("ai-chat-runtime", () => {
   const aiProviderStore = useAiProviderStore();
@@ -198,6 +199,9 @@ export const useAiChatRuntimeStore = defineStore("ai-chat-runtime", () => {
     }
 
     const modelConfig = aiProviderStore.getModelConfig(configId);
+    if (!supportsAiProviderCapability(modelConfig, "chat")) {
+      throw new Error(AI_CHAT_PROVIDER_UNSUPPORTED_MESSAGE);
+    }
     const session = aiSessionStore.ensureActiveSession("chat", {
       modelConfigId: modelConfig.id,
     });

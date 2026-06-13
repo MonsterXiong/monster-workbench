@@ -16,7 +16,7 @@ import { useToast } from "../composables/useToast";
 import { useI18n } from "../composables/useI18n";
 import { addDomEventListener, mergeDomEventCleanups, type DomEventCleanup } from "../utils";
 
-type RouteTab = "workspace" | "system" | "tools" | "navigation" | "ai" | "creative" | "settings" | "file-manager" | "playground" | "utils-docs";
+type RouteTab = "workspace" | "system" | "tools" | "navigation" | "ai" | "settings" | "file-manager" | "playground" | "utils-docs";
 
 const router = useRouter();
 const route = useRoute();
@@ -28,7 +28,7 @@ let stopNetworkStatusListeners: DomEventCleanup | null = null;
 
 const currentTab = computed<RouteTab>(() => {
   const name = String(route.name ?? "workspace");
-  if (name === "system" || name === "tools" || name === "navigation" || name === "ai" || name === "creative" || name === "settings" || name === "file-manager" || name === "playground" || name === "utils-docs") {
+  if (name === "system" || name === "tools" || name === "navigation" || name === "ai" || name === "settings" || name === "file-manager" || name === "playground" || name === "utils-docs") {
     return name as RouteTab;
   }
   return "workspace";
@@ -71,7 +71,6 @@ function handleChangeTab(tab: RouteTab) {
     tools: "/tools",
     navigation: "/navigation",
     ai: "/ai",
-    creative: "/creative",
     settings: "/settings",
     "file-manager": "/file-manager",
     playground: "/playground",

@@ -67,13 +67,20 @@ class MockProviderHandler(BaseHTTPRequestHandler):
         if content_length:
             body = json.loads(self.rfile.read(content_length).decode("utf-8") or "{}")
 
+        if self.path == "/v1/messages":
+            if body.get("model") == "claude-test":
+                if self.headers.get("x-api-key") != "sk-anthropic-test":
+                    self._write_json({"error": {"message": "missing x-api-key"}}, status=401)
+                    return
+                if self.headers.get("anthropic-version") != "2023-06-01":
+                    self._write_json({"error": {"message": "missing anthropic-version"}}, status=400)
+                    return
+                self._write_json({"content": [{"type": "text", "text": "anthropic messages ok"}]})
+                return
+            self._write_json({"error": {"message": "unknown anthropic model"}}, status=404)
+            return
+
         if self.path == "/v1/chat/completions":
-            if body.get("model") == "claude-opus-4-5-20251101":
-                self._write_json({"error": {"message": "当前 API 不支持所选模型 claude-opus-4-5-20251101"}}, status=404)
-                return
-            if body.get("model") == "anthropic/claude-opus-4.5":
-                self._write_json({"choices": [{"message": {"content": "claude anyrouter ok"}}]})
-                return
             if body.get("model") == "secret-echo":
                 self._write_json({
                     "error": "Authorization Bearer sk-test-secret should not be visible",
@@ -229,19 +236,37 @@ class AiProviderTesterContractTest(unittest.TestCase):
         self.assertEqual(result["text"], "pong")
         self.assertEqual(result["statusCode"], 200)
 
-    def test_chat_contract_normalizes_anyrouter_anthropic_model_id(self):
+    def test_chat_contract_uses_anthropic_messages_adapter(self):
         result = self.run_sidecar(
             "chat",
-            request_id="chat-anyrouter-anthropic",
+            request_id="chat-anthropic-messages",
             config_patch={
-                "provider": "anyrouter",
-                "model": "claude-opus-4-5-20251101",
+                "provider": "anthropic",
+                "apiKey": "sk-anthropic-test",
+                "model": "claude-test",
             },
         )
         self.assertTrue(result["ok"], result)
-        self.assertEqual(result["requestId"], "chat-anyrouter-anthropic")
-        self.assertEqual(result["model"], "anthropic/claude-opus-4.5")
-        self.assertEqual(result["text"], "claude anyrouter ok")
+        self.assertEqual(result["requestId"], "chat-anthropic-messages")
+        self.assertEqual(result["model"], "claude-test")
+        self.assertEqual(result["text"], "anthropic messages ok")
+        self.assertEqual(result["statusCode"], 200)
+
+    def test_chat_contract_uses_third_party_anthropic_adapter_id(self):
+        result = self.run_sidecar(
+            "chat",
+            request_id="chat-third-party-anthropic-messages",
+            config_patch={
+                "provider": "custom",
+                "adapterId": "anthropic-messages",
+                "apiKey": "sk-anthropic-test",
+                "model": "claude-test",
+            },
+        )
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(result["requestId"], "chat-third-party-anthropic-messages")
+        self.assertEqual(result["model"], "claude-test")
+        self.assertEqual(result["text"], "anthropic messages ok")
         self.assertEqual(result["statusCode"], 200)
 
     def test_chat_contract_truncates_large_text(self):

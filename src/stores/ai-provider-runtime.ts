@@ -2,7 +2,12 @@ import { defineStore } from "pinia";
 import { storeToRefs } from "pinia";
 import { aiService } from "../services/ai.service";
 import { syncAiProviderBackendQueue } from "../services/ai-provider-queue-sync";
-import { aiProviderDefaults, defaultAiProviderConfig, normalizeAiProviderMaxConcurrency, normalizeAiProviderQueueMode, toAiProviderConfig, useAiProviderStore } from "./ai-provider";
+import { aiProviderDefaults, defaultAiProviderConfig, normalizeAiProviderMaxConcurrency, normalizeAiProviderQueueMode, supportsAiProviderCapability, toAiProviderConfig, useAiProviderStore } from "./ai-provider";
+import {
+  isCanceledProviderQueueItem,
+  syncCanceledProviderBackendTask,
+  waitForProviderBackendTask,
+} from "./ai-provider-task-runtime";
 import { useAiQueueStore } from "./ai-queue";
 import { useAiImageRuntimeStore } from "./ai-image-runtime";
 import {
@@ -10,14 +15,13 @@ import {
   findByValue,
   stringifyErrorMessage,
   runAllSettled,
-  sleep,
-  hasTimeElapsed,
   createTimestampId,
 } from "../utils";
 import type {
   AiProviderConfig,
   AiProviderTestAction,
   AiProviderTestQueueItem,
+  AiProviderTestResult,
   AiProviderTestTask,
 } from "../types/ai";
 
@@ -27,15 +31,16 @@ const IMAGE_TASK_POLL_INTERVAL_MS = 300;
 const IMAGE_SIDECAR_TIMEOUT_SLACK_MS = 30_000;
 const IMAGE_QUEUE_POLL_TIMEOUT_MS = 24 * 60 * 60_000;
 const AI_PROVIDER_TEST_CANCELLED_MESSAGE = "AI provider test canceled";
+const AI_PROVIDER_UNSUPPORTED_ACTION_MESSAGES: Record<AiProviderTestAction, string> = {
+  models: "当前模型配置不支持模型列表查询",
+  chat: "当前模型配置不支持模型对话",
+  image: "当前模型配置不支持图片生成",
+};
 
 const currentTime = () => Date.now();
 
 function createId(prefix: string) {
   return createTimestampId(prefix);
-}
-
-function isCanceledQueueItem(item: Pick<AiProviderTestQueueItem, "status"> | null | undefined) {
-  return String(item?.status || "") === "canceled";
 }
 
 export const useAiProviderRuntimeStore = defineStore("ai-provider-runtime", () => {
@@ -111,54 +116,20 @@ export const useAiProviderRuntimeStore = defineStore("ai-provider-runtime", () =
     item: AiProviderTestQueueItem,
     pollTimeoutMs: number
   ) {
-    const startedAt = currentTime();
-    const pollIntervalMs =
-      item.action === "image" ? IMAGE_TASK_POLL_INTERVAL_MS : TASK_POLL_INTERVAL_MS;
-    let shouldWaitBeforePoll = false;
-
-    for (;;) {
-      if (isCanceledQueueItem(item)) {
-        throw new Error(item.error || AI_PROVIDER_TEST_CANCELLED_MESSAGE);
-      }
-
-      if (hasTimeElapsed(startedAt, pollTimeoutMs)) {
-        item.status = "failed";
-        item.finishedAt = currentTime();
-        item.error = "AI 模型测试任务轮询超时，请刷新队列状态后重试";
-        aiQueueStore.trimLocalTestQueue();
-        throw new Error(item.error);
-      }
-
-      if (shouldWaitBeforePoll) {
-        await sleep(pollIntervalMs);
-      }
-      shouldWaitBeforePoll = true;
-
-      let task: AiProviderTestTask;
-      try {
-        task = await aiService.getProviderTestTask(requestId);
-      } catch (error) {
-        if (isCanceledQueueItem(item)) {
-          throw new Error(item.error || AI_PROVIDER_TEST_CANCELLED_MESSAGE);
-        }
-        const message = stringifyErrorMessage(error);
-        item.status = "failed";
-        item.finishedAt = currentTime();
-        item.error = `AI 模型测试任务状态丢失：${message}`;
-        aiQueueStore.trimLocalTestQueue();
-        throw new Error(item.error);
-      }
-
-      aiQueueStore.applyBackendTask(task, item);
-      if (task.status === "success" || task.status === "failed") {
-        if (task.result) {
-          return task.result;
-        }
-        throw new Error(task.error || "AI 模型测试失败");
-      }
-
-      void refreshBackendQueueStatus();
-    }
+    return await waitForProviderBackendTask({
+      requestId,
+      item,
+      pollTimeoutMs,
+      pollIntervalMs: item.action === "image" ? IMAGE_TASK_POLL_INTERVAL_MS : TASK_POLL_INTERVAL_MS,
+      canceledMessage: AI_PROVIDER_TEST_CANCELLED_MESSAGE,
+      timeoutMessage: "AI 模型测试任务轮询超时，请刷新队列状态后重试",
+      lookupFailedMessage: (message) => `AI 模型测试任务状态丢失：${message}`,
+      noResultMessage: "AI 模型测试失败",
+      applyBackendTask: aiQueueStore.applyBackendTask,
+      onLocalQueueChanged: aiQueueStore.trimLocalTestQueue,
+      refreshBackendQueueStatus,
+      currentTime,
+    });
   }
 
   function buildRuntimeConfig(
@@ -239,15 +210,10 @@ export const useAiProviderRuntimeStore = defineStore("ai-provider-runtime", () =
 
     await runAllSettled(queuedRequestIds, async (requestId) => {
       const item = findByValue(testQueue.value, (candidate) => candidate.id, requestId);
-      try {
-        const task = await aiService.getProviderTestTask(requestId);
-        aiQueueStore.applyBackendTask(task, item);
-      } catch (error) {
-        if (item && item.status === "queued") {
-          const message = stringifyErrorMessage(error);
-          aiQueueStore.markTestQueueItemCanceled(requestId, message);
-        }
-      }
+      await syncCanceledProviderBackendTask(requestId, item, {
+        applyBackendTask: aiQueueStore.applyBackendTask,
+        markCanceled: aiQueueStore.markTestQueueItemCanceled,
+      });
     });
 
     return cancelled;
@@ -263,16 +229,33 @@ export const useAiProviderRuntimeStore = defineStore("ai-provider-runtime", () =
 
     aiQueueStore.markTestQueueItemCanceled(requestId);
 
-    try {
-      const task = await aiService.getProviderTestTask(requestId);
-      aiQueueStore.applyBackendTask(task, item);
-    } catch (error) {
-      if (item && item.status === "queued") {
-        const message = stringifyErrorMessage(error);
-        aiQueueStore.markTestQueueItemCanceled(requestId, message);
-      }
-    }
+    await syncCanceledProviderBackendTask(requestId, item, {
+      applyBackendTask: aiQueueStore.applyBackendTask,
+      markCanceled: aiQueueStore.markTestQueueItemCanceled,
+    });
     return true;
+  }
+
+  function applyProviderTestResultToQueueItem(
+    item: AiProviderTestQueueItem,
+    result: AiProviderTestResult
+  ) {
+    if (!isCanceledProviderQueueItem(item)) {
+      item.status = result.ok
+        ? "success"
+        : result.failureKind === "canceled"
+          ? "canceled"
+          : "failed";
+    }
+    item.result = result;
+    item.error =
+      isCanceledProviderQueueItem(item)
+        ? item.error || result.message || AI_PROVIDER_TEST_CANCELLED_MESSAGE
+        : result.ok
+          ? undefined
+          : result.message;
+    item.finishedAt = currentTime();
+    item.startedAt ??= item.finishedAt;
   }
 
   async function testProvider(
@@ -289,6 +272,9 @@ export const useAiProviderRuntimeStore = defineStore("ai-provider-runtime", () =
     } = {}
   ) {
     const configSnapshot = buildRuntimeConfig(action, options);
+    if (!supportsAiProviderCapability(configSnapshot, action)) {
+      throw new Error(AI_PROVIDER_UNSUPPORTED_ACTION_MESSAGES[action]);
+    }
 
     if (!isHighConcurrencyConfig(configSnapshot)) {
       const existing = testQueue.value.find(
@@ -318,29 +304,14 @@ export const useAiProviderRuntimeStore = defineStore("ai-provider-runtime", () =
         item,
         getTaskPollTimeoutMs(action, configSnapshot)
       );
-      if (!isCanceledQueueItem(item)) {
-        item.status = result.ok
-          ? "success"
-          : result.failureKind === "canceled"
-            ? "canceled"
-            : "failed";
-      }
-      item.result = result;
-      item.error =
-        isCanceledQueueItem(item)
-          ? item.error || result.message || AI_PROVIDER_TEST_CANCELLED_MESSAGE
-          : result.ok
-            ? undefined
-            : result.message;
-      item.finishedAt = currentTime();
-      item.startedAt ??= item.finishedAt;
+      applyProviderTestResultToQueueItem(item, result);
       testResult.value = result;
       aiQueueStore.trimLocalTestQueue();
       return result;
     } catch (error) {
       const message = stringifyErrorMessage(error);
       if (activeItem) {
-        if (!isCanceledQueueItem(activeItem)) {
+        if (!isCanceledProviderQueueItem(activeItem)) {
           activeItem.status = "failed";
           activeItem.error = message;
           activeItem.finishedAt = currentTime();

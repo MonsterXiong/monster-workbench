@@ -3,11 +3,12 @@ import { computed, onMounted, onUnmounted } from "vue";
 import { Bot, CheckCircle2, Gauge, KeyRound, Link, ListChecks, Plus, Save, TestTube2, Trash2 } from "lucide-vue-next";
 import { useAiStore } from "../../../stores/ai";
 import { useI18n } from "../../../composables/useI18n";
-import type { AiProviderQueueMode, AiProviderTestAction } from "../../../types/ai";
+import type { AiProviderCapability, AiProviderQueueMode, AiProviderTestAction } from "../../../types/ai";
 import {
   clampNumber,
   clearIntervalHandle,
   createInterval,
+  formatTemplate,
   getErrorMessage,
   millisecondsToSeconds,
   roundTo,
@@ -27,6 +28,17 @@ const queueModeOptions = computed(() => [
   { label: t("settings.aiProvider.queueModeSerial"), value: "serial" },
   { label: t("settings.aiProvider.queueModeConcurrent"), value: "concurrent" },
 ]);
+const capabilityLabelKeys: Record<AiProviderCapability, string> = {
+  models: "settings.aiProvider.capabilityModels",
+  chat: "settings.aiProvider.capabilityChat",
+  image: "settings.aiProvider.capabilityImage",
+};
+const selectedCapabilityItems = computed(() =>
+  aiStore.selectedConfigCapabilities.map((capability) => ({
+    key: capability,
+    label: getCapabilityLabel(capability),
+  }))
+);
 
 const emit = defineEmits<{
   (e: "saved"): void;
@@ -54,6 +66,26 @@ function actionBusy(action: AiProviderTestAction) {
   return aiStore.isActionBusy(action, configId);
 }
 
+function actionConfigId(action: AiProviderTestAction) {
+  return action === "image" ? aiStore.activeModelConfigIds.image : aiStore.selectedConfigId;
+}
+
+function actionSupported(action: AiProviderTestAction) {
+  return aiStore.modelConfigSupportsCapability(actionConfigId(action), action);
+}
+
+function getCapabilityLabel(capability: AiProviderCapability) {
+  return t(capabilityLabelKeys[capability]);
+}
+
+function actionUnavailableTitle(action: AiProviderTestAction) {
+  if (actionSupported(action)) {
+    return undefined;
+  }
+  const label = getCapabilityLabel(action);
+  return formatTemplate(t("settings.aiProvider.capabilityUnsupported"), { capability: label });
+}
+
 function actionButtonLabel(action: AiProviderTestAction, fallback: string) {
   if (!actionBusy(action)) {
     return fallback;
@@ -79,6 +111,10 @@ async function handleSave() {
 
 async function handleTest(action: AiProviderTestAction) {
   try {
+    if (!actionSupported(action)) {
+      emit("failed", actionUnavailableTitle(action) || t("settings.aiProvider.testFailed"));
+      return;
+    }
     const result = await aiStore.testProvider(action, {
       configId: aiStore.selectedConfigId,
     });
@@ -95,6 +131,10 @@ function handleQueueModeChange(value: unknown) {
 
 async function handleImageTest() {
   try {
+    if (!actionSupported("image")) {
+      emit("failed", actionUnavailableTitle("image") || t("settings.aiProvider.testFailed"));
+      return;
+    }
     const result = await aiStore.testProvider("image", {
       configId: aiStore.activeModelConfigIds.image,
       imageSize: aiStore.imageDraftSize,
@@ -157,6 +197,24 @@ async function handleDeleteConfig() {
             @update:model-value="aiStore.patchConfig({ provider: $event })"
           />
         </label>
+
+        <label class="field-block">
+          <span class="field-label">{{ t("settings.aiProvider.adapterLabel") }}</span>
+          <BaseSelect
+            :model-value="config.adapterId"
+            :options="aiStore.adapterOptions"
+            @update:model-value="aiStore.patchConfig({ adapterId: $event })"
+          />
+        </label>
+
+        <div class="capability-row">
+          <span class="field-label">{{ t("settings.aiProvider.capabilityLabel") }}</span>
+          <div class="capability-list">
+            <span v-for="item in selectedCapabilityItems" :key="item.key" class="capability-chip">
+              {{ item.label }}
+            </span>
+          </div>
+        </div>
 
         <label class="field-block">
           <span class="field-label">{{ t("settings.aiProvider.displayNameLabel") }}</span>
@@ -285,15 +343,15 @@ async function handleDeleteConfig() {
             <template #icon><Save class="h-3.5 w-3.5" /></template>
             {{ t("settings.aiProvider.saveBtn") }}
           </BaseButton>
-          <BaseButton type="neutral" outline size="sm" :disabled="actionBusy('models')" @click="handleTest('models')">
+          <BaseButton type="neutral" outline size="sm" :disabled="!actionSupported('models') || actionBusy('models')" :title="actionUnavailableTitle('models')" @click="handleTest('models')">
             <template #icon><ListChecks class="h-3.5 w-3.5" /></template>
             {{ actionButtonLabel("models", t("settings.aiProvider.modelsBtn")) }}
           </BaseButton>
-          <BaseButton type="primary" size="sm" :disabled="actionBusy('chat')" @click="handleTest('chat')">
+          <BaseButton type="primary" size="sm" :disabled="!actionSupported('chat') || actionBusy('chat')" :title="actionUnavailableTitle('chat')" @click="handleTest('chat')">
             <template #icon><TestTube2 class="h-3.5 w-3.5" /></template>
             {{ actionButtonLabel("chat", t("settings.aiProvider.testBtn")) }}
           </BaseButton>
-          <BaseButton type="success" size="sm" :disabled="actionBusy('image')" @click="handleImageTest">
+          <BaseButton type="success" size="sm" :disabled="!actionSupported('image') || actionBusy('image')" :title="actionUnavailableTitle('image')" @click="handleImageTest">
             <template #icon><TestTube2 class="h-3.5 w-3.5" /></template>
             {{ actionButtonLabel("image", t("settings.aiProvider.imageBtn")) }}
           </BaseButton>
@@ -376,6 +434,15 @@ async function handleDeleteConfig() {
 }
 .remember-row {
   @apply flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2 dark:border-slate-800 dark:bg-slate-900;
+}
+.capability-row {
+  @apply flex flex-col gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 dark:border-slate-800 dark:bg-slate-900;
+}
+.capability-list {
+  @apply flex flex-wrap gap-1.5;
+}
+.capability-chip {
+  @apply inline-flex h-6 items-center rounded-full border border-primary/20 bg-primary/5 px-2.5 text-[10px] font-black text-primary dark:bg-primary/10;
 }
 .switch-btn {
   @apply relative inline-flex h-5 w-9 shrink-0 rounded-full bg-slate-200 transition-colors dark:bg-slate-700;

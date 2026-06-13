@@ -6,9 +6,13 @@ import { systemService } from "../services/system.service";
 import {
   normalizeAiProviderMaxConcurrency,
   normalizeAiProviderQueueMode,
+  supportsAiProviderCapability,
   toAiProviderConfig,
   useAiProviderStore,
 } from "./ai-provider";
+import {
+  waitForProviderBackendTask,
+} from "./ai-provider-task-runtime";
 import { useAiImageStore } from "./ai-image";
 import { useAiQueueStore } from "./ai-queue";
 import { useAiSessionStore } from "./ai-session";
@@ -23,7 +27,6 @@ import {
   hasTimeElapsed,
   parseDimensionsText,
   runAllSettled,
-  sleep,
   stringifyErrorMessage,
   toTrimmedString,
 } from "../utils";
@@ -47,6 +50,7 @@ const IMAGE_REQUEST_TIMEOUT_MAX_MS = 900_000;
 const IMAGE_TASK_LOST_MESSAGE = "AI image task missing";
 const IMAGE_TASK_NO_RESULT_MESSAGE = "AI image task returned no result";
 const IMAGE_REQUEST_CANCELLED_MESSAGE = "Image generation canceled";
+const IMAGE_PROVIDER_UNSUPPORTED_MESSAGE = "当前模型配置不支持图片生成，请切换到支持 image capability 的配置";
 
 const SUPPORTED_IMAGE_SIZES = new Set([
   "1008x1792",
@@ -86,10 +90,6 @@ const SUPPORTED_IMAGE_SIZES = new Set([
 
 const currentTime = () => getCurrentTimestampMs();
 const createId = (prefix: string) => createTimestampId(prefix);
-
-function isCanceledQueueItem(item: Pick<AiProviderTestQueueItem, "status"> | null | undefined) {
-  return String(item?.status || "") === "canceled";
-}
 
 function normalizeImageSize(value: unknown) {
   const size = toTrimmedString(value);
@@ -141,6 +141,62 @@ export const useAiImageRuntimeStore = defineStore("ai-image-runtime", () => {
     );
   }
 
+  function clampImageLatency(value: unknown) {
+    return clampNumber(value, 0, IMAGE_STALE_TIMEOUT_MS, 0, 0);
+  }
+
+  function getImageResultOutputCount(result: AiProviderTestResult) {
+    return Math.max(
+      result.imageUrls?.length || 0,
+      result.imagePaths?.length || 0,
+      result.savedFiles?.length || 0
+    ) || undefined;
+  }
+
+  function buildImageResultTimingPatch(result: AiProviderTestResult): Partial<AiSessionMessage> {
+    return {
+      latencyMs: clampImageLatency(result.latencyMs),
+      queueWaitMs: result.queueWaitMs
+        ? clampImageLatency(result.queueWaitMs)
+        : undefined,
+      totalLatencyMs: result.totalLatencyMs
+        ? clampImageLatency(result.totalLatencyMs)
+        : undefined,
+    };
+  }
+
+  function buildImageResultSizePatch(
+    result: AiProviderTestResult,
+    fallbackImageSize: string
+  ): Partial<AiSessionMessage> {
+    return {
+      imageSize: normalizeImageSize(
+        result.actualImageSize || result.fallbackImageSize || fallbackImageSize
+      ),
+      apiImageSize: result.apiImageSize
+        ? normalizeImageSize(result.apiImageSize)
+        : undefined,
+      requestedImageSize: normalizeImageSize(
+        result.requestedImageSize || fallbackImageSize
+      ),
+      actualImageSize: result.actualImageSize
+        ? normalizeImageSize(result.actualImageSize)
+        : undefined,
+      fallbackImageSize: result.fallbackImageSize
+        ? normalizeImageSize(result.fallbackImageSize)
+        : undefined,
+    };
+  }
+
+  function buildImageResultFilePatch(result: AiProviderTestResult): Partial<AiSessionMessage> {
+    return {
+      imageCount: getImageResultOutputCount(result),
+      imageUrls: result.imageUrls,
+      imagePaths: result.imagePaths,
+      savedFiles: result.savedFiles,
+    };
+  }
+
   function buildImageResultMessagePatch(
     result: AiProviderTestResult,
     modelConfig: AiModelConfig,
@@ -158,41 +214,13 @@ export const useAiImageRuntimeStore = defineStore("ai-image-runtime", () => {
       requestId: result.requestId || fallbackRequestId || undefined,
       model: result.model || modelConfig.imageModel || modelConfig.model,
       error: result.ok ? undefined : result.message,
-      latencyMs: clampNumber(result.latencyMs, 0, IMAGE_STALE_TIMEOUT_MS, 0, 0),
-      queueWaitMs: result.queueWaitMs
-        ? clampNumber(result.queueWaitMs, 0, IMAGE_STALE_TIMEOUT_MS, 0, 0)
-        : undefined,
-      totalLatencyMs: result.totalLatencyMs
-        ? clampNumber(result.totalLatencyMs, 0, IMAGE_STALE_TIMEOUT_MS, 0, 0)
-        : undefined,
-      imageSize: normalizeImageSize(
-        result.actualImageSize || result.fallbackImageSize || fallbackImageSize
-      ),
-      apiImageSize: result.apiImageSize
-        ? normalizeImageSize(result.apiImageSize)
-        : undefined,
-      requestedImageSize: normalizeImageSize(
-        result.requestedImageSize || fallbackImageSize
-      ),
-      actualImageSize: result.actualImageSize
-        ? normalizeImageSize(result.actualImageSize)
-        : undefined,
-      fallbackImageSize: result.fallbackImageSize
-        ? normalizeImageSize(result.fallbackImageSize)
-        : undefined,
+      ...buildImageResultTimingPatch(result),
+      ...buildImageResultSizePatch(result, fallbackImageSize),
       imageAttempts: result.imageAttempts
         ? clampNumber(result.imageAttempts, 1, 10, 1, 0)
         : undefined,
-      imageCount:
-        Math.max(
-          result.imageUrls?.length || 0,
-          result.imagePaths?.length || 0,
-          result.savedFiles?.length || 0
-        ) || undefined,
       failureKind: result.failureKind || undefined,
-      imageUrls: result.imageUrls,
-      imagePaths: result.imagePaths,
-      savedFiles: result.savedFiles,
+      ...buildImageResultFilePatch(result),
     };
   }
 
@@ -212,6 +240,16 @@ export const useAiImageRuntimeStore = defineStore("ai-image-runtime", () => {
 
   function isCanceledImageMessage(message: AiSessionMessage | null | undefined) {
     return message?.status === "canceled" || message?.failureKind === "canceled";
+  }
+
+  function patchCanceledImageMessage(messageId: string, messageText: string) {
+    patchSessionMessage(messageId, {
+      role: "error",
+      status: "canceled",
+      content: messageText,
+      error: messageText,
+      failureKind: "canceled",
+    });
   }
 
   function patchImageMessageFromResult(
@@ -428,53 +466,23 @@ export const useAiImageRuntimeStore = defineStore("ai-image-runtime", () => {
     item: AiProviderTestQueueItem,
     pollTimeoutMs: number
   ) {
-    const startedAt = currentTime();
-    let shouldWaitBeforePoll = false;
-
-    for (;;) {
-      if (isCanceledQueueItem(item)) {
-        throw new Error(item.error || IMAGE_REQUEST_CANCELLED_MESSAGE);
-      }
-
-      if (hasTimeElapsed(startedAt, pollTimeoutMs)) {
-        item.status = "failed";
-        item.finishedAt = currentTime();
-        item.error = "AI image request timed out";
+    return await waitForProviderBackendTask({
+      requestId,
+      item,
+      pollTimeoutMs,
+      pollIntervalMs: IMAGE_TASK_POLL_INTERVAL_MS,
+      canceledMessage: IMAGE_REQUEST_CANCELLED_MESSAGE,
+      timeoutMessage: "AI image request timed out",
+      lookupFailedMessage: (message) => `AI image task lookup failed: ${message}`,
+      noResultMessage: IMAGE_TASK_NO_RESULT_MESSAGE,
+      applyBackendTask,
+      onLocalQueueChanged: () => {
         trimLocalTestQueue();
         updateTestingState();
-        throw new Error(item.error);
-      }
-
-      if (shouldWaitBeforePoll) {
-        await sleep(IMAGE_TASK_POLL_INTERVAL_MS);
-      }
-      shouldWaitBeforePoll = true;
-
-      let task: AiProviderTestTask;
-      try {
-        task = await aiService.getProviderTestTask(requestId);
-      } catch (error) {
-        if (isCanceledQueueItem(item)) {
-          throw new Error(item.error || IMAGE_REQUEST_CANCELLED_MESSAGE);
-        }
-        item.status = "failed";
-        item.finishedAt = currentTime();
-        item.error = `AI image task lookup failed: ${stringifyErrorMessage(error)}`;
-        trimLocalTestQueue();
-        updateTestingState();
-        throw new Error(item.error);
-      }
-
-      applyBackendTask(task, item);
-      if (task.status === "success" || task.status === "failed") {
-        if (task.result) {
-          return task.result;
-        }
-        throw new Error(task.error || IMAGE_TASK_NO_RESULT_MESSAGE);
-      }
-
-      void refreshBackendQueueStatus();
-    }
+      },
+      refreshBackendQueueStatus,
+      currentTime,
+    });
   }
 
   async function openImageSavedFileLocation(path: string) {
@@ -506,13 +514,10 @@ export const useAiImageRuntimeStore = defineStore("ai-image-runtime", () => {
       message.error || message.content || IMAGE_REQUEST_CANCELLED_MESSAGE
     );
 
-    patchSessionMessage(messageId, {
-      role: "error",
-      status: "canceled",
-      content: message.error || message.content || IMAGE_REQUEST_CANCELLED_MESSAGE,
-      error: message.error || message.content || IMAGE_REQUEST_CANCELLED_MESSAGE,
-      failureKind: "canceled",
-    });
+    patchCanceledImageMessage(
+      messageId,
+      message.error || message.content || IMAGE_REQUEST_CANCELLED_MESSAGE
+    );
     trimLocalTestQueue();
     updateTestingState();
     await refreshBackendQueueStatus();
@@ -532,6 +537,9 @@ export const useAiImageRuntimeStore = defineStore("ai-image-runtime", () => {
     }
 
     const modelConfig = getModelConfig(configId);
+    if (!supportsAiProviderCapability(modelConfig, "image")) {
+      throw new Error(IMAGE_PROVIDER_UNSUPPORTED_MESSAGE);
+    }
     const normalizedImageSize = normalizeImageSize(imageSize);
     const normalizedImageCount = clampNumber(Number(imageCount), 1, 4, 1, 0);
     const session = ensureActiveSession("image", {

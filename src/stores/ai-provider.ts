@@ -1,5 +1,6 @@
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
+import aiProviderRegistryJson from "../config/ai-provider-registry.json";
 import { patchAiPreferenceState, readAiPreferenceState } from "../services/ai-preferences";
 import {
   applyObjectPatch,
@@ -15,7 +16,9 @@ import {
 } from "../utils";
 import type {
   AiActiveConfigIds,
+  AiProviderAdapterId,
   AiModelConfig,
+  AiProviderCapability,
   AiProviderConfig,
   AiProviderQueueMode,
   AiProviderType,
@@ -29,41 +32,41 @@ export const MAX_AI_MODEL_CONCURRENCY = 6;
 export const AI_IMAGE_REQUEST_TIMEOUT_MS = 720_000;
 export const AI_IMAGE_REQUEST_TIMEOUT_MAX_MS = 900_000;
 
-const ANYROUTER_CLAUDE_MODEL_PATTERN = /^claude-(opus|sonnet|haiku)-(\d+)(?:-(\d+))?(?:-\d{8})?$/i;
+type AiProviderRegistryAdapter = {
+  displayName: string;
+  capabilities: AiProviderCapability[];
+  baseUrlHostPatterns?: string[];
+};
+
+type AiProviderRegistryProvider = Pick<
+  AiProviderConfig,
+  "displayName" | "baseUrl" | "model" | "adapterId"
+> & {
+  capabilities?: AiProviderCapability[];
+};
+
+type AiProviderRegistry = {
+  defaultProviderId: AiProviderType;
+  defaultAdapterId: AiProviderAdapterId;
+  adapters: Record<AiProviderAdapterId, AiProviderRegistryAdapter>;
+  providers: Record<AiProviderType, AiProviderRegistryProvider>;
+};
+
+const aiProviderRegistry = aiProviderRegistryJson as AiProviderRegistry;
 
 export const aiProviderDefaults: Record<
   AiProviderType,
-  Pick<AiProviderConfig, "displayName" | "baseUrl" | "model">
-> = {
-  openai: {
-    displayName: "OpenAI",
-    baseUrl: "https://api.openai.com/v1",
-    model: "gpt-4o-mini",
-  },
-  deepseek: {
-    displayName: "DeepSeek",
-    baseUrl: "https://api.deepseek.com/v1",
-    model: "deepseek-chat",
-  },
-  siliconflow: {
-    displayName: "SiliconFlow",
-    baseUrl: "https://api.siliconflow.cn/v1",
-    model: "Qwen/Qwen2.5-7B-Instruct",
-  },
-  anyrouter: {
-    displayName: "AnyRouter",
-    baseUrl: "https://anyrouter.dev/api/v1",
-    model: "anthropic/claude-sonnet-4.6",
-  },
-  custom: {
-    displayName: "Codex Local Gateway",
-    baseUrl: "http://localhost:4444/v1",
-    model: "gpt-5.5",
-  },
-};
+  Pick<AiProviderConfig, "displayName" | "baseUrl" | "model" | "adapterId">
+> = { ...aiProviderRegistry.providers };
+
+export const aiProviderAdapterDefaults: Record<
+  AiProviderAdapterId,
+  Pick<AiProviderRegistryAdapter, "displayName" | "capabilities">
+> = { ...aiProviderRegistry.adapters };
 
 export const defaultAiProviderConfig: AiProviderConfig = {
   provider: "custom",
+  adapterId: aiProviderDefaults.custom.adapterId,
   displayName: aiProviderDefaults.custom.displayName,
   baseUrl: aiProviderDefaults.custom.baseUrl,
   apiKey: "",
@@ -85,44 +88,103 @@ function createId(prefix: string) {
   return createTimestampId(prefix);
 }
 
-function isAnyRouterBaseUrl(value: unknown) {
+type AiProviderCapabilityConfig =
+  | Partial<Pick<AiProviderConfig, "provider" | "baseUrl" | "adapterId">>
+  | null
+  | undefined;
+
+function isKnownProvider(value: unknown): value is AiProviderType {
+  return toTrimmedString(value) in aiProviderRegistry.providers;
+}
+
+function isKnownAdapter(value: unknown): value is AiProviderAdapterId {
+  return toTrimmedString(value) in aiProviderRegistry.adapters;
+}
+
+function normalizeAiProviderType(value: unknown): AiProviderType {
+  return isKnownProvider(value)
+    ? (toTrimmedString(value) as AiProviderType)
+    : aiProviderRegistry.defaultProviderId;
+}
+
+function normalizeAiProviderAdapterId(value: unknown): AiProviderAdapterId {
+  return isKnownAdapter(value)
+    ? (toTrimmedString(value) as AiProviderAdapterId)
+    : aiProviderRegistry.defaultAdapterId;
+}
+
+function getBaseUrlHostname(value: unknown) {
   const baseUrl = toTrimmedString(value);
   if (!baseUrl) {
-    return false;
+    return "";
   }
 
   try {
     const url = new URL(baseUrl);
-    return url.hostname === "anyrouter.dev" || url.hostname === "anyrouter.top";
+    return url.hostname.toLowerCase();
   } catch {
-    return baseUrl.toLowerCase().includes("not found");
+    return baseUrl.toLowerCase();
   }
 }
 
-function normalizeAnyRouterClaudeModel(value: unknown) {
-  const model = toTrimmedString(value);
-  if (!model) {
-    return "";
+function baseUrlMatchesAdapter(adapterId: AiProviderAdapterId, value: unknown) {
+  const adapter = aiProviderRegistry.adapters[adapterId];
+  const patterns = adapter?.baseUrlHostPatterns || [];
+  if (!patterns.length) {
+    return false;
   }
 
-  const normalizedModel = model.toLowerCase().startsWith("anthropic/")
-    ? model.slice("anthropic/".length)
-    : model;
-  const match = normalizedModel.match(ANYROUTER_CLAUDE_MODEL_PATTERN);
-  if (!match) {
-    return model;
-  }
-
-  const [, tier, major, minor] = match;
-  const version = minor ? `${major}.${minor}` : major;
-  return `anthropic/claude-${tier.toLowerCase()}-${version}`;
+  const hostname = getBaseUrlHostname(value);
+  return patterns.some((pattern) => {
+    const cleanPattern = pattern.toLowerCase();
+    return hostname === cleanPattern || hostname.endsWith(`.${cleanPattern}`) || hostname.includes(cleanPattern);
+  });
 }
 
-function normalizeProviderModel(provider: AiProviderType, baseUrl: string, model: unknown) {
-  if (provider === "anyrouter" || isAnyRouterBaseUrl(baseUrl)) {
-    return normalizeAnyRouterClaudeModel(model);
+export function resolveAiProviderAdapterId(configLike: AiProviderCapabilityConfig): AiProviderAdapterId {
+  const matchedAdapter = objectKeys(aiProviderRegistry.adapters).find((adapterId) =>
+    baseUrlMatchesAdapter(adapterId, configLike?.baseUrl)
+  );
+  if (matchedAdapter) {
+    return matchedAdapter;
   }
+
+  if (isKnownAdapter(configLike?.adapterId)) {
+    return toTrimmedString(configLike?.adapterId) as AiProviderAdapterId;
+  }
+
+  const provider = normalizeAiProviderType(configLike?.provider);
+  return normalizeAiProviderAdapterId(aiProviderRegistry.providers[provider]?.adapterId);
+}
+
+function normalizeProviderModel(_provider: AiProviderType, _baseUrl: string, model: unknown) {
   return toTrimmedString(model);
+}
+
+export function resolveAiProviderCapabilities(
+  configLike: AiProviderCapabilityConfig
+): AiProviderCapability[] {
+  const provider = normalizeAiProviderType(configLike?.provider);
+  const providerConfig = aiProviderRegistry.providers[provider];
+  const adapterId = resolveAiProviderAdapterId(configLike);
+  const adapter = aiProviderRegistry.adapters[adapterId];
+  const hasAdapterOverride =
+    isKnownAdapter(configLike?.adapterId) && configLike?.adapterId !== providerConfig?.adapterId;
+  const hasBaseUrlOverride =
+    baseUrlMatchesAdapter(adapterId, configLike?.baseUrl) && adapterId !== providerConfig?.adapterId;
+
+  if (!hasAdapterOverride && !hasBaseUrlOverride && providerConfig?.capabilities?.length) {
+    return [...providerConfig.capabilities];
+  }
+
+  return [...(adapter?.capabilities || aiProviderRegistry.adapters[aiProviderRegistry.defaultAdapterId].capabilities)];
+}
+
+export function supportsAiProviderCapability(
+  configLike: AiProviderCapabilityConfig,
+  capability: AiProviderCapability
+) {
+  return resolveAiProviderCapabilities(configLike).includes(capability);
 }
 
 export function normalizeAiProviderQueueMode(value: unknown): AiProviderQueueMode {
@@ -136,10 +198,14 @@ export function normalizeAiProviderMaxConcurrency(value: unknown) {
 export function normalizeAiProviderConfig(
   raw: Partial<AiProviderConfig> | null | undefined
 ): AiProviderConfig {
-  const provider = (
-    raw?.provider && raw.provider in aiProviderDefaults ? raw.provider : "custom"
-  ) as AiProviderType;
+  const provider = normalizeAiProviderType(raw?.provider);
   const preset = aiProviderDefaults[provider];
+  const baseUrl = raw?.baseUrl || preset.baseUrl;
+  const adapterId = resolveAiProviderAdapterId({
+    provider,
+    baseUrl,
+    adapterId: raw?.adapterId,
+  });
   const rawTimeoutMs = Number(raw?.timeoutMs || defaultAiProviderConfig.timeoutMs);
   const timeoutMs =
     rawTimeoutMs === 20000 ||
@@ -161,15 +227,16 @@ export function normalizeAiProviderConfig(
     ...preset,
     ...raw,
     provider,
+    adapterId,
     displayName: raw?.displayName || preset.displayName,
-    baseUrl: raw?.baseUrl || preset.baseUrl,
+    baseUrl,
     model:
-      normalizeProviderModel(provider, raw?.baseUrl || preset.baseUrl, raw?.model || preset.model) ||
+      normalizeProviderModel(provider, baseUrl, raw?.model || preset.model) ||
       preset.model,
     imageModel:
       normalizeProviderModel(
         provider,
-        raw?.baseUrl || preset.baseUrl,
+        baseUrl,
         raw?.imageModel || defaultAiProviderConfig.imageModel
       ) || defaultAiProviderConfig.imageModel,
     timeoutMs: clampNumber(
@@ -291,6 +358,13 @@ export const useAiProviderStore = defineStore("ai-provider", () => {
     }))
   );
 
+  const adapterOptions = computed(() =>
+    objectKeys(aiProviderAdapterDefaults).map((adapterId) => ({
+      label: aiProviderAdapterDefaults[adapterId].displayName,
+      value: adapterId,
+    }))
+  );
+
   const modelConfigOptions = computed(() =>
     modelConfigs.value.map((item) => ({
       label: item.name || item.displayName || item.model,
@@ -301,6 +375,9 @@ export const useAiProviderStore = defineStore("ai-provider", () => {
   const selectedModelConfig = computed(() => getModelConfig(selectedConfigId.value));
   const activeChatConfig = computed(() => getModelConfig(activeModelConfigIds.value.chat));
   const activeImageConfig = computed(() => getModelConfig(activeModelConfigIds.value.image));
+  const selectedConfigCapabilities = computed(() => resolveAiProviderCapabilities(selectedModelConfig.value));
+  const activeChatConfigCapabilities = computed(() => resolveAiProviderCapabilities(activeChatConfig.value));
+  const activeImageConfigCapabilities = computed(() => resolveAiProviderCapabilities(activeImageConfig.value));
 
   function getModelConfig(configId: string) {
     return (
@@ -308,6 +385,14 @@ export const useAiProviderStore = defineStore("ai-provider", () => {
       firstItem(modelConfigs.value) ||
       normalizeAiModelConfig(defaultAiProviderConfig)
     );
+  }
+
+  function getModelConfigCapabilities(configId: string) {
+    return resolveAiProviderCapabilities(getModelConfig(configId));
+  }
+
+  function modelConfigSupportsCapability(configId: string, capability: AiProviderCapability) {
+    return getModelConfigCapabilities(configId).includes(capability);
   }
 
   function syncEditableConfig(configId = selectedConfigId.value) {
@@ -368,6 +453,7 @@ export const useAiProviderStore = defineStore("ai-provider", () => {
 
     if (patch.provider && patch.provider !== "custom") {
       const preset = aiProviderDefaults[patch.provider];
+      next.adapterId = preset.adapterId;
       next.displayName = preset.displayName;
       next.baseUrl = preset.baseUrl;
       next.model = preset.model;
@@ -420,11 +506,17 @@ export const useAiProviderStore = defineStore("ai-provider", () => {
     activeModelConfigIds,
     isLoaded,
     providerOptions,
+    adapterOptions,
     modelConfigOptions,
     selectedModelConfig,
     activeChatConfig,
     activeImageConfig,
+    selectedConfigCapabilities,
+    activeChatConfigCapabilities,
+    activeImageConfigCapabilities,
     getModelConfig,
+    getModelConfigCapabilities,
+    modelConfigSupportsCapability,
     loadConfig,
     patchConfig,
     saveConfig,

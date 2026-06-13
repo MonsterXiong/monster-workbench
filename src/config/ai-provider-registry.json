@@ -1,0 +1,74 @@
+{
+  "schemaVersion": 1,
+  "defaultProviderId": "custom",
+  "defaultAdapterId": "openai-compatible",
+  "adapters": {
+    "openai-compatible": {
+      "displayName": "OpenAI-compatible",
+      "capabilities": ["models", "chat", "image"]
+    },
+    "anthropic-messages": {
+      "displayName": "Anthropic Messages",
+      "capabilities": ["chat"],
+      "baseUrlHostPatterns": ["api.anthropic.com"]
+    }
+  },
+  "providers": {
+    "openai": {
+      "displayName": "OpenAI",
+      "baseUrl": "https://api.openai.com/v1",
+      "model": "gpt-4o-mini",
+      "adapterId": "openai-compatible",
+      "capabilities": ["models", "chat", "image"]
+    },
+    "deepseek": {
+      "displayName": "DeepSeek",
+      "baseUrl": "https://api.deepseek.com",
+      "model": "deepseek-v4-flash",
+      "adapterId": "openai-compatible",
+      "capabilities": ["models", "chat"]
+    },
+    "siliconflow": {
+      "displayName": "SiliconFlow",
+      "baseUrl": "https://api.siliconflow.cn/v1",
+      "model": "Qwen/Qwen2.5-7B-Instruct",
+      "adapterId": "openai-compatible",
+      "capabilities": ["models", "chat"]
+    },
+    "kimi": {
+      "displayName": "Kimi",
+      "baseUrl": "https://api.moonshot.ai/v1",
+      "model": "kimi-k2.6",
+      "adapterId": "openai-compatible",
+      "capabilities": ["models", "chat"]
+    },
+    "minimax": {
+      "displayName": "MiniMax",
+      "baseUrl": "https://api.minimax.io/v1",
+      "model": "MiniMax-M3",
+      "adapterId": "openai-compatible",
+      "capabilities": ["models", "chat"]
+    },
+    "glm": {
+      "displayName": "GLM",
+      "baseUrl": "https://api.z.ai/api/paas/v4",
+      "model": "GLM-5.1",
+      "adapterId": "openai-compatible",
+      "capabilities": ["models", "chat"]
+    },
+    "ollama": {
+      "displayName": "Ollama",
+      "baseUrl": "http://localhost:11434/v1",
+      "model": "qwen3:8b",
+      "adapterId": "openai-compatible",
+      "capabilities": ["models", "chat"]
+    },
+    "custom": {
+      "displayName": "Codex Local Gateway",
+      "baseUrl": "http://localhost:4444/v1",
+      "model": "gpt-5.5",
+      "adapterId": "openai-compatible",
+      "capabilities": ["models", "chat", "image"]
+    }
+  }
+}

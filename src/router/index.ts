@@ -31,11 +31,6 @@ export const router = createRouter({
       component: () => import("../views/ai/AiPage.vue"),
     },
     {
-      path: "/creative",
-      name: "creative",
-      component: () => import("../views/creative/CreativePage.vue"),
-    },
-    {
       path: "/settings",
       name: "settings",
       component: () => import("../views/settings/SettingsPage.vue"),

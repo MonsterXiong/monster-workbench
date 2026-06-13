@@ -1,31 +1,35 @@
 use crate::infra::path::PathProvider;
-use crate::infra::sensitive::sanitize_sensitive_text;
 use crate::infra::{AppError, AppResult};
-use serde::{Deserialize, Serialize};
-use serde_json::json;
+use crate::services::ai_provider_output::cleanup_generated_output_dir;
+use crate::services::ai_provider_process::{
+    configure_python_sidecar_command, join_output_reader, parse_sidecar_result, sanitize_secret,
+    spawn_limited_output_reader, terminate_child, truncate_output, SIDECAR_STDERR_MAX_BYTES,
+    SIDECAR_STDOUT_MAX_BYTES,
+};
+pub use crate::services::ai_provider_types::{AiProviderConfig, AiProviderTestResult};
+use serde::Serialize;
+use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
-use std::io::{Read, Write};
-use std::path::{Path, PathBuf};
-use std::process::{Child, Command, ExitStatus, Stdio};
+use std::io::Write;
+use std::path::PathBuf;
+use std::process::{Child, Command, ExitStatus};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Condvar, Mutex, OnceLock,
 };
-use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Manager, Runtime, Wry};
 
-const GENERATED_IMAGE_MAX_FILES: usize = 40;
-const GENERATED_IMAGE_MAX_AGE: Duration = Duration::from_secs(7 * 24 * 60 * 60);
-const SIDECAR_STDIO_PREVIEW_CHARS: usize = 16_384;
-const SIDECAR_STDOUT_MAX_BYTES: usize = 1024 * 1024;
-const SIDECAR_STDERR_MAX_BYTES: usize = 64 * 1024;
 const AI_PROVIDER_DISPLAY_NAME_MAX_CHARS: usize = 128;
 const AI_PROVIDER_BASE_URL_MAX_CHARS: usize = 2_048;
 const AI_PROVIDER_API_KEY_MAX_CHARS: usize = 4_096;
 const AI_PROVIDER_MODEL_MAX_CHARS: usize = 256;
 const AI_PROVIDER_PROMPT_MAX_CHARS: usize = 8_192;
+const AI_PROVIDER_REGISTRY_JSON: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../src/config/ai-provider-registry.json"
+));
 const SUPPORTED_IMAGE_SIZES: &[&str] = &[
     "1008x1792",
     "1008x1344",
@@ -61,29 +65,6 @@ const SUPPORTED_IMAGE_SIZES: &[&str] = &[
     "3840x1280",
     "1280x3840",
 ];
-const PYTHON_SIDECAR_ENV_ALLOWLIST: &[&str] = &[
-    "PATH",
-    "Path",
-    "PATHEXT",
-    "SystemRoot",
-    "WINDIR",
-    "COMSPEC",
-    "TEMP",
-    "TMP",
-    "USERPROFILE",
-    "APPDATA",
-    "LOCALAPPDATA",
-    "HOME",
-    "SSL_CERT_FILE",
-    "SSL_CERT_DIR",
-    "HTTP_PROXY",
-    "HTTPS_PROXY",
-    "NO_PROXY",
-    "http_proxy",
-    "https_proxy",
-    "no_proxy",
-];
-
 pub struct AiProviderService<R: Runtime = Wry> {
     app_handle: AppHandle<R>,
 }
@@ -418,35 +399,6 @@ impl<R: Runtime> AiProviderService<R> {
             "启动 Python AI sidecar 失败，请确认已安装 Python 3 并加入 PATH。{}",
             errors.join("; ")
         )))
-    }
-}
-
-fn truncate_output(value: &str) -> String {
-    value.chars().take(SIDECAR_STDIO_PREVIEW_CHARS).collect()
-}
-
-fn configure_python_sidecar_command(command: &mut Command, args: &[String], script_path: &Path) {
-    command.env_clear();
-    preserve_python_sidecar_env(command);
-    command
-        .args(args)
-        .env("PYTHONIOENCODING", "utf-8")
-        .env("PYTHONUTF8", "1")
-        .env("PYTHONDONTWRITEBYTECODE", "1")
-        .env("PYTHONNOUSERSITE", "1")
-        .env_remove("PYTHONHOME")
-        .env_remove("PYTHONPATH")
-        .current_dir(script_path.parent().unwrap_or_else(|| Path::new(".")))
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-}
-
-fn preserve_python_sidecar_env(command: &mut Command) {
-    for name in PYTHON_SIDECAR_ENV_ALLOWLIST {
-        if let Some(value) = std::env::var_os(name) {
-            command.env(name, value);
-        }
     }
 }
 
@@ -1155,6 +1107,7 @@ mod queue_tests {
     fn test_config(timeout_ms: u64) -> AiProviderConfig {
         AiProviderConfig {
             provider: "custom".to_string(),
+            adapter_id: "openai-compatible".to_string(),
             display_name: "Mock".to_string(),
             base_url: "https://example.com/v1".to_string(),
             api_key: "secret".to_string(),
@@ -1979,93 +1932,19 @@ mod queue_tests {
     }
 }
 
-#[cfg(test)]
-fn command_has_env(command: &Command, key: &str) -> bool {
-    command
-        .get_envs()
-        .any(|(name, value)| name == std::ffi::OsStr::new(key) && value.is_some())
-}
-
-fn spawn_limited_output_reader<R>(
-    mut reader: R,
-    max_bytes: usize,
-    label: &'static str,
-) -> JoinHandle<AppResult<Vec<u8>>>
-where
-    R: Read + Send + 'static,
-{
-    std::thread::spawn(move || read_limited_output(&mut reader, max_bytes, label))
-}
-
-fn read_limited_output<R: Read>(
-    reader: &mut R,
-    max_bytes: usize,
-    label: &str,
-) -> AppResult<Vec<u8>> {
-    let mut output = Vec::new();
-    let mut buffer = [0_u8; 8192];
-
-    loop {
-        let read = reader
-            .read(&mut buffer)
-            .map_err(|error| AppError::Process(format!("读取 AI sidecar {label} 失败: {error}")))?;
-        if read == 0 {
-            return Ok(output);
-        }
-
-        if output.len().saturating_add(read) > max_bytes {
-            return Err(AppError::Process(format!(
-                "AI sidecar {label} 输出超过 {} KB，已停止读取",
-                max_bytes / 1024
-            )));
-        }
-
-        output.extend_from_slice(&buffer[..read]);
-    }
-}
-
-fn join_output_reader(handle: Option<JoinHandle<AppResult<Vec<u8>>>>) -> AppResult<Vec<u8>> {
-    let Some(handle) = handle else {
-        return Ok(Vec::new());
-    };
-
-    handle
-        .join()
-        .map_err(|_| AppError::Process("AI sidecar 输出读取线程异常".to_string()))?
-}
-
-fn parse_sidecar_result(stdout: &str, stderr: &str) -> AppResult<AiProviderTestResult> {
-    let stdout_preview = truncate_output(stdout);
-    let stderr_preview = truncate_output(stderr);
-    if stdout.as_bytes().len() > SIDECAR_STDOUT_MAX_BYTES {
-        return Err(AppError::Process(format!(
-            "AI sidecar 输出超过 {} MB，已拒绝解析；stdout={}; stderr={}",
-            SIDECAR_STDOUT_MAX_BYTES / 1024 / 1024,
-            sanitize_secret(&stdout_preview),
-            sanitize_secret(&stderr_preview)
-        )));
-    }
-
-    serde_json::from_str(stdout).map_err(|error| {
-        AppError::Process(format!(
-            "AI sidecar 输出格式异常: {}; stdout={}; stderr={}",
-            error,
-            sanitize_secret(&stdout_preview),
-            sanitize_secret(&stderr_preview)
-        ))
-    })
-}
-
 fn validate_provider_config(config: &AiProviderConfig, action: &str) -> AppResult<()> {
     if !matches!(action, "models" | "chat" | "image") {
         return Err(AppError::Config("不支持的 AI 测试动作".to_string()));
     }
 
-    if !matches!(
-        config.provider.as_str(),
-        "openai" | "deepseek" | "siliconflow" | "custom"
-    ) {
+    if !is_supported_provider_id(&config.provider) {
         return Err(AppError::Config("不支持的 AI 模型提供商".to_string()));
+    }
+
+    if !provider_supports_test_action(config, action) {
+        return Err(AppError::Config(
+            "当前 AI 模型配置不支持该测试动作".to_string(),
+        ));
     }
 
     if !matches!(config.queue_mode.as_str(), "serial" | "concurrent") {
@@ -2149,6 +2028,132 @@ fn validate_provider_config(config: &AiProviderConfig, action: &str) -> AppResul
     Ok(())
 }
 
+fn is_supported_provider_id(provider: &str) -> bool {
+    let registry = ai_provider_registry();
+    registry_provider(&registry, provider).is_some() || provider.trim() == "anthropic"
+}
+
+fn ai_provider_registry() -> Value {
+    serde_json::from_str(AI_PROVIDER_REGISTRY_JSON).unwrap_or_else(|_| json!({}))
+}
+
+fn registry_provider<'a>(registry: &'a Value, provider: &str) -> Option<&'a Value> {
+    registry.get("providers")?.get(provider.trim())
+}
+
+fn registry_adapter<'a>(registry: &'a Value, adapter_id: &str) -> Option<&'a Value> {
+    registry.get("adapters")?.get(adapter_id.trim())
+}
+
+fn registry_text(value: &Value, key: &str) -> String {
+    value
+        .get(key)
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string()
+}
+
+fn registry_default_adapter_id(registry: &Value) -> String {
+    registry
+        .get("defaultAdapterId")
+        .and_then(Value::as_str)
+        .unwrap_or("openai-compatible")
+        .to_string()
+}
+
+fn registry_provider_adapter_id(registry: &Value, provider: &str) -> String {
+    registry_provider(registry, provider)
+        .map(|record| registry_text(record, "adapterId"))
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| {
+            if provider.trim() == "anthropic" {
+                "anthropic-messages".to_string()
+            } else {
+                registry_default_adapter_id(registry)
+            }
+        })
+}
+
+fn registry_record_has_capability(record: &Value, capability: &str) -> bool {
+    record
+        .get("capabilities")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .any(|item| item.as_str().is_some_and(|value| value == capability))
+        })
+        .unwrap_or(false)
+}
+
+fn registry_record_declares_capabilities(record: &Value) -> bool {
+    record
+        .get("capabilities")
+        .and_then(Value::as_array)
+        .is_some()
+}
+
+fn base_url_matches_adapter_record(adapter: &Value, base_url: &str) -> bool {
+    let clean_base_url = base_url.trim().to_ascii_lowercase();
+    adapter
+        .get("baseUrlHostPatterns")
+        .and_then(Value::as_array)
+        .map(|patterns| {
+            patterns.iter().any(|pattern| {
+                pattern
+                    .as_str()
+                    .map(|value| clean_base_url.contains(&value.to_ascii_lowercase()))
+                    .unwrap_or(false)
+            })
+        })
+        .unwrap_or(false)
+}
+
+fn base_url_matches_adapter(registry: &Value, adapter_id: &str, base_url: &str) -> bool {
+    registry_adapter(registry, adapter_id)
+        .map(|adapter| base_url_matches_adapter_record(adapter, base_url))
+        .unwrap_or(false)
+}
+
+fn resolve_provider_adapter_id(registry: &Value, config: &AiProviderConfig) -> String {
+    if let Some(adapters) = registry.get("adapters").and_then(Value::as_object) {
+        for (adapter_id, adapter) in adapters {
+            if base_url_matches_adapter_record(adapter, &config.base_url) {
+                return adapter_id.to_string();
+            }
+        }
+    }
+
+    let explicit_adapter = config.adapter_id.trim();
+    if !explicit_adapter.is_empty() && registry_adapter(registry, explicit_adapter).is_some() {
+        return explicit_adapter.to_string();
+    }
+
+    registry_provider_adapter_id(registry, &config.provider)
+}
+
+fn provider_supports_test_action(config: &AiProviderConfig, action: &str) -> bool {
+    let registry = ai_provider_registry();
+    let adapter_id = resolve_provider_adapter_id(&registry, config);
+    let provider_adapter_id = registry_provider_adapter_id(&registry, &config.provider);
+    let has_adapter_override =
+        !config.adapter_id.trim().is_empty() && config.adapter_id.trim() != provider_adapter_id;
+    let has_base_url_override = adapter_id != provider_adapter_id
+        && base_url_matches_adapter(&registry, &adapter_id, &config.base_url);
+
+    if !has_adapter_override && !has_base_url_override {
+        if let Some(provider) = registry_provider(&registry, &config.provider) {
+            if registry_record_declares_capabilities(provider) {
+                return registry_record_has_capability(provider, action);
+            }
+        }
+    }
+
+    registry_adapter(&registry, &adapter_id)
+        .map(|adapter| registry_record_has_capability(adapter, action))
+        .unwrap_or(false)
+}
+
 fn validate_text_len(label: &str, value: &str, max_chars: usize) -> AppResult<()> {
     if value.chars().count() > max_chars {
         return Err(AppError::Config(format!(
@@ -2158,10 +2163,6 @@ fn validate_text_len(label: &str, value: &str, max_chars: usize) -> AppResult<()
     }
 
     Ok(())
-}
-
-fn sanitize_secret(value: &str) -> String {
-    sanitize_sensitive_text(value)
 }
 
 fn build_sidecar_input(
@@ -2183,186 +2184,14 @@ fn should_prepare_output_dir(action: &str) -> bool {
     action == "image"
 }
 
-fn terminate_child(child: &mut Child) {
-    if matches!(child.try_wait(), Ok(Some(_))) {
-        return;
-    }
-
-    let _ = child.kill();
-    let _ = child.wait();
-}
-
-fn cleanup_generated_output_dir(output_dir: &Path) -> AppResult<()> {
-    let now = SystemTime::now();
-    let mut files = collect_generated_files(output_dir)?;
-
-    for file in files
-        .iter()
-        .filter(|file| is_file_expired(now, file.modified_at))
-    {
-        fs::remove_file(&file.path).map_err(|error| {
-            AppError::Io(format!(
-                "删除过期 AI 生图缓存失败 ({}): {}",
-                file.path.display(),
-                error
-            ))
-        })?;
-    }
-
-    files = collect_generated_files(output_dir)?;
-    if files.len() <= GENERATED_IMAGE_MAX_FILES {
-        return Ok(());
-    }
-
-    files.sort_by(|left, right| right.modified_at.cmp(&left.modified_at));
-    for file in files.into_iter().skip(GENERATED_IMAGE_MAX_FILES) {
-        fs::remove_file(&file.path).map_err(|error| {
-            AppError::Io(format!(
-                "裁剪 AI 生图缓存数量失败 ({}): {}",
-                file.path.display(),
-                error
-            ))
-        })?;
-    }
-
-    Ok(())
-}
-
-fn is_file_expired(now: SystemTime, modified_at: SystemTime) -> bool {
-    now.duration_since(modified_at)
-        .map(|elapsed| elapsed >= GENERATED_IMAGE_MAX_AGE)
-        .unwrap_or(false)
-}
-
-fn collect_generated_files(output_dir: &Path) -> AppResult<Vec<GeneratedFileMeta>> {
-    let mut files = Vec::new();
-    let entries = fs::read_dir(output_dir)
-        .map_err(|error| AppError::Io(format!("读取 AI 生图缓存目录失败: {}", error)))?;
-
-    for entry in entries {
-        let entry =
-            entry.map_err(|error| AppError::Io(format!("遍历 AI 生图缓存目录失败: {}", error)))?;
-        let file_type = entry
-            .file_type()
-            .map_err(|error| AppError::Io(format!("读取 AI 生图缓存文件类型失败: {}", error)))?;
-        if !file_type.is_file() {
-            continue;
-        }
-
-        let metadata = entry
-            .metadata()
-            .map_err(|error| AppError::Io(format!("读取 AI 生图缓存元数据失败: {}", error)))?;
-        files.push(GeneratedFileMeta {
-            path: entry.path(),
-            modified_at: metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH),
-        });
-    }
-
-    Ok(files)
-}
-
-struct GeneratedFileMeta {
-    path: PathBuf,
-    modified_at: SystemTime,
-}
-
-fn default_queue_mode() -> String {
-    "serial".to_string()
-}
-
-fn default_max_concurrency() -> usize {
-    3
-}
-
-fn default_image_count() -> usize {
-    1
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AiProviderConfig {
-    pub provider: String,
-    pub display_name: String,
-    pub base_url: String,
-    pub api_key: String,
-    pub remember_api_key: bool,
-    pub model: String,
-    pub test_prompt: String,
-    pub image_model: String,
-    pub image_prompt: String,
-    pub image_size: String,
-    #[serde(default = "default_image_count")]
-    pub image_count: usize,
-    pub timeout_ms: u64,
-    #[serde(default = "default_queue_mode")]
-    pub queue_mode: String,
-    #[serde(default = "default_max_concurrency")]
-    pub max_concurrency: usize,
-    #[serde(default)]
-    pub queue_key: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AiProviderTestResult {
-    pub request_id: Option<String>,
-    pub ok: bool,
-    pub action: String,
-    pub provider: String,
-    pub model: String,
-    pub base_url: String,
-    pub latency_ms: u64,
-    pub queue_wait_ms: Option<u64>,
-    pub total_latency_ms: Option<u64>,
-    pub message: String,
-    pub status_code: Option<u16>,
-    pub models: Option<Vec<String>>,
-    pub text: Option<String>,
-    pub image_urls: Option<Vec<String>>,
-    pub image_paths: Option<Vec<String>>,
-    pub saved_files: Option<Vec<AiProviderSavedFile>>,
-    pub api_image_size: Option<String>,
-    pub requested_image_size: Option<String>,
-    pub actual_image_size: Option<String>,
-    pub fallback_image_size: Option<String>,
-    pub image_attempts: Option<u32>,
-    pub failure_kind: Option<String>,
-    pub raw_preview: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AiProviderSavedFile {
-    pub path: String,
-    pub size_bytes: u64,
-    pub mime_type: String,
-    pub dimensions: Option<String>,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn make_temp_dir(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "monster-workbench-{}-{}",
-            name,
-            SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .expect("system time should be available")
-                .as_nanos()
-        ));
-        fs::create_dir_all(&dir).expect("temp dir should create");
-        dir
-    }
-
-    fn write_temp_file(path: &Path, contents: &[u8]) {
-        fs::write(path, contents).expect("temp file should write");
-    }
-
     fn make_config() -> AiProviderConfig {
         AiProviderConfig {
             provider: "custom".to_string(),
+            adapter_id: "openai-compatible".to_string(),
             display_name: "Mock".to_string(),
             base_url: "https://example.com/v1".to_string(),
             api_key: "secret".to_string(),
@@ -2388,116 +2217,6 @@ mod tests {
     }
 
     #[test]
-    fn sanitize_secret_masks_common_token_markers() {
-        let raw = "Authorization: Bearer sk-live-secret token=AIzaSySecretValue";
-        let sanitized = sanitize_secret(raw);
-
-        assert!(!sanitized.contains("sk-live-secret"));
-        assert!(!sanitized.contains("AIzaSySecretValue"));
-        assert!(sanitized.contains("["));
-        assert_ne!(sanitized, raw);
-    }
-
-    #[test]
-    fn sanitize_secret_masks_json_like_secret_values() {
-        let raw = r#"{"apiKey":"plain-secret","password":"p@ss","authorization":"Basic abc"}"#;
-        let sanitized = sanitize_secret(raw);
-
-        assert!(!sanitized.contains("plain-secret"));
-        assert!(!sanitized.contains("p@ss"));
-        assert!(!sanitized.contains("Basic abc"));
-        assert!(sanitized.contains(r#""apiKey":"[已脱敏]""#));
-        assert!(sanitized.contains(r#""password":"[已脱敏]""#));
-        assert!(sanitized.contains(r#""authorization":"[已脱敏]""#));
-    }
-
-    #[test]
-    fn parse_sidecar_result_accepts_stdout_larger_than_preview_limit() {
-        let models = (0..200)
-            .map(|index| format!("model-{index}-{}", "x".repeat(180)))
-            .collect::<Vec<_>>();
-        let stdout = serde_json::to_string(&AiProviderTestResult {
-            request_id: Some("large-stdout".to_string()),
-            ok: true,
-            action: "models".to_string(),
-            provider: "custom".to_string(),
-            model: "chat-test".to_string(),
-            base_url: "https://example.com/v1".to_string(),
-            latency_ms: 100,
-            queue_wait_ms: None,
-            total_latency_ms: None,
-            message: "模型列表查询成功".to_string(),
-            status_code: Some(200),
-            models: Some(models),
-            text: None,
-            image_urls: None,
-            image_paths: None,
-            saved_files: None,
-            api_image_size: None,
-            requested_image_size: None,
-            actual_image_size: None,
-            fallback_image_size: None,
-            image_attempts: None,
-            failure_kind: None,
-            raw_preview: Some("{}".to_string()),
-        })
-        .expect("result should serialize");
-
-        assert!(stdout.chars().count() > SIDECAR_STDIO_PREVIEW_CHARS);
-        let parsed = parse_sidecar_result(&stdout, "").expect("large stdout should parse");
-        assert_eq!(parsed.request_id, Some("large-stdout".to_string()));
-        assert_eq!(parsed.models.expect("models should exist").len(), 200);
-    }
-
-    #[test]
-    fn parse_sidecar_result_rejects_oversized_stdout() {
-        let stdout = format!(
-            r#"{{"apiKey":"sk-should-not-leak","ok":true,"rawPreview":"{}"}}"#,
-            "x".repeat(SIDECAR_STDOUT_MAX_BYTES + 1)
-        );
-        let error = parse_sidecar_result(&stdout, "")
-            .expect_err("oversized stdout should be rejected")
-            .to_response()
-            .detail;
-
-        assert!(error.contains("AI sidecar 输出超过"));
-        assert!(!error.contains("sk-should-not-leak"));
-        assert!(error.contains(r#""apiKey":"[已脱敏]""#));
-    }
-
-    #[test]
-    fn read_limited_output_rejects_stream_over_limit() {
-        let data = vec![b'x'; SIDECAR_STDERR_MAX_BYTES + 1];
-        let mut reader = std::io::Cursor::new(data);
-        let error = read_limited_output(&mut reader, SIDECAR_STDERR_MAX_BYTES, "stderr")
-            .expect_err("oversized stream should be rejected")
-            .to_response()
-            .detail;
-
-        assert!(error.contains("AI sidecar stderr 输出超过"));
-    }
-
-    #[test]
-    fn cleanup_generated_output_dir_trims_excess_files() {
-        let dir = make_temp_dir("ai-generated-trim");
-        for index in 0..(GENERATED_IMAGE_MAX_FILES + 3) {
-            write_temp_file(&dir.join(format!("file-{index:02}.png")), b"png");
-            std::thread::sleep(Duration::from_millis(5));
-        }
-
-        cleanup_generated_output_dir(&dir).expect("cleanup should succeed");
-
-        let remaining = collect_generated_files(&dir).expect("files should be readable");
-        assert_eq!(remaining.len(), GENERATED_IMAGE_MAX_FILES);
-        assert!(!dir.join("file-00.png").exists());
-        assert!(dir
-            .join(format!("file-{:02}.png", GENERATED_IMAGE_MAX_FILES + 2))
-            .exists());
-
-        fs::remove_dir_all(&dir).expect("temp dir should clean");
-    }
-
-    #[test]
     fn non_image_action_does_not_require_generated_output_dir() {
         assert!(!should_prepare_output_dir("chat"));
         assert!(!should_prepare_output_dir("models"));
@@ -2514,6 +2233,58 @@ mod tests {
         assert_eq!(parsed["action"], "chat");
         assert_eq!(parsed["requestId"], "req-1");
         assert_eq!(parsed["outputDir"], "");
+    }
+
+    #[test]
+    fn validate_provider_config_accepts_mainstream_openai_compatible_presets() {
+        for provider in [
+            "openai",
+            "deepseek",
+            "siliconflow",
+            "kimi",
+            "minimax",
+            "glm",
+            "ollama",
+            "custom",
+        ] {
+            let mut config = make_config();
+            config.provider = provider.to_string();
+
+            validate_provider_config(&config, "chat")
+                .unwrap_or_else(|error| panic!("{provider} should be accepted: {error:?}"));
+        }
+    }
+
+    #[test]
+    fn validate_provider_config_rejects_unsupported_provider_action() {
+        let mut config = make_config();
+        config.provider = "deepseek".to_string();
+
+        assert!(validation_detail(&config, "image").contains("不支持该测试动作"));
+    }
+
+    #[test]
+    fn validate_provider_config_treats_anthropic_native_as_chat_only() {
+        let mut config = make_config();
+        config.base_url = "https://api.anthropic.com".to_string();
+
+        validate_provider_config(&config, "chat")
+            .expect("anthropic native chat should be accepted");
+        assert!(validation_detail(&config, "models").contains("不支持该测试动作"));
+        assert!(validation_detail(&config, "image").contains("不支持该测试动作"));
+    }
+
+    #[test]
+    fn validate_provider_config_accepts_third_party_anthropic_adapter_as_chat_only() {
+        let mut config = make_config();
+        config.provider = "custom".to_string();
+        config.adapter_id = "anthropic-messages".to_string();
+        config.base_url = "https://anthropic-gateway.example.com".to_string();
+
+        validate_provider_config(&config, "chat")
+            .expect("third-party anthropic adapter chat should be accepted");
+        assert!(validation_detail(&config, "models").contains("不支持该测试动作"));
+        assert!(validation_detail(&config, "image").contains("不支持该测试动作"));
     }
 
     #[test]
@@ -2600,58 +2371,6 @@ mod tests {
                 "{size} should be rejected until a real generation run verifies it"
             );
         }
-    }
-
-    #[test]
-    fn is_file_expired_uses_generated_image_max_age_boundary() {
-        let now = SystemTime::now();
-        let expired = now - GENERATED_IMAGE_MAX_AGE - Duration::from_secs(1);
-        let fresh = now - Duration::from_secs(60);
-
-        assert!(is_file_expired(now, expired));
-        assert!(!is_file_expired(now, fresh));
-    }
-
-    #[test]
-    fn terminate_child_reaps_finished_process_without_error() {
-        let mut child = if cfg!(windows) {
-            Command::new("cmd")
-                .args(["/C", "exit", "0"])
-                .spawn()
-                .expect("cmd child should spawn")
-        } else {
-            Command::new("sh")
-                .args(["-c", "exit 0"])
-                .spawn()
-                .expect("sh child should spawn")
-        };
-
-        child.wait().expect("child should finish");
-        terminate_child(&mut child);
-    }
-
-    #[test]
-    fn python_sidecar_command_uses_isolated_runtime_env() {
-        let script_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("sidecars")
-            .join("python")
-            .join("ai_provider_tester.py");
-        let args = vec![script_path.to_string_lossy().to_string()];
-        let mut command = Command::new("python");
-
-        configure_python_sidecar_command(&mut command, &args, &script_path);
-
-        assert!(command_has_env(&command, "PYTHONIOENCODING"));
-        assert!(command_has_env(&command, "PYTHONUTF8"));
-        assert!(command_has_env(&command, "PYTHONDONTWRITEBYTECODE"));
-        assert!(command_has_env(&command, "PYTHONNOUSERSITE"));
-        assert!(!command_has_env(&command, "PYTHONPATH"));
-        assert!(!command_has_env(&command, "PYTHONHOME"));
-        assert_eq!(command.get_current_dir(), script_path.parent());
-        assert_eq!(
-            command.get_args().collect::<Vec<_>>(),
-            vec![std::ffi::OsStr::new(args[0].as_str())]
-        );
     }
 
     #[test]

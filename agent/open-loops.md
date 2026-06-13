@@ -1,25 +1,21 @@
 # Open Loops
 
-本文件只保留当前仍未闭环、且会影响后续推进的事项。已完成 Goal 的历史记录不再堆积在这里。
+本文只保留当前仍未闭环、且会影响后续推进的事项。已移除的旧独立创作工作台、批量任务、任务队列、资产库、常驻运行时和历史执行包事项不再记录。
 
-## 2026-06-11 架构硬化待跟进
+## AI 工作台
 
-- [ ] 基于 `docs/architecture-current-state.md` 和实际代码，确认 post-goal architecture hardening 的拆分顺序与验收边界。
-- [ ] 继续收口 AI 域：2026-06-12 复核确认 `src/stores/ai.ts` 已是薄 façade 且不直接调用 service；`syncAiProviderBackendQueue` 已是共享 service helper。后续重点改为约束 `AiImagePanel.vue`、`ai-image-runtime.ts`、`ai-provider-runtime.ts` 膨胀，必要时抽 image session list、size picker、preview/actions、task polling、pending image recovery、cancel/result patch 等稳定区块，并在改 AI 页面时逐步减少对 `useAiStore()` 兼容入口的依赖。
-- [ ] 继续收口 Creative 前端：2026-06-12 复核确认 `CreativeWorkflowDemo.vue` 已是项目中心 orchestration shell；后续不要为文件名盲拆，优先拆 `CreativeTabBatch.vue` / `CreativeTabAssets.vue` 内部表单、结果面板、任务表和图片墙等宽区块。
-- [ ] 继续产品化 `/creative` 三栏壳层：2026-06-12 复核确认左栏项目切换已接真实 store，但分类/tag 仍未驱动中间 workspace；右栏 `CreativeTaskForm` 是能力较窄的 quick launcher，与中间 Goal/Batch tabs 入口重叠但不等价。下一步先定义分类/tag -> workspace 的交互契约、quick forms 是否保留，再做真实窗口信息密度验收并决定是否扩展成正式资产库与 Agent 监控台。
-- [ ] 继续收口 Creative service / backend：2026-06-13 再次按代码复核确认 Rust `TaskService` 仍是 task/asset/event 可信入口，`run_review_asset_quality_stub` 应继续冻结为 demo/stub；`BatchJobService` supervisor / prompt worker shell / image worker shell 仍短期留在 Rust，不新增正式生产 worker 分支。2026-06-13 已落地 worker ownership / lease migration v4、旧库兼容回归、repo + `WorkerQueueService` 层 lease-aware claim/heartbeat/complete/recover 测试、Rust-owned localhost `/worker/*` control API 首段与启动过期 lease recovery、`/worker/complete` 通用非文件与图片文件 `sidecarResult` trusted settle，以及 Python worker loop 对 `image.prompt.batch` / `image.generate.batch` 的首段消费；lease-aware claim 与 legacy `claim_next_queued_task` 都已遵守父 batch running 状态和 `concurrency` 并发槽；cancelled trusted settle 会把 sidecar `modelRuns` 入库状态归一为 `cancelled`；lease complete / expired lease recovery / legacy complete / startup recovery 已能在父 batch drain 后由 Rust 收敛为 `completed`；下一步评估 worker shell / supervisor 迁移边界。
-- [ ] 评估前后端分域对齐：前端已拆出 `creative-task / creative-asset / creative-goal / creative-batch / creative-project` service/store；Rust 侧 asset CRUD 暂不为拆文件名而拆，后续等资产版本、来源建模稳定后再决定是否独立 `AssetService`。
-- [ ] 完成 `creative_db` 后续治理：2026-06-13 复核确认当前已有 4 个 Rust 内联 migration，worker lease 字段和 repo 层 lease-aware API 已落地；`creative_projects` 仍仅有 upsert/get/list，项目关联仍是字符串 `project_id`，asset provenance 仍依赖 `metadata_json` / `asset_links`。下一批 schema 实现前先补 project FK/provenance 字段缺失库、legacy running task、既有 project/asset/batch/goal 数据等旧库兼容矩阵，再决定 archive command、稳定项目键和结构化 provenance 字段。
-- [ ] 继续收口 model provider 观测：2026-06-13 复核确认正式 creative workflow 已通过 Rust trusted settle 写 `model_runs`，但 AI Provider 工作台仍是诊断链路，不写 `model_runs`；`model_runs` 也还没有正式 list/filter command 或 UI 仪表盘。后续只有在把 provider 测试结果提升为正式 creative task / asset 时，才补 `creative_tasks`、`model_runs`、`task_events` 归档；做观测面板前先补受控查询 API，不要让前端直查 DB，也不要把 `ai_provider_tester.py` 直接当生产审计入口。
-- [ ] 复核 AI 工作台取消/重试收口后的真实 Tauri 行为：2026-06-13 Browser smoke 已确认 `/ai?tab=chat` 与 `/ai?tab=image` 的失败/取消状态、重试入口和“已取消”筛选；后续仍需在真实 Tauri 窗口用有效 Provider 覆盖 pending 对话取消、running 对话中止、running 生图中止和刷新恢复一致性。
-- [ ] 继续推进 Python workflow runtime：`generate_image_prompt`、`image.prompt.batch` 与 `image.generate.batch` 已由 Python sidecar 执行业务 workflow，并保留 Rust settle / model_runs / task_events / asset 写入。2026-06-13 lease schema / repo / service / localhost control API 首段已落地，`/worker/checkpoint` 已要求 Python worker 带回 `workerId/runtimeInstanceId/claimToken` 并校验当前 lease，token 不匹配或 lease 过期时返回取消，task 自身 `cancelling/cancelled` 或父 batch `cancelled` 也返回取消，同时保持父 batch `paused` 不打断 in-flight worker；`/worker/complete` 已能 trusted settle 通用非文件和 `image.generate.batch` 图片文件 sidecar result，且 cancelled settle 会保持 task 与 `model_runs.status` 一致；worker control server 启动时也会先回收过期 lease；Python worker loop 已通过 env 消费 `/worker/*` 并首段处理 `image.prompt.batch` / `image.generate.batch`，但仍不能让 Python 直写 SQLite，也不能把 `complete_creative_task` 当作 sidecar complete API。
+- [ ] 继续拆分 `src-tauri/src/services/ai_service.rs`：首轮已抽出 `ai_provider_types.rs`、`ai_provider_config.rs`、`ai_provider_process.rs`、`ai_provider_output.rs`；下一步优先拆内部队列、任务注册/取消、provider registry 校验，保持现有 Tauri command 和 DTO contract 不变。
+- [ ] AI 生图前端热点已完成首轮拆分：`image session list`、composer settings、composer prompt tools、预览弹窗、message/result display 已分别抽到 `src/views/ai/components/image/`；后续只有在新增生图工作区功能前，继续按稳定 UI / action helper 小步收窄 `src/views/ai/components/AiImagePanel.vue`。
+- [ ] 收窄 AI runtime helper：task polling 与 queued cancel 同步已抽到 `src/stores/ai-provider-task-runtime.ts`；provider/image result patch 已做首轮聚合；后续继续收窄 pending image recovery 与 `generateImageMessage` 成功/失败分支，且新逻辑不要回流到 `src/stores/ai.ts` facade。
+- [ ] 处理 `src/views/utils-docs/utilsDocsContent.ts` 体量：先确认是否为生成物；若是生成物，优先维护生成脚本和 `check:utils-docs`，不要手工拆内容。
+- [ ] 评估 `src/services/tauri.mock.ts` 领域拆分：按 app/file/system/navigation/ai 拆 mock handler，但保持 `callTauri` 浏览器降级 contract。
 
-## 文档维护待办
+## 真实环境验证
 
-- [ ] 以代码事实为准继续同步 `docs/architecture-current-state.md`：AI façade、`/creative` 三栏壳层、Rust 编排边界、migration / project / asset provenance、model_runs / provider 观测边界均已在 2026-06-13 复核；后续文档更新只记录会影响实现顺序的事实，不继续堆组件流水或历史 Goal 执行包。
-- [ ] 基于当前 `/creative` 三栏工作台的实际代码边界，继续评审“正式业务核心”和“原型/展示壳层”的分界：`CreativeTabBatch.vue` / `CreativeTabAssets.vue` 已是主要宽区块；正式化前先决定左栏分类/tag 是否过滤 assets tab 或切 workspace，以及右栏 quick launcher 是否保留。
+- [ ] 在真实 Tauri 窗口用有效 Provider 覆盖 AI 工作台 pending 对话取消、running 对话中止、running 生图中止和刷新恢复一致性。
+- [ ] 用真实第三方 Anthropic Messages 格式 API（`custom + anthropic-messages` adapter）和 OpenAI-compatible 自定义 Provider smoke AI 工作台 capability 展示、按钮禁用、聊天/生图可用性和错误提示；避免使用生产 API key 进入日志或文档。
 
-## 2026-06-11 公共组件治理待跟进
+## 文档维护
 
-- [ ] 公共组件治理暂不作为当前架构升级主线；后续只在新增页面或触碰 AI panels / `WorkspacePage` 时，按 `docs/global-components.md` 与 `docs/frontend-style.md` 小步回收页面直用 `<el-*>`，不要在 open-loops 继续堆已完成控件流水。
+- [ ] 后续文档只更新当前事实、长期规则、边界和未闭环事项；不要重新创建历史 Goal 执行包、阶段提示词、平行路线图或过程性复核堆栈。
+- [ ] 若新增、修改或删除规范文档，先读 `docs/ai/maintenance.md` 和 `docs/ai/index.md`；优先更新已有专题文档。

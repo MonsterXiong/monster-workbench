@@ -3,7 +3,6 @@ import base64
 import binascii
 import ipaddress
 import os
-import re
 import socket
 import sys
 import time
@@ -11,6 +10,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+
+from provider_adapters import ProviderCapabilityError, create_provider_adapter, normalize_base_url
 
 SECRET_KEYS = {"api_key", "apikey", "apiKey", "authorization", "token", "secret", "password"}
 
@@ -36,64 +37,6 @@ MAX_TEXT_CHARS = 8192
 MAX_IMAGE_ITEMS = 4
 MAX_IMAGE_URL_CHARS = 2048
 MAX_RAW_STRING_CHARS = 512
-ANYROUTER_CLAUDE_MODEL_RE = re.compile(r"^claude-(opus|sonnet|haiku)-(\d+)(?:-(\d+))?(?:-\d{8})?$", re.IGNORECASE)
-
-
-def normalize_base_url(base_url):
-    return base_url.rstrip("/")
-
-
-def is_anyrouter_target(base_url, provider):
-    clean_provider = str(provider or "").strip().lower()
-    if clean_provider == "anyrouter":
-        return True
-
-    parsed = urllib.parse.urlparse(str(base_url or ""))
-    hostname = (parsed.hostname or "").lower()
-    return hostname in ("anyrouter.dev", "anyrouter.top")
-
-
-def normalize_anyrouter_model(model):
-    text = str(model or "").strip()
-    if not text:
-        return ""
-
-    clean = text[len("anthropic/"):] if text.lower().startswith("anthropic/") else text
-    match = ANYROUTER_CLAUDE_MODEL_RE.match(clean)
-    if not match:
-        return text
-
-    tier, major, minor = match.groups()
-    version = "{0}.{1}".format(major, minor) if minor else major
-    return "anthropic/claude-{0}-{1}".format(tier.lower(), version)
-
-
-def resolve_request_model(base_url, provider, model):
-    text = str(model or "").strip()
-    if is_anyrouter_target(base_url, provider):
-        return normalize_anyrouter_model(text)
-    return text
-
-
-def build_chat_url(base_url):
-    clean = normalize_base_url(base_url)
-    if clean.endswith("/chat/completions"):
-        return clean
-    return clean + "/chat/completions"
-
-
-def build_models_url(base_url):
-    clean = normalize_base_url(base_url)
-    if clean.endswith("/models"):
-        return clean
-    return clean + "/models"
-
-
-def build_images_url(base_url):
-    clean = normalize_base_url(base_url)
-    if clean.endswith("/images/generations"):
-        return clean
-    return clean + "/images/generations"
 
 
 def is_local_url(url):
@@ -191,30 +134,6 @@ def mask_large_images(value):
     return value
 
 
-def request_json(url, method, headers, body, timeout, max_bytes=MAX_RESPONSE_BYTES, retries=1):
-    data = None if body is None else json.dumps(body).encode("utf-8")
-    last_error = None
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler({})) if is_local_url(url) else None
-    for attempt in range(retries + 1):
-        try:
-            request = urllib.request.Request(url, data=data, headers=headers, method=method)
-            open_url = opener.open if opener else urllib.request.urlopen
-            with open_url(request, timeout=timeout) as response:
-                raw = response.read(max_bytes + 1)
-                if len(raw) > max_bytes:
-                    raise RuntimeError("响应体超过 {0} MB，请降低图片尺寸或改用返回 URL 的生图接口".format(max_bytes // 1024 // 1024))
-                parsed = json.loads(raw.decode("utf-8", errors="ignore") or "{}")
-                return response.status, parsed
-        except urllib.error.HTTPError:
-            raise
-        except Exception as error:
-            last_error = error
-            if attempt >= retries:
-                break
-            time.sleep(0.4)
-    raise last_error
-
-
 def find_nested_error_message(value):
     if isinstance(value, dict):
         error = value.get("error")
@@ -246,17 +165,14 @@ def try_parse_json(value):
         return None
 
 
-def probe_model_listed(base_url, headers, model, timeout):
+def probe_model_listed(adapter, model):
     try:
-        _, parsed = request_json(
-            build_models_url(base_url),
-            "GET",
-            headers,
-            None,
-            min(max(timeout, 3), 10),
-            retries=0,
+        result = adapter.list_models(
+            max_models=MAX_MODELS,
+            max_model_id_chars=MAX_MODEL_ID_CHARS,
+            max_response_bytes=MAX_RESPONSE_BYTES,
         )
-        return model in parse_models(parsed)
+        return model in result.get("models", [])
     except Exception:
         return None
 
@@ -343,18 +259,6 @@ def parse_image_size(value):
 
 def resolve_api_image_size(image_size):
     return str(image_size or "1024x1024")
-
-
-def request_image_generation(base_url, headers, body, timeout):
-    return request_json(
-        build_images_url(base_url),
-        "POST",
-        headers,
-        body,
-        timeout,
-        max_bytes=MAX_IMAGE_RESPONSE_BYTES,
-        retries=0
-    )
 
 
 def ensure_output_dir(output_dir):
@@ -479,17 +383,6 @@ def download_image_to_file(output_dir, url, timeout):
         return save_bytes(output_dir, data, guess_extension(content_type), content_type or None)
 
 
-def parse_models(payload):
-    models = []
-    for item in payload.get("data") or []:
-        model_id = item.get("id") if isinstance(item, dict) else None
-        if model_id:
-            models.append(trim_value(model_id, MAX_MODEL_ID_CHARS))
-        if len(models) >= MAX_MODELS:
-            break
-    return models
-
-
 def trim_value(value, max_chars, marker="[已截断]"):
     text = str(value or "")
     if len(text) <= max_chars:
@@ -497,26 +390,6 @@ def trim_value(value, max_chars, marker="[已截断]"):
     if max_chars <= len(marker):
         return text[:max_chars]
     return text[:max_chars - len(marker)] + marker
-
-
-def trim_text(value, max_chars=MAX_TEXT_CHARS):
-    return trim_value(value, max_chars, "\n[内容过长，已截断]")
-
-
-def parse_chat_text(payload):
-    choices = payload.get("choices") or []
-    if not choices:
-        return ""
-    first = choices[0] or {}
-    message = first.get("message") or {}
-    content = message.get("content")
-    if isinstance(content, list):
-        parts = []
-        for item in content:
-            if isinstance(item, dict):
-                parts.append(str(item.get("text") or item.get("content") or ""))
-        return trim_text("".join(parts))
-    return trim_text(content or first.get("text") or "")
 
 
 def parse_images(payload, output_dir, timeout, provider_base_url):
@@ -571,29 +444,30 @@ def main():
 
     provider = config.get("provider") or "custom"
     base_url = normalize_base_url(config.get("baseUrl") or "")
-    api_key = config.get("apiKey") or ""
-    model = resolve_request_model(base_url, provider, config.get("model") or "")
+    model = str(config.get("model") or "").strip()
     prompt = config.get("testPrompt") or "ping"
-    image_model = resolve_request_model(base_url, provider, config.get("imageModel") or model)
+    image_model = str(config.get("imageModel") or model).strip()
     image_prompt = config.get("imagePrompt") or prompt
     image_size = config.get("imageSize") or "1024x1024"
     timeout_ms = int(config.get("timeoutMs") or 20000)
     timeout = max(timeout_ms / 1000, 3)
 
-    headers = {
-        "Content-Type": "application/json"
-    }
-    if api_key:
-        headers["Authorization"] = "Bearer " + api_key
+    adapter = create_provider_adapter({**config, "model": model}, timeout)
+    image_adapter = create_provider_adapter({**config, "model": image_model}, timeout)
 
     image_model_listed = None
     if action == "image":
-        image_model_listed = probe_model_listed(base_url, headers, image_model, timeout)
+        image_model_listed = probe_model_listed(image_adapter, image_model)
 
     try:
         if action == "models":
-            status, parsed = request_json(build_models_url(base_url), "GET", headers, None, timeout)
-            models = parse_models(parsed)
+            provider_result = adapter.list_models(
+                max_models=MAX_MODELS,
+                max_model_id_chars=MAX_MODEL_ID_CHARS,
+                max_response_bytes=MAX_RESPONSE_BYTES,
+            )
+            models = provider_result["models"]
+            parsed = provider_result["raw"]
             result = {
                 "ok": True,
                 "action": action,
@@ -602,7 +476,7 @@ def main():
                 "baseUrl": base_url,
                 "latencyMs": int((time.time() - started) * 1000),
                 "message": "模型列表查询成功，共 {0} 个模型".format(len(models)),
-                "statusCode": status,
+                "statusCode": provider_result["statusCode"],
                 "models": models,
                 "text": None,
                 "imageUrls": None,
@@ -612,18 +486,13 @@ def main():
         elif action == "image":
             api_image_size = resolve_api_image_size(image_size)
             image_count = max(1, min(MAX_IMAGE_ITEMS, int(config.get("imageCount") or 1)))
-            body = {
-                "model": image_model,
-                "prompt": image_prompt,
-                "n": image_count,
-                "size": api_image_size
-            }
-            status, parsed = request_image_generation(
-                base_url,
-                headers,
-                body,
-                timeout,
+            provider_result = image_adapter.image(
+                image_prompt,
+                api_image_size,
+                image_count=image_count,
+                max_response_bytes=MAX_IMAGE_RESPONSE_BYTES,
             )
+            parsed = provider_result["raw"]
             image_urls, image_paths, saved_files = parse_images(parsed, output_dir, timeout, base_url)
             saved_file_dimensions = first_saved_file_dimensions(saved_files)
             actual_image_size = saved_file_dimensions or api_image_size
@@ -635,7 +504,7 @@ def main():
                 "baseUrl": base_url,
                 "latencyMs": int((time.time() - started) * 1000),
                 "message": "生图测试成功，已保存 {0} 张图片到本地".format(len(image_paths)) if image_paths else "生图接口已响应，但未保存到本地图片",
-                "statusCode": status,
+                "statusCode": provider_result["statusCode"],
                 "models": None,
                 "text": None,
                 "imageUrls": image_urls,
@@ -655,16 +524,14 @@ def main():
                     image_size,
                 )
         else:
-            body = {
-                "model": model,
-                "messages": [
-                    {"role": "user", "content": prompt}
-                ],
-                "max_tokens": 64,
-                "temperature": 0
-            }
-            status, parsed = request_json(build_chat_url(base_url), "POST", headers, body, timeout)
-            text = parse_chat_text(parsed)
+            provider_result = adapter.chat(
+                prompt,
+                max_tokens=64,
+                temperature=0,
+                max_text_chars=MAX_TEXT_CHARS,
+                max_response_bytes=MAX_RESPONSE_BYTES,
+            )
+            parsed = provider_result["raw"]
             result = {
                 "ok": True,
                 "action": action,
@@ -673,13 +540,38 @@ def main():
                 "baseUrl": base_url,
                 "latencyMs": int((time.time() - started) * 1000),
                 "message": "文本模型测试成功",
-                "statusCode": status,
+                "statusCode": provider_result["statusCode"],
                 "models": None,
-                "text": text,
+                "text": provider_result["text"],
                 "imageUrls": None,
                 "imagePaths": None,
                 "rawPreview": raw_preview(parsed)
             }
+        result["requestId"] = request_id
+    except ProviderCapabilityError as error:
+        action_label = "生成图片失败" if action == "image" else "模型对话失败" if action == "chat" else "模型提供商请求失败"
+        result = {
+            "ok": False,
+            "action": action,
+            "provider": provider,
+            "model": image_model if action == "image" else model,
+            "baseUrl": base_url,
+            "latencyMs": int((time.time() - started) * 1000),
+            "message": "{0}: {1}".format(action_label, format_error_message(error)),
+            "statusCode": None,
+            "models": None,
+            "text": None,
+            "imageUrls": None,
+            "imagePaths": None,
+            "savedFiles": None,
+            "apiImageSize": image_size if action == "image" else None,
+            "requestedImageSize": image_size if action == "image" else None,
+            "actualImageSize": None,
+            "fallbackImageSize": None,
+            "imageAttempts": 1 if action == "image" else None,
+            "failureKind": "provider_error" if action == "image" else None,
+            "rawPreview": None
+        }
         result["requestId"] = request_id
     except urllib.error.HTTPError as error:
         detail = error.read(2048).decode("utf-8", errors="ignore")

@@ -16,6 +16,7 @@ import { useI18n } from "../../../composables/useI18n";
 import {
   findIndexByValue,
   findLastItem,
+  formatTemplate,
   getErrorMessage,
   isBlank,
   joinBy,
@@ -45,8 +46,32 @@ const emit = defineEmits<{
 const session = computed(() => aiStore.activeChatSession);
 const messages = computed(() => session.value?.messages || []);
 const isBusy = computed(() => aiStore.isActionBusy("chat", aiStore.activeModelConfigIds.chat));
+const chatSupported = computed(() => aiStore.modelConfigSupportsCapability(aiStore.activeModelConfigIds.chat, "chat"));
+const chatUnavailableTitle = computed(() =>
+  formatTemplate(t("settings.aiProvider.capabilityUnsupported"), {
+    capability: t("settings.aiProvider.capabilityChat"),
+  })
+);
+const chatModelConfigOptions = computed(() =>
+  aiStore.modelConfigs.map((item) => {
+    const supported = aiStore.modelConfigSupportsCapability(item.id, "chat");
+    return {
+      label: item.name || item.displayName || item.model,
+      selectedLabel: item.name || item.displayName || item.model,
+      value: item.id,
+      description: item.model,
+      meta: supported ? t("settings.aiProvider.capabilityChat") : t("common.disabled"),
+      disabled: !supported,
+    };
+  })
+);
+const canSendChat = computed(() => !isBlank(input.value) && !isBusy.value && chatSupported.value);
 const canExportSession = computed(() => Boolean(session.value && messages.value.length));
-const composerHint = computed(() => [t("aiPage.chat.enterHint"), aiStore.activeChatConfig?.model].filter(Boolean).join(" · "));
+const composerHint = computed(() =>
+  chatSupported.value
+    ? [t("aiPage.chat.enterHint"), aiStore.activeChatConfig?.model].filter(Boolean).join(" · ")
+    : chatUnavailableTitle.value
+);
 const scrollAnchor = computed(() => joinBy(messages.value, (message) => `${message.id}:${message.status}`, "|"));
 const sessionActions = computed<ActionMenuItem[]>(() => [
   { key: "rename", label: t("aiPage.sessions.rename"), icon: "Pencil" },
@@ -94,6 +119,10 @@ async function handleSend() {
   if (!content || isBusy.value) {
     return;
   }
+  if (!chatSupported.value) {
+    emit("failed", chatUnavailableTitle.value);
+    return;
+  }
   input.value = "";
   try {
     await aiStore.sendChatMessage(content, aiStore.activeModelConfigIds.chat);
@@ -115,7 +144,23 @@ function canCancelChatMessage(message: ChatMessage) {
 }
 
 function canRetryChatMessage(message: ChatMessage) {
-  return message.role !== "user" && (message.status === "failed" || message.status === "canceled") && Boolean(findRetryPrompt(message.id)) && !isBusy.value;
+  const configId = message.modelConfigId || aiStore.activeModelConfigIds.chat;
+  return (
+    message.role !== "user" &&
+    (message.status === "failed" || message.status === "canceled") &&
+    Boolean(findRetryPrompt(message.id)) &&
+    !isBusy.value &&
+    aiStore.modelConfigSupportsCapability(configId, "chat")
+  );
+}
+
+function handleChatModelConfigChange(value: unknown) {
+  const configId = String(value);
+  if (!aiStore.modelConfigSupportsCapability(configId, "chat")) {
+    emit("failed", chatUnavailableTitle.value);
+    return;
+  }
+  aiStore.setActiveModelConfig("chat", configId);
 }
 
 function getChatMessageText(message: ChatMessage) {
@@ -141,8 +186,13 @@ async function retryChatMessage(message: ChatMessage) {
   if (!prompt || isBusy.value) {
     return;
   }
+  const configId = message.modelConfigId || aiStore.activeModelConfigIds.chat;
+  if (!aiStore.modelConfigSupportsCapability(configId, "chat")) {
+    emit("failed", chatUnavailableTitle.value);
+    return;
+  }
   try {
-    await aiStore.sendChatMessage(prompt, message.modelConfigId || aiStore.activeModelConfigIds.chat);
+    await aiStore.sendChatMessage(prompt, configId);
   } catch (err) {
     emit("failed", getErrorMessage(err, t("settings.aiProvider.testFailed")));
   }
@@ -330,10 +380,10 @@ async function handleExportAction(action: ActionMenuItem) {
             <span class="composer-tools__label">{{ t("aiPage.chat.modelLabel") }}</span>
             <BaseSelect
               :model-value="aiStore.activeModelConfigIds.chat"
-              :options="aiStore.modelConfigOptions"
+              :options="chatModelConfigOptions"
               size="sm"
               class="composer-model"
-              @update:model-value="aiStore.setActiveModelConfig('chat', String($event))"
+              @update:model-value="handleChatModelConfigChange"
             />
           </div>
           <el-input
@@ -342,7 +392,9 @@ async function handleExportAction(action: ActionMenuItem) {
             type="textarea"
             :rows="3"
             resize="none"
+            :disabled="!chatSupported"
             :placeholder="t('aiPage.chat.inputPlaceholder')"
+            :title="chatSupported ? undefined : chatUnavailableTitle"
             @keydown.enter.exact.prevent="handleSend"
           />
           <div class="composer-actions">
@@ -352,7 +404,8 @@ async function handleExportAction(action: ActionMenuItem) {
               size="sm"
               class="send-btn"
               :loading="Boolean(isBusy)"
-              :disabled="isBlank(input) || Boolean(isBusy)"
+              :disabled="!canSendChat"
+              :title="chatSupported ? undefined : chatUnavailableTitle"
               @click="handleSend"
             >
               <template #icon><Send class="h-3.5 w-3.5" /></template>

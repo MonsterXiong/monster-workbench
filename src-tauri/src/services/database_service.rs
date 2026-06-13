@@ -39,9 +39,7 @@ impl DatabaseService {
     }
 
     pub fn init_runtime_schema(&self) -> AppResult<()> {
-        let db_path = self.path_provider.get_db_file_path()?;
         self.init_test_logs_db()?;
-        crate::infra::creative_db_schema::init_schema(&db_path)?;
         Ok(())
     }
 }

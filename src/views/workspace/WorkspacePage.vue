@@ -1,14 +1,7 @@
 <script setup lang="ts">
-import { ArrowRight, FlaskConical } from "lucide-vue-next";
-import { useRouter } from "vue-router";
 import { useI18n } from "../../composables/useI18n";
 
 const { t } = useI18n();
-const router = useRouter();
-
-const openCreativePlayground = () => {
-  void router.push("/creative");
-};
 </script>
 
 <template>
@@ -23,28 +16,6 @@ const openCreativePlayground = () => {
         {{ t('workspace.exploreBtn') }}
       </el-button>
     </div>
-
-    <section
-      class="mb-6 flex flex-col gap-4 rounded-2xl border border-primary/20 bg-white px-5 py-4 shadow-sm shadow-primary/5 dark:border-primary/30 dark:bg-slate-900 md:flex-row md:items-center md:justify-between"
-    >
-      <div class="flex min-w-0 items-start gap-4">
-        <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
-          <FlaskConical class="h-5 w-5" />
-        </div>
-        <div class="min-w-0">
-          <div class="text-xs font-bold uppercase tracking-wide text-primary">{{ t('workspace.creativeEntryEyebrow') }}</div>
-          <h2 class="mt-1 text-lg font-bold text-slate-900 dark:text-slate-100">{{ t('workspace.creativeEntryTitle') }}</h2>
-          <p class="mt-1 max-w-3xl text-sm leading-6 text-slate-500 dark:text-slate-400">
-            {{ t('workspace.creativeEntryDesc') }}
-          </p>
-        </div>
-      </div>
-      <el-button type="primary" size="large" class="shrink-0 font-bold" @click="openCreativePlayground">
-        <FlaskConical class="mr-2 h-4 w-4" />
-        {{ t('workspace.creativeEntryAction') }}
-        <ArrowRight class="ml-2 h-4 w-4" />
-      </el-button>
-    </section>
 
     <!-- 展示卡片区域 -->
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">

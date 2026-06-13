@@ -3,6 +3,7 @@ import { firstItem } from "../utils";
 import type {
   AiChatExportFormat,
   AiConversationSession,
+  AiProviderCapability,
   AiProviderTestAction,
   AiProviderTestQueueItem,
   AiProviderTestTask,
@@ -34,10 +35,14 @@ export const useAiStore = defineStore("ai", () => {
     modelConfigs,
     activeModelConfigIds,
     providerOptions,
+    adapterOptions,
     modelConfigOptions,
     selectedModelConfig,
     activeChatConfig,
     activeImageConfig,
+    selectedConfigCapabilities,
+    activeChatConfigCapabilities,
+    activeImageConfigCapabilities,
   } = storeToRefs(aiProviderStore);
   const {
     sessions,
@@ -69,6 +74,10 @@ export const useAiStore = defineStore("ai", () => {
     configId = aiProviderRuntimeStore.getDefaultActionConfigId(action)
   ) {
     return aiProviderRuntimeStore.isActionBusy(action, configId);
+  }
+
+  function modelConfigSupportsCapability(configId: string, capability: AiProviderCapability) {
+    return aiProviderStore.modelConfigSupportsCapability(configId, capability);
   }
 
   function createSession(
@@ -213,13 +222,18 @@ export const useAiStore = defineStore("ai", () => {
     selectedModelConfig,
     activeChatConfig,
     activeImageConfig,
+    selectedConfigCapabilities,
+    activeChatConfigCapabilities,
+    activeImageConfigCapabilities,
     chatSessions,
     imageSessions,
     activeChatSession,
     activeImageSession,
     providerOptions,
+    adapterOptions,
     promptTypeOptions,
     isActionBusy,
+    modelConfigSupportsCapability,
     getActionQueueStatus: aiQueueStore.getActionQueueStatus,
     getPromptCategories: aiPromptLibraryStore.getPromptCategories,
     getPromptCategoryOptions: aiPromptLibraryStore.getPromptCategoryOptions,
