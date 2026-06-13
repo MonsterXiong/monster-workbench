@@ -1,4 +1,5 @@
 import { defineStore, storeToRefs } from "pinia";
+import { aiService } from "../services/ai.service";
 import { systemService } from "../services/system.service";
 import { persistAiSessions } from "../services/ai-session-storage";
 import {
@@ -15,6 +16,7 @@ import {
 import type {
   AiChatExportFormat,
   AiConversationSession,
+  AiProviderTestResult,
 } from "../types/ai";
 import { useAiProviderStore } from "./ai-provider";
 import { useAiProviderRuntimeStore } from "./ai-provider-runtime";
@@ -33,6 +35,7 @@ const AI_CHAT_EXPORT_META: Record<
 
 const currentTime = () => getCurrentTimestampMs();
 const createId = (prefix: string) => createTimestampId(prefix);
+const AI_CHAT_CANCELLED_MESSAGE = "Chat request canceled";
 
 export const useAiChatRuntimeStore = defineStore("ai-chat-runtime", () => {
   const aiProviderStore = useAiProviderStore();
@@ -44,6 +47,16 @@ export const useAiChatRuntimeStore = defineStore("ai-chat-runtime", () => {
 
   async function persistSessions() {
     await persistAiSessions(sessions.value);
+  }
+
+  function findSessionMessage(messageId: string) {
+    for (const session of sessions.value) {
+      const message = findByValue(session.messages, (item) => item.id, messageId);
+      if (message) {
+        return { session, message };
+      }
+    }
+    return null;
   }
 
   function getChatMessageRoleLabel(message: AiSessionMessage) {
@@ -198,6 +211,7 @@ export const useAiChatRuntimeStore = defineStore("ai-chat-runtime", () => {
     });
     await persistSessions();
 
+    let assistantMessageId = "";
     try {
       const assistantMessage: AiSessionMessage = {
         id: createId("ai-message"),
@@ -208,15 +222,36 @@ export const useAiChatRuntimeStore = defineStore("ai-chat-runtime", () => {
         model: modelConfig.model,
         createdAt: currentTime(),
       };
+      assistantMessageId = assistantMessage.id;
       aiSessionStore.appendSessionMessage(session, assistantMessage);
 
       const result = await aiProviderRuntimeStore.testProvider("chat", {
         configId: modelConfig.id,
         prompt,
+        onTask: async (task) => {
+          aiSessionStore.patchSessionMessage(assistantMessage.id, {
+            requestId: task.requestId,
+          });
+          await persistSessions();
+        },
       });
+      const currentAssistant = findSessionMessage(assistantMessage.id)?.message;
+      if (currentAssistant?.status === "canceled") {
+        return {
+          requestId: currentAssistant.requestId || result.requestId || null,
+          ok: false,
+          action: "chat",
+          provider: modelConfig.provider,
+          model: result.model || modelConfig.model,
+          baseUrl: modelConfig.baseUrl,
+          latencyMs: 0,
+          message: AI_CHAT_CANCELLED_MESSAGE,
+        } satisfies AiProviderTestResult;
+      }
       aiSessionStore.patchSessionMessage(assistantMessage.id, {
         role: result.ok ? "assistant" : "error",
         model: result.model || modelConfig.model,
+        requestId: result.requestId || currentAssistant?.requestId,
         error: result.ok ? undefined : result.message,
       });
       if (result.ok) {
@@ -231,13 +266,31 @@ export const useAiChatRuntimeStore = defineStore("ai-chat-runtime", () => {
       return result;
     } catch (error) {
       const message = stringifyErrorMessage(error);
-      const pendingAssistant =
+      const assistantById = assistantMessageId
+        ? findSessionMessage(assistantMessageId)?.message ?? null
+        : null;
+      const targetAssistant =
+        assistantById ||
         session.messages
           .slice()
           .reverse()
-          .find((item) => item.role === "assistant" && item.status === "pending") || null;
-      if (pendingAssistant) {
-        aiSessionStore.patchSessionMessage(pendingAssistant.id, {
+          .find((item) => item.role === "assistant" && item.status === "pending") ||
+        null;
+      if (targetAssistant?.status === "canceled") {
+        await persistSessions();
+        return {
+          requestId: targetAssistant.requestId || null,
+          ok: false,
+          action: "chat",
+          provider: modelConfig.provider,
+          model: modelConfig.model,
+          baseUrl: modelConfig.baseUrl,
+          latencyMs: 0,
+          message: AI_CHAT_CANCELLED_MESSAGE,
+        } satisfies AiProviderTestResult;
+      }
+      if (targetAssistant) {
+        aiSessionStore.patchSessionMessage(targetAssistant.id, {
           role: "error",
           status: "failed",
           content: message,
@@ -260,8 +313,32 @@ export const useAiChatRuntimeStore = defineStore("ai-chat-runtime", () => {
     }
   }
 
+  async function cancelChatMessage(messageId: string) {
+    const target = findSessionMessage(messageId);
+    const message = target?.message;
+    if (!target || !message?.requestId || message.status !== "pending") {
+      return false;
+    }
+
+    const cancelled = await aiService.cancelProviderTestTask(message.requestId);
+    if (!cancelled) {
+      return false;
+    }
+
+    aiSessionStore.patchSessionMessage(messageId, {
+      role: "error",
+      status: "canceled",
+      content: AI_CHAT_CANCELLED_MESSAGE,
+      error: AI_CHAT_CANCELLED_MESSAGE,
+    });
+    await aiProviderRuntimeStore.refreshBackendQueueStatus();
+    await persistSessions();
+    return true;
+  }
+
   return {
     exportChatSession,
+    cancelChatMessage,
     sendChatMessage,
   };
 });

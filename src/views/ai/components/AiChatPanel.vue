@@ -1,12 +1,32 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from "vue";
-import { AlertTriangle, Bot, MessageSquareText, Plus, Send, UserRound } from "lucide-vue-next";
+import {
+  AlertTriangle,
+  Bot,
+  MessageSquareText,
+  Plus,
+  RotateCcw,
+  Send,
+  UserRound,
+  XCircle,
+} from "lucide-vue-next";
 import { useAiStore } from "../../../stores/ai";
 import { useAiPromptLibraryStore } from "../../../stores/ai-prompt-library";
 import { useI18n } from "../../../composables/useI18n";
-import { getErrorMessage, isBlank, joinBy, scrollElementToBottom, toTrimmedString } from "../../../utils";
+import {
+  findIndexByValue,
+  findLastItem,
+  getErrorMessage,
+  isBlank,
+  joinBy,
+  scrollElementToBottom,
+  take,
+  toTrimmedString,
+} from "../../../utils";
 import type { ActionMenuItem } from "../../../components/common/BaseActionMenu.vue";
 import type { AiChatExportFormat, AiConversationSession } from "../../../types/ai";
+
+type ChatMessage = AiConversationSession["messages"][number];
 
 const aiStore = useAiStore();
 const promptStore = useAiPromptLibraryStore();
@@ -77,6 +97,52 @@ async function handleSend() {
   input.value = "";
   try {
     await aiStore.sendChatMessage(content, aiStore.activeModelConfigIds.chat);
+  } catch (err) {
+    emit("failed", getErrorMessage(err, t("settings.aiProvider.testFailed")));
+  }
+}
+
+function findRetryPrompt(messageId: string) {
+  const index = findIndexByValue(messages.value, (message) => message.id, messageId);
+  if (index <= 0) {
+    return "";
+  }
+  return findLastItem(take(messages.value, index), (message) => message.role === "user")?.content || "";
+}
+
+function canCancelChatMessage(message: ChatMessage) {
+  return message.role !== "user" && message.status === "pending" && Boolean(message.requestId) && Boolean(isBusy.value);
+}
+
+function canRetryChatMessage(message: ChatMessage) {
+  return message.role !== "user" && (message.status === "failed" || message.status === "canceled") && Boolean(findRetryPrompt(message.id)) && !isBusy.value;
+}
+
+function getChatMessageText(message: ChatMessage) {
+  if (message.status === "canceled") {
+    return t("aiPage.chat.canceledMessage");
+  }
+  return message.content || message.error || "";
+}
+
+async function cancelChatMessage(message: ChatMessage) {
+  if (!canCancelChatMessage(message)) {
+    return;
+  }
+  try {
+    await aiStore.cancelChatMessage(message.id);
+  } catch (err) {
+    emit("failed", getErrorMessage(err, t("settings.aiProvider.testFailed")));
+  }
+}
+
+async function retryChatMessage(message: ChatMessage) {
+  const prompt = findRetryPrompt(message.id);
+  if (!prompt || isBusy.value) {
+    return;
+  }
+  try {
+    await aiStore.sendChatMessage(prompt, message.modelConfigId || aiStore.activeModelConfigIds.chat);
   } catch (err) {
     emit("failed", getErrorMessage(err, t("settings.aiProvider.testFailed")));
   }
@@ -206,7 +272,7 @@ async function handleExportAction(action: ActionMenuItem) {
           v-for="message in messages"
           :key="message.id"
           class="message-row"
-          :class="[`message-row--${message.role}`, { 'message-row--failed': message.status === 'failed' }]"
+          :class="[`message-row--${message.role}`, { 'message-row--failed': message.status === 'failed' || message.status === 'canceled' }]"
         >
           <div class="message-avatar">
             <UserRound v-if="message.role === 'user'" class="h-4 w-4" />
@@ -224,14 +290,34 @@ async function handleExportAction(action: ActionMenuItem) {
                 <span></span>
                 <span></span>
               </div>
-              <pre v-else>{{ message.content }}<span v-if="message.status === 'pending'" class="typing-tail">...</span></pre>
+              <pre v-else>{{ getChatMessageText(message) }}<span v-if="message.status === 'pending'" class="typing-tail">...</span></pre>
             </div>
             <div class="message-actions">
+              <BaseButton
+                v-if="canCancelChatMessage(message)"
+                type="neutral"
+                outline
+                size="xs"
+                @click="cancelChatMessage(message)"
+              >
+                <template #icon><XCircle class="h-3 w-3" /></template>
+                {{ t("aiPage.chat.cancel") }}
+              </BaseButton>
+              <BaseButton
+                v-if="canRetryChatMessage(message)"
+                type="neutral"
+                outline
+                size="xs"
+                @click="retryChatMessage(message)"
+              >
+                <template #icon><RotateCcw class="h-3 w-3" /></template>
+                {{ t("aiPage.chat.retry") }}
+              </BaseButton>
               <BaseCopyButton
-                :text="message.content || message.error || ''"
+                :text="getChatMessageText(message)"
                 :label="t('aiPage.chat.copyMessage')"
                 size="xs"
-                :disabled="!(message.content || message.error)"
+                :disabled="!getChatMessageText(message)"
               />
             </div>
           </div>

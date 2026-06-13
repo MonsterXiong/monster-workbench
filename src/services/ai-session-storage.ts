@@ -30,6 +30,7 @@ const AI_IMAGE_FAILURE_KINDS: AiImageFailureKind[] = [
   "auth",
   "provider_http",
   "provider_error",
+  "canceled",
 ];
 const SUPPORTED_IMAGE_SIZES = new Set([
   "1008x1792",
@@ -93,7 +94,9 @@ function normalizeMessageStatus(
   ) {
     return "failed";
   }
-  return message.status === "failed"
+  return message.status === "canceled"
+    ? "canceled"
+    : message.status === "failed"
     ? "failed"
     : message.status === "pending"
       ? "pending"

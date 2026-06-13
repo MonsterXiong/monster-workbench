@@ -46,7 +46,7 @@ const IMAGE_STALE_TIMEOUT_MS = IMAGE_QUEUE_POLL_TIMEOUT_MS;
 const IMAGE_REQUEST_TIMEOUT_MAX_MS = 900_000;
 const IMAGE_TASK_LOST_MESSAGE = "AI image task missing";
 const IMAGE_TASK_NO_RESULT_MESSAGE = "AI image task returned no result";
-const IMAGE_REQUEST_CANCELLED_MESSAGE = "request cancelled";
+const IMAGE_REQUEST_CANCELLED_MESSAGE = "Image generation canceled";
 
 const SUPPORTED_IMAGE_SIZES = new Set([
   "1008x1792",
@@ -492,9 +492,10 @@ export const useAiImageRuntimeStore = defineStore("ai-image-runtime", () => {
 
     patchSessionMessage(messageId, {
       role: "error",
-      status: "failed",
+      status: "canceled",
       content: message.error || message.content || IMAGE_REQUEST_CANCELLED_MESSAGE,
       error: message.error || message.content || IMAGE_REQUEST_CANCELLED_MESSAGE,
+      failureKind: "canceled",
     });
     trimLocalTestQueue();
     updateTestingState();
@@ -597,7 +598,10 @@ export const useAiImageRuntimeStore = defineStore("ai-image-runtime", () => {
           );
 
       if (pendingImage) {
-        const wasCancelled = pendingImage.error === IMAGE_REQUEST_CANCELLED_MESSAGE;
+        const wasCancelled =
+          pendingImage.status === "canceled" ||
+          pendingImage.failureKind === "canceled" ||
+          pendingImage.error === IMAGE_REQUEST_CANCELLED_MESSAGE;
         if (!wasCancelled) {
           patchSessionMessage(pendingImage.id, {
             role: "error",

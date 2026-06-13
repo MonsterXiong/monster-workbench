@@ -59,7 +59,7 @@ import {
 
 type ImageMessage = AiConversationSession["messages"][number];
 type ImageSessionStatusKey = "empty" | "pending" | "canceled" | "failed" | "completed";
-type ImageSessionStatusFilter = "all" | "pending" | "failed" | "completed";
+type ImageSessionStatusFilter = "all" | "pending" | "failed" | "canceled" | "completed";
 type ImageResultSummaryItem = {
   key: string;
   label: string;
@@ -367,6 +367,7 @@ const sessionStatusFilterOptions = computed(() => {
     { key: "all" as const, label: t("aiPage.image.filterAll"), count: sessions.length },
     { key: "pending" as const, label: t("aiPage.image.filterGenerating"), count: countByFilter("pending") },
     { key: "failed" as const, label: t("aiPage.image.filterFailed"), count: countByFilter("failed") },
+    { key: "canceled" as const, label: t("aiPage.image.filterCanceled"), count: countByFilter("canceled") },
     { key: "completed" as const, label: t("aiPage.image.filterCompleted"), count: countByFilter("completed") },
   ];
 });
@@ -664,7 +665,7 @@ function findRetryPrompt(messageId: string) {
 }
 
 function canRetryImageMessage(message: AiConversationSession["messages"][number]) {
-  return message.role !== "user" && message.status === "failed" && Boolean(findRetryPrompt(message.id)) && !isBusy.value;
+  return message.role !== "user" && (message.status === "failed" || message.status === "canceled") && Boolean(findRetryPrompt(message.id)) && !isBusy.value;
 }
 
 function canUsePromptFromMessage(message: ImageMessage) {
@@ -1159,7 +1160,27 @@ function getMessageQueueWaitLabel(message: ImageMessage) {
 }
 
 function getImageFailureText(message: ImageMessage) {
+  if (isCanceledImageMessage(message)) {
+    return t("aiPage.image.canceledMessage");
+  }
   return message.error || message.content || t("aiPage.image.failureUnknown");
+}
+
+function isCanceledImageMessage(message: ImageMessage) {
+  return message.status === "canceled" || message.failureKind === "canceled";
+}
+
+function getImageMessageText(message: ImageMessage) {
+  if (isCanceledImageMessage(message)) {
+    return t("aiPage.image.canceledMessage");
+  }
+  return message.content;
+}
+
+function getImageFailureTitle(message: ImageMessage) {
+  return isCanceledImageMessage(message)
+    ? t("aiPage.image.canceled")
+    : t("aiPage.image.failureTitle");
 }
 
 function getFailureKindLabel(message: ImageMessage) {
@@ -1170,6 +1191,9 @@ function getFailureKindLabel(message: ImageMessage) {
 }
 
 function getFailureHint(message: ImageMessage) {
+  if (isCanceledImageMessage(message)) {
+    return t("aiPage.image.failureHintCanceled");
+  }
   if (message.failureKind === "unsupported_size") {
     return t("aiPage.image.failureHintUnsupportedSize");
   }
@@ -1194,7 +1218,7 @@ function getImageResultSummaryItems(message: ImageMessage): ImageResultSummaryIt
   const apiSize = getMessageApiSize(message);
   const requestedSize = getMessageRequestedSize(message);
 
-  if (message.status === "failed" && message.failureKind) {
+  if ((message.status === "failed" || message.status === "canceled") && message.failureKind) {
     items.push({
       key: "failure-kind",
       label: getFailureKindLabel(message),
@@ -1263,7 +1287,7 @@ function getSessionStatusKey(target: AiConversationSession): ImageSessionStatusK
   if (latestResult.status === "pending") {
     return "pending";
   }
-  if (latestResult.error === "图片生成已取消") {
+  if (latestResult.status === "canceled" || latestResult.failureKind === "canceled") {
     return "canceled";
   }
   if (latestResult.status === "failed") {
@@ -1276,11 +1300,7 @@ function matchesSessionStatusFilter(target: AiConversationSession, filter: Image
   if (filter === "all") {
     return true;
   }
-  const status = getSessionStatusKey(target);
-  if (filter === "failed") {
-    return status === "failed" || status === "canceled";
-  }
-  return status === filter;
+  return getSessionStatusKey(target) === filter;
 }
 
 function getSessionStatusLabel(target: AiConversationSession) {
@@ -1421,7 +1441,7 @@ function getSessionSizeLabel(target: AiConversationSession) {
           v-for="message in messages"
           :key="message.id"
           class="image-row"
-          :class="[`image-row--${message.role}`, { 'image-row--failed': message.status === 'failed' }]"
+          :class="[`image-row--${message.role}`, { 'image-row--failed': message.status === 'failed' || message.status === 'canceled' }]"
         >
           <div class="image-avatar">
             <UserRound v-if="message.role === 'user'" class="h-4 w-4" />
@@ -1481,7 +1501,7 @@ function getSessionSizeLabel(target: AiConversationSession) {
                   </div>
                 </div>
               </div>
-              <pre v-else>{{ message.content }}</pre>
+              <pre v-else>{{ getImageMessageText(message) }}</pre>
               <div v-if="message.role !== 'user' && isImageSizeFallback(message)" class="image-size-notice">
                 <AlertTriangle class="h-3.5 w-3.5" />
                 <span>{{ getFallbackNotice(message) }}</span>
@@ -1490,11 +1510,11 @@ function getSessionSizeLabel(target: AiConversationSession) {
                 <Image class="h-3.5 w-3.5" />
                 <span>{{ getCompatibilityNotice(message) }}</span>
               </div>
-              <div v-if="message.role !== 'user' && message.status === 'failed'" class="image-failure-card">
+              <div v-if="message.role !== 'user' && (message.status === 'failed' || message.status === 'canceled')" class="image-failure-card">
                 <div class="image-failure-card__head">
                   <AlertTriangle class="h-4 w-4" />
                   <div>
-                    <strong>{{ t("aiPage.image.failureTitle") }}</strong>
+                    <strong>{{ getImageFailureTitle(message) }}</strong>
                     <span>{{ getFailureHint(message) }}</span>
                   </div>
                 </div>
@@ -2041,7 +2061,7 @@ function getSessionSizeLabel(target: AiConversationSession) {
   @apply shrink-0;
 }
 .session-filters {
-  @apply grid grid-cols-4 gap-1 rounded-xl border border-slate-200 bg-white p-1 shadow-sm dark:border-slate-800 dark:bg-slate-950;
+  @apply grid grid-cols-5 gap-1 rounded-xl border border-slate-200 bg-white p-1 shadow-sm dark:border-slate-800 dark:bg-slate-950;
 }
 .session-filter-chip {
   @apply flex h-7 min-w-0 items-center justify-center gap-1 rounded-lg text-[10px] font-black text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100;

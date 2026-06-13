@@ -175,6 +175,10 @@ export const useAiStore = defineStore("ai", () => {
     return await aiChatRuntimeStore.sendChatMessage(content, configId);
   }
 
+  async function cancelChatMessage(messageId: string) {
+    return await aiChatRuntimeStore.cancelChatMessage(messageId);
+  }
+
   async function refreshBackendQueueStatus() {
     await aiProviderRuntimeStore.refreshBackendQueueStatus();
   }
@@ -247,6 +251,7 @@ export const useAiStore = defineStore("ai", () => {
     openImageSavedFileLocation: aiImageRuntimeStore.openImageSavedFileLocation,
     saveConfig,
     testProvider,
+    cancelChatMessage,
     sendChatMessage,
     generateImageMessage: aiImageRuntimeStore.generateImageMessage,
     clearFinishedTests: aiQueueStore.clearFinishedTests,

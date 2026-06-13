@@ -5,7 +5,7 @@ export type AiProviderTestQueueStatus = "queued" | "running" | "success" | "fail
 export type AiPromptType = "chat" | "image";
 export type AiSessionType = AiPromptType;
 export type AiSessionMessageRole = "user" | "assistant" | "error";
-export type AiSessionMessageStatus = "success" | "failed" | "pending";
+export type AiSessionMessageStatus = "success" | "failed" | "pending" | "canceled";
 export type AiChatExportFormat = "markdown" | "txt" | "json";
 export type AiImageFailureKind =
   | "unsupported_size"
@@ -14,7 +14,8 @@ export type AiImageFailureKind =
   | "rate_limited"
   | "auth"
   | "provider_http"
-  | "provider_error";
+  | "provider_error"
+  | "canceled";
 
 export interface AiProviderConfig {
   provider: AiProviderType;

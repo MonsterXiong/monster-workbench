@@ -46,6 +46,17 @@ function triggerSafeToast(msg: string) {
   }
 }
 
+function isResizeObserverLoopMessage(message: string): boolean {
+  return includesAnyText(
+    message,
+    [
+      "ResizeObserver loop completed with undelivered notifications",
+      "ResizeObserver loop limit exceeded",
+    ],
+    { ignoreCase: true }
+  );
+}
+
 export const ErrorHandler = {
   init(app: App) {
     // 1. 挂载 Vue 运行时未捕获错误监听
@@ -105,6 +116,10 @@ export const ErrorHandler = {
       message = err;
     } else if (err !== null && err !== undefined) {
       message = safeJsonStringify(err, String(err));
+    }
+
+    if (isResizeObserverLoopMessage(message)) {
+      return;
     }
 
     // 2. 物理日志分级持久化写入
