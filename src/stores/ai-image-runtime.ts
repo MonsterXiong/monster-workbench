@@ -87,6 +87,10 @@ const SUPPORTED_IMAGE_SIZES = new Set([
 const currentTime = () => getCurrentTimestampMs();
 const createId = (prefix: string) => createTimestampId(prefix);
 
+function isCanceledQueueItem(item: Pick<AiProviderTestQueueItem, "status"> | null | undefined) {
+  return String(item?.status || "") === "canceled";
+}
+
 function normalizeImageSize(value: unknown) {
   const size = toTrimmedString(value);
   return SUPPORTED_IMAGE_SIZES.has(size) ? size : "1008x1792";
@@ -145,7 +149,11 @@ export const useAiImageRuntimeStore = defineStore("ai-image-runtime", () => {
   ): Partial<AiSessionMessage> {
     return {
       role: result.ok ? "assistant" : "error",
-      status: result.ok ? "success" : "failed",
+      status: result.ok
+        ? "success"
+        : result.failureKind === "canceled"
+          ? "canceled"
+          : "failed",
       content: result.message,
       requestId: result.requestId || fallbackRequestId || undefined,
       model: result.model || modelConfig.imageModel || modelConfig.model,
@@ -200,6 +208,10 @@ export const useAiImageRuntimeStore = defineStore("ai-image-runtime", () => {
       error,
       requestId: requestId || undefined,
     });
+  }
+
+  function isCanceledImageMessage(message: AiSessionMessage | null | undefined) {
+    return message?.status === "canceled" || message?.failureKind === "canceled";
   }
 
   function patchImageMessageFromResult(
@@ -420,7 +432,7 @@ export const useAiImageRuntimeStore = defineStore("ai-image-runtime", () => {
     let shouldWaitBeforePoll = false;
 
     for (;;) {
-      if (item.status === "canceled") {
+      if (isCanceledQueueItem(item)) {
         throw new Error(item.error || IMAGE_REQUEST_CANCELLED_MESSAGE);
       }
 
@@ -442,6 +454,9 @@ export const useAiImageRuntimeStore = defineStore("ai-image-runtime", () => {
       try {
         task = await aiService.getProviderTestTask(requestId);
       } catch (error) {
+        if (isCanceledQueueItem(item)) {
+          throw new Error(item.error || IMAGE_REQUEST_CANCELLED_MESSAGE);
+        }
         item.status = "failed";
         item.finishedAt = currentTime();
         item.error = `AI image task lookup failed: ${stringifyErrorMessage(error)}`;
@@ -578,6 +593,25 @@ export const useAiImageRuntimeStore = defineStore("ai-image-runtime", () => {
         item,
         getTaskPollTimeoutMs(configSnapshot)
       );
+      const currentPendingMessage = findByValue(
+        session.messages,
+        (item) => item.id,
+        pendingMessage.id
+      );
+      if (isCanceledImageMessage(currentPendingMessage)) {
+        await persistAiSessions(sessions.value);
+        return {
+          requestId: currentPendingMessage?.requestId || task.requestId,
+          ok: false,
+          action: "image",
+          provider: modelConfig.provider,
+          model: modelConfig.imageModel || modelConfig.model,
+          baseUrl: modelConfig.baseUrl,
+          latencyMs: 0,
+          message: IMAGE_REQUEST_CANCELLED_MESSAGE,
+          failureKind: "canceled",
+        } satisfies AiProviderTestResult;
+      }
       patchSessionMessage(
         pendingMessage.id,
         buildImageResultMessagePatch(
@@ -600,8 +634,7 @@ export const useAiImageRuntimeStore = defineStore("ai-image-runtime", () => {
 
       if (pendingImage) {
         const wasCancelled =
-          pendingImage.status === "canceled" ||
-          pendingImage.failureKind === "canceled" ||
+          isCanceledImageMessage(pendingImage) ||
           pendingImage.error === IMAGE_REQUEST_CANCELLED_MESSAGE;
         if (!wasCancelled) {
           patchSessionMessage(pendingImage.id, {
@@ -622,6 +655,7 @@ export const useAiImageRuntimeStore = defineStore("ai-image-runtime", () => {
             baseUrl: modelConfig.baseUrl,
             latencyMs: 0,
             message: IMAGE_REQUEST_CANCELLED_MESSAGE,
+            failureKind: "canceled",
           } satisfies AiProviderTestResult;
         }
       } else {

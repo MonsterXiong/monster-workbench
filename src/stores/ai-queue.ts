@@ -203,14 +203,18 @@ export const useAiQueueStore = defineStore("ai-queue", () => {
     }
     queueItem.startedAt = task.startedAtMs ? Number(task.startedAtMs) : queueItem.startedAt;
     queueItem.finishedAt = task.finishedAtMs ? Number(task.finishedAtMs) : queueItem.finishedAt;
-    queueItem.error = queueItem.status === "canceled"
-      ? task.error ?? queueItem.error ?? AI_PROVIDER_CANCELLED_MESSAGE
-      : task.error ?? undefined;
+    queueItem.error =
+      queueItem.status === "canceled"
+        ? task.error ?? queueItem.error ?? AI_PROVIDER_CANCELLED_MESSAGE
+        : task.error ?? undefined;
     if (task.result) {
       queueItem.result = task.result;
-      queueItem.error = queueItem.status === "canceled"
-        ? task.result.message || queueItem.error || AI_PROVIDER_CANCELLED_MESSAGE
-        : task.result.ok ? undefined : task.result.message;
+      queueItem.error =
+        queueItem.status === "canceled"
+          ? task.result.message || queueItem.error || AI_PROVIDER_CANCELLED_MESSAGE
+          : task.result.ok
+            ? undefined
+            : task.result.message;
       testResult.value = task.result;
     }
     trimLocalTestQueue();

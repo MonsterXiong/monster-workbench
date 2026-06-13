@@ -34,6 +34,10 @@ function createId(prefix: string) {
   return createTimestampId(prefix);
 }
 
+function isCanceledQueueItem(item: Pick<AiProviderTestQueueItem, "status"> | null | undefined) {
+  return String(item?.status || "") === "canceled";
+}
+
 export const useAiProviderRuntimeStore = defineStore("ai-provider-runtime", () => {
   const aiProviderStore = useAiProviderStore();
   const aiQueueStore = useAiQueueStore();
@@ -113,7 +117,7 @@ export const useAiProviderRuntimeStore = defineStore("ai-provider-runtime", () =
     let shouldWaitBeforePoll = false;
 
     for (;;) {
-      if (item.status === "canceled") {
+      if (isCanceledQueueItem(item)) {
         throw new Error(item.error || AI_PROVIDER_TEST_CANCELLED_MESSAGE);
       }
 
@@ -134,6 +138,9 @@ export const useAiProviderRuntimeStore = defineStore("ai-provider-runtime", () =
       try {
         task = await aiService.getProviderTestTask(requestId);
       } catch (error) {
+        if (isCanceledQueueItem(item)) {
+          throw new Error(item.error || AI_PROVIDER_TEST_CANCELLED_MESSAGE);
+        }
         const message = stringifyErrorMessage(error);
         item.status = "failed";
         item.finishedAt = currentTime();
@@ -259,12 +266,12 @@ export const useAiProviderRuntimeStore = defineStore("ai-provider-runtime", () =
     try {
       const task = await aiService.getProviderTestTask(requestId);
       aiQueueStore.applyBackendTask(task, item);
-      } catch (error) {
-        if (item && item.status === "queued") {
-          const message = stringifyErrorMessage(error);
-          aiQueueStore.markTestQueueItemCanceled(requestId, message);
-        }
+    } catch (error) {
+      if (item && item.status === "queued") {
+        const message = stringifyErrorMessage(error);
+        aiQueueStore.markTestQueueItemCanceled(requestId, message);
       }
+    }
     return true;
   }
 
@@ -311,9 +318,20 @@ export const useAiProviderRuntimeStore = defineStore("ai-provider-runtime", () =
         item,
         getTaskPollTimeoutMs(action, configSnapshot)
       );
-      item.status = result.ok ? "success" : "failed";
+      if (!isCanceledQueueItem(item)) {
+        item.status = result.ok
+          ? "success"
+          : result.failureKind === "canceled"
+            ? "canceled"
+            : "failed";
+      }
       item.result = result;
-      item.error = result.ok ? undefined : result.message;
+      item.error =
+        isCanceledQueueItem(item)
+          ? item.error || result.message || AI_PROVIDER_TEST_CANCELLED_MESSAGE
+          : result.ok
+            ? undefined
+            : result.message;
       item.finishedAt = currentTime();
       item.startedAt ??= item.finishedAt;
       testResult.value = result;
@@ -322,7 +340,7 @@ export const useAiProviderRuntimeStore = defineStore("ai-provider-runtime", () =
     } catch (error) {
       const message = stringifyErrorMessage(error);
       if (activeItem) {
-        if (activeItem.status !== "canceled") {
+        if (!isCanceledQueueItem(activeItem)) {
           activeItem.status = "failed";
           activeItem.error = message;
           activeItem.finishedAt = currentTime();
