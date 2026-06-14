@@ -47,4 +47,4 @@ npm run check:architecture
 为了支持脱离底座容器在普通浏览器中的敏捷调试与自动化测试，系统引入了离线 Mock 机制：
 
 - **IPC 拦截重定向**：核心中介 [tauri.ts](../src/services/tauri.ts) 在检测到 `!isTauriRuntime() && import.meta.env.DEV` 时，会自动将底层调用重定向到 Mock 路由。
-- **Mock 同步维护**：当在后端新增任何底座 Rust Commands 时，**必须同步**在 [tauri.mock.ts](../src/services/tauri.mock.ts) 中实现对应的模拟返回（Mock），防止在普通浏览器预览调试该命令时因未注册报错。
+- **Mock 同步维护**：当在后端新增任何底座 Rust Commands 时，**必须同步**浏览器 Mock，防止普通浏览器预览因未注册命令报错。小命令可直接放 [tauri.mock.ts](../src/services/tauri.mock.ts)；成组领域命令优先放 `src/services/mocks/*.mock.ts`，再由 `tauri.mock.ts` 统一分发。

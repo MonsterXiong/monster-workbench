@@ -9,6 +9,7 @@
 - 小步交付：一次任务只解决一个明确问题，避免顺手重构无关模块。
 - 先读事实：修改前先读 `AGENTS.md`、相关专题文档和现有代码实现。
 - 分层推进：新增能力默认走 `Page/Component -> Store -> Service -> callTauri -> Rust Command -> Rust Service -> Repo/DB`。
+- 组件化预算：Page、组件、Store、Service、Mock、Rust Service/Repo 都有体量预算；热点文件只允许在显式债务基线内维护，继续加功能前优先拆分。
 - 浏览器可预览：所有 Tauri 原生能力必须有浏览器降级或 Mock，不让 `http://localhost:1420` 直接崩溃。
 - 文案可切换：用户可见文本进入 `locales/`，日志和异常保持 `[ERR_*] 中文描述`。
 - 验证前置：每次代码变更后至少运行 `npm run typecheck`，涉及分层边界时运行 `npm run check:architecture`。
@@ -25,7 +26,7 @@
 3. 状态放 `src/stores/<module>.ts`，页面只装配状态和 UI。
 4. 底座能力放 `src/services/<module>.service.ts`，IPC 统一走 `callTauri()`。
 5. Rust 侧按 `commands -> services -> infra/repo` 拆分，Command 保持薄代理。
-6. 新增 Tauri Command 时同步补 `src/services/tauri.mock.ts`。
+6. 新增 Tauri Command 时同步补浏览器 Mock；小命令可放 `src/services/tauri.mock.ts`，领域命令优先放 `src/services/mocks/*.mock.ts` 并由 `tauri.mock.ts` 分发。
 7. 补齐 `zh-CN.ts` / `en-US.ts`，避免 Raw Key 出现在界面。
 8. 运行 `npm run verify`；涉及 Rust / capabilities 时再运行 `npm run tauri:build:no-bundle`。
 
@@ -47,7 +48,7 @@
 ### 发布与发布测试
 
 1. 日常桌面联调使用 `npm run dev:desktop` 或 `npm run tauri:dev`。
-2. 修改 Rust、capabilities、sidecar 或打包链路后，本地运行 `npm run verify`、`npm run test:ai-sidecar`、`npm run test:ai-sidecar:stress` 和 `npm run tauri:build:no-bundle`。
+2. 修改 Rust、capabilities、sidecar 或打包链路后，本地运行 `npm run verify`、`npm run test:ai-sidecar`、`npm run test:ai-sidecar:stress` 和 `npm run tauri:build:no-bundle`；其中 `npm run check:architecture` 会检查生产 sidecar 模块是否已加入 Tauri bundle resources。
 3. 日常发布前先运行 `npm run release:test`，触发 GitHub Actions 的 quick dry-run，不上传 Release。
 4. 正式发版前至少运行一次 `npm run release:test:full`，验证安装包、更新包和签名链路。
 5. 正式发布只使用 `npm run release`；该脚本会检查 main 分支、干净工作区、版本号、重复 tag，并先执行本地发布门禁。
@@ -140,13 +141,22 @@ AI 不应做：
 - 为了“更现代”重写模块。
 - 给过期文档加状态标签后继续保留误导信息；应直接更新或移除。
 
+AI 能力开发规则：
+
+- 业务入口、模型对话、模型生图默认调用 `aiService.runBusinessGenerationTask()`，即先走 `enqueue_ai_business_generation` 入队，再轮询 generation task registry 收敛结果；`aiService.generateBusinessContent` 只保留给后端 runner 或明确需要同步阻塞返回的服务层场景；有专属持久数据模型的工作台（如图片工作台）应先创建业务 job/task，再通过后端 runner 调用原子能力并写入自身 asset / metadata / model_run；`/ai?tab=features` 原子能力测试可调用 `aiService.generateDirectContent`，Provider 测试运行时可调用 `testProvider` / `enqueueProviderTest`，不得把业务生成伪装成 Provider 诊断任务。
+- Provider 面板只承担配置、连接、模型列表和最小诊断；业务能力不足时扩展原子能力 schema、降级规则、队列/取消和 artifact 合同。
+- 浏览器 mock 应尽量复用桌面端真实配置形状；需要同步模型配置时运行 `npm run mock:sync-config`，只生成脱敏 seed，不把 API Key、token、password、secret 写入浏览器 mock 文件或 Git。
+- active model config 统一走 capability binding；Rust 业务生成解析 `config.json` active binding 时允许按文件修改时间和长度缓存，配置保存后必须自动失效重读。新增 `img2img`、`inpaint`、`upscale_*`、`person_consistency`、`audio`、`video` 等能力时，同步补绑定、校验、UI 禁用原因和持久化兼容。
+- 长任务先创建 job/task，再由 Rust 后端 runner、generation task registry 或 backend worker 推进；前端状态树只保存 requestId、状态和 artifact metadata/path，不保存大图、音频或视频正文。图片工作台已使用 DB task claim/lease、Tauri 启动恢复和页面初始化兜底恢复；`/ai` Chat/Image 业务生成已写入 `ai_generation_tasks` 持久任务表并在 Tauri 启动时恢复 queued/running 业务请求，完成/失败应先写持久表再发布内存 task 终态。直连原子能力测试不持久化完整 Provider config，避免把 API Key 写入任务表。
+- Python sidecar 当前只作为短生命周期脚本被 Rust 受控调用；升级成长驻 worker 或 `externalBin` 二进制前，必须先满足同一套运行时合同：仍由 Rust Service 独占启动、停止、超时、取消、并发槽位和日志脱敏；worker 只能接收脱敏后的结构化请求和受控 artifact 输出目录，不能直接读写主库、偏好配置、用户任意文件或 Tauri capability；长任务必须有 heartbeat / lease / stale recovery，异常退出必须回写业务 job/task 或 generation task 终态；新增生产 sidecar 模块或二进制资源必须纳入 `tauri.conf.json` bundle resources / externalBin，并通过 `npm run check:architecture`、`npm run test:ai-sidecar` 和必要 Rust 测试。
+
 ---
 
 ## 6. 质量门禁
 
 | 命令 | 使用场景 |
 |------|----------|
-| `npm run check:architecture` | 检查 Tauri / IPC / fetch / SQLite 是否越层，并防止 SQL/FS 插件、capability 与宽 HOME asset scope 回引 |
+| `npm run check:architecture` | 检查 Tauri / IPC / fetch / SQLite 是否越层，防止 SQL/FS 插件、capability 与宽 HOME asset scope 回引，并检查组件化体量预算 |
 | `npm run check:commit-message` | 检查最近一次 commit 是否符合 `类型：中文概要` |
 | `npm run setup:git-hooks` | 将本仓库 Git hooks 指向 `.githooks`，启用 commit-msg 自动拦截 |
 | `npm run typecheck` | 每次 TS / Vue 代码变更后必须运行 |

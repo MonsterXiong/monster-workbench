@@ -14,6 +14,7 @@
     "check:utils-docs": "npm run check:utils-docs:quality && npm run check:utils-docs:sandbox",
     "check:utils-docs:quality": "node scripts/check-utils-docs-quality.cjs",
     "check:utils-docs:sandbox": "node scripts/check-utils-docs-sandbox.cjs",
+    "mock:sync-config": "node scripts/sync-browser-mock-config.cjs",
     "setup:git-hooks": "git config core.hooksPath .githooks",
     "prepare": "npm run setup:git-hooks",
     "typecheck": "vue-tsc --noEmit",

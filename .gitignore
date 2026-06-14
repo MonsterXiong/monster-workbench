@@ -12,3 +12,4 @@ src-tauri/gen
 __pycache__/
 *.pyc
 .gemini
+public/mock/*.json
