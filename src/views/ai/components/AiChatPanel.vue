@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import {
   AlertTriangle,
   Bot,
@@ -20,9 +20,12 @@ import {
   getErrorMessage,
   isBlank,
   joinBy,
+  clearAnimationFrameHandle,
+  createAnimationFrame,
   scrollElementToBottom,
   take,
   toTrimmedString,
+  type AnimationFrameHandle,
 } from "../../../utils";
 import type { ActionMenuItem } from "../../../components/common/BaseActionMenu.vue";
 import type { AiChatExportFormat, AiConversationSession } from "../../../types/ai";
@@ -37,6 +40,7 @@ const messageListRef = ref<HTMLElement | null>(null);
 const renameDialogVisible = ref(false);
 const renameDraft = ref("");
 const renamingSessionId = ref("");
+let scrollFrame: AnimationFrameHandle | null = null;
 
 const emit = defineEmits<{
   (e: "tested", ok: boolean, message: string): void;
@@ -72,7 +76,14 @@ const composerHint = computed(() =>
     ? [t("aiPage.chat.enterHint"), aiStore.activeChatConfig?.model].filter(Boolean).join(" · ")
     : chatUnavailableTitle.value
 );
-const scrollAnchor = computed(() => joinBy(messages.value, (message) => `${message.id}:${message.status}`, "|"));
+const scrollAnchor = computed(() =>
+  joinBy(
+    messages.value,
+    (message) =>
+      `${message.id}:${message.status}:${message.content?.length || 0}:${message.error?.length || 0}`,
+    "|"
+  )
+);
 const sessionActions = computed<ActionMenuItem[]>(() => [
   { key: "rename", label: t("aiPage.sessions.rename"), icon: "Pencil" },
   { key: "duplicate", label: t("aiPage.sessions.duplicate"), icon: "Copy" },
@@ -92,6 +103,12 @@ onMounted(async () => {
     aiStore.createSession("chat");
   }
   consumePendingPrompt();
+  await scrollMessageListToBottomAfterRender();
+});
+
+onUnmounted(() => {
+  clearAnimationFrameHandle(scrollFrame);
+  scrollFrame = null;
 });
 
 watch(
@@ -101,11 +118,22 @@ watch(
 
 watch(
   () => scrollAnchor.value,
-  async () => {
-    await nextTick();
-    scrollElementToBottom(messageListRef.value, "auto");
-  }
+  () => scrollMessageListToBottomAfterRender(),
+  { immediate: true, flush: "post" }
 );
+
+async function scrollMessageListToBottomAfterRender() {
+  await nextTick();
+  requestMessageListBottomScroll();
+}
+
+function requestMessageListBottomScroll(behavior: ScrollBehavior = "auto") {
+  clearAnimationFrameHandle(scrollFrame);
+  scrollFrame = createAnimationFrame(() => {
+    scrollFrame = null;
+    scrollElementToBottom(messageListRef.value, behavior);
+  });
+}
 
 function consumePendingPrompt() {
   const content = promptStore.consumePendingPrompt("chat");

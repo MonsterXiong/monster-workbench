@@ -7,9 +7,10 @@ import {
   persistAiSessions,
 } from "../services/ai-session-storage";
 import { findByValue, firstItem, keySetBy, toTrimmedString } from "../utils";
-import type { AiConversationSession } from "../types/ai";
+import type { AiActiveConfigIdKey, AiConversationSession } from "../types/ai";
 import { useAiImageStore } from "./ai-image";
 import { useAiImageRuntimeStore } from "./ai-image-runtime";
+import { useAiChatRuntimeStore } from "./ai-chat-runtime";
 import { useAiPromptLibraryStore } from "./ai-prompt-library";
 import { useAiProviderStore } from "./ai-provider";
 import { useAiSessionStore } from "./ai-session";
@@ -20,8 +21,9 @@ export const useAiSessionRuntimeStore = defineStore("ai-session-runtime", () => 
   const aiPromptLibraryStore = useAiPromptLibraryStore();
   const aiImageStore = useAiImageStore();
   const aiImageRuntimeStore = useAiImageRuntimeStore();
+  const aiChatRuntimeStore = useAiChatRuntimeStore();
 
-  const { modelConfigs, activeModelConfigIds, selectedConfigId } = storeToRefs(aiProviderStore);
+  const { modelConfigs, selectedConfigId } = storeToRefs(aiProviderStore);
   const { sessions, activeSessionIds } = storeToRefs(aiSessionStore);
   const { imageDraftSize } = storeToRefs(aiImageStore);
 
@@ -38,8 +40,8 @@ export const useAiSessionRuntimeStore = defineStore("ai-session-runtime", () => 
   ) {
     const configId =
       type === "image"
-        ? activeModelConfigIds.value.image
-        : activeModelConfigIds.value.chat;
+        ? aiProviderStore.getActiveModelConfigIdForCapability("image")
+        : aiProviderStore.getActiveModelConfigIdForCapability("chat");
     const session = aiSessionStore.createSession(type, {
       modelConfigId: configId,
       imageSize: type === "image" ? imageDraftSize.value : undefined,
@@ -87,12 +89,12 @@ export const useAiSessionRuntimeStore = defineStore("ai-session-runtime", () => 
   }
 
   function setActiveModelConfig(
-    type: AiConversationSession["type"],
+    type: AiActiveConfigIdKey,
     configId: string
   ) {
     const target = aiProviderStore.getModelConfig(configId);
-    aiProviderStore.setActiveModelConfig(type, target.id);
-    const session = aiSessionStore.getActiveSession(type);
+    aiProviderStore.setActiveCapabilityModelConfig(type, target.id);
+    const session = type === "chat" || type === "image" ? aiSessionStore.getActiveSession(type) : null;
     if (session) {
       session.modelConfigId = target.id;
       session.updatedAt = Date.now();
@@ -127,7 +129,12 @@ export const useAiSessionRuntimeStore = defineStore("ai-session-runtime", () => 
 
     isLoaded.value = true;
     try {
-      await aiImageRuntimeStore.reconcilePendingImageMessages({ checkBackend: false });
+      await aiChatRuntimeStore.reconcilePendingChatMessages({ checkBackend: true });
+    } catch (error) {
+      console.error("[ERR_AI_CHAT_TASK_RECOVER]", error);
+    }
+    try {
+      await aiImageRuntimeStore.reconcilePendingImageMessages({ checkBackend: true });
     } catch (error) {
       console.error("[ERR_AI_IMAGE_TASK_RECOVER]", error);
     }

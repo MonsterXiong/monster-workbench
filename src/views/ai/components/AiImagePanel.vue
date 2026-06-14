@@ -1,195 +1,50 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref } from "vue";
 import { Image, Send } from "lucide-vue-next";
-import AiImageMessageList, { type AiImageMessageListActions, type ImageResultSummaryItem } from "./image/AiImageMessageList.vue";
+import AiImageMessageList, { type AiImageMessageListActions } from "./image/AiImageMessageList.vue";
 import AiImageComposerPromptTools, { type EmptyPromptStarter } from "./image/AiImageComposerPromptTools.vue";
 import AiImageComposerSettings from "./image/AiImageComposerSettings.vue";
-import AiImagePreviewDialog, { type ImagePreviewInspectorItem } from "./image/AiImagePreviewDialog.vue";
+import AiImagePreviewDialog from "./image/AiImagePreviewDialog.vue";
 import AiImageSessionList, { type ImageSessionStatusFilter } from "./image/AiImageSessionList.vue";
+import {
+  buildImageSizeOptions,
+  isExperimentalImageSize,
+} from "./image/aiImageSizeOptions";
+import { createAiImageMessageMeta } from "./image/aiImageMessageMeta";
+import { useAiImageDraftState } from "./image/useAiImageDraftState";
+import { useAiImageGenerationActions } from "./image/useAiImageGenerationActions";
+import { useAiImagePendingState } from "./image/useAiImagePendingState";
+import { useAiImagePreviewState } from "./image/useAiImagePreviewState";
+import { useAiImageSessionActions } from "./image/useAiImageSessionActions";
 import { useAiStore } from "../../../stores/ai";
 import { useAiPromptLibraryStore } from "../../../stores/ai-prompt-library";
 import { useI18n } from "../../../composables/useI18n";
-import type { ActionMenuItem } from "../../../components/common/BaseActionMenu.vue";
-import type { AiConversationSession, AiPromptItem } from "../../../types/ai";
+import type { AiConversationSession } from "../../../types/ai";
 import {
   clearIntervalHandle,
-  clampNumber,
   createInterval,
-  extractTextBetween,
   findByValue,
-  findIndexByValue,
-  findLastItem,
-  filterBySearchTextFields,
   firstItem,
-  formatAspectRatio,
-  formatDuration,
-  formatPositiveDuration,
-  formatReducedAspectRatio,
   formatTemplate,
-  getDimensionsMaxSide,
-  getDimensionsRatio,
   getCurrentTimestampMs,
   getErrorMessage,
-  getElapsedMs,
-  getItemAtOrOnly,
-  includesAnyText,
   isBlank,
-  hasMultipleItems,
-  joinBy,
-  joinLines,
-  joinMappedNonEmptyLines,
-  parseDimensionsText,
-  replaceAllText,
-  take,
-  toTrimmedString,
   type IntervalHandle,
 } from "../../../utils";
 
 type ImageMessage = AiConversationSession["messages"][number];
-const STYLE_PROMPT_CATEGORY_ID = "image-quality-styles";
-const STYLE_PROMPT_SUBJECT_PLACEHOLDER = "{替换为你的主体}";
-const VERIFIED_IMAGE_SIZE_VALUES = [
-  "1008x1792",
-  "1008x1344",
-  "1536x864",
-  "1344x1008",
-  "1024x1024",
-  "2048x2048",
-  "1152x2048",
-  "2048x1152",
-  "1536x2048",
-  "2048x1536",
-  "1344x2016",
-  "2016x1344",
-  "2000x1600",
-  "1600x2000",
-  "2000x1200",
-  "1200x2000",
-  "2048x1024",
-  "1024x2048",
-  "2880x2880",
-  "2160x3840",
-  "3840x2160",
-  "2160x2880",
-  "2880x2160",
-  "2304x3456",
-  "3456x2304",
-  "2880x2304",
-  "2304x2880",
-  "3600x2160",
-  "2160x3600",
-  "3840x1920",
-  "1920x3840",
-  "3840x1280",
-  "1280x3840",
-];
-const EXPERIMENTAL_IMAGE_SIZE_VALUES = new Set<string>();
-const IMAGE_SIZE_TIER_LABELS = new Map<string, string>([
-  ["2048x2048", "2K"],
-  ["1152x2048", "2K"],
-  ["2048x1152", "2K"],
-  ["1536x2048", "2K"],
-  ["2048x1536", "2K"],
-  ["2048x1024", "2K"],
-  ["1024x2048", "2K"],
-  ["2880x2880", "4K"],
-  ["2160x3840", "4K"],
-  ["3840x2160", "4K"],
-  ["2160x2880", "4K"],
-  ["2880x2160", "4K"],
-  ["2304x3456", "4K"],
-  ["3456x2304", "4K"],
-  ["2880x2304", "4K"],
-  ["2304x2880", "4K"],
-  ["3600x2160", "4K"],
-  ["2160x3600", "4K"],
-  ["3840x1920", "4K"],
-  ["1920x3840", "4K"],
-  ["3840x1280", "4K"],
-  ["1280x3840", "4K"],
-]);
 
 const aiStore = useAiStore();
 const promptStore = useAiPromptLibraryStore();
 const { t } = useI18n();
-const input = ref("");
 const imageDraftCount = ref(1);
 const imageInputRef = ref<{ focus?: () => void } | null>(null);
-const renameDialogVisible = ref(false);
-const renameDraft = ref("");
-const renamingSessionId = ref("");
 const sessionSearch = ref("");
-const previewDialogVisible = ref(false);
-const previewImageIndex = ref(0);
-const previewMessage = ref<ImageMessage | null>(null);
-const selectedStylePromptId = ref("");
-const stylePromptSearch = ref("");
-const promptStartersExpanded = ref(false);
-const stylePresetsExpanded = ref(false);
 const sessionStatusFilter = ref<ImageSessionStatusFilter>("all");
-const promptBeforeEnhance = ref("");
-const stylePromptIdBeforeEnhance = ref("");
 const nowMs = ref(getCurrentTimestampMs());
 let clockTimer: IntervalHandle | null = null;
 
-function getImageSizeTierLabel(size: string) {
-  const mappedTier = IMAGE_SIZE_TIER_LABELS.get(size);
-  if (mappedTier) {
-    return mappedTier;
-  }
-  const dimensions = parseDimensionsText(size);
-  if (!dimensions) {
-    return "";
-  }
-  const maxSide = getDimensionsMaxSide(dimensions);
-  if (maxSide >= 7680) {
-    return "8K";
-  }
-  if (maxSide >= 3840) {
-    return "4K";
-  }
-  if (maxSide >= 2048) {
-    return "2K";
-  }
-  return "";
-}
-
-function getImageSizeKindLabel(size: string) {
-  const dimensions = parseDimensionsText(size);
-  if (!dimensions) {
-    return t("aiPage.image.sizeKindCustom");
-  }
-  const ratio = getDimensionsRatio(dimensions);
-  if (ratio === 1) {
-    return t("aiPage.image.sizeKindSquare");
-  }
-  if (ratio >= 3) {
-    return t("aiPage.image.sizeKindPanorama");
-  }
-  if (ratio <= 1 / 3) {
-    return t("aiPage.image.sizeKindVerticalPanorama");
-  }
-  return ratio > 1 ? t("aiPage.image.sizeKindLandscape") : t("aiPage.image.sizeKindPortrait");
-}
-
-function buildImageSizeOption(size: string) {
-  const dimensions = parseDimensionsText(size);
-  const ratio = dimensions ? formatReducedAspectRatio(dimensions, ":") : size;
-  const tier = getImageSizeTierLabel(size);
-  const kind = getImageSizeKindLabel(size);
-  const selectedLabel = ratio;
-  const description = joinBy([kind, size], (item) => item, " · ");
-  return {
-    label: ratio,
-    selectedLabel,
-    description,
-    filterText: joinBy([tier, kind, ratio, size], (item) => item, " "),
-    meta: tier,
-    value: size,
-  };
-}
-
-const imageSizeOptions = computed(() => VERIFIED_IMAGE_SIZE_VALUES.map(buildImageSizeOption));
+const imageSizeOptions = computed(() => buildImageSizeOptions(t));
 
 const emit = defineEmits<{
   (e: "tested", ok: boolean, message: string): void;
@@ -229,7 +84,7 @@ const activeSizeDetail = computed(() => {
   return [option.description, option.meta].filter(Boolean).join(" · ");
 });
 const activeSizeNotice = computed(() => {
-  if (!EXPERIMENTAL_IMAGE_SIZE_VALUES.has(aiStore.imageDraftSize)) {
+  if (!isExperimentalImageSize(aiStore.imageDraftSize)) {
     return "";
   }
   return formatTemplate(t("aiPage.image.experimentalSizeNotice"), { size: activeSizeLabel.value });
@@ -244,27 +99,40 @@ const imageCountOptions = computed(() =>
   }))
 );
 const activeImageModelName = computed(() => aiStore.activeImageConfig?.imageModel || aiStore.activeImageConfig?.model || "-");
-const stylePromptPresets = computed(() => promptStore.getPrompts("image", STYLE_PROMPT_CATEGORY_ID));
-const filteredStylePromptPresets = computed(() => {
-  const keyword = toTrimmedString(stylePromptSearch.value);
-  if (!keyword) {
-    return stylePromptPresets.value;
-  }
-  return filterBySearchTextFields(stylePromptPresets.value, keyword, [
-    (item) => item.title,
-    (item) => item.content,
-  ]);
+const {
+  input,
+  selectedStylePromptId,
+  stylePromptSearch,
+  promptStartersExpanded,
+  stylePresetsExpanded,
+  stylePromptPresets,
+  filteredStylePromptPresets,
+  selectedStylePrompt,
+  stylePickerLabel,
+  stylePresetCountLabel,
+  canEnhancePrompt,
+  canUndoPromptEnhance,
+  draftHasStyleSubjectPlaceholder,
+  draftMetaItems,
+  consumePendingPrompt,
+  applyStylePrompt,
+  clearStylePrompt,
+  clearPromptEnhanceUndo,
+  enhancePrompt,
+  undoPromptEnhance,
+  toggleStylePresets,
+  togglePromptStarters,
+  applyEmptyPromptStarter,
+  clearDraftPrompt,
+} = useAiImageDraftState({
+  t,
+  promptStore,
+  getActiveSizeLabel: () => activeSizeLabel.value,
+  setImageDraftSize: (size) => {
+    aiStore.imageDraftSize = size;
+  },
+  focusImageInput,
 });
-const selectedStylePrompt = computed(() => findByValue(stylePromptPresets.value, (item) => item.id, selectedStylePromptId.value) ?? null);
-const stylePickerLabel = computed(() => selectedStylePrompt.value?.title || t("aiPage.image.stylePresetLabel"));
-const stylePresetCountLabel = computed(() => formatTemplate(t("aiPage.image.stylePresetCount"), {
-  count: filteredStylePromptPresets.value.length,
-  total: stylePromptPresets.value.length,
-}));
-const canEnhancePrompt = computed(() => !isBlank(input.value));
-const canUndoPromptEnhance = computed(() => !isBlank(promptBeforeEnhance.value));
-const draftPromptLength = computed(() => toTrimmedString(input.value).length);
-const draftHasStyleSubjectPlaceholder = computed(() => toTrimmedString(input.value).includes(STYLE_PROMPT_SUBJECT_PLACEHOLDER));
 const canGenerateImage = computed(() => imageSupported.value && !isBlank(input.value) && !isBusy.value && !draftHasStyleSubjectPlaceholder.value);
 const imageGenerateButtonTitle = computed(() => {
   if (!imageSupported.value) {
@@ -274,24 +142,6 @@ const imageGenerateButtonTitle = computed(() => {
     return t("aiPage.image.subjectPlaceholderButtonTitle");
   }
   return undefined;
-});
-const draftMetaItems = computed(() => {
-  if (!draftPromptLength.value) {
-    return [];
-  }
-  const items = [
-    formatTemplate(t("aiPage.image.draftLength"), { count: draftPromptLength.value }),
-    activeSizeLabel.value,
-  ];
-  if (selectedStylePrompt.value) {
-    items.push(formatTemplate(t("aiPage.image.draftStyle"), { style: selectedStylePrompt.value.title }));
-  } else if (isEnhancedPrompt(input.value)) {
-    items.push(t("aiPage.image.draftEnhanced"));
-  }
-  if (draftHasStyleSubjectPlaceholder.value) {
-    items.push(t("aiPage.image.draftSubjectMissing"));
-  }
-  return items;
 });
 const emptyPromptStarters = computed<EmptyPromptStarter[]>(() => [
   {
@@ -329,16 +179,106 @@ const imageStatusLabel = computed(() => {
   }
   return isBusy.value ? t("aiPage.image.generating") : t("aiPage.image.ready");
 });
-const sessionActions = computed<ActionMenuItem[]>(() => [
-  { key: "rename", label: t("aiPage.sessions.rename"), icon: "Pencil" },
-  { key: "duplicate", label: t("aiPage.sessions.duplicate"), icon: "Copy" },
-  { key: "delete", label: t("common.delete"), icon: "Trash2", type: "danger", divided: true },
-]);
 const activeImageHeaderMeta = computed(() => [
   aiStore.activeImageConfig?.name || aiStore.activeImageConfig?.displayName,
   activeImageModelName.value,
   isBusy.value ? imageStatusLabel.value : "",
 ].filter(Boolean).join(" · "));
+const {
+  renameDialogVisible,
+  renameDraft,
+  sessionActions,
+  saveSessionName,
+  handleSessionAction,
+} = useAiImageSessionActions({
+  t,
+  deleteSession: (sessionId) => aiStore.deleteSession(sessionId),
+  createSession: () => aiStore.createSession("image"),
+  hasActiveSession: () => Boolean(aiStore.activeImageSession),
+  renameSession: (sessionId, title) => aiStore.renameSession(sessionId, title),
+  duplicateSession: (sessionId) => aiStore.duplicateSession(sessionId),
+  onError: (error) => {
+    emit("failed", getErrorMessage(error, t("settings.aiProvider.saveFailed")));
+  },
+});
+const imageMessageMeta = createAiImageMessageMeta(() => ({
+  t,
+  fallbackSize: aiStore.imageDraftSize,
+  activeSizeLabel: activeSizeLabel.value,
+}));
+const {
+  handleGenerate,
+  canRetryImageMessage,
+  canUsePromptFromMessage,
+  canRegenerateImageMessage,
+  usePromptFromMessage,
+  retryImageMessage,
+  regenerateImageMessage,
+  cancelImageMessage,
+  getMessagePrompt,
+} = useAiImageGenerationActions({
+  input,
+  imageDraftCount,
+  selectedStylePromptId,
+  promptStartersExpanded,
+  stylePresetsExpanded,
+  messages,
+  isBusy,
+  imageSupported,
+  draftHasStyleSubjectPlaceholder,
+  imageUnavailableTitle,
+  activeImageModelConfigId: () => aiStore.activeModelConfigIds.image,
+  getImageDraftSize: () => aiStore.imageDraftSize,
+  setImageDraftSize: (size) => {
+    aiStore.imageDraftSize = size;
+  },
+  meta: imageMessageMeta,
+  supportsImageConfig: (configId) => aiStore.modelConfigSupportsCapability(configId, "image"),
+  generateImageMessage: (prompt, configId, size, count) =>
+    aiStore.generateImageMessage(prompt, configId, size, count),
+  cancelImageMessage: (messageId) => aiStore.cancelImageMessage(messageId),
+  clearPromptEnhanceUndo,
+  focusImageInput,
+  onFailed: (message) => {
+    emit("failed", message);
+  },
+  onError: (error) => {
+    emit("failed", getErrorMessage(error, t("settings.aiProvider.testFailed")));
+  },
+});
+const {
+  previewDialogVisible,
+  previewImageIndex,
+  previewMessage,
+  previewPrompt,
+  previewImageTitle,
+  previewActualSize,
+  previewRequestedSize,
+  previewLatencyLabel,
+  previewIsSizeFallback,
+  previewIsSizeCompatibility,
+  previewFallbackNotice,
+  previewCompatibilityNotice,
+  previewCanUsePrompt,
+  previewCanRegenerate,
+  previewInspectorItems,
+  openImagePreview,
+  usePromptFromPreview,
+  regeneratePreviewImage,
+  openPreviewSavedFileLocation,
+} = useAiImagePreviewState({
+  t,
+  meta: imageMessageMeta,
+  getMessagePrompt,
+  canUsePromptFromMessage,
+  usePromptFromMessage,
+  canRegenerateImageMessage,
+  regenerateImageMessage,
+  openSavedFileLocation: (path) => aiStore.openImageSavedFileLocation(path),
+  onOpenSavedFileLocationError: (error) => {
+    emit("failed", getErrorMessage(error, t("settings.aiProvider.saveFailed")));
+  },
+});
 
 onMounted(async () => {
   clockTimer = createInterval(() => {
@@ -364,171 +304,9 @@ onUnmounted(() => {
   clockTimer = null;
 });
 
-watch(
-  () => promptStore.pendingPrompt,
-  () => consumePendingPrompt()
-);
-
-watch(input, (value) => {
-  if (!selectedStylePrompt.value) {
-    return;
-  }
-  if (!isStyledPrompt(value, selectedStylePrompt.value)) {
-    selectedStylePromptId.value = "";
-  }
-});
-
-function consumePendingPrompt() {
-  const content = promptStore.consumePendingPrompt("image");
-  if (content) {
-    input.value = content;
-    selectedStylePromptId.value = "";
-    clearPromptEnhanceUndo();
-  }
-}
-
-function extractSubjectFromStylePrompt(content: string, preset: AiPromptItem) {
-  const presetContent = toTrimmedString(preset.content);
-  if (!presetContent.includes(STYLE_PROMPT_SUBJECT_PLACEHOLDER)) {
-    return null;
-  }
-  const subjectIndex = presetContent.indexOf(STYLE_PROMPT_SUBJECT_PLACEHOLDER);
-  const prefix = presetContent.slice(0, subjectIndex);
-  const suffix = presetContent.slice(subjectIndex + STYLE_PROMPT_SUBJECT_PLACEHOLDER.length);
-  const cleanContent = toTrimmedString(content);
-  const subject = extractTextBetween(cleanContent, prefix, suffix);
-  if (!subject.found) {
-    return null;
-  }
-  return subject.value.trim();
-}
-
-function getPromptSubjectCandidate(content: string) {
-  const cleanContent = toTrimmedString(content);
-  for (const preset of stylePromptPresets.value) {
-    const subject = extractSubjectFromStylePrompt(cleanContent, preset);
-    if (subject !== null) {
-      return subject === STYLE_PROMPT_SUBJECT_PLACEHOLDER ? "" : subject;
-    }
-  }
-  return cleanContent;
-}
-
-function isEnhancedPrompt(content: string) {
-  const cleanContent = toTrimmedString(content);
-  return includesAnyText(cleanContent, [t("aiPage.image.enhancedPromptMarker"), "质量控制：", "Quality control:"]);
-}
-
-function isStyledPrompt(content: string, preset: AiPromptItem) {
-  return extractSubjectFromStylePrompt(content, preset) !== null;
-}
-
-function formatStylePromptContent(preset: AiPromptItem, subject: string) {
-  const presetContent = toTrimmedString(preset.content);
-  if (!presetContent) {
-    return subject;
-  }
-  if (presetContent.includes(STYLE_PROMPT_SUBJECT_PLACEHOLDER)) {
-    return replaceAllText(presetContent, STYLE_PROMPT_SUBJECT_PLACEHOLDER, subject || STYLE_PROMPT_SUBJECT_PLACEHOLDER);
-  }
-  return subject ? `${subject}\n\n${presetContent}` : presetContent;
-}
-
-function applyStylePrompt(preset: AiPromptItem) {
-  const subject = getPromptSubjectCandidate(input.value);
-  input.value = formatStylePromptContent(preset, subject);
-  selectedStylePromptId.value = preset.id;
-  promptStartersExpanded.value = false;
-  stylePresetsExpanded.value = false;
-  clearPromptEnhanceUndo();
-  void focusImageInput();
-}
-
-function clearStylePrompt() {
-  input.value = getPromptSubjectCandidate(input.value);
-  selectedStylePromptId.value = "";
-  promptStartersExpanded.value = false;
-  stylePresetsExpanded.value = false;
-  clearPromptEnhanceUndo();
-  void focusImageInput();
-}
-
-function clearPromptEnhanceUndo() {
-  promptBeforeEnhance.value = "";
-  stylePromptIdBeforeEnhance.value = "";
-}
-
-function enhancePrompt() {
-  const subject = getPromptSubjectCandidate(input.value);
-  if (!subject) {
-    return;
-  }
-  if (isEnhancedPrompt(subject)) {
-    input.value = subject;
-    selectedStylePromptId.value = "";
-    return;
-  }
-  promptBeforeEnhance.value = input.value;
-  stylePromptIdBeforeEnhance.value = selectedStylePromptId.value;
-  input.value = joinLines([
-    formatTemplate(t("aiPage.image.enhancedPromptSubject"), { subject }),
-    t("aiPage.image.enhancedPromptComposition"),
-    t("aiPage.image.enhancedPromptLighting"),
-    t("aiPage.image.enhancedPromptDetails"),
-    t("aiPage.image.enhancedPromptQuality"),
-  ]);
-  selectedStylePromptId.value = "";
-  promptStartersExpanded.value = false;
-  stylePresetsExpanded.value = false;
-  void focusImageInput();
-}
-
-function undoPromptEnhance() {
-  if (!promptBeforeEnhance.value) {
-    return;
-  }
-  input.value = promptBeforeEnhance.value;
-  selectedStylePromptId.value = stylePromptIdBeforeEnhance.value;
-  clearPromptEnhanceUndo();
-  void focusImageInput();
-}
-
-function toggleStylePresets() {
-  stylePresetsExpanded.value = !stylePresetsExpanded.value;
-  if (stylePresetsExpanded.value) {
-    promptStartersExpanded.value = false;
-  }
-}
-
-function togglePromptStarters() {
-  promptStartersExpanded.value = !promptStartersExpanded.value;
-  if (promptStartersExpanded.value) {
-    stylePresetsExpanded.value = false;
-  }
-}
-
 async function focusImageInput() {
   await nextTick();
   imageInputRef.value?.focus?.();
-}
-
-function applyEmptyPromptStarter(starter: EmptyPromptStarter) {
-  input.value = starter.prompt;
-  aiStore.imageDraftSize = starter.size;
-  selectedStylePromptId.value = "";
-  promptStartersExpanded.value = false;
-  stylePresetsExpanded.value = false;
-  clearPromptEnhanceUndo();
-  void focusImageInput();
-}
-
-function clearDraftPrompt() {
-  input.value = "";
-  selectedStylePromptId.value = "";
-  promptStartersExpanded.value = false;
-  stylePresetsExpanded.value = false;
-  clearPromptEnhanceUndo();
-  void focusImageInput();
 }
 
 function handleImageModelConfigChange(value: unknown) {
@@ -540,243 +318,8 @@ function handleImageModelConfigChange(value: unknown) {
   aiStore.setActiveModelConfig("image", configId);
 }
 
-async function handleGenerate() {
-  const content = toTrimmedString(input.value);
-  if (!content || isBusy.value) {
-    return;
-  }
-  if (!imageSupported.value) {
-    emit("failed", imageUnavailableTitle.value);
-    return;
-  }
-  if (draftHasStyleSubjectPlaceholder.value) {
-    void focusImageInput();
-    return;
-  }
-  input.value = "";
-  selectedStylePromptId.value = "";
-  promptStartersExpanded.value = false;
-  stylePresetsExpanded.value = false;
-  clearPromptEnhanceUndo();
-  try {
-    await aiStore.generateImageMessage(
-      content,
-      aiStore.activeModelConfigIds.image,
-      aiStore.imageDraftSize,
-      imageDraftCount.value
-    );
-  } catch (err) {
-    emit("failed", getErrorMessage(err, t("settings.aiProvider.testFailed")));
-  }
-}
-
-function findRetryPrompt(messageId: string) {
-  const index = findIndexByValue(messages.value, (message) => message.id, messageId);
-  if (index <= 0) {
-    return "";
-  }
-  return findLastItem(take(messages.value, index), (message) => message.role === "user")?.content || "";
-}
-
-function canRetryImageMessage(message: AiConversationSession["messages"][number]) {
-  const configId = message.modelConfigId || aiStore.activeModelConfigIds.image;
-  return (
-    message.role !== "user" &&
-    (message.status === "failed" || message.status === "canceled") &&
-    Boolean(findRetryPrompt(message.id)) &&
-    !isBusy.value &&
-    aiStore.modelConfigSupportsCapability(configId, "image")
-  );
-}
-
-function canUsePromptFromMessage(message: ImageMessage) {
-  return message.role !== "user" && message.status !== "pending" && Boolean(findRetryPrompt(message.id));
-}
-
-function canRegenerateImageMessage(message: ImageMessage) {
-  const configId = message.modelConfigId || aiStore.activeModelConfigIds.image;
-  return (
-    message.role !== "user" &&
-    message.status === "success" &&
-    Boolean(findRetryPrompt(message.id)) &&
-    !isBusy.value &&
-    aiStore.modelConfigSupportsCapability(configId, "image")
-  );
-}
-
-function canCancelImageMessage(message: ImageMessage) {
-  return message.role !== "user" && message.status === "pending" && Boolean(message.requestId);
-}
-
-function getMessageRegenerateSize(message: ImageMessage) {
-  return message.requestedImageSize || message.imageSize || aiStore.imageDraftSize;
-}
-
-function usePromptFromMessage(message: ImageMessage) {
-  const prompt = findRetryPrompt(message.id);
-  if (!prompt) {
-    return;
-  }
-  input.value = prompt;
-  aiStore.imageDraftSize = getMessageRegenerateSize(message);
-  imageDraftCount.value = getMessageImageCount(message);
-  selectedStylePromptId.value = "";
-  promptStartersExpanded.value = false;
-  stylePresetsExpanded.value = false;
-  clearPromptEnhanceUndo();
-  void focusImageInput();
-}
-
-async function retryImageMessage(message: AiConversationSession["messages"][number]) {
-  const prompt = findRetryPrompt(message.id);
-  if (!prompt || isBusy.value) {
-    return;
-  }
-  const configId = message.modelConfigId || aiStore.activeModelConfigIds.image;
-  if (!aiStore.modelConfigSupportsCapability(configId, "image")) {
-    emit("failed", imageUnavailableTitle.value);
-    return;
-  }
-  try {
-    await aiStore.generateImageMessage(
-      prompt,
-      configId,
-      getMessageRegenerateSize(message),
-      getMessageImageCount(message)
-    );
-  } catch (err) {
-    emit("failed", getErrorMessage(err, t("settings.aiProvider.testFailed")));
-  }
-}
-
-async function regenerateImageMessage(message: ImageMessage) {
-  const prompt = findRetryPrompt(message.id);
-  if (!prompt || isBusy.value) {
-    return;
-  }
-  const configId = message.modelConfigId || aiStore.activeModelConfigIds.image;
-  if (!aiStore.modelConfigSupportsCapability(configId, "image")) {
-    emit("failed", imageUnavailableTitle.value);
-    return;
-  }
-  try {
-    await aiStore.generateImageMessage(
-      prompt,
-      configId,
-      getMessageRegenerateSize(message),
-      getMessageImageCount(message)
-    );
-  } catch (err) {
-    emit("failed", getErrorMessage(err, t("settings.aiProvider.testFailed")));
-  }
-}
-
-async function cancelImageMessage(message: ImageMessage) {
-  if (!canCancelImageMessage(message)) {
-    return;
-  }
-  try {
-    await aiStore.cancelImageMessage(message.id);
-  } catch (err) {
-    emit("failed", getErrorMessage(err, t("settings.aiProvider.testFailed")));
-  }
-}
-
-async function handleDeleteSession(sessionId: string) {
-  try {
-    await aiStore.deleteSession(sessionId);
-    if (!aiStore.activeImageSession) {
-      aiStore.createSession("image");
-    }
-  } catch (err) {
-    emit("failed", getErrorMessage(err, t("settings.aiProvider.saveFailed")));
-  }
-}
-
-function openRenameSession(target: AiConversationSession) {
-  renamingSessionId.value = target.id;
-  renameDraft.value = target.title;
-  renameDialogVisible.value = true;
-}
-
-async function saveSessionName() {
-  try {
-    await aiStore.renameSession(renamingSessionId.value, renameDraft.value);
-    renameDialogVisible.value = false;
-  } catch (err) {
-    emit("failed", getErrorMessage(err, t("settings.aiProvider.saveFailed")));
-  }
-}
-
-async function handleSessionAction(action: ActionMenuItem, target: AiConversationSession) {
-  try {
-    if (action.key === "rename") {
-      openRenameSession(target);
-      return;
-    }
-    if (action.key === "duplicate") {
-      await aiStore.duplicateSession(target.id);
-      return;
-    }
-    if (action.key === "delete") {
-      await handleDeleteSession(target.id);
-    }
-  } catch (err) {
-    emit("failed", getErrorMessage(err, t("settings.aiProvider.saveFailed")));
-  }
-}
-
-function parseImageSize(size: string | undefined) {
-  return parseDimensionsText(size || aiStore.imageDraftSize, { width: 1, height: 1 }) ?? { width: 1, height: 1 };
-}
-
-function getImagePreviewStyle(message: ImageMessage) {
-  const dimensions = parseImageSize(message.imageSize);
-  const ratio = getDimensionsRatio(dimensions);
-  if (ratio >= 3) {
-    return { aspectRatio: "auto", height: "168px" };
-  }
-  if (ratio <= 1 / 3) {
-    return { aspectRatio: "auto", height: "320px" };
-  }
-  return { aspectRatio: formatAspectRatio(dimensions) };
-}
-
-function getPreviewItems(message: ImageMessage) {
-  return message.imageUrls || [];
-}
-
-function hasMultiplePreviewItems(message: ImageMessage) {
-  return hasMultipleItems(getPreviewItems(message));
-}
-
-function hasMultipleSavedFiles(message: ImageMessage) {
-  return hasMultipleItems(message.savedFiles || []);
-}
-
-function getGeneratedImageUrlsText(message: ImageMessage) {
-  return joinLines(getPreviewItems(message));
-}
-
-function getGeneratedImageSavedFilePathsText(message: ImageMessage) {
-  return joinMappedNonEmptyLines(message.savedFiles || [], (file) => file.path);
-}
-
-function getGeneratedImageSavedFile(message: ImageMessage, index: number) {
-  const files = message.savedFiles || [];
-  return getItemAtOrOnly(files, index) ?? null;
-}
-
-function getGeneratedImageSavedFilePath(message: ImageMessage, index: number) {
-  return getGeneratedImageSavedFile(message, index)?.path || "";
-}
-
-function hasGeneratedImageSavedFile(message: ImageMessage, index: number) {
-  return Boolean(getGeneratedImageSavedFilePath(message, index));
-}
-
 async function openGeneratedImageLocation(message: ImageMessage, index: number) {
-  const path = getGeneratedImageSavedFilePath(message, index);
+  const path = imageMessageMeta.getGeneratedImageSavedFilePath(message, index);
   if (!path) {
     return;
   }
@@ -787,373 +330,51 @@ async function openGeneratedImageLocation(message: ImageMessage, index: number) 
   }
 }
 
-async function openPreviewSavedFileLocation() {
-  const files = previewMessage.value?.savedFiles || [];
-  const path = getItemAtOrOnly(files, previewImageIndex.value)?.path || "";
-  if (!path) {
-    return;
-  }
-  try {
-    await aiStore.openImageSavedFileLocation(path);
-  } catch (err) {
-    emit("failed", getErrorMessage(err, t("settings.aiProvider.saveFailed")));
-  }
-}
-
-function hasGeneratedImages(message: ImageMessage) {
-  return getPreviewItems(message).length > 0;
-}
-
-const previewPrompt = computed(() => (previewMessage.value ? getMessagePrompt(previewMessage.value) : ""));
-const previewImageTitle = computed(() => (previewMessage.value ? getImagePreviewTitle(previewMessage.value) : ""));
-const previewActualSize = computed(() => (previewMessage.value ? getMessageActualSize(previewMessage.value) : ""));
-const previewRequestedSize = computed(() => (previewMessage.value ? getMessageRequestedSize(previewMessage.value) : ""));
-const previewLatencyLabel = computed(() => (previewMessage.value ? getMessageLatencyLabel(previewMessage.value) : ""));
-const previewIsSizeFallback = computed(() => Boolean(previewMessage.value && isImageSizeFallback(previewMessage.value)));
-const previewIsSizeCompatibility = computed(() => Boolean(previewMessage.value && isImageSizeCompatibility(previewMessage.value)));
-const previewFallbackNotice = computed(() => (previewMessage.value ? getFallbackNotice(previewMessage.value) : ""));
-const previewCompatibilityNotice = computed(() => (previewMessage.value ? getCompatibilityNotice(previewMessage.value) : ""));
-const previewCanUsePrompt = computed(() => Boolean(previewMessage.value && canUsePromptFromMessage(previewMessage.value)));
-const previewCanRegenerate = computed(() => Boolean(previewMessage.value && canRegenerateImageMessage(previewMessage.value)));
-const previewInspectorItems = computed<ImagePreviewInspectorItem[]>(() => {
-  const message = previewMessage.value;
-  if (!message) {
-    return [];
-  }
-
-  const previewItems = getPreviewItems(message);
-  const items: ImagePreviewInspectorItem[] = [];
-  if (previewItems.length) {
-    items.push({
-      key: "image-index",
-      label: t("aiPage.image.previewImage"),
-      value: formatTemplate(t("aiPage.image.previewCount"), {
-        current: previewImageIndex.value + 1,
-        total: previewItems.length,
-      }),
-      tone: hasMultipleItems(previewItems) ? "info" : undefined,
-    });
-  }
-
-  const actualSize = getMessageActualSize(message);
-  if (actualSize) {
-    items.push({
-      key: "actual-size",
-      label: t("aiPage.image.actualSize"),
-      value: actualSize,
-    });
-  }
-
-  const requestedSize = getMessageRequestedSize(message);
-  const apiSize = getMessageApiSize(message);
-  if (requestedSize && apiSize && requestedSize !== apiSize) {
-    items.push({
-      key: "api-size",
-      label: t("aiPage.image.previewApiSize"),
-      value: apiSize,
-      tone: "info",
-    });
-  }
-
-  return items;
-});
-
-function openImagePreview(_url: string, message: ImageMessage, index = 0) {
-  previewImageIndex.value = index;
-  previewMessage.value = message;
-  previewDialogVisible.value = true;
-}
-
-async function usePromptFromPreview() {
-  const message = previewMessage.value;
-  if (!message || !canUsePromptFromMessage(message)) {
-    return;
-  }
-  previewDialogVisible.value = false;
-  await nextTick();
-  usePromptFromMessage(message);
-}
-
-async function regeneratePreviewImage() {
-  const message = previewMessage.value;
-  if (!message || !canRegenerateImageMessage(message)) {
-    return;
-  }
-  previewDialogVisible.value = false;
-  await nextTick();
-  await regenerateImageMessage(message);
-}
-
-function findImageTaskItem(message: ImageMessage) {
-  if (!message.requestId) {
-    return null;
-  }
-  const localItem = findByValue(aiStore.testQueue, (item) => item.id, message.requestId);
-  if (localItem) {
-    return localItem;
-  }
-  return (
-    findByValue(aiStore.backendQueueStatus.runningItems || [], (item) => item.requestId, message.requestId) ??
-    findByValue(aiStore.backendQueueStatus.queued, (item) => item.requestId, message.requestId) ??
-    null
-  );
-}
-
-function getImageTaskValue(task: ReturnType<typeof findImageTaskItem>, key: string) {
-  return task ? (task as Record<string, unknown>)[key] : undefined;
-}
-
-function getPendingImageStatusLabel(message: ImageMessage) {
-  const task = findImageTaskItem(message);
-  if (!task && message.requestId && getElapsedMs(message.createdAt, nowMs.value) > 30_000) {
-    return t("aiPage.image.recovering");
-  }
-  const status = getImageTaskValue(task, "status");
-  const startedAt = Number(getImageTaskValue(task, "startedAt") ?? getImageTaskValue(task, "startedAtMs") ?? 0);
-  if (status === "queued" || (task && !startedAt)) {
-    return t("aiPage.image.queued");
-  }
-  return t("aiPage.image.generating");
-}
-
-function getPendingImageElapsedLabel(message: ImageMessage) {
-  const task = findImageTaskItem(message);
-  const createdAt = Number(getImageTaskValue(task, "createdAt") ?? getImageTaskValue(task, "createdAtMs") ?? message.createdAt);
-  const startedAt = Number(getImageTaskValue(task, "startedAt") ?? getImageTaskValue(task, "startedAtMs") ?? 0);
-  const baseTime = startedAt || createdAt || message.createdAt;
-  const elapsed = getElapsedMs(baseTime, nowMs.value);
-  const labelKey = startedAt ? "elapsed" : "queueElapsed";
-  return formatTemplate(t(`aiPage.image.${labelKey}`), { time: formatDuration(elapsed, { maxUnits: 2 }) });
-}
-
-function getMessageRequestedSize(message: ImageMessage) {
-  return message.requestedImageSize || message.imageSize || "";
-}
-
-function getMessageImageCount(message: ImageMessage) {
-  return clampNumber(Number(message.imageCount || getPreviewItems(message).length || 1), 1, 4, 1, 0);
-}
-
-function getMessageActualSize(message: ImageMessage) {
-  return message.actualImageSize || message.imageSize || "";
-}
-
-function getMessageApiSize(message: ImageMessage) {
-  return message.apiImageSize || "";
-}
-
-function isImageSizeFallback(message: ImageMessage) {
-  const requestedSize = getMessageRequestedSize(message);
-  const actualSize = getMessageActualSize(message);
-  return Boolean(message.fallbackImageSize) || Boolean(requestedSize && actualSize && requestedSize !== actualSize);
-}
-
-function isImageSizeCompatibility(message: ImageMessage) {
-  const requestedSize = getMessageRequestedSize(message);
-  const apiSize = getMessageApiSize(message);
-  return Boolean(apiSize && requestedSize && apiSize !== requestedSize && !isImageSizeFallback(message));
-}
-
-function getMessageSizeMeta(message: ImageMessage) {
-  const requestedSize = getMessageRequestedSize(message);
-  const actualSize = getMessageActualSize(message);
-  if (!requestedSize && !actualSize) {
-    return "";
-  }
-  if (message.role !== "user" && isImageSizeFallback(message)) {
-    return `${t("aiPage.image.requestedSize")} ${requestedSize} -> ${t("aiPage.image.actualSize")} ${actualSize}`;
-  }
-  return actualSize || requestedSize;
-}
-
-function getImagePreviewTitle(message: ImageMessage) {
-  const requestedSize = getMessageRequestedSize(message);
-  const actualSize = getMessageActualSize(message);
-  if (isImageSizeFallback(message)) {
-    return `${actualSize} (${t("aiPage.image.requestedSize")} ${requestedSize})`;
-  }
-  return actualSize || activeSizeLabel.value;
-}
-
-function getFallbackNotice(message: ImageMessage) {
-  const requestedSize = getMessageRequestedSize(message);
-  const actualSize = getMessageActualSize(message);
-  let text = formatTemplate(t("aiPage.image.sizeFallback"), {
-    requested: requestedSize,
-    actual: actualSize,
-  });
-  if (message.imageAttempts && message.imageAttempts > 1) {
-    text += ` · ${formatTemplate(t("aiPage.image.attempts"), { count: message.imageAttempts })}`;
-  }
-  return text;
-}
-
-function getCompatibilityNotice(message: ImageMessage) {
-  return formatTemplate(t("aiPage.image.sizeCompatibility"), {
-    requested: getMessageRequestedSize(message),
-    api: getMessageApiSize(message),
-  });
-}
-
-function formatMessageDuration(value: unknown) {
-  return formatPositiveDuration(value, { maxUnits: 2 });
-}
-
-function getMessageLatencyLabel(message: ImageMessage) {
-  return formatMessageDuration(message.totalLatencyMs || message.latencyMs);
-}
-
-function getMessageQueueWaitLabel(message: ImageMessage) {
-  return formatMessageDuration(message.queueWaitMs);
-}
-
-function getImageFailureText(message: ImageMessage) {
-  if (isCanceledImageMessage(message)) {
-    return t("aiPage.image.canceledMessage");
-  }
-  return message.error || message.content || t("aiPage.image.failureUnknown");
-}
-
-function isCanceledImageMessage(message: ImageMessage) {
-  return message.status === "canceled" || message.failureKind === "canceled";
-}
-
-function getImageMessageText(message: ImageMessage) {
-  if (isCanceledImageMessage(message)) {
-    return t("aiPage.image.canceledMessage");
-  }
-  return message.content;
-}
-
-function getImageFailureTitle(message: ImageMessage) {
-  return isCanceledImageMessage(message)
-    ? t("aiPage.image.canceled")
-    : t("aiPage.image.failureTitle");
-}
-
-function getFailureKindLabel(message: ImageMessage) {
-  if (!message.failureKind) {
-    return "";
-  }
-  return t(`aiPage.image.failureKind.${message.failureKind}`) || message.failureKind;
-}
-
-function getFailureHint(message: ImageMessage) {
-  if (isCanceledImageMessage(message)) {
-    return t("aiPage.image.failureHintCanceled");
-  }
-  if (message.failureKind === "unsupported_size") {
-    return t("aiPage.image.failureHintUnsupportedSize");
-  }
-  if (message.failureKind === "timeout") {
-    return t("aiPage.image.failureHintTimeout");
-  }
-  if (message.failureKind === "connection") {
-    return t("aiPage.image.failureHintConnection");
-  }
-  return t("aiPage.image.failureHint");
-}
-
-function getImageResultSummaryItems(message: ImageMessage): ImageResultSummaryItem[] {
-  if (message.role === "user" || message.status === "pending") {
-    return [];
-  }
-
-  const items: ImageResultSummaryItem[] = [];
-  const imageCount = getPreviewItems(message).length;
-  const latency = getMessageLatencyLabel(message);
-  const queueWait = getMessageQueueWaitLabel(message);
-  const apiSize = getMessageApiSize(message);
-  const requestedSize = getMessageRequestedSize(message);
-
-  if ((message.status === "failed" || message.status === "canceled") && message.failureKind) {
-    items.push({
-      key: "failure-kind",
-      label: getFailureKindLabel(message),
-      tone: message.failureKind === "unsupported_size" ? "danger" : "warning",
-    });
-  }
-  if (imageCount > 0) {
-    items.push({
-      key: "images",
-      label: formatTemplate(t("aiPage.image.resultImageCount"), { count: imageCount }),
-      tone: "success",
-    });
-  }
-  if (latency) {
-    items.push({
-      key: "latency",
-      label: `${t("aiPage.image.latency")} ${latency}`,
-      tone: "info",
-    });
-  }
-  if (queueWait) {
-    items.push({
-      key: "queue",
-      label: `${t("aiPage.image.queueWait")} ${queueWait}`,
-      tone: "info",
-    });
-  }
-  if (message.imageAttempts && message.imageAttempts > 1) {
-    items.push({
-      key: "attempts",
-      label: formatTemplate(t("aiPage.image.attempts"), { count: message.imageAttempts }),
-      tone: "warning",
-    });
-  }
-  if (apiSize && requestedSize && apiSize !== requestedSize) {
-    items.push({
-      key: "api-size",
-      label: formatTemplate(t("aiPage.image.sizeApiTag"), { size: apiSize }),
-      tone: "info",
-    });
-  }
-
-  return items;
-}
-
-function getMessagePrompt(message: ImageMessage) {
-  if (message.role === "user") {
-    return message.content;
-  }
-  return findRetryPrompt(message.id);
-}
-
-const messageListActions: AiImageMessageListActions = {
-  parseImageSize,
-  applyEmptyPromptStarter,
-  getMessageSizeMeta,
-  getMessageLatencyLabel,
-  getImagePreviewStyle,
+const {
   getPendingImageStatusLabel,
   getPendingImageElapsedLabel,
-  getMessageRequestedSize,
+} = useAiImagePendingState({
+  t,
+  nowMs,
+  testQueue: () => aiStore.testQueue,
+  backendQueueStatus: () => aiStore.backendQueueStatus,
+});
+
+const messageListActions: AiImageMessageListActions = {
+  parseImageSize: imageMessageMeta.parseImageSize,
+  applyEmptyPromptStarter,
+  getMessageSizeMeta: imageMessageMeta.getMessageSizeMeta,
+  getMessageLatencyLabel: imageMessageMeta.getMessageLatencyLabel,
+  getImagePreviewStyle: imageMessageMeta.getImagePreviewStyle,
+  getPendingImageStatusLabel,
+  getPendingImageElapsedLabel,
+  getMessageRequestedSize: imageMessageMeta.getMessageRequestedSize,
   cancelImageMessage,
-  getImageMessageText,
-  isImageSizeFallback,
-  getFallbackNotice,
-  isImageSizeCompatibility,
-  getCompatibilityNotice,
-  getImageFailureTitle,
-  getFailureHint,
+  getImageMessageText: imageMessageMeta.getImageMessageText,
+  isImageSizeFallback: imageMessageMeta.isImageSizeFallback,
+  getFallbackNotice: imageMessageMeta.getFallbackNotice,
+  isImageSizeCompatibility: imageMessageMeta.isImageSizeCompatibility,
+  getCompatibilityNotice: imageMessageMeta.getCompatibilityNotice,
+  getImageFailureTitle: imageMessageMeta.getImageFailureTitle,
+  getFailureHint: imageMessageMeta.getFailureHint,
   canUsePromptFromMessage,
   usePromptFromMessage,
   canRetryImageMessage,
   retryImageMessage,
-  getImageFailureText,
-  getImageResultSummaryItems,
-  getPreviewItems,
-  hasMultiplePreviewItems,
-  hasMultipleSavedFiles,
-  getGeneratedImageUrlsText,
-  getGeneratedImageSavedFilePathsText,
+  getImageFailureText: imageMessageMeta.getImageFailureText,
+  getImageResultSummaryItems: imageMessageMeta.getImageResultSummaryItems,
+  getPreviewItems: imageMessageMeta.getPreviewItems,
+  hasMultiplePreviewItems: imageMessageMeta.hasMultiplePreviewItems,
+  hasMultipleSavedFiles: imageMessageMeta.hasMultipleSavedFiles,
+  getGeneratedImageUrlsText: imageMessageMeta.getGeneratedImageUrlsText,
+  getGeneratedImageSavedFilePathsText: imageMessageMeta.getGeneratedImageSavedFilePathsText,
   openImagePreview,
   canRegenerateImageMessage,
   regenerateImageMessage,
-  hasGeneratedImageSavedFile,
-  getGeneratedImageSavedFilePath,
+  hasGeneratedImageSavedFile: imageMessageMeta.hasGeneratedImageSavedFile,
+  getGeneratedImageSavedFilePath: imageMessageMeta.getGeneratedImageSavedFilePath,
   openGeneratedImageLocation,
-  hasGeneratedImages,
+  hasGeneratedImages: imageMessageMeta.hasGeneratedImages,
 };
 
 </script>

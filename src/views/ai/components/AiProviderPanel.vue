@@ -32,6 +32,14 @@ const capabilityLabelKeys: Record<AiProviderCapability, string> = {
   models: "settings.aiProvider.capabilityModels",
   chat: "settings.aiProvider.capabilityChat",
   image: "settings.aiProvider.capabilityImage",
+  txt2img: "settings.aiProvider.capabilityTxt2img",
+  img2img: "settings.aiProvider.capabilityImg2img",
+  inpaint: "settings.aiProvider.capabilityInpaint",
+  upscale_2x: "settings.aiProvider.capabilityUpscale2x",
+  upscale_4x: "settings.aiProvider.capabilityUpscale4x",
+  person_consistency: "settings.aiProvider.capabilityPersonConsistency",
+  audio: "settings.aiProvider.capabilityAudio",
+  video: "settings.aiProvider.capabilityVideo",
 };
 const selectedCapabilityItems = computed(() =>
   aiStore.selectedConfigCapabilities.map((capability) => ({
@@ -361,7 +369,7 @@ async function handleDeleteConfig() {
       <div v-if="queueItems.length" class="queue-list">
         <div v-for="item in queueItems" :key="item.id" class="queue-item">
           <span class="queue-item__title">{{ t(`settings.aiProvider.queueStatus.${item.status}`) }}</span>
-          <span class="queue-item__meta">{{ item.result?.message || item.error || item.action }}</span>
+          <span class="queue-item__meta">{{ item.result?.message || item.message || item.error || item.action }}</span>
         </div>
       </div>
 

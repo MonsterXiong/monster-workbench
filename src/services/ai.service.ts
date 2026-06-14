@@ -1,7 +1,12 @@
 import { isTauriRuntime } from "./runtime";
 import { callTauri, convertFileSrc } from "./tauri";
-import { includesAllText, stringifyErrorMessage, toError, tryJsonParseObject } from "../utils";
+import { includesAllText, sleep, stringifyErrorMessage, toError, tryJsonParseObject } from "../utils";
 import type {
+  AiBusinessGenerationRequest,
+  AiGenerationArtifact,
+  AiGenerationRequest,
+  AiGenerationResult,
+  AiGenerationTask,
   AiProviderBackendQueueStatus,
   AiProviderConfig,
   AiProviderTestAction,
@@ -10,6 +15,8 @@ import type {
 } from "../types/ai";
 
 const AI_PROVIDER_TEST_FAILED = "\u0041\u0049 \u6a21\u578b\u6d4b\u8bd5\u5931\u8d25";
+const AI_BUSINESS_GENERATION_POLL_INTERVAL_MS = 600;
+const AI_BUSINESS_GENERATION_POLL_TIMEOUT_MS = 30 * 60_000;
 
 function normalizeAiError(err: unknown): Error {
   const message = stringifyErrorMessage(err);
@@ -34,6 +41,34 @@ function normalizeAiResultImages(result: AiProviderTestResult): AiProviderTestRe
   return result;
 }
 
+function normalizeAiArtifact(artifact: AiGenerationArtifact): AiGenerationArtifact {
+  if (artifact.path && !artifact.url) {
+    return {
+      ...artifact,
+      url: convertFileSrc(artifact.path),
+    };
+  }
+  return artifact;
+}
+
+function normalizeAiGenerationResult(result: AiGenerationResult): AiGenerationResult {
+  return {
+    ...result,
+    artifacts: (result.artifacts || []).map(normalizeAiArtifact),
+  };
+}
+
+function normalizeAiGenerationTask(task: AiGenerationTask): AiGenerationTask {
+  if (!task.result) {
+    return task;
+  }
+
+  return {
+    ...task,
+    result: normalizeAiGenerationResult(task.result),
+  };
+}
+
 function normalizeAiTask(task: AiProviderTestTask): AiProviderTestTask {
   if (!task.result) {
     return task;
@@ -45,7 +80,112 @@ function normalizeAiTask(task: AiProviderTestTask): AiProviderTestTask {
   };
 }
 
+function isGenerationTaskTerminal(task: AiGenerationTask) {
+  return task.status === "success" || task.status === "failed" || task.status === "canceled";
+}
+
+function generationTaskToResultOrError(task: AiGenerationTask): AiGenerationResult {
+  if (task.result) {
+    return normalizeAiGenerationResult(task.result);
+  }
+
+  if (task.status === "canceled") {
+    throw new Error(task.error || "AI generation task canceled");
+  }
+
+  throw new Error(task.error || "AI generation task finished without result");
+}
+
+function canCallRuntimeCommand() {
+  return isTauriRuntime() || import.meta.env.DEV;
+}
+
 export const aiService = {
+  async generateDirectContent(request: AiGenerationRequest): Promise<AiGenerationResult> {
+    try {
+      const result = await callTauri<AiGenerationResult>("generate_ai_content", { request });
+      return normalizeAiGenerationResult(result);
+    } catch (err) {
+      const message = stringifyErrorMessage(err);
+      if (includesAllText(message, ["generate_ai_content", "not found"])) {
+        throw new Error("[ERR_AI_COMMAND_MISSING] AI 原子能力命令未注册，请重启 Tauri 开发进程后重试");
+      }
+      throw normalizeAiError(err);
+    }
+  },
+
+  async generateBusinessContent(request: AiBusinessGenerationRequest): Promise<AiGenerationResult> {
+    try {
+      const result = await callTauri<AiGenerationResult>("generate_ai_business_content", { request });
+      return normalizeAiGenerationResult(result);
+    } catch (err) {
+      const message = stringifyErrorMessage(err);
+      if (includesAllText(message, ["generate_ai_business_content", "not found"])) {
+        throw new Error("[ERR_AI_COMMAND_MISSING] AI 业务生成命令未注册，请重启 Tauri 开发进程后重试");
+      }
+      throw normalizeAiError(err);
+    }
+  },
+
+  async enqueueBusinessGeneration(request: AiBusinessGenerationRequest): Promise<AiGenerationTask> {
+    try {
+      const task = await callTauri<AiGenerationTask>("enqueue_ai_business_generation", { request });
+      return normalizeAiGenerationTask(task);
+    } catch (err) {
+      const message = stringifyErrorMessage(err);
+      if (includesAllText(message, ["enqueue_ai_business_generation", "not found"])) {
+        throw new Error("[ERR_AI_COMMAND_MISSING] AI 业务生成任务命令未注册，请重启 Tauri 开发进程后重试");
+      }
+      throw normalizeAiError(err);
+    }
+  },
+
+  async getGenerationTask(requestId: string): Promise<AiGenerationTask> {
+    return normalizeAiGenerationTask(await callTauri<AiGenerationTask>("get_ai_generation_task", { requestId }));
+  },
+
+  async runBusinessGenerationTask(
+    request: AiBusinessGenerationRequest,
+    options: {
+      pollIntervalMs?: number;
+      pollTimeoutMs?: number;
+      onTask?: (task: AiGenerationTask) => unknown | Promise<unknown>;
+    } = {}
+  ): Promise<AiGenerationResult> {
+    const task = await this.enqueueBusinessGeneration(request);
+    await options.onTask?.(task);
+    if (isGenerationTaskTerminal(task)) {
+      return generationTaskToResultOrError(task);
+    }
+
+    const startedAt = Date.now();
+    const pollIntervalMs = options.pollIntervalMs ?? AI_BUSINESS_GENERATION_POLL_INTERVAL_MS;
+    const pollTimeoutMs = options.pollTimeoutMs ?? AI_BUSINESS_GENERATION_POLL_TIMEOUT_MS;
+
+    for (;;) {
+      if (Date.now() - startedAt > pollTimeoutMs) {
+        await this.cancelGeneration(task.requestId).catch(() => undefined);
+        throw new Error("AI generation task polling timed out");
+      }
+
+      await sleep(pollIntervalMs);
+      const nextTask = await this.getGenerationTask(task.requestId);
+      await options.onTask?.(nextTask);
+      if (isGenerationTaskTerminal(nextTask)) {
+        return generationTaskToResultOrError(nextTask);
+      }
+    }
+  },
+
+  async listGenerationTasks(): Promise<AiGenerationTask[]> {
+    if (!canCallRuntimeCommand()) {
+      return [];
+    }
+
+    const tasks = await callTauri<AiGenerationTask[]>("list_ai_generation_tasks");
+    return tasks.map((task) => normalizeAiGenerationTask(task));
+  },
+
   async testProvider(config: AiProviderConfig, action: AiProviderTestAction): Promise<AiProviderTestResult> {
     try {
       const result = await callTauri<AiProviderTestResult>("test_ai_provider", { config, action });
@@ -77,7 +217,7 @@ export const aiService = {
   },
 
   async listProviderTestTasks(): Promise<AiProviderTestTask[]> {
-    if (!isTauriRuntime()) {
+    if (!canCallRuntimeCommand()) {
       return [];
     }
 
@@ -86,7 +226,7 @@ export const aiService = {
   },
 
   async getProviderQueueStatus(): Promise<AiProviderBackendQueueStatus> {
-    if (!isTauriRuntime()) {
+    if (!canCallRuntimeCommand()) {
       return {
         running: null,
         runningItems: [],
@@ -111,5 +251,9 @@ export const aiService = {
 
   async cancelProviderTestTask(requestId: string): Promise<boolean> {
     return await callTauri<boolean>("cancel_ai_provider_test_task", { requestId });
+  },
+
+  async cancelGeneration(requestId: string): Promise<boolean> {
+    return await callTauri<boolean>("cancel_ai_generation_task", { requestId });
   },
 };

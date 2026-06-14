@@ -15,6 +15,7 @@ import {
   getCurrentTimestampMs,
 } from "../utils";
 import type {
+  AiActiveConfigIdKey,
   AiActiveConfigIds,
   AiProviderAdapterId,
   AiModelConfig,
@@ -53,6 +54,32 @@ type AiProviderRegistry = {
 };
 
 const aiProviderRegistry = aiProviderRegistryJson as AiProviderRegistry;
+
+export const AI_ACTIVE_CONFIG_KEYS: AiActiveConfigIdKey[] = [
+  "chat",
+  "image",
+  "txt2img",
+  "img2img",
+  "inpaint",
+  "upscale_2x",
+  "upscale_4x",
+  "person_consistency",
+  "audio",
+  "video",
+];
+
+const AI_ACTIVE_CONFIG_FALLBACKS: Record<AiActiveConfigIdKey, AiActiveConfigIdKey[]> = {
+  chat: ["chat"],
+  image: ["image", "txt2img"],
+  txt2img: ["txt2img", "image"],
+  img2img: ["img2img", "image", "txt2img"],
+  inpaint: ["inpaint", "image", "txt2img"],
+  upscale_2x: ["upscale_2x", "image", "txt2img"],
+  upscale_4x: ["upscale_4x", "upscale_2x", "image", "txt2img"],
+  person_consistency: ["person_consistency", "image", "txt2img"],
+  audio: ["audio", "chat"],
+  video: ["video", "image", "txt2img"],
+};
 
 export const aiProviderDefaults: Record<
   AiProviderType,
@@ -322,10 +349,21 @@ export function normalizeAiActiveModelConfigIds(
   raw: Partial<AiActiveConfigIds> | null | undefined,
   fallbackId: string
 ): AiActiveConfigIds {
-  return {
-    chat: String(raw?.chat || fallbackId),
-    image: String(raw?.image || fallbackId),
-  };
+  const chatFallback = String(raw?.chat || fallbackId);
+  const imageFallback = String(raw?.image || raw?.txt2img || fallbackId);
+
+  return AI_ACTIVE_CONFIG_KEYS.reduce((result, key) => {
+    const legacyFallback =
+      key === "txt2img"
+        ? imageFallback
+        : ["img2img", "inpaint", "upscale_2x", "upscale_4x", "person_consistency", "video"].includes(key)
+          ? imageFallback
+          : key === "audio"
+            ? chatFallback
+            : fallbackId;
+    result[key] = String(raw?.[key] || legacyFallback);
+    return result;
+  }, {} as AiActiveConfigIds);
 }
 
 async function writeAiProviderState(
@@ -344,10 +382,9 @@ export const useAiProviderStore = defineStore("ai-provider", () => {
   const config = ref<AiProviderConfig>({ ...defaultAiProviderConfig });
   const selectedConfigId = ref("");
   const modelConfigs = ref<AiModelConfig[]>([normalizeAiModelConfig(defaultAiProviderConfig)]);
-  const activeModelConfigIds = ref<AiActiveConfigIds>({
-    chat: firstItem(modelConfigs.value)?.id || "",
-    image: firstItem(modelConfigs.value)?.id || "",
-  });
+  const activeModelConfigIds = ref<AiActiveConfigIds>(
+    normalizeAiActiveModelConfigIds(null, firstItem(modelConfigs.value)?.id || "")
+  );
   const isLoaded = ref(false);
   let loadConfigPromise: Promise<void> | null = null;
 
@@ -375,6 +412,12 @@ export const useAiProviderStore = defineStore("ai-provider", () => {
   const selectedModelConfig = computed(() => getModelConfig(selectedConfigId.value));
   const activeChatConfig = computed(() => getModelConfig(activeModelConfigIds.value.chat));
   const activeImageConfig = computed(() => getModelConfig(activeModelConfigIds.value.image));
+  const activeCapabilityConfigMap = computed(() =>
+    AI_ACTIVE_CONFIG_KEYS.reduce((result, capability) => {
+      result[capability] = getActiveModelConfigIdForCapability(capability);
+      return result;
+    }, {} as AiActiveConfigIds)
+  );
   const selectedConfigCapabilities = computed(() => resolveAiProviderCapabilities(selectedModelConfig.value));
   const activeChatConfigCapabilities = computed(() => resolveAiProviderCapabilities(activeChatConfig.value));
   const activeImageConfigCapabilities = computed(() => resolveAiProviderCapabilities(activeImageConfig.value));
@@ -395,6 +438,21 @@ export const useAiProviderStore = defineStore("ai-provider", () => {
     return getModelConfigCapabilities(configId).includes(capability);
   }
 
+  function getActiveModelConfigIdForCapability(capability: AiActiveConfigIdKey) {
+    const fallbackId = firstItem(modelConfigs.value)?.id || selectedConfigId.value;
+    const fallbackChain = AI_ACTIVE_CONFIG_FALLBACKS[capability] || [capability];
+    const candidateId =
+      fallbackChain
+        .map((key) => activeModelConfigIds.value[key])
+        .find((configId) => findByValue(modelConfigs.value, (item) => item.id, configId)) ||
+      fallbackId;
+    return getModelConfig(candidateId).id;
+  }
+
+  function getActiveModelConfigForCapability(capability: AiActiveConfigIdKey) {
+    return getModelConfig(getActiveModelConfigIdForCapability(capability));
+  }
+
   function syncEditableConfig(configId = selectedConfigId.value) {
     const target = getModelConfig(configId);
     selectedConfigId.value = target.id;
@@ -409,6 +467,17 @@ export const useAiProviderStore = defineStore("ai-provider", () => {
     };
   }
 
+  function setActiveCapabilityModelConfig(type: AiActiveConfigIdKey, configId: string) {
+    setActiveModelConfig(type, configId);
+    if (type === "image" || type === "txt2img") {
+      activeModelConfigIds.value = {
+        ...activeModelConfigIds.value,
+        image: getModelConfig(configId).id,
+        txt2img: getModelConfig(configId).id,
+      };
+    }
+  }
+
   async function loadConfigInner() {
     const parsed = await readAiPreferenceState();
     modelConfigs.value = normalizeAiModelConfigs(
@@ -420,12 +489,11 @@ export const useAiProviderStore = defineStore("ai-provider", () => {
       parsed[AI_ACTIVE_MODEL_CONFIGS_KEY] as Partial<AiActiveConfigIds> | null | undefined,
       fallbackId
     );
-    if (!findByValue(modelConfigs.value, (item) => item.id, activeModelConfigIds.value.chat)) {
-      activeModelConfigIds.value.chat = fallbackId;
-    }
-    if (!findByValue(modelConfigs.value, (item) => item.id, activeModelConfigIds.value.image)) {
-      activeModelConfigIds.value.image = fallbackId;
-    }
+    AI_ACTIVE_CONFIG_KEYS.forEach((key) => {
+      if (!findByValue(modelConfigs.value, (item) => item.id, activeModelConfigIds.value[key])) {
+        activeModelConfigIds.value[key] = getActiveModelConfigIdForCapability(key) || fallbackId;
+      }
+    });
     selectedConfigId.value = activeModelConfigIds.value.chat;
     syncEditableConfig(selectedConfigId.value);
     isLoaded.value = true;
@@ -511,10 +579,13 @@ export const useAiProviderStore = defineStore("ai-provider", () => {
     selectedModelConfig,
     activeChatConfig,
     activeImageConfig,
+    activeCapabilityConfigMap,
     selectedConfigCapabilities,
     activeChatConfigCapabilities,
     activeImageConfigCapabilities,
     getModelConfig,
+    getActiveModelConfigIdForCapability,
+    getActiveModelConfigForCapability,
     getModelConfigCapabilities,
     modelConfigSupportsCapability,
     loadConfig,
@@ -525,5 +596,6 @@ export const useAiProviderStore = defineStore("ai-provider", () => {
     replaceModelConfigs,
     syncEditableConfig,
     setActiveModelConfig,
+    setActiveCapabilityModelConfig,
   };
 });

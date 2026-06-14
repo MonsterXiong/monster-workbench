@@ -27,7 +27,12 @@
     "createUpdaterArtifacts": true,
     "resources": [
       "../src/config/ai-provider-registry.json",
+      "sidecars/python/ai_provider_actions.py",
+      "sidecars/python/ai_provider_artifacts.py",
+      "sidecars/python/ai_provider_input.py",
+      "sidecars/python/ai_provider_results.py",
       "sidecars/python/ai_provider_tester.py",
+      "sidecars/python/provider_anthropic_adapter.py",
       "sidecars/python/provider_adapters.py"
     ],
     "icon": [

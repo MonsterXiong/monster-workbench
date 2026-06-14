@@ -1,14 +1,17 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch, type CSSProperties } from "vue";
+import { computed, nextTick, onUnmounted, ref, watch, type CSSProperties } from "vue";
 import { AlertTriangle, Bot, ChevronDown, FolderOpen, Image, Maximize2, RotateCcw, Sparkles, UserRound, XCircle } from "lucide-vue-next";
 import { useI18n } from "../../../../composables/useI18n";
 import type { AiConversationSession } from "../../../../types/ai";
 import {
+  clearAnimationFrameHandle,
+  createAnimationFrame,
   createTimeout,
   formatTemplate,
   getScrollDistanceToBottom,
   joinBy,
   scrollElementToBottom,
+  type AnimationFrameHandle,
 } from "../../../../utils";
 import type { EmptyPromptStarter } from "./AiImageComposerPromptTools.vue";
 
@@ -75,8 +78,23 @@ const { t } = useI18n();
 const messageListRef = ref<HTMLElement | null>(null);
 const isHistoryAwayFromBottom = ref(false);
 const hasHistoryUpdateBelow = ref(false);
+let scrollFrame: AnimationFrameHandle | null = null;
 
-const scrollAnchor = computed(() => joinBy(props.messages, (message) => `${message.id}:${message.status}`, "|"));
+const scrollAnchor = computed(() =>
+  joinBy(
+    props.messages,
+    (message) =>
+      [
+        message.id,
+        message.status,
+        message.content?.length || 0,
+        message.error?.length || 0,
+        message.imageUrls?.length || 0,
+        message.savedFiles?.length || 0,
+      ].join(":"),
+    "|"
+  )
+);
 
 watch(
   () => scrollAnchor.value,
@@ -84,13 +102,19 @@ watch(
     const shouldFollow = !isHistoryAwayFromBottom.value || isHistoryNearBottom();
     await nextTick();
     if (shouldFollow) {
-      scrollHistoryToBottom("auto");
+      requestScrollHistoryToBottom("auto");
       return;
     }
     hasHistoryUpdateBelow.value = true;
     updateHistoryScrollState();
-  }
+  },
+  { immediate: true, flush: "post" }
 );
+
+onUnmounted(() => {
+  clearAnimationFrameHandle(scrollFrame);
+  scrollFrame = null;
+});
 
 function isHistoryNearBottom() {
   return getScrollDistanceToBottom(messageListRef.value) < 96;
@@ -115,6 +139,22 @@ function scrollHistoryToBottom(behavior: ScrollBehavior = "smooth") {
     return;
   }
   createTimeout(updateHistoryScrollState, 220);
+}
+
+function requestScrollHistoryToBottom(behavior: ScrollBehavior = "smooth") {
+  clearAnimationFrameHandle(scrollFrame);
+  scrollFrame = createAnimationFrame(() => {
+    scrollFrame = null;
+    scrollHistoryToBottom(behavior);
+  });
+}
+
+function handleHistoryContentSettled() {
+  if (!isHistoryAwayFromBottom.value || isHistoryNearBottom()) {
+    requestScrollHistoryToBottom("auto");
+    return;
+  }
+  updateHistoryScrollState();
 }
 
 function getEmptyPreviewAspectRatio() {
@@ -285,7 +325,7 @@ function getEmptyPreviewAspectRatio() {
                     class="generated-preview-button"
                     @click="actions.openImagePreview(url, message, index)"
                   >
-                    <img :src="url" alt="AI generated preview" class="generated-image" />
+                    <img :src="url" alt="AI generated preview" class="generated-image" @load="handleHistoryContentSettled" />
                     <span v-if="actions.hasMultiplePreviewItems(message)" class="generated-frame__index">
                       {{ formatTemplate(t("aiPage.image.previewCount"), { current: index + 1, total: actions.getPreviewItems(message).length }) }}
                     </span>

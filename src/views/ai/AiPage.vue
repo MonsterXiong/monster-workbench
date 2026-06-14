@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, onMounted } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { Bot, Image, MessageSquareText, Puzzle, ScrollText, SlidersHorizontal } from "lucide-vue-next";
 import { useI18n } from "../../composables/useI18n";
 import { useToast } from "../../composables/useToast";
+import { useAiStore } from "../../stores/ai";
 import AiChatPanel from "./components/AiChatPanel.vue";
 import AiFeaturePanel from "./components/AiFeaturePanel.vue";
 import AiImagePanel from "./components/AiImagePanel.vue";
@@ -13,6 +14,7 @@ import { getQueryParamEnum } from "../../utils";
 
 const { t } = useI18n();
 const { triggerToast } = useToast();
+const aiStore = useAiStore();
 const route = useRoute();
 const router = useRouter();
 
@@ -58,6 +60,12 @@ const handleFailed = (message: string) => {
 const handleUsePrompt = (type: "chat" | "image") => {
   activeTab.value = type;
 };
+
+onMounted(() => {
+  if (!aiStore.isLoaded) {
+    void aiStore.loadConfig();
+  }
+});
 </script>
 
 <template>

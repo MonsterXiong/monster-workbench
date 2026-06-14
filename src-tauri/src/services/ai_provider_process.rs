@@ -211,6 +211,7 @@ mod tests {
             image_urls: None,
             image_paths: None,
             saved_files: None,
+            artifacts: None,
             api_image_size: None,
             requested_image_size: None,
             actual_image_size: None,

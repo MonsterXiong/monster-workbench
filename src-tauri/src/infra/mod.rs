@@ -1,3 +1,5 @@
+pub mod ai_generation_repo;
+pub mod ai_generation_schema;
 #[allow(dead_code)]
 pub mod crypto;
 pub mod db;

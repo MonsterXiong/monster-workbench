@@ -2,6 +2,7 @@ import { defineStore, storeToRefs } from "pinia";
 import { firstItem } from "../utils";
 import type {
   AiChatExportFormat,
+  AiActiveConfigIdKey,
   AiConversationSession,
   AiProviderCapability,
   AiProviderTestAction,
@@ -17,6 +18,7 @@ import { useAiQueueStore } from "./ai-queue";
 import { useAiPromptLibraryStore } from "./ai-prompt-library";
 import { useAiImageStore } from "./ai-image";
 import { useAiImageRuntimeStore } from "./ai-image-runtime";
+import { useAiGenerationStore } from "./ai-generation";
 
 export const useAiStore = defineStore("ai", () => {
   const aiProviderStore = useAiProviderStore();
@@ -28,6 +30,7 @@ export const useAiStore = defineStore("ai", () => {
   const aiPromptLibraryStore = useAiPromptLibraryStore();
   const aiImageStore = useAiImageStore();
   const aiImageRuntimeStore = useAiImageRuntimeStore();
+  const aiGenerationStore = useAiGenerationStore();
 
   const {
     config,
@@ -40,6 +43,7 @@ export const useAiStore = defineStore("ai", () => {
     selectedModelConfig,
     activeChatConfig,
     activeImageConfig,
+    activeCapabilityConfigMap,
     selectedConfigCapabilities,
     activeChatConfigCapabilities,
     activeImageConfigCapabilities,
@@ -68,6 +72,23 @@ export const useAiStore = defineStore("ai", () => {
   } = storeToRefs(aiPromptLibraryStore);
   const { imageDraftSize } = storeToRefs(aiImageStore);
   const { isLoaded } = storeToRefs(aiSessionRuntimeStore);
+  const {
+    prompts: generationPrompts,
+    modelOverrides: generationModelOverrides,
+    imageSize: generationImageSize,
+    imageCount: generationImageCount,
+    audioVoice: generationAudioVoice,
+    audioFormat: generationAudioFormat,
+    videoSize: generationVideoSize,
+    videoDurationSeconds: generationVideoDurationSeconds,
+    isGenerating: isGeneratingAtomicContent,
+    isCancelling: isCancellingAtomicContent,
+    activeCapability: activeGenerationCapability,
+    activeRequestId: activeGenerationRequestId,
+    lastResult: lastGenerationResult,
+    lastError: lastGenerationError,
+    generationCapabilities,
+  } = storeToRefs(aiGenerationStore);
 
   function isActionBusy(
     action: AiProviderTestAction,
@@ -111,7 +132,7 @@ export const useAiStore = defineStore("ai", () => {
   }
 
   function setActiveModelConfig(
-    type: AiConversationSession["type"],
+    type: AiActiveConfigIdKey,
     configId: string
   ) {
     aiSessionRuntimeStore.setActiveModelConfig(type, configId);
@@ -135,12 +156,12 @@ export const useAiStore = defineStore("ai", () => {
     if (selectedConfigId.value === configId) {
       aiProviderStore.syncEditableConfig(fallbackId);
     }
-    if (activeModelConfigIds.value.chat === configId) {
-      aiProviderStore.setActiveModelConfig("chat", fallbackId);
-    }
-    if (activeModelConfigIds.value.image === configId) {
-      aiProviderStore.setActiveModelConfig("image", fallbackId);
-    }
+    Object.keys(activeModelConfigIds.value).forEach((key) => {
+      const capability = key as AiActiveConfigIdKey;
+      if (activeModelConfigIds.value[capability] === configId) {
+        aiProviderStore.setActiveCapabilityModelConfig(capability, fallbackId);
+      }
+    });
 
     for (const session of sessions.value) {
       if (session.modelConfigId === configId) {
@@ -222,9 +243,25 @@ export const useAiStore = defineStore("ai", () => {
     selectedModelConfig,
     activeChatConfig,
     activeImageConfig,
+    activeCapabilityConfigMap,
     selectedConfigCapabilities,
     activeChatConfigCapabilities,
     activeImageConfigCapabilities,
+    generationPrompts,
+    generationModelOverrides,
+    generationImageSize,
+    generationImageCount,
+    generationAudioVoice,
+    generationAudioFormat,
+    generationVideoSize,
+    generationVideoDurationSeconds,
+    isGeneratingAtomicContent,
+    isCancellingAtomicContent,
+    activeGenerationCapability,
+    activeGenerationRequestId,
+    lastGenerationResult,
+    lastGenerationError,
+    generationCapabilities,
     chatSessions,
     imageSessions,
     activeChatSession,
@@ -234,6 +271,20 @@ export const useAiStore = defineStore("ai", () => {
     promptTypeOptions,
     isActionBusy,
     modelConfigSupportsCapability,
+    getActiveModelConfigIdForCapability: aiProviderStore.getActiveModelConfigIdForCapability,
+    getActiveModelConfigForCapability: aiProviderStore.getActiveModelConfigForCapability,
+    getGenerationModel: aiGenerationStore.getModelForCapability,
+    isGenerationCapabilitySupported: aiGenerationStore.isCapabilitySupported,
+    isGenerationCapabilityReady: aiGenerationStore.isCapabilityReady,
+    getGenerationCapabilityUnavailableReason: aiGenerationStore.getCapabilityUnavailableReason,
+    getGenerationModelConfigId: aiGenerationStore.getModelConfigIdForCapability,
+    getGenerationModelConfig: aiGenerationStore.getModelConfigForCapability,
+    generationModelConfigSupportsCapability: aiGenerationStore.modelConfigSupportsGenerationCapability,
+    selectGenerationModelConfig: aiGenerationStore.selectModelConfigForCapability,
+    patchGenerationPrompt: aiGenerationStore.patchPrompt,
+    patchGenerationModelOverride: aiGenerationStore.patchModelOverride,
+    generateAtomicContent: aiGenerationStore.generate,
+    cancelAtomicContent: aiGenerationStore.cancelActiveGeneration,
     getActionQueueStatus: aiQueueStore.getActionQueueStatus,
     getPromptCategories: aiPromptLibraryStore.getPromptCategories,
     getPromptCategoryOptions: aiPromptLibraryStore.getPromptCategoryOptions,
@@ -256,6 +307,7 @@ export const useAiStore = defineStore("ai", () => {
     deleteModelConfig,
     selectModelConfig: aiProviderStore.selectModelConfig,
     setActiveModelConfig,
+    setActiveCapabilityModelConfig: aiProviderStore.setActiveCapabilityModelConfig,
     createSession,
     selectSession,
     deleteSession,

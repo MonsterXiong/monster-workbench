@@ -19,6 +19,8 @@ PNG_BYTES = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADElEQVR42mP8z8AARQAFAgH/"
     "qk9lAAAAAElFTkSuQmCC"
 )
+AUDIO_BYTES = base64.b64decode("UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQAAAAA=")
+VIDEO_BYTES = b"\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00mp42isom\x00\x00\x00\x08mdat"
 
 
 class MockProviderHandler(BaseHTTPRequestHandler):
@@ -37,6 +39,13 @@ class MockProviderHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(PNG_BYTES)
 
+    def _write_binary(self, payload, content_type):
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
     def _write_too_large_image_headers(self):
         self.send_response(200)
         self.send_header("Content-Type", "image/png")
@@ -52,6 +61,40 @@ class MockProviderHandler(BaseHTTPRequestHandler):
                 self._write_json({"data": [{"id": "model-" + "x" * 400}]})
                 return
             self._write_json({"data": [{"id": "chat-test"}, {"id": "image-test"}]})
+            return
+        if self.path == "/v1/videos/video-contract":
+            self.server.last_video_status_path = self.path
+            self._write_json({
+                "id": "video-contract",
+                "status": "completed",
+                "download_url": "http://169.254.169.254/latest/meta-data/ignored.mp4",
+            })
+            return
+        if self.path == "/v1/videos/video-contract/content":
+            self.server.last_video_content_path = self.path
+            self._write_binary(VIDEO_BYTES, "video/mp4")
+            return
+        if self.path == "/v1/videos/video-json-content":
+            self.server.last_video_status_path = self.path
+            self._write_json({
+                "id": "video-json-content",
+                "status": "completed",
+            })
+            return
+        if self.path == "/v1/videos/video-json-content/content":
+            self.server.last_video_content_path = self.path
+            self._write_json({"error": {"message": "not a binary video response"}})
+            return
+        if self.path == "/v1/videos/video-mislabeled-content":
+            self.server.last_video_status_path = self.path
+            self._write_json({
+                "id": "video-mislabeled-content",
+                "status": "completed",
+            })
+            return
+        if self.path == "/v1/videos/video-mislabeled-content/content":
+            self.server.last_video_content_path = self.path
+            self._write_binary(b'{"error":{"message":"not a real video"}}', "video/mp4")
             return
         if self.path == "/assets/image.png":
             self._write_png()
@@ -81,6 +124,7 @@ class MockProviderHandler(BaseHTTPRequestHandler):
             return
 
         if self.path == "/v1/chat/completions":
+            self.server.last_chat_body = body
             if body.get("model") == "secret-echo":
                 self._write_json({
                     "error": "Authorization Bearer sk-test-secret should not be visible",
@@ -91,6 +135,38 @@ class MockProviderHandler(BaseHTTPRequestHandler):
                 self._write_json({"choices": [{"message": {"content": "大" * 9000}}]})
                 return
             self._write_json({"choices": [{"message": {"content": "pong"}}]})
+            return
+
+        if self.path == "/v1/audio/speech":
+            self.server.last_audio_body = body
+            if "json audio response" in str(body.get("input") or ""):
+                self._write_json({"error": {"message": "not a binary audio response"}})
+                return
+            if "mislabeled audio response" in str(body.get("input") or ""):
+                self._write_binary(b'{"error":{"message":"not a real audio"}}', "audio/mpeg")
+                return
+            self._write_binary(AUDIO_BYTES, "audio/wav")
+            return
+
+        if self.path == "/v1/videos":
+            self.server.last_video_body = body
+            if "json video response" in str(body.get("prompt") or ""):
+                self._write_json({
+                    "id": "video-json-content",
+                    "status": "queued",
+                })
+                return
+            if "mislabeled video response" in str(body.get("prompt") or ""):
+                self._write_json({
+                    "id": "video-mislabeled-content",
+                    "status": "queued",
+                })
+                return
+            self._write_json({
+                "id": "video-contract",
+                "status": "queued",
+                "download_url": "http://169.254.169.254/latest/meta-data/ignored.mp4",
+            })
             return
 
         if self.path == "/v1/images/generations":
@@ -162,7 +238,15 @@ class AiProviderTesterContractTest(unittest.TestCase):
         cls.server.shutdown()
         cls.server.server_close()
 
-    def run_sidecar(self, action, output_dir=None, request_id="contract-test", config_patch=None, env_patch=None):
+    def run_sidecar(
+        self,
+        action,
+        output_dir=None,
+        request_id="contract-test",
+        config_patch=None,
+        env_patch=None,
+        generation=None,
+    ):
         config = {
             "provider": "custom",
             "displayName": "Mock Provider",
@@ -184,6 +268,8 @@ class AiProviderTesterContractTest(unittest.TestCase):
             "outputDir": str(output_dir or ""),
             "requestId": request_id,
         }
+        if generation is not None:
+            payload["generation"] = generation
         completed = subprocess.run(
             [sys.executable, str(SCRIPT_PATH)],
             input=json.dumps(payload).encode("utf-8"),
@@ -235,6 +321,29 @@ class AiProviderTesterContractTest(unittest.TestCase):
         self.assertEqual(result["requestId"], "chat-contract")
         self.assertEqual(result["text"], "pong")
         self.assertEqual(result["statusCode"], 200)
+
+    def test_chat_generation_uses_generation_prompt_model_and_options(self):
+        result = self.run_sidecar(
+            "chat",
+            request_id="chat-generation-options",
+            config_patch={"model": "unused-chat-test"},
+            generation={
+                "prompt": "atomic chat prompt",
+                "model": "chat-test",
+                "options": {
+                    "maxTokens": 123,
+                    "temperature": 0.7,
+                },
+            },
+        )
+
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(result["requestId"], "chat-generation-options")
+        self.assertEqual(result["model"], "chat-test")
+        self.assertEqual(self.server.last_chat_body["model"], "chat-test")
+        self.assertEqual(self.server.last_chat_body["messages"][0]["content"], "atomic chat prompt")
+        self.assertEqual(self.server.last_chat_body["max_tokens"], 123)
+        self.assertEqual(self.server.last_chat_body["temperature"], 0.7)
 
     def test_chat_contract_uses_anthropic_messages_adapter(self):
         result = self.run_sidecar(
@@ -292,6 +401,184 @@ class AiProviderTesterContractTest(unittest.TestCase):
             chat_result = self.run_sidecar("chat", output_dir=broken_path, request_id="chat-broken-dir")
             self.assertTrue(chat_result["ok"], chat_result)
             self.assertEqual(chat_result["text"], "pong")
+
+    def test_audio_generation_saves_artifact_and_uses_generation_options(self):
+        with tempfile.TemporaryDirectory(prefix="monster-ai-sidecar-audio-") as temp_dir:
+            result = self.run_sidecar(
+                "audio",
+                output_dir=temp_dir,
+                request_id="audio-generation-contract",
+                config_patch={"model": "unused-audio-model"},
+                generation={
+                    "prompt": "speak this line",
+                    "model": "tts-test",
+                    "options": {
+                        "voice": "nova",
+                        "format": "wav",
+                    },
+                },
+            )
+
+            self.assertTrue(result["ok"], result)
+            self.assertEqual(result["requestId"], "audio-generation-contract")
+            self.assertEqual(result["model"], "tts-test")
+            self.assertEqual(result["statusCode"], 200)
+            self.assertEqual(self.server.last_audio_body["model"], "tts-test")
+            self.assertEqual(self.server.last_audio_body["input"], "speak this line")
+            self.assertEqual(self.server.last_audio_body["voice"], "nova")
+            self.assertEqual(self.server.last_audio_body["response_format"], "wav")
+
+            artifact = result["artifacts"][0]
+            saved_path = Path(artifact["path"])
+            self.assertTrue(saved_path.exists())
+            self.assertEqual(saved_path.read_bytes(), AUDIO_BYTES)
+            self.assertEqual(artifact["kind"], "audio")
+            self.assertEqual(artifact["mimeType"], "audio/wav")
+            self.assertEqual(artifact["sizeBytes"], len(AUDIO_BYTES))
+
+    def test_audio_generation_rejects_untrusted_format_names(self):
+        with tempfile.TemporaryDirectory(prefix="monster-ai-sidecar-audio-format-") as temp_dir:
+            result = self.run_sidecar(
+                "audio",
+                output_dir=temp_dir,
+                request_id="audio-generation-format",
+                generation={
+                    "prompt": "speak safely",
+                    "model": "tts-test",
+                    "options": {
+                        "voice": "alloy",
+                        "format": "../not-a-real-format",
+                    },
+                },
+            )
+
+            self.assertTrue(result["ok"], result)
+            self.assertEqual(self.server.last_audio_body["response_format"], "mp3")
+            artifact = result["artifacts"][0]
+            saved_path = Path(artifact["path"])
+            self.assertEqual(saved_path.parent, Path(temp_dir))
+            self.assertTrue(saved_path.name.startswith("ai-audio-"))
+
+    def test_audio_generation_rejects_json_media_response(self):
+        with tempfile.TemporaryDirectory(prefix="monster-ai-sidecar-audio-json-") as temp_dir:
+            result = self.run_sidecar(
+                "audio",
+                output_dir=temp_dir,
+                request_id="audio-json-media-response",
+                generation={
+                    "prompt": "json audio response",
+                    "model": "tts-test",
+                    "options": {
+                        "voice": "alloy",
+                        "format": "mp3",
+                    },
+                },
+            )
+
+            self.assertFalse(result["ok"], result)
+            self.assertIn("unexpected media response content-type", result["message"])
+            self.assertIsNone(result["artifacts"])
+            self.assertFalse(any(Path(temp_dir).iterdir()))
+
+    def test_audio_generation_rejects_mislabeled_json_media_body(self):
+        with tempfile.TemporaryDirectory(prefix="monster-ai-sidecar-audio-body-") as temp_dir:
+            result = self.run_sidecar(
+                "audio",
+                output_dir=temp_dir,
+                request_id="audio-json-media-body",
+                generation={
+                    "prompt": "mislabeled audio response",
+                    "model": "tts-test",
+                    "options": {
+                        "voice": "alloy",
+                        "format": "mp3",
+                    },
+                },
+            )
+
+            self.assertFalse(result["ok"], result)
+            self.assertIn("unexpected media response body", result["message"])
+            self.assertIsNone(result["artifacts"])
+            self.assertFalse(any(Path(temp_dir).iterdir()))
+
+    def test_video_generation_polls_and_downloads_same_provider_content(self):
+        with tempfile.TemporaryDirectory(prefix="monster-ai-sidecar-video-") as temp_dir:
+            result = self.run_sidecar(
+                "video",
+                output_dir=temp_dir,
+                request_id="video-generation-contract",
+                config_patch={"model": "unused-video-model"},
+                generation={
+                    "prompt": "make a short clip",
+                    "model": "sora-test",
+                    "options": {
+                        "size": "640x360",
+                        "durationSeconds": 3,
+                    },
+                },
+            )
+
+            self.assertTrue(result["ok"], result)
+            self.assertEqual(result["requestId"], "video-generation-contract")
+            self.assertEqual(result["model"], "sora-test")
+            self.assertEqual(result["statusCode"], 200)
+            self.assertEqual(self.server.last_video_body["model"], "sora-test")
+            self.assertEqual(self.server.last_video_body["prompt"], "make a short clip")
+            self.assertEqual(self.server.last_video_body["size"], "640x360")
+            self.assertEqual(self.server.last_video_body["seconds"], 3)
+            self.assertEqual(self.server.last_video_status_path, "/v1/videos/video-contract")
+            self.assertEqual(self.server.last_video_content_path, "/v1/videos/video-contract/content")
+
+            artifact = result["artifacts"][0]
+            saved_path = Path(artifact["path"])
+            self.assertTrue(saved_path.exists())
+            self.assertEqual(saved_path.read_bytes(), VIDEO_BYTES)
+            self.assertEqual(artifact["kind"], "video")
+            self.assertEqual(artifact["mimeType"], "video/mp4")
+            self.assertEqual(artifact["sizeBytes"], len(VIDEO_BYTES))
+            self.assertEqual(artifact["durationSeconds"], 3)
+
+    def test_video_generation_rejects_json_media_response(self):
+        with tempfile.TemporaryDirectory(prefix="monster-ai-sidecar-video-json-") as temp_dir:
+            result = self.run_sidecar(
+                "video",
+                output_dir=temp_dir,
+                request_id="video-json-media-response",
+                generation={
+                    "prompt": "json video response",
+                    "model": "sora-test",
+                    "options": {
+                        "size": "640x360",
+                        "durationSeconds": 2,
+                    },
+                },
+            )
+
+            self.assertFalse(result["ok"], result)
+            self.assertIn("unexpected media response content-type", result["message"])
+            self.assertIsNone(result["artifacts"])
+            self.assertFalse(any(Path(temp_dir).iterdir()))
+
+    def test_video_generation_rejects_mislabeled_json_media_body(self):
+        with tempfile.TemporaryDirectory(prefix="monster-ai-sidecar-video-body-") as temp_dir:
+            result = self.run_sidecar(
+                "video",
+                output_dir=temp_dir,
+                request_id="video-json-media-body",
+                generation={
+                    "prompt": "mislabeled video response",
+                    "model": "sora-test",
+                    "options": {
+                        "size": "640x360",
+                        "durationSeconds": 2,
+                    },
+                },
+            )
+
+            self.assertFalse(result["ok"], result)
+            self.assertIn("unexpected media response body", result["message"])
+            self.assertIsNone(result["artifacts"])
+            self.assertFalse(any(Path(temp_dir).iterdir()))
 
     def test_image_contract_saves_local_file_metadata(self):
         with tempfile.TemporaryDirectory(prefix="monster-ai-sidecar-") as temp_dir:

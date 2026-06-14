@@ -8,10 +8,35 @@ export type AiProviderType =
   | "ollama"
   | "custom";
 export type AiProviderAdapterId = "openai-compatible" | "anthropic-messages";
-export type AiProviderCapability = "models" | "chat" | "image";
+export type AiProviderCapability =
+  | "models"
+  | "chat"
+  | "image"
+  | "txt2img"
+  | "img2img"
+  | "inpaint"
+  | "upscale_2x"
+  | "upscale_4x"
+  | "person_consistency"
+  | "audio"
+  | "video";
 export type AiProviderTestAction = "models" | "chat" | "image";
+export type AiGenerationCapability =
+  | "chat"
+  | "image"
+  | "txt2img"
+  | "img2img"
+  | "inpaint"
+  | "upscale_2x"
+  | "upscale_4x"
+  | "person_consistency"
+  | "audio"
+  | "video";
+export type AiActiveConfigIdKey = Exclude<AiProviderCapability, "models">;
+export type AiProviderRuntimeAction = AiProviderTestAction | AiGenerationCapability;
 export type AiProviderQueueMode = "serial" | "concurrent";
 export type AiProviderTestQueueStatus = "queued" | "running" | "success" | "failed" | "canceled";
+export type AiGenerationTaskStatus = "queued" | "running" | "success" | "failed" | "canceled";
 export type AiPromptType = "chat" | "image";
 export type AiSessionType = AiPromptType;
 export type AiSessionMessageRole = "user" | "assistant" | "error";
@@ -56,7 +81,7 @@ export interface AiModelConfig extends AiProviderConfig {
 export interface AiProviderTestResult {
   requestId?: string | null;
   ok: boolean;
-  action: AiProviderTestAction;
+  action: AiProviderRuntimeAction;
   provider: AiProviderType;
   model: string;
   baseUrl: string;
@@ -70,6 +95,7 @@ export interface AiProviderTestResult {
   imageUrls?: string[];
   imagePaths?: string[];
   savedFiles?: AiProviderSavedFile[];
+  artifacts?: AiGenerationArtifact[] | null;
   apiImageSize?: string | null;
   requestedImageSize?: string | null;
   actualImageSize?: string | null;
@@ -86,14 +112,95 @@ export interface AiProviderSavedFile {
   dimensions?: string | null;
 }
 
+export interface AiGenerationOptions {
+  maxTokens?: number | null;
+  temperature?: number | null;
+  size?: string | null;
+  count?: number;
+  format?: string | null;
+  voice?: string | null;
+  durationSeconds?: number | null;
+  referenceAssetIds?: string[];
+  referenceImagePath?: string | null;
+  sourceAssetId?: string | null;
+  sourceImagePath?: string | null;
+  maskPath?: string | null;
+  personContextJson?: string | null;
+  scale?: number | null;
+  fallbackMode?: string | null;
+}
+
+export interface AiGenerationRequest {
+  capability: AiGenerationCapability;
+  config: AiProviderConfig;
+  prompt: string;
+  model?: string | null;
+  requestId?: string | null;
+  options?: AiGenerationOptions;
+}
+
+export interface AiBusinessGenerationRequest {
+  capability: AiGenerationCapability;
+  providerConfigId?: string | null;
+  prompt: string;
+  model?: string | null;
+  requestId?: string | null;
+  options?: AiGenerationOptions;
+}
+
+export interface AiGenerationArtifact {
+  kind: AiGenerationCapability;
+  url?: string | null;
+  path?: string | null;
+  mimeType?: string | null;
+  sizeBytes?: number | null;
+  dimensions?: string | null;
+  durationSeconds?: number | null;
+}
+
+export interface AiGenerationResult {
+  requestId?: string | null;
+  ok: boolean;
+  capability: AiGenerationCapability;
+  provider: AiProviderType;
+  model: string;
+  baseUrl: string;
+  latencyMs: number;
+  queueWaitMs?: number | null;
+  totalLatencyMs?: number | null;
+  message: string;
+  statusCode?: number | null;
+  text?: string | null;
+  artifacts: AiGenerationArtifact[];
+  failureKind?: string | null;
+  rawPreview?: string | null;
+}
+
+export interface AiGenerationTask {
+  requestId: string;
+  capability: AiGenerationCapability;
+  scope: "direct" | "business" | string;
+  status: AiGenerationTaskStatus;
+  providerConfigId?: string | null;
+  model?: string | null;
+  createdAtMs: number;
+  startedAtMs?: number | null;
+  finishedAtMs?: number | null;
+  queueWaitMs?: number | null;
+  totalLatencyMs?: number | null;
+  result?: AiGenerationResult | null;
+  error?: string | null;
+}
+
 export interface AiProviderTestQueueItem {
   id: string;
-  action: AiProviderTestAction;
+  action: AiProviderRuntimeAction;
   status: AiProviderTestQueueStatus;
   queueKey?: string;
   createdAt: number;
   startedAt?: number;
   finishedAt?: number;
+  message?: string;
   result?: AiProviderTestResult;
   error?: string;
 }
@@ -114,7 +221,7 @@ export interface AiProviderTestTask {
 export interface AiProviderBackendQueueItem {
   id: number;
   requestId: string;
-  action: AiProviderTestAction;
+  action: AiProviderRuntimeAction;
   createdAtMs: number;
   startedAtMs?: number | null;
   waitMs: number;
@@ -207,7 +314,4 @@ export interface AiConversationSession {
   messages: AiSessionMessage[];
 }
 
-export interface AiActiveConfigIds {
-  chat: string;
-  image: string;
-}
+export type AiActiveConfigIds = Record<AiActiveConfigIdKey, string>;

@@ -1,5 +1,6 @@
 import { defineStore, storeToRefs } from "pinia";
 import { aiService } from "../services/ai.service";
+import { syncAiProviderBackendQueue } from "../services/ai-provider-queue-sync";
 import { systemService } from "../services/system.service";
 import { persistAiSessions } from "../services/ai-session-storage";
 import {
@@ -16,10 +17,14 @@ import {
 import type {
   AiChatExportFormat,
   AiConversationSession,
-  AiProviderTestResult,
+  AiGenerationResult,
+  AiModelConfig,
 } from "../types/ai";
-import { supportsAiProviderCapability, useAiProviderStore } from "./ai-provider";
-import { useAiProviderRuntimeStore } from "./ai-provider-runtime";
+import {
+  supportsAiProviderCapability,
+  useAiProviderStore,
+} from "./ai-provider";
+import { createAiChatPendingRecovery } from "./ai-chat-pending-recovery";
 import { useAiQueueStore } from "./ai-queue";
 import { useAiSessionStore } from "./ai-session";
 
@@ -38,18 +43,69 @@ const currentTime = () => getCurrentTimestampMs();
 const createId = (prefix: string) => createTimestampId(prefix);
 const AI_CHAT_CANCELLED_MESSAGE = "Chat request canceled";
 const AI_CHAT_PROVIDER_UNSUPPORTED_MESSAGE = "当前模型配置不支持模型对话";
+const AI_CHAT_TASK_LOST_AFTER_MS = 30_000;
+const AI_CHAT_TASK_LOST_MESSAGE = "AI chat task missing";
+const AI_CHAT_TASK_NO_RESULT_MESSAGE = "AI chat task returned no result";
+const AI_CHAT_CANCEL_KEYWORDS = [
+  "cancel",
+  "canceled",
+  "cancelled",
+  "aborted",
+  "interrupted",
+  "取消",
+  "中止",
+  "终止",
+];
+
+function isChatCancellationMessage(value: unknown) {
+  const message = String(value || "").toLowerCase();
+  return AI_CHAT_CANCEL_KEYWORDS.some((keyword) => message.includes(keyword));
+}
+
+function buildCanceledChatResult(
+  modelConfig: AiModelConfig,
+  requestId: string | null | undefined,
+  message: string
+): AiGenerationResult {
+  return {
+    requestId: requestId || null,
+    ok: false,
+    capability: "chat",
+    provider: modelConfig.provider,
+    model: modelConfig.model,
+    baseUrl: modelConfig.baseUrl,
+    latencyMs: 0,
+    message,
+    artifacts: [],
+    failureKind: "canceled",
+  };
+}
 
 export const useAiChatRuntimeStore = defineStore("ai-chat-runtime", () => {
   const aiProviderStore = useAiProviderStore();
-  const aiProviderRuntimeStore = useAiProviderRuntimeStore();
   const aiQueueStore = useAiQueueStore();
   const aiSessionStore = useAiSessionStore();
 
   const { activeModelConfigIds } = storeToRefs(aiProviderStore);
   const { sessions } = storeToRefs(aiSessionStore);
+  const { testQueue } = storeToRefs(aiQueueStore);
 
   async function persistSessions() {
     await persistAiSessions(sessions.value);
+  }
+
+  async function refreshBackendQueueStatus() {
+    try {
+      await syncAiProviderBackendQueue({
+        setBackendQueueStatus: aiQueueStore.setBackendQueueStatus,
+        syncLocalQueueWithBackendStatus: aiQueueStore.syncLocalQueueWithBackendStatus,
+        applyBackendTask: aiQueueStore.applyBackendTask,
+        applyGenerationTask: aiQueueStore.applyGenerationTask,
+        updateTestingState: aiQueueStore.updateTestingState,
+      });
+    } catch (error) {
+      console.error("[ERR_AI_CHAT_QUEUE_STATUS]", error);
+    }
   }
 
   function findSessionMessage(messageId: string) {
@@ -61,6 +117,20 @@ export const useAiChatRuntimeStore = defineStore("ai-chat-runtime", () => {
     }
     return null;
   }
+
+  const { reconcilePendingChatMessages } = createAiChatPendingRecovery({
+    sessions,
+    testQueue,
+    patchSessionMessage: aiSessionStore.patchSessionMessage,
+    applyGenerationTask: aiQueueStore.applyGenerationTask,
+    trimLocalTestQueue: aiQueueStore.trimLocalTestQueue,
+    updateTestingState: aiQueueStore.updateTestingState,
+    getGenerationTask: (requestId) => aiService.getGenerationTask(requestId),
+    taskLostAfterMs: AI_CHAT_TASK_LOST_AFTER_MS,
+    taskLostMessage: AI_CHAT_TASK_LOST_MESSAGE,
+    taskNoResultMessage: AI_CHAT_TASK_NO_RESULT_MESSAGE,
+    taskCancelledMessage: AI_CHAT_CANCELLED_MESSAGE,
+  });
 
   function getChatMessageRoleLabel(message: AiSessionMessage) {
     if (message.role === "user") return "用户";
@@ -219,52 +289,69 @@ export const useAiChatRuntimeStore = defineStore("ai-chat-runtime", () => {
 
     let assistantMessageId = "";
     try {
+      const requestId = createId("ai-chat");
       const assistantMessage: AiSessionMessage = {
         id: createId("ai-message"),
         role: "assistant",
         status: "pending",
         content: "",
+        requestId,
         modelConfigId: modelConfig.id,
         model: modelConfig.model,
         createdAt: currentTime(),
       };
       assistantMessageId = assistantMessage.id;
       aiSessionStore.appendSessionMessage(session, assistantMessage);
+      aiQueueStore.upsertRuntimeQueueItem({
+        id: requestId,
+        action: "chat",
+        status: "running",
+        message: "AI 对话生成中",
+      });
+      await persistSessions();
 
-      const result = await aiProviderRuntimeStore.testProvider("chat", {
-        configId: modelConfig.id,
+      const result = await aiService.runBusinessGenerationTask({
+        capability: "chat",
+        providerConfigId: modelConfig.id,
         prompt,
-        onTask: async (task) => {
-          aiSessionStore.patchSessionMessage(assistantMessage.id, {
-            requestId: task.requestId,
-          });
-          await persistSessions();
+        model: modelConfig.model,
+        requestId,
+        options: {
+          maxTokens: 512,
+          temperature: 0.2,
         },
+      }, {
+        onTask: aiQueueStore.applyGenerationTask,
       });
       const currentAssistant = findSessionMessage(assistantMessage.id)?.message;
       if (currentAssistant?.status === "canceled") {
-        return {
-          requestId: currentAssistant.requestId || result.requestId || null,
-          ok: false,
-          action: "chat",
-          provider: modelConfig.provider,
-          model: result.model || modelConfig.model,
-          baseUrl: modelConfig.baseUrl,
-          latencyMs: 0,
-          message: AI_CHAT_CANCELLED_MESSAGE,
-        } satisfies AiProviderTestResult;
+        return buildCanceledChatResult(
+          modelConfig,
+          currentAssistant.requestId || result.requestId || requestId,
+          AI_CHAT_CANCELLED_MESSAGE
+        );
       }
+      const queueStatus = result.ok
+        ? "success"
+        : result.failureKind === "canceled" || isChatCancellationMessage(result.message)
+          ? "canceled"
+          : "failed";
+      aiQueueStore.finishRuntimeQueueItem(
+        result.requestId || requestId,
+        queueStatus,
+        result.message
+      );
       aiSessionStore.patchSessionMessage(assistantMessage.id, {
         role: result.ok ? "assistant" : "error",
         model: result.model || modelConfig.model,
-        requestId: result.requestId || currentAssistant?.requestId,
+        requestId: result.requestId || currentAssistant?.requestId || requestId,
         error: result.ok ? undefined : result.message,
       });
       if (result.ok) {
         await typewriterMessage(assistantMessage, result.text || "");
       } else {
         aiSessionStore.patchSessionMessage(assistantMessage.id, {
-          status: "failed",
+          status: queueStatus === "canceled" ? "canceled" : "failed",
           content: result.message,
         });
       }
@@ -282,18 +369,30 @@ export const useAiChatRuntimeStore = defineStore("ai-chat-runtime", () => {
           .reverse()
           .find((item) => item.role === "assistant" && item.status === "pending") ||
         null;
-      if (targetAssistant?.status === "canceled") {
+      const wasCancelled =
+        targetAssistant?.status === "canceled" || isChatCancellationMessage(message);
+      if (targetAssistant?.requestId) {
+        aiQueueStore.finishRuntimeQueueItem(
+          targetAssistant.requestId,
+          wasCancelled ? "canceled" : "failed",
+          wasCancelled ? AI_CHAT_CANCELLED_MESSAGE : message
+        );
+      }
+      if (wasCancelled) {
+        if (targetAssistant && targetAssistant.status !== "canceled") {
+          aiSessionStore.patchSessionMessage(targetAssistant.id, {
+            role: "error",
+            status: "canceled",
+            content: AI_CHAT_CANCELLED_MESSAGE,
+            error: AI_CHAT_CANCELLED_MESSAGE,
+          });
+        }
         await persistSessions();
-        return {
-          requestId: targetAssistant.requestId || null,
-          ok: false,
-          action: "chat",
-          provider: modelConfig.provider,
-          model: modelConfig.model,
-          baseUrl: modelConfig.baseUrl,
-          latencyMs: 0,
-          message: AI_CHAT_CANCELLED_MESSAGE,
-        } satisfies AiProviderTestResult;
+        return buildCanceledChatResult(
+          modelConfig,
+          targetAssistant?.requestId || null,
+          AI_CHAT_CANCELLED_MESSAGE
+        );
       }
       if (targetAssistant) {
         aiSessionStore.patchSessionMessage(targetAssistant.id, {
@@ -316,6 +415,8 @@ export const useAiChatRuntimeStore = defineStore("ai-chat-runtime", () => {
       }
       await persistSessions();
       throw error;
+    } finally {
+      void refreshBackendQueueStatus();
     }
   }
 
@@ -326,7 +427,7 @@ export const useAiChatRuntimeStore = defineStore("ai-chat-runtime", () => {
       return false;
     }
 
-    const cancelled = await aiService.cancelProviderTestTask(message.requestId);
+    const cancelled = await aiService.cancelGeneration(message.requestId);
     if (!cancelled) {
       return false;
     }
@@ -338,7 +439,7 @@ export const useAiChatRuntimeStore = defineStore("ai-chat-runtime", () => {
       content: AI_CHAT_CANCELLED_MESSAGE,
       error: AI_CHAT_CANCELLED_MESSAGE,
     });
-    await aiProviderRuntimeStore.refreshBackendQueueStatus();
+    await refreshBackendQueueStatus();
     await persistSessions();
     return true;
   }
@@ -346,6 +447,7 @@ export const useAiChatRuntimeStore = defineStore("ai-chat-runtime", () => {
   return {
     exportChatSession,
     cancelChatMessage,
+    reconcilePendingChatMessages,
     sendChatMessage,
   };
 });

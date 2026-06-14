@@ -189,6 +189,7 @@ export const useAiProviderRuntimeStore = defineStore("ai-provider-runtime", () =
           setBackendQueueStatus: aiQueueStore.setBackendQueueStatus,
           syncLocalQueueWithBackendStatus: aiQueueStore.syncLocalQueueWithBackendStatus,
           applyBackendTask: aiQueueStore.applyBackendTask,
+          applyGenerationTask: aiQueueStore.applyGenerationTask,
           updateTestingState: aiQueueStore.updateTestingState,
         },
         {

@@ -15,7 +15,9 @@ import {
   take,
 } from "../utils";
 import type {
+  AiGenerationTask,
   AiProviderBackendQueueStatus,
+  AiProviderRuntimeAction,
   AiProviderTestAction,
   AiProviderTestQueueItem,
   AiProviderTestQueueStatus,
@@ -39,7 +41,7 @@ const currentTime = () => getCurrentTimestampMs();
 
 export const useAiQueueStore = defineStore("ai-queue", () => {
   const isTesting = ref(false);
-  const activeAction = ref<AiProviderTestAction | null>(null);
+  const activeAction = ref<AiProviderRuntimeAction | null>(null);
   const testResult = ref<AiProviderTestResult | null>(null);
   const testQueue = ref<AiProviderTestQueueItem[]>([]);
   const backendQueueStatus = ref<AiProviderBackendQueueStatus>({
@@ -168,6 +170,10 @@ export const useAiQueueStore = defineStore("ai-queue", () => {
     return task.status;
   }
 
+  function getGenerationTaskQueueStatus(task: AiGenerationTask): AiProviderTestQueueStatus {
+    return task.status;
+  }
+
   function markTestQueueItemCanceled(requestId: string, message = AI_PROVIDER_CANCELLED_MESSAGE) {
     const queueItem = findByValue(testQueue.value, (candidate) => candidate.id, requestId);
     if (!queueItem) {
@@ -177,6 +183,68 @@ export const useAiQueueStore = defineStore("ai-queue", () => {
     queueItem.status = "canceled";
     queueItem.finishedAt = currentTime();
     queueItem.error = message;
+    trimLocalTestQueue();
+    updateTestingState();
+    return true;
+  }
+
+  function upsertRuntimeQueueItem(options: {
+    id: string;
+    action: AiProviderRuntimeAction;
+    status?: AiProviderTestQueueStatus;
+    message?: string;
+    createdAt?: number;
+    startedAt?: number;
+  }) {
+    const now = currentTime();
+    const status = options.status ?? "running";
+    const queueItem = findByValue(testQueue.value, (candidate) => candidate.id, options.id);
+
+    if (queueItem) {
+      queueItem.action = options.action;
+      queueItem.status = status;
+      queueItem.message = options.message ?? queueItem.message;
+      queueItem.createdAt = options.createdAt ?? queueItem.createdAt;
+      if (status === "running") {
+        queueItem.startedAt = options.startedAt ?? queueItem.startedAt ?? now;
+      } else if (status === "queued") {
+        queueItem.startedAt = options.startedAt;
+      }
+    } else {
+      testQueue.value.push({
+        id: options.id,
+        action: options.action,
+        status,
+        createdAt: options.createdAt ?? now,
+        startedAt: status === "running" ? options.startedAt ?? now : options.startedAt,
+        message: options.message,
+      });
+    }
+
+    trimLocalTestQueue();
+    updateTestingState();
+  }
+
+  function finishRuntimeQueueItem(
+    requestId: string,
+    status: Extract<AiProviderTestQueueStatus, "success" | "failed" | "canceled">,
+    message: string,
+    result?: AiProviderTestResult
+  ) {
+    const queueItem = findByValue(testQueue.value, (candidate) => candidate.id, requestId);
+    if (!queueItem) {
+      return false;
+    }
+
+    queueItem.status = status;
+    queueItem.finishedAt = currentTime();
+    queueItem.startedAt ??= queueItem.finishedAt;
+    queueItem.message = message;
+    queueItem.error = status === "success" ? undefined : message;
+    if (result) {
+      queueItem.result = result;
+      testResult.value = result;
+    }
     trimLocalTestQueue();
     updateTestingState();
     return true;
@@ -222,6 +290,37 @@ export const useAiQueueStore = defineStore("ai-queue", () => {
     return queueItem;
   }
 
+  function applyGenerationTask(task: AiGenerationTask, item?: AiProviderTestQueueItem) {
+    const queueItem =
+      item ??
+      findByValue(testQueue.value, (candidate) => candidate.id, task.requestId) ??
+      ({
+        id: task.requestId,
+        action: task.capability,
+        status: task.status,
+        createdAt: Number(task.createdAtMs),
+      } satisfies AiProviderTestQueueItem);
+
+    if (!hasByValue(testQueue.value, (candidate) => candidate.id, queueItem.id)) {
+      testQueue.value.push(queueItem);
+    }
+
+    const nextStatus = getGenerationTaskQueueStatus(task);
+    if (queueItem.status !== "canceled") {
+      queueItem.status = nextStatus;
+    }
+    queueItem.startedAt = task.startedAtMs ? Number(task.startedAtMs) : queueItem.startedAt;
+    queueItem.finishedAt = task.finishedAtMs ? Number(task.finishedAtMs) : queueItem.finishedAt;
+    queueItem.message = task.result?.message ?? queueItem.message;
+    queueItem.error =
+      queueItem.status === "success"
+        ? undefined
+        : task.error ?? task.result?.message ?? queueItem.error;
+    trimLocalTestQueue();
+    updateTestingState();
+    return queueItem;
+  }
+
   function setBackendQueueStatus(status: AiProviderBackendQueueStatus) {
     backendQueueStatus.value = status;
   }
@@ -252,7 +351,10 @@ export const useAiQueueStore = defineStore("ai-queue", () => {
     trimLocalTestQueue,
     syncLocalQueueWithBackendStatus,
     applyBackendTask,
+    applyGenerationTask,
     markTestQueueItemCanceled,
+    upsertRuntimeQueueItem,
+    finishRuntimeQueueItem,
     setBackendQueueStatus,
     clearFinishedTests,
     resetTestQueue,

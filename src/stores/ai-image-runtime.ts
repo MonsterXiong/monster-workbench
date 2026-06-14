@@ -4,15 +4,24 @@ import { syncAiProviderBackendQueue } from "../services/ai-provider-queue-sync";
 import { persistAiSessions } from "../services/ai-session-storage";
 import { systemService } from "../services/system.service";
 import {
-  normalizeAiProviderMaxConcurrency,
-  normalizeAiProviderQueueMode,
   supportsAiProviderCapability,
-  toAiProviderConfig,
   useAiProviderStore,
 } from "./ai-provider";
+import { cancelPendingImageMessage } from "./ai-image-cancel-sync";
+import { createAiImagePendingRecovery } from "./ai-image-pending-recovery";
 import {
-  waitForProviderBackendTask,
-} from "./ai-provider-task-runtime";
+  buildImagePromptWithSize,
+  buildImageResultMessagePatch,
+  imageGenerationResultToProviderTestResult,
+  isCanceledImageMessage,
+  normalizeImageSize,
+} from "./ai-image-result-patch";
+import {
+  buildCanceledImageResult,
+  buildFailedImageMessage,
+  buildImageUserMessage,
+  buildPendingImageMessage,
+} from "./ai-image-message-builders";
 import { useAiImageStore } from "./ai-image";
 import { useAiQueueStore } from "./ai-queue";
 import { useAiSessionStore } from "./ai-session";
@@ -23,96 +32,17 @@ import {
   findLastItem,
   getCurrentTimestampMs,
   getDirectoryName,
-  hasByValue,
-  hasTimeElapsed,
-  parseDimensionsText,
-  runAllSettled,
   stringifyErrorMessage,
   toTrimmedString,
 } from "../utils";
-import type {
-  AiConversationSession,
-  AiModelConfig,
-  AiProviderConfig,
-  AiProviderTestQueueItem,
-  AiProviderTestResult,
-  AiProviderTestTask,
-} from "../types/ai";
-
-type AiSessionMessage = AiConversationSession["messages"][number];
-
-const IMAGE_TASK_POLL_INTERVAL_MS = 300;
-const IMAGE_SIDECAR_TIMEOUT_SLACK_MS = 30_000;
-const IMAGE_QUEUE_POLL_TIMEOUT_MS = 24 * 60 * 60_000;
 const IMAGE_TASK_LOST_AFTER_MS = 30_000;
-const IMAGE_STALE_TIMEOUT_MS = IMAGE_QUEUE_POLL_TIMEOUT_MS;
-const IMAGE_REQUEST_TIMEOUT_MAX_MS = 900_000;
 const IMAGE_TASK_LOST_MESSAGE = "AI image task missing";
 const IMAGE_TASK_NO_RESULT_MESSAGE = "AI image task returned no result";
 const IMAGE_REQUEST_CANCELLED_MESSAGE = "Image generation canceled";
 const IMAGE_PROVIDER_UNSUPPORTED_MESSAGE = "当前模型配置不支持图片生成，请切换到支持 image capability 的配置";
 
-const SUPPORTED_IMAGE_SIZES = new Set([
-  "1008x1792",
-  "1008x1344",
-  "1536x864",
-  "1344x1008",
-  "1024x1024",
-  "2048x2048",
-  "1152x2048",
-  "2048x1152",
-  "1536x2048",
-  "2048x1536",
-  "1344x2016",
-  "2016x1344",
-  "2000x1600",
-  "1600x2000",
-  "2000x1200",
-  "1200x2000",
-  "2048x1024",
-  "1024x2048",
-  "2880x2880",
-  "2160x3840",
-  "3840x2160",
-  "2160x2880",
-  "2880x2160",
-  "2304x3456",
-  "3456x2304",
-  "2880x2304",
-  "2304x2880",
-  "3600x2160",
-  "2160x3600",
-  "3840x1920",
-  "1920x3840",
-  "3840x1280",
-  "1280x3840",
-]);
-
 const currentTime = () => getCurrentTimestampMs();
 const createId = (prefix: string) => createTimestampId(prefix);
-
-function normalizeImageSize(value: unknown) {
-  const size = toTrimmedString(value);
-  return SUPPORTED_IMAGE_SIZES.has(size) ? size : "1008x1792";
-}
-
-function buildImagePromptWithSize(prompt: string, imageSize: string) {
-  const cleanPrompt = toTrimmedString(prompt);
-  if (!cleanPrompt) {
-    return cleanPrompt;
-  }
-
-  const dimensions = parseDimensionsText(imageSize);
-  if (!dimensions) {
-    return cleanPrompt;
-  }
-
-  const ratio = `${dimensions.width}:${dimensions.height}`;
-  const sizeInstruction = `Output size ${imageSize} (${ratio}).`;
-  return cleanPrompt.includes(sizeInstruction)
-    ? cleanPrompt
-    : `${cleanPrompt}\n\n${sizeInstruction}`;
-}
 
 export const useAiImageRuntimeStore = defineStore("ai-image-runtime", () => {
   const aiProviderStore = useAiProviderStore();
@@ -133,215 +63,13 @@ export const useAiImageRuntimeStore = defineStore("ai-image-runtime", () => {
     updateTestingState,
   } = aiQueueStore;
 
-  let reconcilePendingImageMessagesPromise: Promise<void> | null = null;
-
-  function getImageMessageFallbackSize(message: AiSessionMessage) {
-    return normalizeImageSize(
-      message.requestedImageSize || message.imageSize || imageDraftSize.value
-    );
-  }
-
-  function clampImageLatency(value: unknown) {
-    return clampNumber(value, 0, IMAGE_STALE_TIMEOUT_MS, 0, 0);
-  }
-
-  function getImageResultOutputCount(result: AiProviderTestResult) {
-    return Math.max(
-      result.imageUrls?.length || 0,
-      result.imagePaths?.length || 0,
-      result.savedFiles?.length || 0
-    ) || undefined;
-  }
-
-  function buildImageResultTimingPatch(result: AiProviderTestResult): Partial<AiSessionMessage> {
-    return {
-      latencyMs: clampImageLatency(result.latencyMs),
-      queueWaitMs: result.queueWaitMs
-        ? clampImageLatency(result.queueWaitMs)
-        : undefined,
-      totalLatencyMs: result.totalLatencyMs
-        ? clampImageLatency(result.totalLatencyMs)
-        : undefined,
-    };
-  }
-
-  function buildImageResultSizePatch(
-    result: AiProviderTestResult,
-    fallbackImageSize: string
-  ): Partial<AiSessionMessage> {
-    return {
-      imageSize: normalizeImageSize(
-        result.actualImageSize || result.fallbackImageSize || fallbackImageSize
-      ),
-      apiImageSize: result.apiImageSize
-        ? normalizeImageSize(result.apiImageSize)
-        : undefined,
-      requestedImageSize: normalizeImageSize(
-        result.requestedImageSize || fallbackImageSize
-      ),
-      actualImageSize: result.actualImageSize
-        ? normalizeImageSize(result.actualImageSize)
-        : undefined,
-      fallbackImageSize: result.fallbackImageSize
-        ? normalizeImageSize(result.fallbackImageSize)
-        : undefined,
-    };
-  }
-
-  function buildImageResultFilePatch(result: AiProviderTestResult): Partial<AiSessionMessage> {
-    return {
-      imageCount: getImageResultOutputCount(result),
-      imageUrls: result.imageUrls,
-      imagePaths: result.imagePaths,
-      savedFiles: result.savedFiles,
-    };
-  }
-
-  function buildImageResultMessagePatch(
-    result: AiProviderTestResult,
-    modelConfig: AiModelConfig,
-    fallbackImageSize: string,
-    fallbackRequestId = ""
-  ): Partial<AiSessionMessage> {
-    return {
-      role: result.ok ? "assistant" : "error",
-      status: result.ok
-        ? "success"
-        : result.failureKind === "canceled"
-          ? "canceled"
-          : "failed",
-      content: result.message,
-      requestId: result.requestId || fallbackRequestId || undefined,
-      model: result.model || modelConfig.imageModel || modelConfig.model,
-      error: result.ok ? undefined : result.message,
-      ...buildImageResultTimingPatch(result),
-      ...buildImageResultSizePatch(result, fallbackImageSize),
-      imageAttempts: result.imageAttempts
-        ? clampNumber(result.imageAttempts, 1, 10, 1, 0)
-        : undefined,
-      failureKind: result.failureKind || undefined,
-      ...buildImageResultFilePatch(result),
-    };
-  }
-
-  function failPendingImageMessage(
-    message: AiSessionMessage,
-    error: string,
-    requestId = message.requestId
-  ) {
-    patchSessionMessage(message.id, {
-      role: "error",
-      status: "failed",
-      content: error,
-      error,
-      requestId: requestId || undefined,
-    });
-  }
-
-  function isCanceledImageMessage(message: AiSessionMessage | null | undefined) {
-    return message?.status === "canceled" || message?.failureKind === "canceled";
-  }
-
-  function patchCanceledImageMessage(messageId: string, messageText: string) {
-    patchSessionMessage(messageId, {
-      role: "error",
-      status: "canceled",
-      content: messageText,
-      error: messageText,
-      failureKind: "canceled",
-    });
-  }
-
-  function patchImageMessageFromResult(
-    message: AiSessionMessage,
-    result: AiProviderTestResult,
-    fallbackRequestId = message.requestId || ""
-  ) {
-    const modelConfig = getModelConfig(
-      message.modelConfigId || activeModelConfigIds.value.image
-    );
-    patchSessionMessage(
-      message.id,
-      buildImageResultMessagePatch(
-        result,
-        modelConfig,
-        getImageMessageFallbackSize(message),
-        fallbackRequestId
-      )
-    );
-  }
-
-  function patchImageMessageFromTask(message: AiSessionMessage, task: AiProviderTestTask) {
-    if (task.status !== "success" && task.status !== "failed") {
-      return false;
-    }
-
-    if (task.result) {
-      patchImageMessageFromResult(
-        message,
-        {
-          ...task.result,
-          requestId: task.result.requestId || task.requestId,
-          queueWaitMs: task.result.queueWaitMs ?? task.queueWaitMs,
-          totalLatencyMs: task.result.totalLatencyMs ?? task.totalLatencyMs,
-        },
-        task.requestId
-      );
-      return true;
-    }
-
-    failPendingImageMessage(message, task.error || IMAGE_TASK_NO_RESULT_MESSAGE, task.requestId);
-    return true;
-  }
-
-  function patchImageMessageFromLocalQueue(message: AiSessionMessage) {
-    if (!message.requestId) {
-      return false;
-    }
-
-    const queueItem = findByValue(testQueue.value, (item) => item.id, message.requestId);
-    if (!queueItem || (queueItem.status !== "success" && queueItem.status !== "failed")) {
-      return false;
-    }
-
-    if (queueItem.result) {
-      patchImageMessageFromResult(message, queueItem.result, queueItem.id);
-      return true;
-    }
-
-    failPendingImageMessage(
-      message,
-      queueItem.error || IMAGE_TASK_NO_RESULT_MESSAGE,
-      queueItem.id
-    );
-    return true;
-  }
-
-  function getPendingImageMessages() {
-    const pendingMessages: AiSessionMessage[] = [];
-    for (const session of sessions.value) {
-      if (session.type !== "image") {
-        continue;
-      }
-      for (const message of session.messages) {
-        if (message.role !== "user" && message.status === "pending") {
-          pendingMessages.push(message);
-        }
-      }
-    }
-    return pendingMessages;
-  }
-
-  function isBackendTaskMissingError(message: string) {
-    return message.toLowerCase().includes("not found");
-  }
-
   async function refreshBackendQueueStatus() {
     try {
       await syncAiProviderBackendQueue({
         setBackendQueueStatus,
         syncLocalQueueWithBackendStatus,
         applyBackendTask,
+        applyGenerationTask: aiQueueStore.applyGenerationTask,
         updateTestingState,
       });
     } catch (error) {
@@ -349,141 +77,23 @@ export const useAiImageRuntimeStore = defineStore("ai-image-runtime", () => {
     }
   }
 
-  async function reconcilePendingImageMessagesInner(options: { checkBackend?: boolean } = {}) {
-    const checkBackend = options.checkBackend !== false;
-    const backendLookups: AiSessionMessage[] = [];
-    const lookupRequestIds = new Set<string>();
-    let changed = false;
-
-    for (const message of getPendingImageMessages()) {
-      if (patchImageMessageFromLocalQueue(message)) {
-        changed = true;
-        continue;
-      }
-
-      if (checkBackend && message.requestId && !lookupRequestIds.has(message.requestId)) {
-        lookupRequestIds.add(message.requestId);
-        backendLookups.push(message);
-      }
-    }
-
-    if (backendLookups.length) {
-      await runAllSettled(backendLookups, async (message) => {
-        if (!message.requestId) {
-          return;
-        }
-
-        try {
-          const task = await aiService.getProviderTestTask(message.requestId);
-          applyBackendTask(task);
-          if (patchImageMessageFromTask(message, task)) {
-            changed = true;
-          }
-        } catch (error) {
-          const messageText = stringifyErrorMessage(error);
-          if (
-            isBackendTaskMissingError(messageText) &&
-            hasTimeElapsed(message.createdAt, IMAGE_TASK_LOST_AFTER_MS)
-          ) {
-            failPendingImageMessage(message, IMAGE_TASK_LOST_MESSAGE);
-            changed = true;
-            return;
-          }
-          console.error("[ERR_AI_IMAGE_TASK_RECOVER]", error);
-        }
-      });
-    }
-
-    if (changed) {
-      trimLocalTestQueue();
-      updateTestingState();
-      await persistAiSessions(sessions.value);
-    }
-  }
-
-  async function reconcilePendingImageMessages(options: { checkBackend?: boolean } = {}) {
-    if (reconcilePendingImageMessagesPromise) {
-      return reconcilePendingImageMessagesPromise;
-    }
-
-    reconcilePendingImageMessagesPromise = reconcilePendingImageMessagesInner(options);
-    try {
-      await reconcilePendingImageMessagesPromise;
-    } finally {
-      reconcilePendingImageMessagesPromise = null;
-    }
-  }
-
-  function buildRuntimeConfig(
-    content: string,
-    options: { configId?: string; imageSize?: string; imageCount?: number } = {}
-  ): AiProviderConfig {
-    const fallbackConfigId = activeModelConfigIds.value.image;
-    const source = options.configId
-      ? getModelConfig(options.configId)
-      : getModelConfig(fallbackConfigId);
-    const base = toAiProviderConfig(source);
-    const normalizedSize = normalizeImageSize(
-      options.imageSize || base.imageSize || imageDraftSize.value
-    );
-    const normalizedCount = clampNumber(
-      Number(options.imageCount || base.imageCount || 1),
-      1,
-      4,
-      base.imageCount || 1,
-      0
-    );
-
-    return {
-      ...base,
-      queueKey: source.id,
-      imageModel: base.imageModel || base.model,
-      imagePrompt: buildImagePromptWithSize(
-        content || base.imagePrompt || base.testPrompt,
-        normalizedSize
-      ),
-      imageSize: normalizedSize,
-      imageCount: normalizedCount,
-      queueMode: normalizeAiProviderQueueMode(base.queueMode),
-      maxConcurrency: normalizeAiProviderMaxConcurrency(base.maxConcurrency),
-    };
-  }
-
-  function getTaskPollTimeoutMs(configSnapshot: AiProviderConfig) {
-    const requestTimeoutMs =
-      clampNumber(
-        configSnapshot.timeoutMs,
-        3_000,
-        IMAGE_REQUEST_TIMEOUT_MAX_MS,
-        720_000,
-        0
-      ) + IMAGE_SIDECAR_TIMEOUT_SLACK_MS;
-    return requestTimeoutMs + IMAGE_QUEUE_POLL_TIMEOUT_MS;
-  }
-
-  async function waitForBackendTask(
-    requestId: string,
-    item: AiProviderTestQueueItem,
-    pollTimeoutMs: number
-  ) {
-    return await waitForProviderBackendTask({
-      requestId,
-      item,
-      pollTimeoutMs,
-      pollIntervalMs: IMAGE_TASK_POLL_INTERVAL_MS,
-      canceledMessage: IMAGE_REQUEST_CANCELLED_MESSAGE,
-      timeoutMessage: "AI image request timed out",
-      lookupFailedMessage: (message) => `AI image task lookup failed: ${message}`,
-      noResultMessage: IMAGE_TASK_NO_RESULT_MESSAGE,
-      applyBackendTask,
-      onLocalQueueChanged: () => {
-        trimLocalTestQueue();
-        updateTestingState();
-      },
-      refreshBackendQueueStatus,
-      currentTime,
-    });
-  }
+  const { reconcilePendingImageMessages } = createAiImagePendingRecovery({
+    sessions,
+    testQueue,
+    activeImageConfigId: () => activeModelConfigIds.value.image,
+    imageDraftSize: () => imageDraftSize.value,
+    getModelConfig,
+    patchSessionMessage,
+    applyBackendTask,
+    applyGenerationTask: aiQueueStore.applyGenerationTask,
+    trimLocalTestQueue,
+    updateTestingState,
+    getProviderTestTask: (requestId) => aiService.getProviderTestTask(requestId),
+    getGenerationTask: (requestId) => aiService.getGenerationTask(requestId),
+    taskLostAfterMs: IMAGE_TASK_LOST_AFTER_MS,
+    taskLostMessage: IMAGE_TASK_LOST_MESSAGE,
+    taskNoResultMessage: IMAGE_TASK_NO_RESULT_MESSAGE,
+  });
 
   async function openImageSavedFileLocation(path: string) {
     const targetPath = getDirectoryName(path) || path;
@@ -494,35 +104,17 @@ export const useAiImageRuntimeStore = defineStore("ai-image-runtime", () => {
   }
 
   async function cancelImageMessage(messageId: string) {
-    const session = sessions.value.find((item) =>
-      hasByValue(item.messages, (message) => message.id, messageId)
-    );
-    const message = session
-      ? findByValue(session.messages, (item) => item.id, messageId)
-      : null;
-    if (!session || !message?.requestId || message.status !== "pending") {
-      return false;
-    }
-
-    const cancelled = await aiService.cancelProviderTestTask(message.requestId);
-    if (!cancelled) {
-      return false;
-    }
-
-    aiQueueStore.markTestQueueItemCanceled(
-      message.requestId,
-      message.error || message.content || IMAGE_REQUEST_CANCELLED_MESSAGE
-    );
-
-    patchCanceledImageMessage(
-      messageId,
-      message.error || message.content || IMAGE_REQUEST_CANCELLED_MESSAGE
-    );
-    trimLocalTestQueue();
-    updateTestingState();
-    await refreshBackendQueueStatus();
-    await persistAiSessions(sessions.value);
-    return true;
+    return cancelPendingImageMessage({
+      sessions,
+      cancelProviderTestTask: (requestId) => aiService.cancelGeneration(requestId),
+      markTestQueueItemCanceled: (requestId, error) =>
+        aiQueueStore.markTestQueueItemCanceled(requestId, error),
+      patchSessionMessage,
+      trimLocalTestQueue,
+      updateTestingState,
+      refreshBackendQueueStatus,
+      canceledMessage: IMAGE_REQUEST_CANCELLED_MESSAGE,
+    }, messageId);
   }
 
   async function generateImageMessage(
@@ -550,56 +142,54 @@ export const useAiImageRuntimeStore = defineStore("ai-image-runtime", () => {
     session.imageSize = normalizedImageSize;
     imageDraftSize.value = normalizedImageSize;
 
-    appendSessionMessage(session, {
+    appendSessionMessage(session, buildImageUserMessage(prompt, {
       id: createId("ai-message"),
-      role: "user",
-      status: "success",
-      content: prompt,
-      modelConfigId: modelConfig.id,
-      model: modelConfig.model,
+      modelConfig,
       imageSize: normalizedImageSize,
       imageCount: normalizedImageCount,
-      requestedImageSize: normalizedImageSize,
       createdAt: currentTime(),
-    });
+    }));
     await persistAiSessions(sessions.value);
 
     let pendingMessageId = "";
     try {
-      const pendingMessage: AiConversationSession["messages"][number] = {
+      const requestId = createId("ai-image");
+      const pendingMessage = buildPendingImageMessage({
         id: createId("ai-message"),
-        role: "assistant",
-        status: "pending",
-        content: "",
-        modelConfigId: modelConfig.id,
-        model: modelConfig.imageModel || modelConfig.model,
+        requestId,
+        modelConfig,
         imageSize: normalizedImageSize,
         imageCount: normalizedImageCount,
-        requestedImageSize: normalizedImageSize,
         createdAt: currentTime(),
-      };
+      });
       pendingMessageId = pendingMessage.id;
       appendSessionMessage(session, pendingMessage);
-      await persistAiSessions(sessions.value);
 
-      const configSnapshot = buildRuntimeConfig(prompt, {
-        configId: modelConfig.id,
-        imageSize: normalizedImageSize,
-        imageCount: normalizedImageCount,
-      });
-      const task = await aiService.enqueueProviderTest(configSnapshot, "image");
-      const item = applyBackendTask(task);
-      item.queueKey = configSnapshot.queueKey;
-
-      patchSessionMessage(pendingMessage.id, {
-        requestId: task.requestId,
+      const generationPrompt = buildImagePromptWithSize(prompt, normalizedImageSize);
+      aiQueueStore.upsertRuntimeQueueItem({
+        id: requestId,
+        action: "image",
+        status: "running",
+        message: "AI 图片生成中",
       });
       await persistAiSessions(sessions.value);
 
-      const result = await waitForBackendTask(
-        task.requestId,
-        item,
-        getTaskPollTimeoutMs(configSnapshot)
+      const generationResult = await aiService.runBusinessGenerationTask({
+        capability: "image",
+        providerConfigId: modelConfig.id,
+        prompt: generationPrompt,
+        model: modelConfig.imageModel || modelConfig.model,
+        requestId,
+        options: {
+          size: normalizedImageSize,
+          count: normalizedImageCount,
+        },
+      }, {
+        onTask: aiQueueStore.applyGenerationTask,
+      });
+      const result = imageGenerationResultToProviderTestResult(
+        generationResult,
+        normalizedImageSize
       );
       const currentPendingMessage = findByValue(
         session.messages,
@@ -608,25 +198,29 @@ export const useAiImageRuntimeStore = defineStore("ai-image-runtime", () => {
       );
       if (isCanceledImageMessage(currentPendingMessage)) {
         await persistAiSessions(sessions.value);
-        return {
-          requestId: currentPendingMessage?.requestId || task.requestId,
-          ok: false,
-          action: "image",
-          provider: modelConfig.provider,
-          model: modelConfig.imageModel || modelConfig.model,
-          baseUrl: modelConfig.baseUrl,
-          latencyMs: 0,
-          message: IMAGE_REQUEST_CANCELLED_MESSAGE,
-          failureKind: "canceled",
-        } satisfies AiProviderTestResult;
+        return buildCanceledImageResult(
+          modelConfig,
+          currentPendingMessage?.requestId || generationResult.requestId || requestId,
+          IMAGE_REQUEST_CANCELLED_MESSAGE
+        );
       }
+      aiQueueStore.finishRuntimeQueueItem(
+        generationResult.requestId || requestId,
+        generationResult.ok
+          ? "success"
+          : generationResult.failureKind === "canceled"
+            ? "canceled"
+            : "failed",
+        generationResult.message,
+        result
+      );
       patchSessionMessage(
         pendingMessage.id,
         buildImageResultMessagePatch(
           result,
           modelConfig,
           normalizedImageSize,
-          task.requestId
+          requestId
         )
       );
       await persistAiSessions(sessions.value);
@@ -644,6 +238,13 @@ export const useAiImageRuntimeStore = defineStore("ai-image-runtime", () => {
         const wasCancelled =
           isCanceledImageMessage(pendingImage) ||
           pendingImage.error === IMAGE_REQUEST_CANCELLED_MESSAGE;
+        if (pendingImage.requestId) {
+          aiQueueStore.finishRuntimeQueueItem(
+            pendingImage.requestId,
+            wasCancelled ? "canceled" : "failed",
+            wasCancelled ? IMAGE_REQUEST_CANCELLED_MESSAGE : messageText
+          );
+        }
         if (!wasCancelled) {
           patchSessionMessage(pendingImage.id, {
             role: "error",
@@ -654,32 +255,20 @@ export const useAiImageRuntimeStore = defineStore("ai-image-runtime", () => {
         }
         await persistAiSessions(sessions.value);
         if (wasCancelled) {
-          return {
-            requestId: pendingImage.requestId || null,
-            ok: false,
-            action: "image",
-            provider: modelConfig.provider,
-            model: modelConfig.imageModel || modelConfig.model,
-            baseUrl: modelConfig.baseUrl,
-            latencyMs: 0,
-            message: IMAGE_REQUEST_CANCELLED_MESSAGE,
-            failureKind: "canceled",
-          } satisfies AiProviderTestResult;
+          return buildCanceledImageResult(
+            modelConfig,
+            pendingImage.requestId,
+            IMAGE_REQUEST_CANCELLED_MESSAGE
+          );
         }
       } else {
-        appendSessionMessage(session, {
+        appendSessionMessage(session, buildFailedImageMessage(messageText, {
           id: createId("ai-message"),
-          role: "error",
-          status: "failed",
-          content: messageText,
-          modelConfigId: modelConfig.id,
-          model: modelConfig.imageModel || modelConfig.model,
-          error: messageText,
+          modelConfig,
           imageSize: normalizedImageSize,
           imageCount: normalizedImageCount,
-          requestedImageSize: normalizedImageSize,
           createdAt: currentTime(),
-        });
+        }));
         await persistAiSessions(sessions.value);
       }
       throw error;

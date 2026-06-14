@@ -1,15 +1,14 @@
 import { ensureBrowserMessage } from "./runtime";
+import { clearAiProviderMockTasks, handleAiProviderMock } from "./mocks/ai-provider.mock";
+import { request } from "./request";
 import {
   filterByOptionalValues,
   filterBySearchTextFields,
   findByValue,
   findIndexByValue,
   formatCurrentIsoDateTime,
-  createTimeout,
-  getCurrentTimestampMs,
   getNextNumberBy,
   joinLines,
-  mapValuesToArray,
   paginateArray,
   pushLimitedItem,
   redactSensitiveObjectDeep,
@@ -17,7 +16,6 @@ import {
   removeByValues,
   safeJsonStringify,
   sortByMany,
-  take,
   tryJsonParse,
   tryJsonParseObject,
   uniqueMappedValues,
@@ -71,6 +69,7 @@ const mockNavigations = [
 let navigationsStore = [...mockNavigations];
 
 const APP_CONFIG_STORE_KEY = "monsterWorkbench.mock.preferenceConfig";
+const APP_CONFIG_SEED_URL = "/mock/preference-config.json";
 const defaultAppConfigStore = {
   theme: "light",
   language: "zh-CN",
@@ -79,32 +78,12 @@ const defaultAppConfigStore = {
 };
 
 let appConfigStore = loadMockPreferenceConfig();
+let appConfigStoreSeedPromise: Promise<void> | null = null;
 
 const mockLogs = [
   "[2026-06-07 13:00:01] [INFO] [Mock] Monster Workbench 离线预览版引擎挂载成功",
   "[2026-06-07 13:02:15] [WARN] [Mock] 拦截到 tauri_invoke 调用，自动开启开发沙箱安全路由保护",
 ];
-
-const mockAiQueueStatus = {
-  running: null,
-  runningItems: [],
-  queued: [],
-  pendingCount: 0,
-  queueLimit: 16,
-  runningCount: 0,
-  runningLimit: 6,
-  availableRunningSlots: 6,
-  availableSlots: 16,
-  isSaturated: false,
-  waitTimeoutMs: 90000,
-};
-
-const mockAiTasks = new Map<string, any>();
-const MOCK_AI_TASK_LIMIT = 40;
-const MOCK_IMAGE_DATA_URL =
-  "data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%201024%201024%22%3E%3Cdefs%3E%3ClinearGradient%20id%3D%22g%22%20x1%3D%220%22%20x2%3D%221%22%20y1%3D%220%22%20y2%3D%221%22%3E%3Cstop%20stop-color%3D%22%2310b981%22/%3E%3Cstop%20offset%3D%221%22%20stop-color%3D%22%232563eb%22/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect%20width%3D%221024%22%20height%3D%221024%22%20rx%3D%2280%22%20fill%3D%22url(%23g)%22/%3E%3Ccircle%20cx%3D%22512%22%20cy%3D%22440%22%20r%3D%22140%22%20fill%3D%22white%22%20opacity%3D%22.88%22/%3E%3Crect%20x%3D%22272%22%20y%3D%22616%22%20width%3D%22480%22%20height%3D%2272%22%20rx%3D%2236%22%20fill%3D%22white%22%20opacity%3D%22.88%22/%3E%3Ctext%20x%3D%22512%22%20y%3D%22804%22%20text-anchor%3D%22middle%22%20font-family%3D%22Arial%2Csans-serif%22%20font-size%3D%2256%22%20font-weight%3D%22700%22%20fill%3D%22white%22%3EMock%20Image%3C/text%3E%3C/svg%3E";
-const MOCK_IMAGE_DATA_URL_ALT =
-  "data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%201024%201024%22%3E%3Cdefs%3E%3ClinearGradient%20id%3D%22g%22%20x1%3D%221%22%20x2%3D%220%22%20y1%3D%220%22%20y2%3D%221%22%3E%3Cstop%20stop-color%3D%22%23f59e0b%22/%3E%3Cstop%20offset%3D%221%22%20stop-color%3D%22%238b5cf6%22/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect%20width%3D%221024%22%20height%3D%221024%22%20rx%3D%2280%22%20fill%3D%22url(%23g)%22/%3E%3Ccircle%20cx%3D%22512%22%20cy%3D%22388%22%20r%3D%22118%22%20fill%3D%22white%22%20opacity%3D%22.9%22/%3E%3Crect%20x%3D%22304%22%20y%3D%22572%22%20width%3D%22416%22%20height%3D%22104%22%20rx%3D%2252%22%20fill%3D%22white%22%20opacity%3D%22.9%22/%3E%3Ctext%20x%3D%22512%22%20y%3D%22804%22%20text-anchor%3D%22middle%22%20font-family%3D%22Arial%2Csans-serif%22%20font-size%3D%2256%22%20font-weight%3D%22700%22%20fill%3D%22white%22%3EMock%202%3C/text%3E%3C/svg%3E";
 
 function readMockStorageItem(key: string) {
   try {
@@ -133,110 +112,46 @@ function loadMockPreferenceConfig() {
   return parsed.ok && parsed.data ? { ...defaultAppConfigStore, ...parsed.data } : { ...defaultAppConfigStore };
 }
 
-function createMockSavedFile(index: number, size: string) {
-  const suffix = index > 0 ? `-${index + 1}` : "";
-  return {
-    path: `C:\\Users\\MockUser\\.monster-tools\\ai\\generated\\browser-mock\\mock-image-${size}${suffix}.png`,
-    sizeBytes: 1683860 + index * 122880,
-    mimeType: "image/png",
-    dimensions: size,
-  };
-}
-
-function trimMockAiTasks() {
-  const tasks = sortByMany(mapValuesToArray(mockAiTasks), [
-    { getValue: (task) => task.createdAtMs, direction: "desc" },
-  ]);
-  for (const task of tasks.slice(MOCK_AI_TASK_LIMIT)) {
-    mockAiTasks.delete(task.requestId);
+async function ensureMockPreferenceConfigSeedLoaded() {
+  if (readMockStorageItem(APP_CONFIG_STORE_KEY)) {
+    return;
   }
-}
-
-function createMockAiResultBase(args: Record<string, unknown>, action: string) {
-  const config = args.config as any;
-  return {
-    requestId: `mock-ai-${getCurrentTimestampMs()}`,
-    action,
-    provider: config?.provider || "custom",
-    baseUrl: config?.baseUrl || "https://mock.local/v1",
-    latencyMs: 100,
-    queueWaitMs: 0,
-    totalLatencyMs: 100,
-    statusCode: 200,
-    savedFiles: null,
-  };
-}
-
-function createMockAiResult(args: Record<string, unknown>, action: string) {
-  if (action === "models") {
-    return {
-      ...createMockAiResultBase(args, "models"),
-      ok: true,
-      model: (args.config as any)?.model || "mock-model",
-      latencyMs: 86,
-      totalLatencyMs: 86,
-      message: "浏览器 Mock 已返回 3 个模型",
-      models: ["gpt-5.5", "gpt-5.4", "mock-image-1"],
-      rawPreview: "{\"data\":[{\"id\":\"gpt-5.5\"},{\"id\":\"gpt-5.4\"},{\"id\":\"mock-image-1\"}]}",
-    };
+  if (!appConfigStoreSeedPromise) {
+    appConfigStoreSeedPromise = loadMockPreferenceConfigSeed().finally(() => {
+      appConfigStoreSeedPromise = null;
+    });
   }
+  await appConfigStoreSeedPromise;
+}
 
-  if (action === "image") {
-    const prompt = String((args.config as any)?.imagePrompt || "").toLowerCase();
-    const requestedImageSize = (args.config as any)?.imageSize || "1024x1024";
-    const shouldMockUnsupportedSize = prompt.includes("unsupported size");
-    const shouldMockMultiImage = prompt.includes("multi");
-    if (shouldMockUnsupportedSize) {
-      return {
-        ...createMockAiResultBase(args, "image"),
-        ok: false,
-        model: (args.config as any)?.imageModel || "mock-image-1",
-        latencyMs: 260,
-        totalLatencyMs: 260,
-        message: `浏览器 Mock 生图失败：模型不支持尺寸 ${requestedImageSize}`,
-        imageUrls: [],
-        imagePaths: [],
-        savedFiles: [],
-        apiImageSize: requestedImageSize,
-        requestedImageSize,
-        actualImageSize: null,
-        fallbackImageSize: null,
-        imageAttempts: 1,
-        failureKind: "unsupported_size",
-        rawPreview: "{\"error\":{\"message\":\"unsupported image size\"}}",
-      };
+async function loadMockPreferenceConfigSeed() {
+  try {
+    const seedUrl =
+      typeof window === "undefined"
+        ? APP_CONFIG_SEED_URL
+        : `${window.location.origin}${APP_CONFIG_SEED_URL}`;
+    const response = await request.get<unknown>(seedUrl, undefined, {
+      timeout: 2_000,
+      headers: {
+        "Cache-Control": "no-cache",
+      },
+    });
+    if (!response.success) {
+      return;
     }
-    const imageUrls = shouldMockMultiImage ? [MOCK_IMAGE_DATA_URL, MOCK_IMAGE_DATA_URL_ALT] : [MOCK_IMAGE_DATA_URL];
-    return {
-      ...createMockAiResultBase(args, "image"),
-      ok: true,
-      model: (args.config as any)?.imageModel || "mock-image-1",
-      latencyMs: 260,
-      totalLatencyMs: 260,
-      message: "浏览器 Mock 生图测试成功",
-      imageUrls,
-      imagePaths: [],
-      savedFiles: imageUrls.map((_, index) => createMockSavedFile(index, requestedImageSize)),
-      apiImageSize: requestedImageSize,
-      requestedImageSize,
-      actualImageSize: requestedImageSize,
-      fallbackImageSize: null,
-      imageAttempts: 1,
-      failureKind: null,
-      rawPreview: "{\"data\":[{\"url\":\"mock://image\"}]}",
-    };
+    const parsed =
+      typeof response.data === "string"
+        ? tryJsonParseObject(response.data)
+        : { ok: true, data: response.data };
+    if (!parsed.ok || !parsed.data || typeof parsed.data !== "object" || Array.isArray(parsed.data)) {
+      console.warn("[WARN_IPC_MOCK_CONFIG] 浏览器 Mock 配置 seed 不是合法 JSON，已忽略");
+      return;
+    }
+    appConfigStore = { ...defaultAppConfigStore, ...parsed.data };
+    writeMockStorageItem(APP_CONFIG_STORE_KEY, safeJsonStringify(appConfigStore, "{}"));
+  } catch (error) {
+    console.warn("[WARN_IPC_MOCK_CONFIG] 读取浏览器 Mock 配置 seed 失败，已使用默认配置:", error);
   }
-
-  return {
-    ...createMockAiResultBase(args, "chat"),
-    ok: true,
-    model: (args.config as any)?.model || "mock-model",
-    latencyMs: 128,
-    totalLatencyMs: 128,
-    message: "浏览器 Mock 模型连接测试成功",
-    text: "连接测试成功。",
-    rawPreview: "{\"choices\":[{\"message\":{\"content\":\"连接测试成功。\"}}]}",
-  };
 }
 
 export async function mockCallTauri<T = unknown>(
@@ -245,6 +160,11 @@ export async function mockCallTauri<T = unknown>(
 ): Promise<T> {
   if (import.meta.env.DEV) {
     console.debug(`[MOCK_IPC] ${command}`, redactSensitiveObjectDeep(args));
+  }
+
+  const aiProviderResult = handleAiProviderMock(command, args);
+  if (aiProviderResult.handled) {
+    return aiProviderResult.value as T;
   }
 
   switch (command) {
@@ -258,6 +178,7 @@ export async function mockCallTauri<T = unknown>(
       } as T;
 
     case "get_preference_config":
+      await ensureMockPreferenceConfigSeedLoaded();
       return safeJsonStringify(appConfigStore, "{}") as T;
 
     case "save_preference_config":
@@ -275,90 +196,6 @@ export async function mockCallTauri<T = unknown>(
 
     case "verify_admin_password":
       return true as T;
-
-    case "test_ai_provider":
-      return createMockAiResult(args, String(args.action || "chat")) as T;
-
-    case "enqueue_ai_provider_test": {
-      const action = String(args.action || "chat");
-      const now = getCurrentTimestampMs();
-      const requestId = `mock-ai-task-${now}`;
-      const result = {
-        ...createMockAiResult(args, action),
-        requestId,
-      };
-      const isImageTask = action === "image";
-      const task = {
-        requestId,
-        action,
-        status: isImageTask ? "running" : "success",
-        createdAtMs: now,
-        startedAtMs: now,
-        finishedAtMs: isImageTask ? null : now,
-        queueWaitMs: 0,
-        totalLatencyMs: isImageTask ? null : result.totalLatencyMs,
-        result: isImageTask ? null : result,
-        error: null,
-      };
-      mockAiTasks.set(requestId, task);
-      if (isImageTask) {
-        createTimeout(() => {
-          const currentTask = mockAiTasks.get(requestId);
-          if (!currentTask || currentTask.status !== "running") {
-            return;
-          }
-          const finishedAt = getCurrentTimestampMs();
-          mockAiTasks.set(requestId, {
-            ...currentTask,
-            status: "success",
-            finishedAtMs: finishedAt,
-            totalLatencyMs: finishedAt - now,
-            result: {
-              ...result,
-              latencyMs: finishedAt - now,
-              totalLatencyMs: finishedAt - now,
-            },
-          });
-          trimMockAiTasks();
-        }, 1400);
-      }
-      trimMockAiTasks();
-      return task as T;
-    }
-
-    case "get_ai_provider_test_task": {
-      const now = getCurrentTimestampMs();
-      return (mockAiTasks.get(args.requestId as string) || {
-        requestId: args.requestId,
-        action: "chat",
-        status: "failed",
-        createdAtMs: now,
-        finishedAtMs: now,
-        error: "浏览器 Mock 未找到该 AI 测试任务",
-      }) as T;
-    }
-
-    case "list_ai_provider_test_tasks":
-      return take(sortByMany(mapValuesToArray(mockAiTasks), [
-        { getValue: (task) => task.createdAtMs, direction: "desc" },
-      ]), MOCK_AI_TASK_LIMIT) as T;
-
-    case "get_ai_provider_queue_status":
-      return mockAiQueueStatus as T;
-
-    case "cancel_ai_provider_queued_tests":
-      return 0 as T;
-
-    case "cancel_ai_provider_test_task": {
-      const task = mockAiTasks.get(args.requestId as string);
-      if (!task || (task.status !== "queued" && task.status !== "running")) {
-        return false as T;
-      }
-      task.status = "failed";
-      task.finishedAtMs = getCurrentTimestampMs();
-      task.error = "浏览器 Mock 已取消 AI 测试任务";
-      return true as T;
-    }
 
     case "init_navigation_db":
       return null as T;
@@ -517,7 +354,7 @@ export async function mockCallTauri<T = unknown>(
 
     case "reset_database":
       navigationsStore = [...mockNavigations];
-      mockAiTasks.clear();
+      clearAiProviderMockTasks();
       return null as T;
 
     case "export_database":

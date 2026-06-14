@@ -1,16 +1,26 @@
 import json
 import os
+import time
+import uuid
+import urllib.parse
 import urllib.request
 
 
 DEFAULT_MAX_RESPONSE_BYTES = 4 * 1024 * 1024
-DEFAULT_ANTHROPIC_VERSION = "2023-06-01"
 PROVIDER_REGISTRY_FILE_NAME = "ai-provider-registry.json"
+AUDIO_RESPONSE_FORMAT_EXTENSIONS = {
+    "mp3": ".mp3",
+    "wav": ".wav",
+    "opus": ".opus",
+    "aac": ".aac",
+    "flac": ".flac",
+    "pcm": ".pcm",
+}
 FALLBACK_PROVIDER_REGISTRY = {
     "defaultAdapterId": "openai-compatible",
     "adapters": {
         "openai-compatible": {
-            "capabilities": ["models", "chat", "image"],
+            "capabilities": ["models", "chat", "image", "txt2img", "audio", "video"],
         },
         "anthropic-messages": {
             "capabilities": ["chat"],
@@ -152,6 +162,155 @@ def request_json(url, method, headers, body, timeout, max_bytes=DEFAULT_MAX_RESP
     raise last_error
 
 
+def ensure_output_dir(output_dir):
+    if not output_dir:
+        raise ValueError("outputDir is required for media generation")
+    os.makedirs(output_dir, exist_ok=True)
+    return output_dir
+
+
+def extension_from_content_type(content_type, fallback_ext):
+    clean = str(content_type or "").lower()
+    if "mpeg" in clean or "mp3" in clean:
+        return ".mp3"
+    if "wav" in clean:
+        return ".wav"
+    if "opus" in clean:
+        return ".opus"
+    if "aac" in clean:
+        return ".aac"
+    if "flac" in clean:
+        return ".flac"
+    if "webm" in clean:
+        return ".webm"
+    if "quicktime" in clean or "mov" in clean:
+        return ".mov"
+    if "mp4" in clean:
+        return ".mp4"
+    return fallback_ext
+
+
+def base_content_type(content_type):
+    return str(content_type or "").split(";", 1)[0].strip().lower()
+
+
+def is_text_response_content_type(content_type):
+    clean = base_content_type(content_type)
+    non_media_types = {
+        "application/json",
+        "application/javascript",
+        "application/problem+json",
+        "application/xhtml+xml",
+        "application/xml",
+    }
+    return (
+        clean.startswith("text/")
+        or clean.endswith("+json")
+        or clean.endswith("+xml")
+        or clean in non_media_types
+    )
+
+
+def validate_media_content_type(content_type, default_mime_type, allowed_prefixes, allowed_types):
+    clean = base_content_type(content_type or default_mime_type)
+    if not clean:
+        return default_mime_type
+    if is_text_response_content_type(clean):
+        raise RuntimeError("unexpected media response content-type: {0}".format(clean))
+    allowed_prefixes = tuple(allowed_prefixes or ())
+    allowed_types = set(allowed_types or ())
+    if allowed_prefixes and not clean.startswith(allowed_prefixes) and clean not in allowed_types:
+        raise RuntimeError("unexpected media response content-type: {0}".format(clean))
+    return content_type or default_mime_type
+
+
+def looks_like_text_error_payload(chunk):
+    if not chunk:
+        return False
+    sample = chunk[:512].lstrip(b"\xef\xbb\xbf\r\n\t ")
+    lowered = sample[:32].lower()
+    return (
+        lowered.startswith(b"{")
+        or lowered.startswith(b"[")
+        or lowered.startswith(b"<!doctype")
+        or lowered.startswith(b"<html")
+        or lowered.startswith(b"<?xml")
+    )
+
+
+def normalize_audio_response_format(value):
+    clean = str(value or "mp3").strip().lower()
+    if clean in AUDIO_RESPONSE_FORMAT_EXTENSIONS:
+        return clean, AUDIO_RESPONSE_FORMAT_EXTENSIONS[clean]
+    return "mp3", AUDIO_RESPONSE_FORMAT_EXTENSIONS["mp3"]
+
+
+def request_binary_to_file(
+    url,
+    method,
+    headers,
+    body,
+    timeout,
+    output_dir,
+    file_prefix,
+    fallback_ext,
+    default_mime_type,
+    max_bytes,
+    allowed_prefixes=None,
+    allowed_types=None,
+):
+    data = None if body is None else json.dumps(body).encode("utf-8")
+    request = urllib.request.Request(url, data=data, headers=headers, method=method)
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({})) if is_local_url(url) else None
+    open_url = opener.open if opener else urllib.request.urlopen
+    target_dir = ensure_output_dir(output_dir)
+
+    with open_url(request, timeout=timeout) as response:
+        content_type = validate_media_content_type(
+            response.headers.get("Content-Type", ""),
+            default_mime_type,
+            allowed_prefixes,
+            allowed_types,
+        )
+        content_length = int(response.headers.get("Content-Length", "0") or "0")
+        if content_length > max_bytes:
+            raise RuntimeError("media response exceeds {0} MB".format(max_bytes // 1024 // 1024))
+
+        extension = extension_from_content_type(content_type, fallback_ext)
+        target_path = os.path.join(target_dir, "{0}-{1}{2}".format(file_prefix, uuid.uuid4().hex, extension))
+        written = 0
+        try:
+            with open(target_path, "wb") as file:
+                first_chunk = True
+                while True:
+                    chunk = response.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    if first_chunk:
+                        first_chunk = False
+                        if looks_like_text_error_payload(chunk):
+                            raise RuntimeError("unexpected media response body")
+                    written += len(chunk)
+                    if written > max_bytes:
+                        raise RuntimeError("media response exceeds {0} MB".format(max_bytes // 1024 // 1024))
+                    file.write(chunk)
+                if written == 0:
+                    raise RuntimeError("media response was empty")
+        except Exception:
+            try:
+                os.remove(target_path)
+            except Exception:
+                pass
+            raise
+
+        return response.status, {
+            "path": target_path,
+            "sizeBytes": written,
+            "mimeType": content_type or default_mime_type,
+            "dimensions": None,
+        }
+
+
 def parse_openai_models(payload, max_models=200, max_model_id_chars=256):
     models = []
     for item in payload.get("data") or []:
@@ -178,19 +337,6 @@ def parse_openai_chat_text(payload, max_text_chars=None):
         text = "".join(parts)
     else:
         text = str(content or first.get("text") or "")
-    return trim_text(text, max_text_chars) if max_text_chars else text
-
-
-def parse_anthropic_chat_text(payload, max_text_chars=None):
-    content = payload.get("content")
-    if isinstance(content, list):
-        parts = []
-        for item in content:
-            if isinstance(item, dict) and item.get("type") == "text":
-                parts.append(str(item.get("text") or ""))
-        text = "".join(parts)
-    else:
-        text = str(payload.get("text") or payload.get("completion") or "")
     return trim_text(text, max_text_chars) if max_text_chars else text
 
 
@@ -231,7 +377,7 @@ class ProviderAdapter:
 
 class OpenAICompatibleAdapter(ProviderAdapter):
     adapter_id = "openai-compatible"
-    capabilities = frozenset({"models", "chat", "image"})
+    capabilities = frozenset({"models", "chat", "image", "txt2img", "audio", "video"})
 
     def _headers(self):
         headers = {"Content-Type": "application/json"}
@@ -254,6 +400,23 @@ class OpenAICompatibleAdapter(ProviderAdapter):
         if self.base_url.endswith("/images/generations"):
             return self.base_url
         return self.base_url + "/images/generations"
+
+    def _audio_speech_url(self):
+        if self.base_url.endswith("/audio/speech"):
+            return self.base_url
+        return self.base_url + "/audio/speech"
+
+    def _videos_url(self):
+        if self.base_url.endswith("/videos"):
+            return self.base_url
+        return self.base_url + "/videos"
+
+    def _video_url(self, video_id):
+        root = self.base_url[:-7] if self.base_url.endswith("/videos") else self.base_url
+        return root + "/videos/" + urllib.parse.quote(str(video_id), safe="")
+
+    def _video_content_url(self, video_id):
+        return self._video_url(video_id) + "/content"
 
     def list_models(self, max_models=200, max_model_id_chars=256, max_response_bytes=DEFAULT_MAX_RESPONSE_BYTES):
         self.ensure_base_url()
@@ -333,67 +496,129 @@ class OpenAICompatibleAdapter(ProviderAdapter):
             "raw": parsed,
         }
 
-
-class AnthropicMessagesAdapter(ProviderAdapter):
-    adapter_id = "anthropic-messages"
-    capabilities = frozenset({"chat"})
-
-    def _headers(self):
-        headers = {
-            "Content-Type": "application/json",
-            "anthropic-version": str(self.provider.get("anthropicVersion") or DEFAULT_ANTHROPIC_VERSION),
-        }
-        api_key = str(self.provider.get("apiKey") or "")
-        if api_key:
-            headers["x-api-key"] = api_key
-        return headers
-
-    def _messages_url(self):
-        if self.base_url.endswith("/messages"):
-            return self.base_url
-        if self.base_url.endswith("/v1"):
-            return self.base_url + "/messages"
-        return self.base_url + "/v1/messages"
-
-    def list_models(self, *_, **__):
-        self.ensure_capability("models")
-
-    def chat(
+    def audio(
         self,
         prompt,
-        max_tokens=512,
-        temperature=0,
-        max_text_chars=None,
-        max_response_bytes=DEFAULT_MAX_RESPONSE_BYTES,
-        retries=1,
+        output_dir,
+        voice="alloy",
+        response_format="mp3",
+        instructions="",
+        max_response_bytes=64 * 1024 * 1024,
     ):
         self.ensure_base_model()
-        self.ensure_capability("chat")
+        self.ensure_capability("audio")
+        clean_format, fallback_ext = normalize_audio_response_format(response_format)
         body = {
             "model": self.model,
-            "messages": [{"role": "user", "content": prompt}],
-            "max_tokens": max_tokens,
-            "temperature": temperature,
+            "input": prompt,
+            "voice": str(voice or "alloy").strip() or "alloy",
+            "response_format": clean_format,
         }
-        status, parsed = request_json(
-            self._messages_url(),
+        if instructions:
+            body["instructions"] = instructions
+        status, saved_file = request_binary_to_file(
+            self._audio_speech_url(),
             "POST",
             self._headers(),
             body,
             self.timeout,
-            max_bytes=max_response_bytes,
-            retries=retries,
+            output_dir,
+            "ai-audio",
+            fallback_ext,
+            "audio/mpeg",
+            max_response_bytes,
+            allowed_prefixes=("audio/",),
+            allowed_types={"application/octet-stream", "binary/octet-stream"},
         )
         return {
             **self.metadata(),
             "statusCode": status,
             "model": self.model,
-            "text": parse_anthropic_chat_text(parsed, max_text_chars),
-            "raw": parsed,
+            "savedFile": saved_file,
         }
 
-    def image(self, *_, **__):
-        self.ensure_capability("image")
+    def video(
+        self,
+        prompt,
+        output_dir,
+        size="1280x720",
+        duration_seconds=None,
+        max_response_bytes=512 * 1024 * 1024,
+        poll_interval_seconds=5,
+    ):
+        self.ensure_base_model()
+        self.ensure_capability("video")
+        body = {
+            "model": self.model,
+            "prompt": prompt,
+        }
+        if size:
+            body["size"] = size
+        if duration_seconds:
+            body["seconds"] = duration_seconds
+
+        create_status, created = request_json(
+            self._videos_url(),
+            "POST",
+            self._headers(),
+            body,
+            min(self.timeout, 60),
+            max_bytes=DEFAULT_MAX_RESPONSE_BYTES,
+            retries=0,
+        )
+        video_id = created.get("id") if isinstance(created, dict) else ""
+        if not video_id:
+            raise RuntimeError("video generation did not return an id")
+
+        deadline = time.time() + max(self.timeout, 60)
+        current = created
+        current_status = str(current.get("status") or "").lower()
+        should_wait_before_poll = False
+        while current_status in {"", "queued", "in_progress", "running", "processing"}:
+            if time.time() >= deadline:
+                raise TimeoutError("video generation polling timed out")
+            if should_wait_before_poll:
+                time.sleep(max(1, min(int(poll_interval_seconds or 5), 30)))
+            should_wait_before_poll = True
+            _, current = request_json(
+                self._video_url(video_id),
+                "GET",
+                self._headers(),
+                None,
+                min(self.timeout, 60),
+                max_bytes=DEFAULT_MAX_RESPONSE_BYTES,
+                retries=0,
+            )
+            current_status = str(current.get("status") or "").lower()
+
+        if current_status not in {"completed", "succeeded", "success", "ready"}:
+            error = current.get("error") if isinstance(current, dict) else None
+            raise RuntimeError("video generation failed: {0}".format(error or current_status or "unknown"))
+
+        status, saved_file = request_binary_to_file(
+            self._video_content_url(video_id),
+            "GET",
+            self._headers(),
+            None,
+            min(self.timeout, 120),
+            output_dir,
+            "ai-video",
+            ".mp4",
+            "video/mp4",
+            max_response_bytes,
+            allowed_prefixes=("video/",),
+            allowed_types={"application/mp4", "application/octet-stream", "binary/octet-stream"},
+        )
+        return {
+            **self.metadata(),
+            "statusCode": status or create_status,
+            "model": self.model,
+            "savedFile": saved_file,
+            "raw": current,
+        }
+
+
+from provider_anthropic_adapter import AnthropicMessagesAdapter
 
 
 def create_provider_adapter(provider, timeout):

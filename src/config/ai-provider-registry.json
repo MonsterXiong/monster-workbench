@@ -5,7 +5,7 @@
   "adapters": {
     "openai-compatible": {
       "displayName": "OpenAI-compatible",
-      "capabilities": ["models", "chat", "image"]
+      "capabilities": ["models", "chat", "image", "txt2img", "audio", "video"]
     },
     "anthropic-messages": {
       "displayName": "Anthropic Messages",
@@ -19,7 +19,7 @@
       "baseUrl": "https://api.openai.com/v1",
       "model": "gpt-4o-mini",
       "adapterId": "openai-compatible",
-      "capabilities": ["models", "chat", "image"]
+      "capabilities": ["models", "chat", "image", "txt2img", "audio", "video"]
     },
     "deepseek": {
       "displayName": "DeepSeek",
@@ -68,7 +68,7 @@
       "baseUrl": "http://localhost:4444/v1",
       "model": "gpt-5.5",
       "adapterId": "openai-compatible",
-      "capabilities": ["models", "chat", "image"]
+      "capabilities": ["models", "chat", "image", "txt2img", "audio", "video"]
     }
   }
 }

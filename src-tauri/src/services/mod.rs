@@ -1,8 +1,14 @@
-mod ai_provider_output;
+mod ai_generation_support;
+mod ai_generation_task;
 mod ai_provider_config;
+mod ai_provider_output;
 mod ai_provider_process;
+mod ai_provider_queue;
+mod ai_provider_task;
 mod ai_provider_types;
 pub mod ai_service;
+#[cfg(test)]
+mod ai_service_generation_tests;
 pub mod app_service;
 pub mod auth_service;
 pub mod config_service;

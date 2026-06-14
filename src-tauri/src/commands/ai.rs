@@ -1,4 +1,5 @@
 use crate::services::ai_service::{
+    AiBusinessGenerationRequest, AiGenerationRequest, AiGenerationResult, AiGenerationTask,
     AiProviderConfig, AiProviderQueueStatus, AiProviderService, AiProviderTestResult,
     AiProviderTestTask,
 };
@@ -21,6 +22,71 @@ pub async fn test_ai_provider(
     handle
         .await
         .map_err(|error| format!("AI 模型连接测试任务异常: {}", error))?
+}
+
+#[tauri::command]
+pub async fn generate_ai_content(
+    request: AiGenerationRequest,
+    state: AiProviderState<'_>,
+) -> Result<AiGenerationResult, String> {
+    let handle = {
+        let service = state.lock().unwrap_or_else(|e| e.into_inner());
+        service.spawn_direct_generation(request)
+    };
+
+    handle
+        .await
+        .map_err(|error| format!("AI 原子能力任务异常: {}", error))?
+}
+
+#[tauri::command]
+pub async fn generate_ai_business_content(
+    request: AiBusinessGenerationRequest,
+    state: AiProviderState<'_>,
+) -> Result<AiGenerationResult, String> {
+    let handle = {
+        let service = state.lock().unwrap_or_else(|e| e.into_inner());
+        service.spawn_business_generation(request)
+    };
+
+    handle
+        .await
+        .map_err(|error| format!("AI 业务生成任务异常: {}", error))?
+}
+
+#[tauri::command]
+pub fn enqueue_ai_business_generation(
+    request: AiBusinessGenerationRequest,
+    state: AiProviderState<'_>,
+) -> Result<AiGenerationTask, String> {
+    let service = state.lock().unwrap_or_else(|e| e.into_inner());
+    service.enqueue_business_generation(request)
+}
+
+#[tauri::command]
+pub fn get_ai_generation_task(
+    request_id: String,
+    state: AiProviderState<'_>,
+) -> Result<AiGenerationTask, String> {
+    let service = state.lock().unwrap_or_else(|e| e.into_inner());
+    service.get_generation_task(&request_id)
+}
+
+#[tauri::command]
+pub fn list_ai_generation_tasks(
+    state: AiProviderState<'_>,
+) -> Result<Vec<AiGenerationTask>, String> {
+    let service = state.lock().unwrap_or_else(|e| e.into_inner());
+    service.list_generation_tasks()
+}
+
+#[tauri::command]
+pub fn cancel_ai_generation_task(
+    request_id: String,
+    state: AiProviderState<'_>,
+) -> Result<bool, String> {
+    let service = state.lock().unwrap_or_else(|e| e.into_inner());
+    service.cancel_generation_task(&request_id)
 }
 
 #[tauri::command]

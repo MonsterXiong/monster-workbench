@@ -63,8 +63,10 @@ fn main() {
             let ai_provider_service = AiProviderService::new(handle.clone());
 
             // 初始化运行时数据库表，具体 DB/Repo 细节保持在 Service 层内。
-            let _ = database_service.init_runtime_schema();
+            database_service.init_runtime_schema()?;
 
+            // 通用 AI 业务生成任务使用持久 job 恢复，避免 Chat/Image 刷新或重启后 requestId 丢失。
+            let _ = ai_provider_service.resume_persisted_business_generations();
             // 2. 状态依赖管理注入
             app.manage(std::sync::Mutex::new(app_service));
             app.manage(std::sync::Mutex::new(config_service));
@@ -175,6 +177,12 @@ fn main() {
             commands::navigation::get_all_navigation_list,
             commands::navigation::import_navigation_list,
             commands::ai::test_ai_provider,
+            commands::ai::generate_ai_content,
+            commands::ai::generate_ai_business_content,
+            commands::ai::enqueue_ai_business_generation,
+            commands::ai::get_ai_generation_task,
+            commands::ai::list_ai_generation_tasks,
+            commands::ai::cancel_ai_generation_task,
             commands::ai::enqueue_ai_provider_test,
             commands::ai::get_ai_provider_test_task,
             commands::ai::list_ai_provider_test_tasks,

@@ -1,5 +1,5 @@
 use crate::infra::{AppError, AppResult};
-use crate::services::ai_provider_types::AiProviderConfig;
+use crate::services::ai_provider_types::{AiGenerationOptions, AiProviderConfig};
 use serde_json::{json, Value};
 
 pub(super) const AI_PROVIDER_TEST_MAX_CONFIG_CONCURRENCY: usize = 6;
@@ -54,14 +54,118 @@ pub(super) fn validate_provider_config(config: &AiProviderConfig, action: &str) 
         return Err(AppError::Config("不支持的 AI 测试动作".to_string()));
     }
 
-    if !is_supported_provider_id(&config.provider) {
-        return Err(AppError::Config("不支持的 AI 模型提供商".to_string()));
-    }
+    validate_provider_basic_config(config)?;
 
     if !provider_supports_test_action(config, action) {
         return Err(AppError::Config(
             "当前 AI 模型配置不支持该测试动作".to_string(),
         ));
+    }
+
+    if action == "chat" && config.model.trim().is_empty() {
+        return Err(AppError::Config("模型名称不能为空".to_string()));
+    }
+
+    if action == "image" {
+        if config.image_count == 0 || config.image_count > 4 {
+            return Err(AppError::Config("生图一次仅支持 1 到 4 张图片".to_string()));
+        }
+
+        if config.image_model.trim().is_empty() {
+            return Err(AppError::Config("生图模型名称不能为空".to_string()));
+        }
+
+        if config.image_prompt.trim().is_empty() {
+            return Err(AppError::Config("生图提示词不能为空".to_string()));
+        }
+
+        if !SUPPORTED_IMAGE_SIZES.contains(&config.image_size.as_str()) {
+            return Err(AppError::Config("不支持的生图尺寸".to_string()));
+        }
+    }
+
+    Ok(())
+}
+
+pub(super) fn validate_generation_config(
+    config: &AiProviderConfig,
+    capability: &str,
+    prompt: &str,
+    model: &str,
+) -> AppResult<()> {
+    if !matches!(
+        capability,
+        "chat"
+            | "image"
+            | "txt2img"
+            | "img2img"
+            | "inpaint"
+            | "person_consistency"
+            | "upscale_2x"
+            | "upscale_4x"
+            | "video"
+            | "audio"
+    ) {
+        return Err(AppError::Config("不支持的 AI 原子能力".to_string()));
+    }
+
+    if matches!(
+        capability,
+        "image"
+            | "txt2img"
+            | "img2img"
+            | "inpaint"
+            | "person_consistency"
+            | "upscale_2x"
+            | "upscale_4x"
+    ) {
+        validate_provider_config(config, "image")?;
+        if !is_base_image_capability(capability)
+            && !provider_supports_test_action(config, capability)
+            && !can_fallback_to_txt2img(config, capability)
+        {
+            return Err(AppError::Config(
+                "褰撳墠 AI 妯″瀷閰嶇疆涓嶆敮鎸佽鍥剧墖鍘熷瓙鑳藉姏".to_string(),
+            ));
+        }
+        return Ok(());
+    }
+
+    validate_provider_basic_config(config)?;
+
+    if !provider_supports_test_action(config, capability) {
+        return Err(AppError::Config(
+            "当前 AI 模型配置不支持该原子能力".to_string(),
+        ));
+    }
+
+    if prompt.trim().is_empty() {
+        return Err(AppError::Config("生成提示词不能为空".to_string()));
+    }
+
+    if model.trim().is_empty() {
+        return Err(AppError::Config("生成模型名称不能为空".to_string()));
+    }
+
+    validate_text_len("生成模型名称", model, AI_PROVIDER_MODEL_MAX_CHARS)?;
+    validate_text_len("生成提示词", prompt, AI_PROVIDER_PROMPT_MAX_CHARS)?;
+
+    Ok(())
+}
+
+fn is_base_image_capability(capability: &str) -> bool {
+    matches!(capability, "image" | "txt2img")
+}
+
+fn can_fallback_to_txt2img(config: &AiProviderConfig, capability: &str) -> bool {
+    matches!(capability, "img2img" | "inpaint" | "person_consistency")
+        && (provider_supports_test_action(config, "txt2img")
+            || provider_supports_test_action(config, "image"))
+}
+
+fn validate_provider_basic_config(config: &AiProviderConfig) -> AppResult<()> {
+    if !is_supported_provider_id(&config.provider) {
+        return Err(AppError::Config("不支持的 AI 模型提供商".to_string()));
     }
 
     if !matches!(config.queue_mode.as_str(), "serial" | "concurrent") {
@@ -75,12 +179,6 @@ pub(super) fn validate_provider_config(config: &AiProviderConfig, action: &str) 
             "AI 并发槽位必须在 1 到 {} 之间",
             AI_PROVIDER_TEST_MAX_CONFIG_CONCURRENCY
         )));
-    }
-
-    if action == "image" && (config.image_count == 0 || config.image_count > 4) {
-        return Err(AppError::Config(
-            "生图测试一次仅支持 1 到 4 张图片".to_string(),
-        ));
     }
 
     validate_text_len(
@@ -120,24 +218,6 @@ pub(super) fn validate_provider_config(config: &AiProviderConfig, action: &str) 
         ));
     }
 
-    if action == "chat" && config.model.trim().is_empty() {
-        return Err(AppError::Config("模型名称不能为空".to_string()));
-    }
-
-    if action == "image" {
-        if config.image_model.trim().is_empty() {
-            return Err(AppError::Config("生图模型名称不能为空".to_string()));
-        }
-
-        if config.image_prompt.trim().is_empty() {
-            return Err(AppError::Config("生图提示词不能为空".to_string()));
-        }
-
-        if !SUPPORTED_IMAGE_SIZES.contains(&config.image_size.as_str()) {
-            return Err(AppError::Config("不支持的生图尺寸".to_string()));
-        }
-    }
-
     if config.api_key.trim().is_empty() && !is_local {
         return Err(AppError::Config("API Key 不能为空".to_string()));
     }
@@ -151,17 +231,50 @@ pub(super) fn build_sidecar_input(
     request_id: Option<&str>,
     output_dir: &str,
 ) -> AppResult<String> {
+    build_sidecar_input_inner(config, action, request_id, output_dir, None)
+}
+
+pub(super) fn build_generation_sidecar_input(
+    config: &AiProviderConfig,
+    action: &str,
+    request_id: Option<&str>,
+    output_dir: &str,
+    prompt: &str,
+    model: &str,
+    options: &AiGenerationOptions,
+) -> AppResult<String> {
+    build_sidecar_input_inner(
+        config,
+        action,
+        request_id,
+        output_dir,
+        Some(json!({
+            "prompt": prompt,
+            "model": model,
+            "options": options,
+        })),
+    )
+}
+
+fn build_sidecar_input_inner(
+    config: &AiProviderConfig,
+    action: &str,
+    request_id: Option<&str>,
+    output_dir: &str,
+    generation: Option<Value>,
+) -> AppResult<String> {
     serde_json::to_string(&json!({
         "config": config,
         "action": action,
         "outputDir": if should_prepare_output_dir(action) { output_dir } else { "" },
         "requestId": request_id,
+        "generation": generation,
     }))
     .map_err(|error| AppError::Config(format!("AI 测试参数序列化失败: {}", error)))
 }
 
 pub(super) fn should_prepare_output_dir(action: &str) -> bool {
-    action == "image"
+    matches!(action, "image" | "video" | "audio")
 }
 
 fn is_supported_provider_id(provider: &str) -> bool {
@@ -350,6 +463,96 @@ mod tests {
         assert_eq!(parsed["action"], "chat");
         assert_eq!(parsed["requestId"], "req-1");
         assert_eq!(parsed["outputDir"], "");
+    }
+
+    #[test]
+    fn build_generation_sidecar_input_includes_media_output_dir_and_options() {
+        let config = make_config();
+        let options = AiGenerationOptions {
+            max_tokens: Some(256),
+            temperature: Some(0.3),
+            size: Some("640x360".to_string()),
+            count: 2,
+            format: Some("wav".to_string()),
+            voice: Some("nova".to_string()),
+            duration_seconds: Some(3),
+            ..Default::default()
+        };
+
+        let raw = build_generation_sidecar_input(
+            &config,
+            "video",
+            Some("req-video"),
+            "C:/tmp/output",
+            "make a clip",
+            "sora-test",
+            &options,
+        )
+        .expect("generation input should serialize");
+        let parsed: serde_json::Value = serde_json::from_str(&raw).expect("json should parse");
+
+        assert_eq!(parsed["action"], "video");
+        assert_eq!(parsed["requestId"], "req-video");
+        assert_eq!(parsed["outputDir"], "C:/tmp/output");
+        assert_eq!(parsed["generation"]["prompt"], "make a clip");
+        assert_eq!(parsed["generation"]["model"], "sora-test");
+        assert_eq!(parsed["generation"]["options"]["maxTokens"], 256);
+        let temperature = parsed["generation"]["options"]["temperature"]
+            .as_f64()
+            .expect("temperature should be numeric");
+        assert!((temperature - 0.3).abs() < 0.000_001);
+        assert_eq!(parsed["generation"]["options"]["size"], "640x360");
+        assert_eq!(parsed["generation"]["options"]["count"], 2);
+        assert_eq!(parsed["generation"]["options"]["format"], "wav");
+        assert_eq!(parsed["generation"]["options"]["voice"], "nova");
+        assert_eq!(parsed["generation"]["options"]["durationSeconds"], 3);
+    }
+
+    #[test]
+    fn validate_generation_config_checks_audio_video_capabilities() {
+        let config = make_config();
+
+        validate_generation_config(&config, "audio", "speak", "tts-test")
+            .expect("custom openai-compatible audio should be accepted");
+        validate_generation_config(&config, "video", "clip", "sora-test")
+            .expect("custom openai-compatible video should be accepted");
+
+        let mut chat_only = make_config();
+        chat_only.provider = "deepseek".to_string();
+        assert!(
+            validate_generation_config(&chat_only, "audio", "speak", "tts-test")
+                .expect_err("chat-only provider should reject audio")
+                .to_response()
+                .detail
+                .contains("不支持该原子能力")
+        );
+    }
+
+    #[test]
+    fn validate_generation_config_does_not_require_image_count_for_non_image_capabilities() {
+        let mut config = make_config();
+        config.image_count = 0;
+
+        validate_generation_config(&config, "chat", "hello", "chat-test")
+            .expect("chat generation should not depend on image count");
+        validate_generation_config(&config, "audio", "speak", "tts-test")
+            .expect("audio generation should not depend on image count");
+        validate_generation_config(&config, "video", "clip", "sora-test")
+            .expect("video generation should not depend on image count");
+        assert!(
+            validate_generation_config(&config, "image", "draw", "image-test")
+                .expect_err("image generation should validate image count")
+                .to_response()
+                .detail
+                .contains("生图一次仅支持")
+        );
+        assert!(
+            validate_generation_config(&config, "txt2img", "draw", "image-test")
+                .expect_err("txt2img generation should validate image count")
+                .to_response()
+                .detail
+                .contains("生图一次仅支持")
+        );
     }
 
     #[test]
