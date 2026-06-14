@@ -57,3 +57,32 @@ export function parseMockReferenceAssetIds(value: unknown) {
     return [];
   }
 }
+
+export function buildMockImageWorkbenchMaskResult(
+  request: any,
+  hasAsset: (assetId: string) => boolean,
+  now: number
+) {
+  const assetId = String(request?.assetId || "");
+  if (!hasAsset(assetId)) {
+    throw new Error("[ERR_IPC_BROWSER] 浏览器 Mock 未找到图片工作台资产");
+  }
+  const width = Math.floor(Number(request?.width || 0));
+  const height = Math.floor(Number(request?.height || 0));
+  const strokes = Array.isArray(request?.strokes) ? request.strokes : [];
+  const pointCount = strokes.reduce((total: number, stroke: any) => {
+    return total + (Array.isArray(stroke?.points) ? stroke.points.length : 0);
+  }, 0);
+  if (width < 16 || height < 16 || !strokes.length || pointCount < 2) {
+    throw new Error("[ERR_IPC_BROWSER] 图片工作台 mask 需要有效画布和笔触");
+  }
+  return {
+    assetId,
+    maskPath: `C:\\Users\\MockUser\\.monster-tools\\ai\\image-workbench\\masks\\${assetId}-${now}.svg`,
+    width,
+    height,
+    strokeCount: strokes.length,
+    pointCount,
+    createdAtMs: now,
+  };
+}

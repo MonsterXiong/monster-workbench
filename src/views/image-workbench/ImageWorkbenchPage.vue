@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import {
   Ban,
   BookTemplate,
@@ -7,15 +7,18 @@ import {
   Copy,
   Database,
   Download,
+  Eraser,
   FolderOpen,
   History,
   ImagePlus,
   Images,
   Info,
   ListChecks,
+  Paintbrush,
   Play,
   RefreshCcw,
   RotateCcw,
+  Save,
   Sparkles,
   Star,
   Trash2,
@@ -28,6 +31,7 @@ import "./ImageWorkbenchPage.css";
 import type {
   ImageWorkbenchAsset,
   ImageWorkbenchJob,
+  ImageWorkbenchMaskStroke,
   ImageWorkbenchMode,
   ImageWorkbenchTemplate,
 } from "../../types/image-workbench";
@@ -35,6 +39,11 @@ import type {
 const { t } = useI18n();
 const imageWorkbenchStore = useImageWorkbenchStore();
 const galleryTab = ref<"current" | "library">("current");
+const maskCanvasRef = ref<HTMLCanvasElement | null>(null);
+const maskTool = ref<"paint" | "erase">("paint");
+const maskBrushSize = ref(32);
+const inpaintMaskStrokes = ref<ImageWorkbenchMaskStroke[]>([]);
+let activeMaskStroke: ImageWorkbenchMaskStroke | null = null;
 
 const modeOptions: ImageWorkbenchMode[] = [
   "txt2img",
@@ -67,9 +76,20 @@ const selectedModelRun = computed(() => imageWorkbenchStore.selectedAssetModelRu
 const selectedAssetDisplayUrl = computed(() =>
   imageWorkbenchStore.libraryAssetCards
     .concat(imageWorkbenchStore.currentAssetCards)
-    .find((item) => item.id === selectedAsset.value?.id)?.displayUrl || ""
+    .find((item: { id: string; displayUrl: string }) => item.id === selectedAsset.value?.id)?.displayUrl || ""
 );
 const canSaveTemplate = computed(() => Boolean(imageWorkbenchStore.prompt.trim()));
+const isInpaintWorkspace = computed(() => imageWorkbenchStore.mode === "inpaint" && Boolean(selectedAsset.value));
+const inpaintAspectRatio = computed(() => {
+  const width = selectedAsset.value?.width || 1;
+  const height = selectedAsset.value?.height || 1;
+  return `${width} / ${height}`;
+});
+const canSaveInpaintMask = computed(
+  () =>
+    isInpaintWorkspace.value &&
+    inpaintMaskStrokes.value.some((stroke) => stroke.points.length >= 2)
+);
 
 function modeLabel(mode: ImageWorkbenchMode | string) {
   return t(`imageWorkbench.modes.${mode}`);
@@ -184,8 +204,159 @@ function handleModelConfigChange(event: Event) {
   imageWorkbenchStore.selectImageModelConfig(target?.value || "");
 }
 
+function syncMaskCanvasSize() {
+  const canvas = maskCanvasRef.value;
+  if (!canvas) {
+    return;
+  }
+  const rect = canvas.getBoundingClientRect();
+  const width = Math.max(16, Math.round(rect.width));
+  const height = Math.max(16, Math.round(rect.height));
+  if (canvas.width !== width || canvas.height !== height) {
+    canvas.width = width;
+    canvas.height = height;
+    replayMaskCanvas();
+  }
+}
+
+function getMaskCanvasPoint(event: PointerEvent) {
+  const canvas = maskCanvasRef.value;
+  if (!canvas) {
+    return null;
+  }
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = canvas.width / Math.max(rect.width, 1);
+  const scaleY = canvas.height / Math.max(rect.height, 1);
+  return {
+    x: (event.clientX - rect.left) * scaleX,
+    y: (event.clientY - rect.top) * scaleY,
+  };
+}
+
+function drawMaskStroke(stroke: ImageWorkbenchMaskStroke, fromIndex = 0) {
+  const canvas = maskCanvasRef.value;
+  const ctx = canvas?.getContext("2d");
+  if (!canvas || !ctx || stroke.points.length < 2) {
+    return;
+  }
+  ctx.save();
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.lineWidth = stroke.brushSize;
+  ctx.strokeStyle = "rgba(56, 189, 248, 0.78)";
+  ctx.globalCompositeOperation = stroke.tool === "erase" ? "destination-out" : "source-over";
+  const startIndex = Math.max(1, fromIndex);
+  for (let index = startIndex; index < stroke.points.length; index += 1) {
+    const previous = stroke.points[index - 1];
+    const point = stroke.points[index];
+    ctx.beginPath();
+    ctx.moveTo(previous.x, previous.y);
+    ctx.lineTo(point.x, point.y);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function replayMaskCanvas() {
+  const canvas = maskCanvasRef.value;
+  const ctx = canvas?.getContext("2d");
+  if (!canvas || !ctx) {
+    return;
+  }
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  inpaintMaskStrokes.value.forEach((stroke) => drawMaskStroke(stroke));
+}
+
+function handleMaskPointerDown(event: PointerEvent) {
+  if (!isInpaintWorkspace.value) {
+    return;
+  }
+  syncMaskCanvasSize();
+  const point = getMaskCanvasPoint(event);
+  if (!point) {
+    return;
+  }
+  event.preventDefault();
+  imageWorkbenchStore.clearInpaintMask();
+  const canvas = maskCanvasRef.value;
+  canvas?.setPointerCapture(event.pointerId);
+  activeMaskStroke = {
+    tool: maskTool.value,
+    brushSize: maskBrushSize.value,
+    points: [point],
+  };
+  inpaintMaskStrokes.value = [...inpaintMaskStrokes.value, activeMaskStroke];
+}
+
+function handleMaskPointerMove(event: PointerEvent) {
+  if (!activeMaskStroke) {
+    return;
+  }
+  const point = getMaskCanvasPoint(event);
+  if (!point) {
+    return;
+  }
+  event.preventDefault();
+  const fromIndex = activeMaskStroke.points.length - 1;
+  activeMaskStroke.points.push(point);
+  drawMaskStroke(activeMaskStroke, fromIndex);
+}
+
+function finishMaskStroke(event: PointerEvent) {
+  if (!activeMaskStroke) {
+    return;
+  }
+  if (maskCanvasRef.value?.hasPointerCapture(event.pointerId)) {
+    maskCanvasRef.value.releasePointerCapture(event.pointerId);
+  }
+  if (activeMaskStroke.points.length < 2) {
+    inpaintMaskStrokes.value = inpaintMaskStrokes.value.filter((stroke) => stroke !== activeMaskStroke);
+  } else {
+    inpaintMaskStrokes.value = [...inpaintMaskStrokes.value];
+  }
+  activeMaskStroke = null;
+}
+
+function resetInpaintMask() {
+  activeMaskStroke = null;
+  inpaintMaskStrokes.value = [];
+  imageWorkbenchStore.clearInpaintMask();
+  replayMaskCanvas();
+}
+
+function handleMaskImageLoad() {
+  nextTick(() => syncMaskCanvasSize());
+}
+
+function handleSaveInpaintMask() {
+  const canvas = maskCanvasRef.value;
+  if (!canvas || !canSaveInpaintMask.value) {
+    return;
+  }
+  void imageWorkbenchStore.saveInpaintMaskDraft({
+    width: canvas.width,
+    height: canvas.height,
+    strokes: inpaintMaskStrokes.value.filter((stroke) => stroke.points.length >= 2),
+  });
+}
+
+watch(
+  () => [imageWorkbenchStore.mode, selectedAsset.value?.id, selectedAssetDisplayUrl.value],
+  () => {
+    resetInpaintMask();
+    if (imageWorkbenchStore.mode === "inpaint") {
+      void nextTick(() => syncMaskCanvasSize());
+    }
+  }
+);
+
 onMounted(() => {
   void imageWorkbenchStore.loadInitialState();
+  window.addEventListener("resize", syncMaskCanvasSize);
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener("resize", syncMaskCanvasSize);
 });
 </script>
 
@@ -425,7 +596,49 @@ onMounted(() => {
               </button>
             </div>
           </div>
-          <div v-if="visibleAssetCards.length" class="image-workbench-grid">
+          <div v-if="isInpaintWorkspace" class="image-workbench-mask-workspace">
+            <div class="image-workbench-mask-toolbar">
+              <span>{{ t("imageWorkbench.mask.title") }}</span>
+              <div class="image-workbench-mask-tools">
+                <button type="button" :class="{ 'is-active': maskTool === 'paint' }" @click="maskTool = 'paint'">
+                  <Paintbrush class="h-3.5 w-3.5" />
+                  {{ t("imageWorkbench.mask.paint") }}
+                </button>
+                <button type="button" :class="{ 'is-active': maskTool === 'erase' }" @click="maskTool = 'erase'">
+                  <Eraser class="h-3.5 w-3.5" />
+                  {{ t("imageWorkbench.mask.erase") }}
+                </button>
+                <label>
+                  <span>{{ t("imageWorkbench.mask.brush") }}</span>
+                  <input v-model.number="maskBrushSize" type="range" min="8" max="96" step="4" />
+                </label>
+                <button type="button" @click="resetInpaintMask">
+                  <RotateCcw class="h-3.5 w-3.5" />
+                  {{ t("imageWorkbench.mask.reset") }}
+                </button>
+                <button type="button" :disabled="!canSaveInpaintMask" @click="handleSaveInpaintMask">
+                  <Save class="h-3.5 w-3.5" />
+                  {{ t("imageWorkbench.mask.save") }}
+                </button>
+              </div>
+            </div>
+            <div class="image-workbench-mask-stage" :style="{ aspectRatio: inpaintAspectRatio }">
+              <img :src="selectedAssetDisplayUrl" alt="" @load="handleMaskImageLoad" />
+              <canvas
+                ref="maskCanvasRef"
+                @pointerdown="handleMaskPointerDown"
+                @pointermove="handleMaskPointerMove"
+                @pointerup="finishMaskStroke"
+                @pointercancel="finishMaskStroke"
+                @pointerleave="finishMaskStroke"
+              ></canvas>
+            </div>
+            <div class="image-workbench-mask-footer">
+              <span>{{ imageWorkbenchStore.hasInpaintMask ? t("imageWorkbench.mask.ready") : t("imageWorkbench.mask.empty") }}</span>
+              <small v-if="imageWorkbenchStore.inpaintMaskPath">{{ imageWorkbenchStore.inpaintMaskPath }}</small>
+            </div>
+          </div>
+          <div v-else-if="visibleAssetCards.length" class="image-workbench-grid">
             <button
               v-for="asset in visibleAssetCards"
               :key="asset.id"

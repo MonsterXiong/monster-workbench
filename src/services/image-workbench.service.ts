@@ -4,6 +4,8 @@ import type {
   ImageWorkbenchAsset,
   ImageWorkbenchContractSummary,
   ImageWorkbenchJob,
+  SaveImageWorkbenchMaskRequest,
+  SaveImageWorkbenchMaskResult,
   ImageWorkbenchSnapshot,
   ImageWorkbenchTemplate,
   RecordImageWorkbenchAssetRequest,
@@ -71,6 +73,10 @@ export const imageWorkbenchService = {
 
   async exportAsset(assetId: string): Promise<string> {
     return callTauri<string>("export_image_workbench_asset", { assetId });
+  },
+
+  async saveMask(request: SaveImageWorkbenchMaskRequest): Promise<SaveImageWorkbenchMaskResult> {
+    return callTauri<SaveImageWorkbenchMaskResult>("save_image_workbench_mask", { request });
   },
 
   async setAssetFavorite(

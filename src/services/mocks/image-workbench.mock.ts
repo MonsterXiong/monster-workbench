@@ -5,6 +5,7 @@ import {
 } from "../../utils";
 import { handleAiProviderMock } from "./ai-provider.mock";
 import {
+  buildMockImageWorkbenchMaskResult,
   buildMockExpandedPrompt,
   buildMockFallbackPrompt,
   mergeMockNegativePrompt,
@@ -462,6 +463,9 @@ function startImageWorkbenchJobRunner(args: Record<string, unknown>) {
   return getMockImageWorkbenchSnapshot(jobId);
 }
 
+function saveImageWorkbenchMask(args: Record<string, unknown>) {
+  return buildMockImageWorkbenchMaskResult(args.request, (assetId) => mockImageWorkbenchAssets.has(assetId), getCurrentTimestampMs());
+}
 async function runMockImageWorkbenchJob(jobId: string) {
   const snapshot = getMockImageWorkbenchSnapshot(jobId);
   const tasks = snapshot.tasks.filter((task: any) => ["queued", "retrying"].includes(task.status));
@@ -823,6 +827,8 @@ export function handleImageWorkbenchMock(command: string, args: Record<string, u
       return { handled: true, value: exportImageWorkbenchJob(args) };
     case "export_image_workbench_asset":
       return { handled: true, value: exportImageWorkbenchAsset(args) };
+    case "save_image_workbench_mask":
+      return { handled: true, value: saveImageWorkbenchMask(args) };
     case "record_image_workbench_task_asset":
       return { handled: true, value: recordImageWorkbenchTaskAsset(args) };
     case "set_image_workbench_asset_favorite":

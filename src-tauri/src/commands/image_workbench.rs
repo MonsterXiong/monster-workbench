@@ -2,6 +2,9 @@ use crate::infra::image_workbench_types::{
     ImageWorkbenchAsset, ImageWorkbenchJob, ImageWorkbenchSnapshot, ImageWorkbenchTemplate,
 };
 use crate::services::ai_service::AiProviderService;
+use crate::services::image_workbench_mask::{
+    SaveImageWorkbenchMaskRequest, SaveImageWorkbenchMaskResult,
+};
 use crate::services::image_workbench_service::{
     CreateImageWorkbenchJobRequest, ImageWorkbenchContractSummary, ImageWorkbenchService,
     RecordImageWorkbenchAssetRequest, SaveImageWorkbenchTemplateRequest,
@@ -149,6 +152,15 @@ pub fn export_image_workbench_asset(
     service
         .export_asset(&asset_id)
         .map_err(|e| e.to_json_string())
+}
+
+#[tauri::command]
+pub fn save_image_workbench_mask(
+    request: SaveImageWorkbenchMaskRequest,
+    state: ImageWorkbenchState<'_>,
+) -> Result<SaveImageWorkbenchMaskResult, String> {
+    let service = state.lock().unwrap_or_else(|e| e.into_inner());
+    service.save_mask(request).map_err(|e| e.to_json_string())
 }
 
 #[tauri::command]

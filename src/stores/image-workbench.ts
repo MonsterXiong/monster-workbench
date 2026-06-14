@@ -11,6 +11,7 @@ import {
   IMAGE_WORKBENCH_JOB_RUNNER_POLL_INTERVAL_MS,
   IMAGE_WORKBENCH_JOB_RUNNER_POLL_LIMIT,
   buildApproxReversePrompt,
+  buildImageWorkbenchJobProgress,
   buildImageWorkbenchJobContext,
   buildSelectedMetaPromptText,
   delay,
@@ -24,6 +25,7 @@ import {
   supportsModeForConfig,
   toAssetCard,
   toImageModelConfigOption,
+  useImageWorkbenchMaskState,
 } from "./image-workbench-helpers";
 import { useAiProviderStore } from "./ai-provider";
 import { useFileManagerStore } from "./file-manager";
@@ -46,6 +48,7 @@ export const useImageWorkbenchStore = defineStore("image-workbench", () => {
   const aiProviderStore = useAiProviderStore();
   const fileManagerStore = useFileManagerStore();
   const settingStore = useSettingStore();
+  const t = (key: string) => getTranslation(key, settingStore.locale);
   const loading = ref(false);
   const generating = ref(false);
   const error = ref("");
@@ -97,13 +100,13 @@ export const useImageWorkbenchStore = defineStore("image-workbench", () => {
   const deferredModes = computed(() => contract.value?.deferredModes ?? []);
   const isModeSupported = computed(() => supportedModes.value.includes(mode.value));
   const isModeDeferred = computed(() => deferredModes.value.includes(mode.value));
-  const supportsTxt2img = computed(() => supportsImageGenerationConfig(activeImageConfig.value));
   const supportsCurrentProviderMode = computed(() => supportsModeForConfig(activeImageConfig.value, mode.value));
   const currentModeContextUnavailableReason = computed(() =>
     getModeContextUnavailableReason({
       targetMode: mode.value,
       hasReferenceImage: hasReferenceImage.value,
       hasSelectedAsset: Boolean(selectedAsset.value),
+      hasInpaintMask: hasInpaintMask.value,
       t,
     })
   );
@@ -141,25 +144,14 @@ export const useImageWorkbenchStore = defineStore("image-workbench", () => {
       ? modelRuns.value.filter((item) => item.taskId === selectedAsset.value?.taskId)
       : []
   );
+  const { inpaintMaskPath, hasInpaintMask, startInpaintSelectedAsset, saveInpaintMaskDraft, clearInpaintMask, syncInpaintMaskFromJob } = useImageWorkbenchMaskState({ selectedAsset, mode, notice, runWithLoading, t });
   const currentAssetCards = computed(() => assets.value.map(toAssetCard));
-  const previewUrls = computed(() => currentAssetCards.value.map((asset) => asset.displayUrl));
   const libraryAssetCards = computed(() => assetLibrary.value.map(toAssetCard));
   const hasReferenceImage = computed(() => Boolean(referenceImagePath.value));
   const referenceImageDisplayUrl = computed(() =>
     referenceImagePath.value ? fileManagerStore.getImgUrl(referenceImagePath.value) : ""
   );
-  const jobProgress = computed(() => {
-    const total = tasks.value.length;
-    const finished = tasks.value.filter((task) => ["succeeded", "failed", "cancelled"].includes(task.status)).length;
-    return {
-      total,
-      finished,
-      succeeded: tasks.value.filter((task) => task.status === "succeeded").length,
-      failed: tasks.value.filter((task) => task.status === "failed").length,
-      running: tasks.value.filter((task) => ["running", "validating", "retrying"].includes(task.status)).length,
-      percent: total ? Math.round((finished / total) * 100) : 0,
-    };
-  });
+  const jobProgress = computed(() => buildImageWorkbenchJobProgress(tasks.value));
   const canRetryFailedTasks = computed(() =>
     Boolean(currentJob.value) &&
     tasks.value.some((task) => task.status === "failed" && task.retryCount < task.maxRetries) &&
@@ -187,7 +179,6 @@ export const useImageWorkbenchStore = defineStore("image-workbench", () => {
     supportsModeForConfig(activeImageConfig.value, "upscale_4x") &&
     !generating.value
   );
-  const t = (key: string) => getTranslation(key, settingStore.locale);
 
   async function runWithLoading<T>(runner: () => Promise<T>): Promise<T> {
     loading.value = true;
@@ -316,6 +307,7 @@ export const useImageWorkbenchStore = defineStore("image-workbench", () => {
           mode: mode.value,
           source: selectedAsset.value,
           referenceImagePath: referenceImagePath.value,
+          maskPath: hasInpaintMask.value ? inpaintMaskPath.value : "",
           activeImageConfig: activeImageConfig.value,
         }),
         mode: mode.value,
@@ -498,6 +490,9 @@ export const useImageWorkbenchStore = defineStore("image-workbench", () => {
   }
 
   function selectAsset(assetId: string) {
+    if (selectedAssetId.value !== assetId) {
+      clearInpaintMask();
+    }
     selectedAssetId.value = assetId;
   }
 
@@ -583,14 +578,6 @@ export const useImageWorkbenchStore = defineStore("image-workbench", () => {
     return runTxt2imgBatch();
   }
 
-  async function startInpaintSelectedAsset() {
-    if (!selectedAsset.value) {
-      throw new Error(t("imageWorkbench.errors.noSelectedAsset"));
-    }
-    mode.value = "inpaint";
-    notice.value = t("imageWorkbench.errors.maskRequired");
-  }
-
   async function continueSelectedPerson() {
     if (!selectedAsset.value) {
       throw new Error(t("imageWorkbench.errors.noSelectedAsset"));
@@ -668,6 +655,7 @@ export const useImageWorkbenchStore = defineStore("image-workbench", () => {
     quantity.value = job.quantity;
     size.value = job.size || size.value;
     model.value = job.model || getImageModelName(activeImageConfig.value) || model.value;
+    syncInpaintMaskFromJob(job);
   }
 
   function selectImageModelConfig(configId: string) {
@@ -743,7 +731,6 @@ export const useImageWorkbenchStore = defineStore("image-workbench", () => {
     deferredModes,
     isModeSupported,
     isModeDeferred,
-    supportsTxt2img,
     supportsCurrentProviderMode,
     modeUnavailableReason,
     canGenerate,
@@ -751,9 +738,10 @@ export const useImageWorkbenchStore = defineStore("image-workbench", () => {
     selectedAssetMetadata,
     selectedAssetModelRuns,
     currentAssetCards,
-    previewUrls,
     libraryAssetCards,
     hasReferenceImage,
+    inpaintMaskPath,
+    hasInpaintMask,
     referenceImageDisplayUrl,
     jobProgress,
     canRetryFailedTasks,
@@ -791,6 +779,8 @@ export const useImageWorkbenchStore = defineStore("image-workbench", () => {
     regenerateSelectedAsset,
     continueSelectedStyle,
     startInpaintSelectedAsset,
+    saveInpaintMaskDraft,
+    clearInpaintMask,
     continueSelectedPerson,
     upscaleSelectedAsset,
     reuseSelectedAssetPrompt,

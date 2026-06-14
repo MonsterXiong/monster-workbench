@@ -158,6 +158,34 @@ export interface CreateImageWorkbenchJobRequest {
   fallbackPolicy?: string | null;
 }
 
+export interface ImageWorkbenchMaskPoint {
+  x: number;
+  y: number;
+}
+
+export interface ImageWorkbenchMaskStroke {
+  tool: "paint" | "erase";
+  brushSize: number;
+  points: ImageWorkbenchMaskPoint[];
+}
+
+export interface SaveImageWorkbenchMaskRequest {
+  assetId: string;
+  width: number;
+  height: number;
+  strokes: ImageWorkbenchMaskStroke[];
+}
+
+export interface SaveImageWorkbenchMaskResult {
+  assetId: string;
+  maskPath: string;
+  width: number;
+  height: number;
+  strokeCount: number;
+  pointCount: number;
+  createdAtMs: number;
+}
+
 export interface UpdateImageWorkbenchTaskStatusRequest {
   taskId: string;
   status: ImageWorkbenchTaskStatus;

@@ -221,6 +221,7 @@ fn main() {
             commands::image_workbench::delete_image_workbench_job,
             commands::image_workbench::export_image_workbench_job,
             commands::image_workbench::export_image_workbench_asset,
+            commands::image_workbench::save_image_workbench_mask,
             commands::image_workbench::record_image_workbench_task_asset,
             commands::image_workbench::set_image_workbench_asset_favorite,
             commands::image_workbench::list_image_workbench_templates,

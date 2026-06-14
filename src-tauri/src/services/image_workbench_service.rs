@@ -13,6 +13,10 @@ use crate::services::ai_provider_types::{
 };
 use crate::services::ai_service::AiProviderService;
 use crate::services::image_workbench_asset_policy::ImageWorkbenchAssetPathPolicy;
+use crate::services::image_workbench_mask::{
+    build_mask_svg, normalize_mask_strokes, SaveImageWorkbenchMaskRequest,
+    SaveImageWorkbenchMaskResult,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::fs;
@@ -500,6 +504,37 @@ impl ImageWorkbenchService {
         )?;
 
         Ok(export_dir.to_string_lossy().to_string())
+    }
+
+    pub fn save_mask(
+        &self,
+        request: SaveImageWorkbenchMaskRequest,
+    ) -> AppResult<SaveImageWorkbenchMaskResult> {
+        let asset_id = normalize_required_id("图片工作台资产 ID", &request.asset_id)?;
+        let _asset = self.repo()?.get_asset_by_id(&asset_id)?;
+        let mask = normalize_mask_strokes(request.width, request.height, request.strokes)?;
+        let created_at_ms = now_ms_for_export();
+        let mask_dir = self
+            .path_provider
+            .get_app_local_data_dir()?
+            .join("ai")
+            .join("image-workbench")
+            .join("masks");
+        fs::create_dir_all(&mask_dir)?;
+
+        let file_name = format!("{}-{}.svg", sanitize_file_stem(&asset_id), created_at_ms);
+        let mask_path = mask_dir.join(file_name);
+        fs::write(&mask_path, build_mask_svg(&mask))?;
+
+        Ok(SaveImageWorkbenchMaskResult {
+            asset_id,
+            mask_path: mask_path.to_string_lossy().to_string(),
+            width: mask.width(),
+            height: mask.height(),
+            stroke_count: mask.stroke_count(),
+            point_count: mask.point_count(),
+            created_at_ms,
+        })
     }
 
     pub fn update_task_status(

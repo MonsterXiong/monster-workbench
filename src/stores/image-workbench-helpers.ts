@@ -1,3 +1,5 @@
+import { computed, ref, type ComputedRef, type Ref } from "vue";
+import { imageWorkbenchService } from "../services/image-workbench.service";
 import { resolveDisplayImageSrc } from "../services/image-source.service";
 import { findByValue, firstItem, toTrimmedString } from "../utils";
 import { supportsAiProviderCapability } from "./ai-provider";
@@ -8,6 +10,8 @@ import type {
   ImageWorkbenchMetadata,
   ImageWorkbenchMode,
   ImageWorkbenchModelRun,
+  ImageWorkbenchTask,
+  SaveImageWorkbenchMaskRequest,
 } from "../types/image-workbench";
 
 export const DEFAULT_IMAGE_WORKBENCH_HISTORY_LIMIT = 50;
@@ -48,6 +52,19 @@ export function toAssetCard(asset: ImageWorkbenchAsset) {
   return {
     ...asset,
     displayUrl: resolveDisplayImageSrc(asset.thumbnailPath || asset.filePath),
+  };
+}
+
+export function buildImageWorkbenchJobProgress(tasks: ImageWorkbenchTask[]) {
+  const total = tasks.length;
+  const finished = tasks.filter((task) => ["succeeded", "failed", "cancelled"].includes(task.status)).length;
+  return {
+    total,
+    finished,
+    succeeded: tasks.filter((task) => task.status === "succeeded").length,
+    failed: tasks.filter((task) => task.status === "failed").length,
+    running: tasks.filter((task) => ["running", "validating", "retrying"].includes(task.status)).length,
+    percent: total ? Math.round((finished / total) * 100) : 0,
   };
 }
 
@@ -102,9 +119,10 @@ export function getModeContextUnavailableReason(options: {
   targetMode: ImageWorkbenchMode;
   hasReferenceImage: boolean;
   hasSelectedAsset: boolean;
+  hasInpaintMask: boolean;
   t: (key: string) => string;
 }) {
-  const { targetMode, hasReferenceImage, hasSelectedAsset, t } = options;
+  const { targetMode, hasReferenceImage, hasSelectedAsset, hasInpaintMask, t } = options;
   if (targetMode === "txt2img") {
     return "";
   }
@@ -115,7 +133,10 @@ export function getModeContextUnavailableReason(options: {
     return hasSelectedAsset ? "" : t("imageWorkbench.errors.noSelectedAsset");
   }
   if (targetMode === "inpaint") {
-    return hasSelectedAsset ? t("imageWorkbench.errors.maskRequired") : t("imageWorkbench.errors.noSelectedAsset");
+    if (!hasSelectedAsset) {
+      return t("imageWorkbench.errors.noSelectedAsset");
+    }
+    return hasInpaintMask ? "" : t("imageWorkbench.errors.maskRequired");
   }
   return "";
 }
@@ -151,9 +172,10 @@ export function buildImageWorkbenchJobContext(options: {
   mode: ImageWorkbenchMode;
   source: ImageWorkbenchAsset | null;
   referenceImagePath: string;
+  maskPath: string;
   activeImageConfig: AiModelConfig | null | undefined;
 }) {
-  const { mode, source, referenceImagePath, activeImageConfig } = options;
+  const { mode, source, referenceImagePath, maskPath, activeImageConfig } = options;
   const externalReferenceId = !source && referenceImagePath ? `external:${referenceImagePath}` : "";
   const referenceAssetIds = source ? [source.id] : externalReferenceId ? [externalReferenceId] : [];
   const sourceImagePath = source?.filePath || referenceImagePath || null;
@@ -173,7 +195,7 @@ export function buildImageWorkbenchJobContext(options: {
     referenceAssetIdsJson: referenceAssetIds.length ? JSON.stringify(referenceAssetIds) : null,
     sourceAssetId: source?.id || null,
     sourceImagePath,
-    maskPath: null,
+    maskPath: mode === "inpaint" ? maskPath || null : null,
     personContextJson,
     upscaleScale: mode === "upscale_4x" ? 4 : mode === "upscale_2x" ? 2 : null,
     fallbackPolicy,
@@ -214,4 +236,62 @@ export function buildApproxReversePrompt(path: string) {
     .slice(0, 5);
   const subject = terms.length ? terms.join("，") : "外部参考图";
   return `近似反推：${subject}，主体清晰，保留参考图的主要构图、色彩倾向和视觉风格。该提示词基于外部图片信息近似生成，不代表真实生成参数。`;
+}
+
+export function useImageWorkbenchMaskState(options: {
+  selectedAsset: ComputedRef<ImageWorkbenchAsset | null>;
+  mode: Ref<ImageWorkbenchMode>;
+  notice: Ref<string>;
+  runWithLoading: <T>(runner: () => Promise<T>) => Promise<T>;
+  t: (key: string) => string;
+}) {
+  const inpaintMaskAssetId = ref("");
+  const inpaintMaskPath = ref("");
+  const hasInpaintMask = computed(
+    () => Boolean(inpaintMaskPath.value) && inpaintMaskAssetId.value === options.selectedAsset.value?.id
+  );
+
+  function startInpaintSelectedAsset() {
+    if (!options.selectedAsset.value) {
+      throw new Error(options.t("imageWorkbench.errors.noSelectedAsset"));
+    }
+    options.mode.value = "inpaint";
+    options.notice.value = options.t("imageWorkbench.mask.drawNotice");
+  }
+
+  async function saveInpaintMaskDraft(request: Omit<SaveImageWorkbenchMaskRequest, "assetId">) {
+    if (!options.selectedAsset.value) {
+      throw new Error(options.t("imageWorkbench.errors.noSelectedAsset"));
+    }
+    const result = await options.runWithLoading(() =>
+      imageWorkbenchService.saveMask({
+        ...request,
+        assetId: options.selectedAsset.value!.id,
+      })
+    );
+    inpaintMaskAssetId.value = result.assetId;
+    inpaintMaskPath.value = result.maskPath;
+    options.mode.value = "inpaint";
+    options.notice.value = options.t("imageWorkbench.mask.savedNotice");
+    return result;
+  }
+
+  function clearInpaintMask() {
+    inpaintMaskAssetId.value = "";
+    inpaintMaskPath.value = "";
+  }
+
+  function syncInpaintMaskFromJob(job: ImageWorkbenchJob) {
+    inpaintMaskPath.value = job.maskPath || "";
+    inpaintMaskAssetId.value = job.sourceAssetId || "";
+  }
+
+  return {
+    inpaintMaskPath,
+    hasInpaintMask,
+    startInpaintSelectedAsset,
+    saveInpaintMaskDraft,
+    clearInpaintMask,
+    syncInpaintMaskFromJob,
+  };
 }
