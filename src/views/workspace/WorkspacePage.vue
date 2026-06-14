@@ -12,9 +12,9 @@ const { t } = useI18n();
         <h1 class="text-3xl font-bold text-slate-900 dark:text-slate-100 tracking-tight">{{ t('workspace.title') }}</h1>
         <p class="mt-2 text-slate-500 text-sm">{{ t('workspace.welcome') }}</p>
       </div>
-      <el-button type="primary" size="large" class="shadow-lg shadow-primary/30 rounded-full px-6 font-medium tracking-wide">
+      <BaseButton type="primary" size="lg" round class="shadow-lg shadow-primary/30 rounded-full px-6 font-medium tracking-wide">
         {{ t('workspace.exploreBtn') }}
-      </el-button>
+      </BaseButton>
     </div>
 
     <!-- 展示卡片区域 -->
