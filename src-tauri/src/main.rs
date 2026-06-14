@@ -16,6 +16,7 @@ use services::auth_service::AuthService;
 use services::config_service::ConfigService;
 use services::database_service::DatabaseService;
 use services::file_service::FileService;
+use services::image_workbench_service::ImageWorkbenchService;
 use services::log_service::LogService;
 use services::navigation_service::NavigationService;
 use services::system_service::SystemService;
@@ -61,12 +62,29 @@ fn main() {
             let system_service = SystemService::new(handle.clone(), path_provider.clone());
             let navigation_service = NavigationService::new(path_provider.clone());
             let ai_provider_service = AiProviderService::new(handle.clone());
+            let image_workbench_service = ImageWorkbenchService::new(path_provider.clone());
 
             // 初始化运行时数据库表，具体 DB/Repo 细节保持在 Service 层内。
             database_service.init_runtime_schema()?;
 
             // 通用 AI 业务生成任务使用持久 job 恢复，避免 Chat/Image 刷新或重启后 requestId 丢失。
             let _ = ai_provider_service.resume_persisted_business_generations();
+
+            // 应用级恢复图片工作台未完成任务，后续由 DB 领取/租约防止重复 runner 抢同一任务。
+            if image_workbench_service
+                .recover_interrupted_jobs()
+                .map(|count| count > 0)
+                .unwrap_or(false)
+            {
+                if let Ok(jobs) = image_workbench_service.list_jobs(Some(100)) {
+                    for job in jobs.iter().filter(|job| {
+                        matches!(job.status.as_str(), "queued" | "running" | "validating")
+                    }) {
+                        let _ = image_workbench_service.start_job_runner(handle.clone(), &job.id);
+                    }
+                }
+            }
+
             // 2. 状态依赖管理注入
             app.manage(std::sync::Mutex::new(app_service));
             app.manage(std::sync::Mutex::new(config_service));
@@ -78,6 +96,7 @@ fn main() {
             app.manage(std::sync::Mutex::new(system_service));
             app.manage(std::sync::Mutex::new(navigation_service));
             app.manage(std::sync::Mutex::new(ai_provider_service));
+            app.manage(std::sync::Mutex::new(image_workbench_service));
 
             // 3. 创建托盘菜单
             let quit_i = MenuItem::with_id(app.handle(), "quit", "退出应用", true, None::<&str>)?;
@@ -189,6 +208,24 @@ fn main() {
             commands::ai::get_ai_provider_queue_status,
             commands::ai::cancel_ai_provider_queued_tests,
             commands::ai::cancel_ai_provider_test_task,
+            commands::image_workbench::get_image_workbench_contract,
+            commands::image_workbench::create_image_workbench_job,
+            commands::image_workbench::list_image_workbench_jobs,
+            commands::image_workbench::list_image_workbench_assets,
+            commands::image_workbench::get_image_workbench_job_snapshot,
+            commands::image_workbench::update_image_workbench_task_status,
+            commands::image_workbench::start_image_workbench_job_runner,
+            commands::image_workbench::cancel_image_workbench_job,
+            commands::image_workbench::retry_image_workbench_failed_tasks,
+            commands::image_workbench::recover_image_workbench_interrupted_jobs,
+            commands::image_workbench::delete_image_workbench_job,
+            commands::image_workbench::export_image_workbench_job,
+            commands::image_workbench::export_image_workbench_asset,
+            commands::image_workbench::record_image_workbench_task_asset,
+            commands::image_workbench::set_image_workbench_asset_favorite,
+            commands::image_workbench::list_image_workbench_templates,
+            commands::image_workbench::save_image_workbench_template,
+            commands::image_workbench::delete_image_workbench_template,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

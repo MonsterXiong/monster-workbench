@@ -1,0 +1,967 @@
+use crate::infra::image_workbench_schema::init_image_workbench_schema;
+use crate::infra::{AppError, AppResult};
+use rusqlite::{params, Connection, OptionalExtension};
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+static ID_SEQUENCE: AtomicU64 = AtomicU64::new(1);
+
+use crate::infra::image_workbench_types::{
+    ImageWorkbenchAsset, ImageWorkbenchJob, ImageWorkbenchMetadata, ImageWorkbenchModelRun,
+    ImageWorkbenchSnapshot, ImageWorkbenchTask, ImageWorkbenchTaskClaim,
+    ImageWorkbenchTaskStatusPatch, ImageWorkbenchTemplate, NewImageWorkbenchAsset,
+    NewImageWorkbenchJob, NewImageWorkbenchMetadata, NewImageWorkbenchModelRun,
+    NewImageWorkbenchTemplate,
+};
+
+pub struct ImageWorkbenchRepo {
+    db_path: PathBuf,
+}
+
+impl ImageWorkbenchRepo {
+    pub fn new(db_path: PathBuf) -> Self {
+        Self { db_path }
+    }
+
+    fn connect(&self) -> AppResult<Connection> {
+        init_image_workbench_schema(&self.db_path)?;
+        let conn = Connection::open(&self.db_path)?;
+        conn.execute_batch(
+            "PRAGMA journal_mode = WAL;
+             PRAGMA busy_timeout = 5000;
+             PRAGMA foreign_keys = ON;",
+        )?;
+        Ok(conn)
+    }
+
+    pub fn create_job(&self, input: NewImageWorkbenchJob) -> AppResult<ImageWorkbenchSnapshot> {
+        let mut conn = self.connect()?;
+        let now = now_ms();
+        let job_id = next_id("iw-job");
+
+        let tx = conn.transaction()?;
+        tx.execute(
+            "INSERT INTO image_workbench_jobs
+                (id, mode, status, prompt, negative_prompt, quantity, provider_config_id, model, size,
+                 reference_asset_ids_json, source_asset_id, source_image_path, mask_path, person_context_json,
+                 upscale_scale, fallback_policy, created_at_ms, updated_at_ms, queued_at_ms)
+             VALUES (?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            params![
+                job_id,
+                input.mode,
+                input.prompt,
+                input.negative_prompt,
+                input.quantity as i64,
+                input.provider_config_id,
+                input.model,
+                input.size,
+                input.reference_asset_ids_json,
+                input.source_asset_id,
+                input.source_image_path,
+                input.mask_path,
+                input.person_context_json,
+                input.upscale_scale.map(|value| value as i64),
+                input.fallback_policy,
+                now,
+                now,
+                now
+            ],
+        )?;
+
+        for index in 0..input.quantity {
+            let task_prompt = input
+                .task_prompts
+                .get(index as usize)
+                .cloned()
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or_else(|| input.prompt.clone());
+            tx.execute(
+                "INSERT INTO image_workbench_tasks
+                    (id, job_id, queue_index, status, retry_count, max_retries, prompt, created_at_ms, updated_at_ms)
+                 VALUES (?, ?, ?, 'queued', 0, 1, ?, ?, ?)",
+                params![
+                    next_id("iw-task"),
+                    job_id,
+                    index as i64,
+                    task_prompt,
+                    now,
+                    now
+                ],
+            )?;
+        }
+
+        tx.commit()?;
+        self.get_snapshot(&job_id)
+    }
+
+    pub fn get_snapshot(&self, job_id: &str) -> AppResult<ImageWorkbenchSnapshot> {
+        let conn = self.connect()?;
+        let job = self.get_job(&conn, job_id)?;
+        let tasks = self.list_tasks(&conn, job_id)?;
+        let assets = self.list_assets(&conn, job_id)?;
+        let metadata = self.list_metadata(&conn, job_id)?;
+        let model_runs = self.list_model_runs(&conn, job_id)?;
+        Ok(ImageWorkbenchSnapshot {
+            job,
+            tasks,
+            assets,
+            metadata,
+            model_runs,
+        })
+    }
+
+    pub fn list_jobs(&self, limit: u32) -> AppResult<Vec<ImageWorkbenchJob>> {
+        let conn = self.connect()?;
+        let limit = limit.clamp(1, 100) as i64;
+        let mut stmt = conn.prepare(
+            "SELECT id, mode, status, prompt, negative_prompt, quantity, provider_config_id, model, size,
+                    reference_asset_ids_json, source_asset_id, source_image_path, mask_path, person_context_json,
+                    upscale_scale, fallback_policy, created_at_ms, updated_at_ms, queued_at_ms,
+                    started_at_ms, finished_at_ms, error
+             FROM image_workbench_jobs
+             ORDER BY updated_at_ms DESC, created_at_ms DESC
+             LIMIT ?",
+        )?;
+        let rows = stmt.query_map(params![limit], map_job)?;
+        collect_rows(rows)
+    }
+
+    pub fn list_recent_assets(&self, limit: u32) -> AppResult<Vec<ImageWorkbenchAsset>> {
+        let conn = self.connect()?;
+        let limit = limit.clamp(1, 200) as i64;
+        let mut stmt = conn.prepare(
+            "SELECT id, job_id, task_id, file_path, thumbnail_path, width, height, mime_type, size_bytes, favorite, created_at_ms
+             FROM image_workbench_assets
+             ORDER BY favorite DESC, created_at_ms DESC
+             LIMIT ?",
+        )?;
+        let rows = stmt.query_map(params![limit], map_asset)?;
+        collect_rows(rows)
+    }
+
+    pub fn get_asset_by_id(&self, asset_id: &str) -> AppResult<ImageWorkbenchAsset> {
+        let conn = self.connect()?;
+        self.get_asset(&conn, asset_id)
+    }
+
+    pub fn delete_job(&self, job_id: &str) -> AppResult<()> {
+        let conn = self.connect()?;
+        let affected = conn.execute(
+            "DELETE FROM image_workbench_jobs WHERE id = ?",
+            params![job_id],
+        )?;
+        if affected == 0 {
+            return Err(AppError::Database(format!(
+                "未找到图片工作台作业: {}",
+                job_id
+            )));
+        }
+        Ok(())
+    }
+
+    pub fn cancel_job(&self, job_id: &str) -> AppResult<ImageWorkbenchSnapshot> {
+        let conn = self.connect()?;
+        let now = now_ms();
+        self.get_job(&conn, job_id)?;
+        conn.execute(
+            "UPDATE image_workbench_tasks
+             SET status = 'cancelled',
+                 error = COALESCE(error, '用户取消'),
+                 claim_token = NULL,
+                 leased_until_ms = NULL,
+                 finished_at_ms = COALESCE(finished_at_ms, ?),
+                 updated_at_ms = ?
+             WHERE job_id = ?
+               AND status IN ('queued', 'running', 'validating', 'retrying')",
+            params![now, now, job_id],
+        )?;
+        self.recalculate_job_status(&conn, job_id, now)?;
+        self.get_snapshot(job_id)
+    }
+
+    pub fn record_model_run(
+        &self,
+        job_id: &str,
+        task_id: Option<&str>,
+        model_run: NewImageWorkbenchModelRun,
+    ) -> AppResult<()> {
+        let conn = self.connect()?;
+        self.get_job(&conn, job_id)?;
+        if let Some(task_id) = task_id {
+            let task = self.get_task(&conn, task_id)?;
+            if task.job_id != job_id {
+                return Err(AppError::Database(format!(
+                    "图片工作台任务不属于作业: {}",
+                    task_id
+                )));
+            }
+        }
+        self.insert_model_run(&conn, job_id, task_id, model_run, now_ms())
+    }
+
+    pub fn retry_failed_tasks(&self, job_id: &str) -> AppResult<ImageWorkbenchSnapshot> {
+        let conn = self.connect()?;
+        let now = now_ms();
+        self.get_job(&conn, job_id)?;
+        let tasks = self.list_tasks(&conn, job_id)?;
+        let mut updated = 0;
+        for task in tasks
+            .iter()
+            .filter(|task| task.status == "failed" && task.retry_count < task.max_retries)
+        {
+            conn.execute(
+                "UPDATE image_workbench_tasks
+                 SET status = 'retrying',
+                     error = NULL,
+                     claim_token = NULL,
+                     leased_until_ms = NULL,
+                     retry_count = retry_count + 1,
+                     finished_at_ms = NULL,
+                     updated_at_ms = ?
+                 WHERE id = ?",
+                params![now, task.id],
+            )?;
+            updated += 1;
+        }
+        if updated == 0 {
+            return Err(AppError::Config("没有可重试的图片工作台任务".to_string()));
+        }
+        self.recalculate_job_status(&conn, job_id, now)?;
+        self.get_snapshot(job_id)
+    }
+
+    pub fn recover_interrupted_jobs(&self, _reason: &str) -> AppResult<u32> {
+        let conn = self.connect()?;
+        let now = now_ms();
+        let mut stmt = conn.prepare(
+            "SELECT DISTINCT job_id
+             FROM image_workbench_tasks
+             WHERE status IN ('queued', 'running', 'validating', 'retrying')",
+        )?;
+        let job_ids = collect_rows(stmt.query_map([], |row| row.get::<_, String>(0))?)?;
+
+        for job_id in &job_ids {
+            conn.execute(
+                "UPDATE image_workbench_tasks
+                 SET status = CASE
+                         WHEN status IN ('running', 'validating') THEN 'queued'
+                         ELSE status
+                     END,
+                     error = NULL,
+                     claim_token = NULL,
+                     leased_until_ms = NULL,
+                     finished_at_ms = NULL,
+                     updated_at_ms = ?
+                 WHERE job_id = ?
+                   AND status IN ('queued', 'running', 'validating', 'retrying')",
+                params![now, job_id],
+            )?;
+            self.recalculate_job_status(&conn, job_id, now)?;
+        }
+
+        Ok(job_ids.len() as u32)
+    }
+
+    pub fn update_task_status(
+        &self,
+        patch: ImageWorkbenchTaskStatusPatch,
+    ) -> AppResult<ImageWorkbenchSnapshot> {
+        let conn = self.connect()?;
+        let now = now_ms();
+        let task = self.get_task(&conn, &patch.task_id)?;
+        validate_task_status_transition(&task, &patch.status)?;
+        let retry_count = if task.status == "failed" && patch.status == "retrying" {
+            task.retry_count + 1
+        } else {
+            task.retry_count
+        };
+        let started_at = if matches!(patch.status.as_str(), "running" | "validating" | "retrying")
+            && task.started_at_ms.is_none()
+        {
+            Some(now)
+        } else {
+            task.started_at_ms
+        };
+        let finished_at = if is_terminal_status(&patch.status) {
+            Some(now)
+        } else if patch.status == "retrying" {
+            None
+        } else {
+            task.finished_at_ms
+        };
+        let clear_claim = if matches!(
+            patch.status.as_str(),
+            "queued" | "retrying" | "succeeded" | "failed" | "cancelled"
+        ) {
+            1
+        } else {
+            0
+        };
+
+        conn.execute(
+            "UPDATE image_workbench_tasks
+             SET status = ?,
+                 error = ?,
+                 retry_count = ?,
+                 claim_token = CASE WHEN ? = 1 THEN NULL ELSE claim_token END,
+                 leased_until_ms = CASE WHEN ? = 1 THEN NULL ELSE leased_until_ms END,
+                 started_at_ms = ?,
+                 finished_at_ms = ?,
+                 updated_at_ms = ?
+             WHERE id = ?",
+            params![
+                patch.status,
+                patch.error,
+                retry_count as i64,
+                clear_claim,
+                clear_claim,
+                started_at,
+                finished_at,
+                now,
+                patch.task_id
+            ],
+        )?;
+
+        if let Some(model_run) = patch.model_run {
+            self.insert_model_run(&conn, &task.job_id, Some(&task.id), model_run, now)?;
+        }
+
+        self.recalculate_job_status(&conn, &task.job_id, now)?;
+        self.get_snapshot(&task.job_id)
+    }
+
+    pub fn claim_next_runnable_task(
+        &self,
+        job_id: &str,
+        task_ids: Option<&[String]>,
+        lease_ms: i64,
+    ) -> AppResult<Option<ImageWorkbenchTaskClaim>> {
+        let conn = self.connect()?;
+        let now = now_ms();
+        self.get_job(&conn, job_id)?;
+        let task = self.list_tasks(&conn, job_id)?.into_iter().find(|task| {
+            task_ids
+                .map(|ids| ids.iter().any(|id| id == &task.id))
+                .unwrap_or(true)
+                && is_claimable_task(task, now)
+        });
+        let Some(task) = task else {
+            return Ok(None);
+        };
+
+        let claim_token = next_id("iw-claim");
+        let leased_until_ms = now + lease_ms.max(1_000);
+        let affected = conn.execute(
+            "UPDATE image_workbench_tasks
+             SET status = 'running',
+                 error = NULL,
+                 claim_token = ?,
+                 leased_until_ms = ?,
+                 started_at_ms = COALESCE(started_at_ms, ?),
+                 finished_at_ms = NULL,
+                 updated_at_ms = ?
+             WHERE id = ?
+               AND job_id = ?
+               AND (
+                    status IN ('queued', 'retrying')
+                    OR (
+                        status IN ('running', 'validating')
+                        AND (leased_until_ms IS NULL OR leased_until_ms <= ?)
+                    )
+               )",
+            params![claim_token, leased_until_ms, now, now, task.id, job_id, now],
+        )?;
+        if affected == 0 {
+            return Ok(None);
+        }
+
+        self.recalculate_job_status(&conn, &task.job_id, now)?;
+        let snapshot = self.get_snapshot(&task.job_id)?;
+        Ok(Some(ImageWorkbenchTaskClaim {
+            task_id: task.id,
+            snapshot,
+        }))
+    }
+
+    pub fn record_asset(
+        &self,
+        asset: NewImageWorkbenchAsset,
+        metadata: Option<NewImageWorkbenchMetadata>,
+        model_run: Option<NewImageWorkbenchModelRun>,
+    ) -> AppResult<ImageWorkbenchSnapshot> {
+        let mut conn = self.connect()?;
+        let now = now_ms();
+        let task = self.get_task(&conn, &asset.task_id)?;
+        let asset_id = next_id("iw-asset");
+        let job_id = task.job_id.clone();
+
+        let tx = conn.transaction()?;
+        tx.execute(
+            "INSERT INTO image_workbench_assets
+                (id, job_id, task_id, file_path, thumbnail_path, width, height, mime_type, size_bytes, favorite, created_at_ms)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)",
+            params![
+                asset_id,
+                job_id,
+                asset.task_id,
+                asset.file_path,
+                asset.thumbnail_path,
+                asset.width.map(|value| value as i64),
+                asset.height.map(|value| value as i64),
+                asset.mime_type,
+                asset.size_bytes.map(|value| value as i64),
+                now
+            ],
+        )?;
+
+        if let Some(metadata) = metadata {
+            tx.execute(
+                "INSERT INTO image_workbench_metadata
+                    (id, asset_id, task_id, original_prompt, expanded_prompt, negative_prompt, seed, model, mode, provider, reference_asset_ids_json, mask_path, person_context_json, created_at_ms)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                params![
+                    next_id("iw-meta"),
+                    asset_id,
+                    asset.task_id,
+                    metadata.original_prompt,
+                    metadata.expanded_prompt,
+                    metadata.negative_prompt,
+                    metadata.seed,
+                    metadata.model,
+                    metadata.mode,
+                    metadata.provider,
+                    metadata.reference_asset_ids_json,
+                    metadata.mask_path,
+                    metadata.person_context_json,
+                    now
+                ],
+            )?;
+        }
+
+        if let Some(model_run) = model_run {
+            tx.execute(
+                "INSERT INTO image_workbench_model_runs
+                    (id, job_id, task_id, provider, model, capability, status, latency_ms, request_json, response_preview, error, created_at_ms, finished_at_ms)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                params![
+                    next_id("iw-run"),
+                    job_id,
+                    asset.task_id,
+                    model_run.provider,
+                    model_run.model,
+                    model_run.capability,
+                    model_run.status.unwrap_or_else(|| "succeeded".to_string()),
+                    model_run.latency_ms.map(|value| value as i64),
+                    model_run.request_json,
+                    model_run.response_preview,
+                    model_run.error,
+                    now,
+                    Some(now)
+                ],
+            )?;
+        }
+        tx.commit()?;
+
+        self.get_snapshot(&job_id)
+    }
+
+    pub fn set_asset_favorite(
+        &self,
+        asset_id: &str,
+        favorite: bool,
+    ) -> AppResult<ImageWorkbenchSnapshot> {
+        let conn = self.connect()?;
+        let asset = self.get_asset(&conn, asset_id)?;
+        let now = now_ms();
+        conn.execute(
+            "UPDATE image_workbench_assets
+             SET favorite = ?
+             WHERE id = ?",
+            params![if favorite { 1 } else { 0 }, asset_id],
+        )?;
+        conn.execute(
+            "UPDATE image_workbench_jobs
+             SET updated_at_ms = ?
+             WHERE id = ?",
+            params![now, asset.job_id],
+        )?;
+        self.get_snapshot(&asset.job_id)
+    }
+
+    pub fn list_templates(&self) -> AppResult<Vec<ImageWorkbenchTemplate>> {
+        let conn = self.connect()?;
+        let mut stmt = conn.prepare(
+            "SELECT id, name, prompt, negative_prompt, mode, is_system, created_at_ms, updated_at_ms
+             FROM image_workbench_templates
+             ORDER BY is_system DESC, updated_at_ms DESC, name ASC",
+        )?;
+        let rows = stmt.query_map([], map_template)?;
+        collect_rows(rows)
+    }
+
+    pub fn save_template(
+        &self,
+        input: NewImageWorkbenchTemplate,
+    ) -> AppResult<ImageWorkbenchTemplate> {
+        let conn = self.connect()?;
+        let now = now_ms();
+        let id = input.id.unwrap_or_else(|| next_id("iw-template"));
+        let existing = self.get_template_optional(&conn, &id)?;
+        if existing.as_ref().is_some_and(|template| template.is_system) {
+            return Err(AppError::Permission("系统模板不能被覆盖".to_string()));
+        }
+
+        if existing.is_some() {
+            conn.execute(
+                "UPDATE image_workbench_templates
+                 SET name = ?, prompt = ?, negative_prompt = ?, mode = ?, updated_at_ms = ?
+                 WHERE id = ?",
+                params![
+                    input.name,
+                    input.prompt,
+                    input.negative_prompt,
+                    input.mode,
+                    now,
+                    id
+                ],
+            )?;
+        } else {
+            conn.execute(
+                "INSERT INTO image_workbench_templates
+                    (id, name, prompt, negative_prompt, mode, is_system, created_at_ms, updated_at_ms)
+                 VALUES (?, ?, ?, ?, ?, 0, ?, ?)",
+                params![
+                    id,
+                    input.name,
+                    input.prompt,
+                    input.negative_prompt,
+                    input.mode,
+                    now,
+                    now
+                ],
+            )?;
+        }
+
+        self.get_template(&conn, &id)
+    }
+
+    pub fn delete_template(&self, template_id: &str) -> AppResult<()> {
+        let conn = self.connect()?;
+        let template = self.get_template(&conn, template_id)?;
+        if template.is_system {
+            return Err(AppError::Permission("系统模板不能删除".to_string()));
+        }
+        conn.execute(
+            "DELETE FROM image_workbench_templates WHERE id = ?",
+            params![template_id],
+        )?;
+        Ok(())
+    }
+
+    fn get_job(&self, conn: &Connection, job_id: &str) -> AppResult<ImageWorkbenchJob> {
+        conn.query_row(
+            "SELECT id, mode, status, prompt, negative_prompt, quantity, provider_config_id, model, size,
+                    reference_asset_ids_json, source_asset_id, source_image_path, mask_path, person_context_json,
+                    upscale_scale, fallback_policy, created_at_ms, updated_at_ms, queued_at_ms,
+                    started_at_ms, finished_at_ms, error
+             FROM image_workbench_jobs
+             WHERE id = ?",
+            params![job_id],
+            map_job,
+        )
+        .optional()?
+        .ok_or_else(|| AppError::Database(format!("未找到图片工作台作业: {}", job_id)))
+    }
+
+    fn get_task(&self, conn: &Connection, task_id: &str) -> AppResult<ImageWorkbenchTask> {
+        conn.query_row(
+            "SELECT id, job_id, queue_index, status, retry_count, max_retries, claim_token, leased_until_ms,
+                    prompt, created_at_ms, updated_at_ms, started_at_ms, finished_at_ms, error
+             FROM image_workbench_tasks
+             WHERE id = ?",
+            params![task_id],
+            map_task,
+        )
+        .optional()?
+        .ok_or_else(|| AppError::Database(format!("未找到图片工作台任务: {}", task_id)))
+    }
+
+    fn get_asset(&self, conn: &Connection, asset_id: &str) -> AppResult<ImageWorkbenchAsset> {
+        conn.query_row(
+            "SELECT id, job_id, task_id, file_path, thumbnail_path, width, height, mime_type, size_bytes, favorite, created_at_ms
+             FROM image_workbench_assets
+             WHERE id = ?",
+            params![asset_id],
+            map_asset,
+        )
+        .optional()?
+        .ok_or_else(|| AppError::Database(format!("未找到图片工作台资产: {}", asset_id)))
+    }
+
+    fn get_template(
+        &self,
+        conn: &Connection,
+        template_id: &str,
+    ) -> AppResult<ImageWorkbenchTemplate> {
+        self.get_template_optional(conn, template_id)?
+            .ok_or_else(|| AppError::Database(format!("未找到图片工作台模板: {}", template_id)))
+    }
+
+    fn get_template_optional(
+        &self,
+        conn: &Connection,
+        template_id: &str,
+    ) -> AppResult<Option<ImageWorkbenchTemplate>> {
+        conn.query_row(
+            "SELECT id, name, prompt, negative_prompt, mode, is_system, created_at_ms, updated_at_ms
+             FROM image_workbench_templates
+             WHERE id = ?",
+            params![template_id],
+            map_template,
+        )
+        .optional()
+        .map_err(AppError::from)
+    }
+
+    fn list_tasks(&self, conn: &Connection, job_id: &str) -> AppResult<Vec<ImageWorkbenchTask>> {
+        let mut stmt = conn.prepare(
+            "SELECT id, job_id, queue_index, status, retry_count, max_retries, claim_token, leased_until_ms,
+                    prompt, created_at_ms, updated_at_ms, started_at_ms, finished_at_ms, error
+             FROM image_workbench_tasks
+             WHERE job_id = ?
+             ORDER BY queue_index ASC",
+        )?;
+        let rows = stmt.query_map(params![job_id], map_task)?;
+        collect_rows(rows)
+    }
+
+    fn list_assets(&self, conn: &Connection, job_id: &str) -> AppResult<Vec<ImageWorkbenchAsset>> {
+        let mut stmt = conn.prepare(
+            "SELECT id, job_id, task_id, file_path, thumbnail_path, width, height, mime_type, size_bytes, favorite, created_at_ms
+             FROM image_workbench_assets
+             WHERE job_id = ?
+             ORDER BY created_at_ms ASC",
+        )?;
+        let rows = stmt.query_map(params![job_id], map_asset)?;
+        collect_rows(rows)
+    }
+
+    fn list_metadata(
+        &self,
+        conn: &Connection,
+        job_id: &str,
+    ) -> AppResult<Vec<ImageWorkbenchMetadata>> {
+        let mut stmt = conn.prepare(
+            "SELECT m.id, m.asset_id, m.task_id, m.original_prompt, m.expanded_prompt, m.negative_prompt,
+                    m.seed, m.model, m.mode, m.provider, m.reference_asset_ids_json, m.mask_path,
+                    m.person_context_json, m.created_at_ms
+             FROM image_workbench_metadata m
+             INNER JOIN image_workbench_assets a ON a.id = m.asset_id
+             WHERE a.job_id = ?
+             ORDER BY m.created_at_ms ASC",
+        )?;
+        let rows = stmt.query_map(params![job_id], map_metadata)?;
+        collect_rows(rows)
+    }
+
+    fn list_model_runs(
+        &self,
+        conn: &Connection,
+        job_id: &str,
+    ) -> AppResult<Vec<ImageWorkbenchModelRun>> {
+        let mut stmt = conn.prepare(
+            "SELECT id, job_id, task_id, provider, model, capability, status, latency_ms, request_json,
+                    response_preview, error, created_at_ms, finished_at_ms
+             FROM image_workbench_model_runs
+             WHERE job_id = ?
+             ORDER BY created_at_ms ASC",
+        )?;
+        let rows = stmt.query_map(params![job_id], map_model_run)?;
+        collect_rows(rows)
+    }
+
+    fn insert_model_run(
+        &self,
+        conn: &Connection,
+        job_id: &str,
+        task_id: Option<&str>,
+        model_run: NewImageWorkbenchModelRun,
+        now: i64,
+    ) -> AppResult<()> {
+        conn.execute(
+            "INSERT INTO image_workbench_model_runs
+                (id, job_id, task_id, provider, model, capability, status, latency_ms, request_json, response_preview, error, created_at_ms, finished_at_ms)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            params![
+                next_id("iw-run"),
+                job_id,
+                task_id,
+                model_run.provider,
+                model_run.model,
+                model_run.capability,
+                model_run.status.unwrap_or_else(|| "succeeded".to_string()),
+                model_run.latency_ms.map(|value| value as i64),
+                model_run.request_json,
+                model_run.response_preview,
+                model_run.error,
+                now,
+                Some(now)
+            ],
+        )?;
+        Ok(())
+    }
+
+    fn recalculate_job_status(&self, conn: &Connection, job_id: &str, now: i64) -> AppResult<()> {
+        let tasks = self.list_tasks(conn, job_id)?;
+        if tasks.is_empty() {
+            return Ok(());
+        }
+
+        let has_running = tasks.iter().any(|task| task.status == "running");
+        let has_validating = tasks.iter().any(|task| task.status == "validating");
+        let has_retrying = tasks.iter().any(|task| task.status == "retrying");
+        let has_succeeded = tasks.iter().any(|task| task.status == "succeeded");
+        let all_queued = tasks.iter().all(|task| task.status == "queued");
+        let all_terminal = tasks
+            .iter()
+            .all(|task| is_terminal_status(task.status.as_str()));
+        let all_succeeded = tasks.iter().all(|task| task.status == "succeeded");
+        let all_cancelled = tasks.iter().all(|task| task.status == "cancelled");
+        let all_failed = tasks.iter().all(|task| task.status == "failed");
+
+        let next_status = if all_queued {
+            "queued"
+        } else if has_running || has_retrying {
+            "running"
+        } else if has_validating {
+            "validating"
+        } else if all_succeeded {
+            "succeeded"
+        } else if all_cancelled {
+            "cancelled"
+        } else if all_failed {
+            "failed"
+        } else if all_terminal && has_succeeded {
+            "partial_succeeded"
+        } else {
+            "running"
+        };
+
+        let started_at = if next_status == "running" || next_status == "validating" {
+            Some(now)
+        } else {
+            None
+        };
+        let finished_at = if is_job_terminal_status(next_status) {
+            Some(now)
+        } else {
+            None
+        };
+
+        conn.execute(
+            "UPDATE image_workbench_jobs
+             SET status = ?,
+                 updated_at_ms = ?,
+                 started_at_ms = COALESCE(started_at_ms, ?),
+                 finished_at_ms = CASE WHEN ? IS NULL THEN finished_at_ms ELSE ? END
+             WHERE id = ?",
+            params![
+                next_status,
+                now,
+                started_at,
+                finished_at,
+                finished_at,
+                job_id
+            ],
+        )?;
+
+        Ok(())
+    }
+}
+
+fn now_ms() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+fn next_id(prefix: &str) -> String {
+    let seq = ID_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    format!("{}-{}-{}", prefix, now_ms(), seq)
+}
+
+fn is_terminal_status(status: &str) -> bool {
+    matches!(status, "succeeded" | "failed" | "cancelled")
+}
+
+fn is_job_terminal_status(status: &str) -> bool {
+    matches!(
+        status,
+        "succeeded" | "failed" | "cancelled" | "partial_succeeded"
+    )
+}
+
+fn is_claimable_task(task: &ImageWorkbenchTask, now: i64) -> bool {
+    matches!(task.status.as_str(), "queued" | "retrying")
+        || matches!(task.status.as_str(), "running" | "validating")
+            && task
+                .leased_until_ms
+                .map(|until| until <= now)
+                .unwrap_or(true)
+}
+
+fn validate_task_status_transition(task: &ImageWorkbenchTask, next_status: &str) -> AppResult<()> {
+    if task.status == next_status {
+        return Ok(());
+    }
+
+    let allowed = match task.status.as_str() {
+        "queued" => matches!(next_status, "running" | "failed" | "cancelled"),
+        "running" => matches!(
+            next_status,
+            "validating" | "succeeded" | "failed" | "cancelled" | "retrying"
+        ),
+        "validating" => matches!(next_status, "succeeded" | "failed" | "cancelled"),
+        "retrying" => matches!(next_status, "running" | "failed" | "cancelled"),
+        "failed" => next_status == "retrying" && task.retry_count < task.max_retries,
+        "succeeded" | "cancelled" => false,
+        _ => false,
+    };
+
+    if allowed {
+        Ok(())
+    } else {
+        Err(AppError::Config(format!(
+            "图片工作台任务状态不能从 {} 切换到 {}",
+            task.status, next_status
+        )))
+    }
+}
+
+fn collect_rows<T>(
+    rows: rusqlite::MappedRows<'_, impl FnMut(&rusqlite::Row<'_>) -> rusqlite::Result<T>>,
+) -> AppResult<Vec<T>> {
+    let mut items = Vec::new();
+    for row in rows {
+        items.push(row?);
+    }
+    Ok(items)
+}
+
+fn map_job(row: &rusqlite::Row<'_>) -> rusqlite::Result<ImageWorkbenchJob> {
+    Ok(ImageWorkbenchJob {
+        id: row.get(0)?,
+        mode: row.get(1)?,
+        status: row.get(2)?,
+        prompt: row.get(3)?,
+        negative_prompt: row.get(4)?,
+        quantity: row.get::<_, i64>(5)? as u32,
+        provider_config_id: row.get(6)?,
+        model: row.get(7)?,
+        size: row.get(8)?,
+        reference_asset_ids_json: row.get(9)?,
+        source_asset_id: row.get(10)?,
+        source_image_path: row.get(11)?,
+        mask_path: row.get(12)?,
+        person_context_json: row.get(13)?,
+        upscale_scale: row.get::<_, Option<i64>>(14)?.map(|value| value as u32),
+        fallback_policy: row.get(15)?,
+        created_at_ms: row.get(16)?,
+        updated_at_ms: row.get(17)?,
+        queued_at_ms: row.get(18)?,
+        started_at_ms: row.get(19)?,
+        finished_at_ms: row.get(20)?,
+        error: row.get(21)?,
+    })
+}
+
+fn map_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<ImageWorkbenchTask> {
+    Ok(ImageWorkbenchTask {
+        id: row.get(0)?,
+        job_id: row.get(1)?,
+        queue_index: row.get::<_, i64>(2)? as u32,
+        status: row.get(3)?,
+        retry_count: row.get::<_, i64>(4)? as u32,
+        max_retries: row.get::<_, i64>(5)? as u32,
+        claim_token: row.get(6)?,
+        leased_until_ms: row.get(7)?,
+        prompt: row.get(8)?,
+        created_at_ms: row.get(9)?,
+        updated_at_ms: row.get(10)?,
+        started_at_ms: row.get(11)?,
+        finished_at_ms: row.get(12)?,
+        error: row.get(13)?,
+    })
+}
+
+fn map_asset(row: &rusqlite::Row<'_>) -> rusqlite::Result<ImageWorkbenchAsset> {
+    Ok(ImageWorkbenchAsset {
+        id: row.get(0)?,
+        job_id: row.get(1)?,
+        task_id: row.get(2)?,
+        file_path: row.get(3)?,
+        thumbnail_path: row.get(4)?,
+        width: row.get::<_, Option<i64>>(5)?.map(|value| value as u32),
+        height: row.get::<_, Option<i64>>(6)?.map(|value| value as u32),
+        mime_type: row.get(7)?,
+        size_bytes: row.get::<_, Option<i64>>(8)?.map(|value| value as u64),
+        favorite: row.get::<_, i64>(9)? == 1,
+        created_at_ms: row.get(10)?,
+    })
+}
+
+fn map_metadata(row: &rusqlite::Row<'_>) -> rusqlite::Result<ImageWorkbenchMetadata> {
+    Ok(ImageWorkbenchMetadata {
+        id: row.get(0)?,
+        asset_id: row.get(1)?,
+        task_id: row.get(2)?,
+        original_prompt: row.get(3)?,
+        expanded_prompt: row.get(4)?,
+        negative_prompt: row.get(5)?,
+        seed: row.get(6)?,
+        model: row.get(7)?,
+        mode: row.get(8)?,
+        provider: row.get(9)?,
+        reference_asset_ids_json: row.get(10)?,
+        mask_path: row.get(11)?,
+        person_context_json: row.get(12)?,
+        created_at_ms: row.get(13)?,
+    })
+}
+
+fn map_model_run(row: &rusqlite::Row<'_>) -> rusqlite::Result<ImageWorkbenchModelRun> {
+    Ok(ImageWorkbenchModelRun {
+        id: row.get(0)?,
+        job_id: row.get(1)?,
+        task_id: row.get(2)?,
+        provider: row.get(3)?,
+        model: row.get(4)?,
+        capability: row.get(5)?,
+        status: row.get(6)?,
+        latency_ms: row.get::<_, Option<i64>>(7)?.map(|value| value as u64),
+        request_json: row.get(8)?,
+        response_preview: row.get(9)?,
+        error: row.get(10)?,
+        created_at_ms: row.get(11)?,
+        finished_at_ms: row.get(12)?,
+    })
+}
+
+fn map_template(row: &rusqlite::Row<'_>) -> rusqlite::Result<ImageWorkbenchTemplate> {
+    Ok(ImageWorkbenchTemplate {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        prompt: row.get(2)?,
+        negative_prompt: row.get(3)?,
+        mode: row.get(4)?,
+        is_system: row.get::<_, i64>(5)? == 1,
+        created_at_ms: row.get(6)?,
+        updated_at_ms: row.get(7)?,
+    })
+}
+
+#[cfg(test)]
+#[path = "image_workbench_repo_tests.rs"]
+mod tests;

@@ -7,6 +7,7 @@ import navigation from "./zh-CN/navigation";
 import fileManager from "./zh-CN/fileManager";
 import settings from "./zh-CN/settings";
 import aiPage from "./zh-CN/aiPage";
+import imageWorkbench from "./zh-CN/imageWorkbench";
 import sidebar from "./zh-CN/sidebar";
 import header from "./zh-CN/header";
 import error from "./zh-CN/error";
@@ -21,6 +22,7 @@ export default {
   fileManager,
   settings,
   aiPage,
+  imageWorkbench,
   sidebar,
   header,
   error,

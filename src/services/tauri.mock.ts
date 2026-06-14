@@ -1,5 +1,6 @@
 import { ensureBrowserMessage } from "./runtime";
 import { clearAiProviderMockTasks, handleAiProviderMock } from "./mocks/ai-provider.mock";
+import { handleImageWorkbenchMock } from "./mocks/image-workbench.mock";
 import { request } from "./request";
 import {
   filterByOptionalValues,
@@ -160,6 +161,11 @@ export async function mockCallTauri<T = unknown>(
 ): Promise<T> {
   if (import.meta.env.DEV) {
     console.debug(`[MOCK_IPC] ${command}`, redactSensitiveObjectDeep(args));
+  }
+
+  const imageWorkbenchResult = handleImageWorkbenchMock(command, args);
+  if (imageWorkbenchResult.handled) {
+    return imageWorkbenchResult.value as T;
   }
 
   const aiProviderResult = handleAiProviderMock(command, args);

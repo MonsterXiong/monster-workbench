@@ -8,20 +8,21 @@ import {
   Wrench,
   Compass,
   Bot,
+  Images,
   FolderOpen,
   FlaskConical,
   BookOpen
 } from "lucide-vue-next";
 
 defineProps<{
-  activeTab: "workspace" | "system" | "tools" | "navigation" | "ai" | "settings" | "file-manager" | "playground" | "utils-docs";
+  activeTab: "workspace" | "system" | "tools" | "navigation" | "ai" | "image-workbench" | "settings" | "file-manager" | "playground" | "utils-docs";
   collapsed: boolean;
   version: string;
   hasUpdate?: boolean;
 }>();
 
 const emit = defineEmits<{
-  (e: "changeTab", tab: "workspace" | "system" | "tools" | "navigation" | "ai" | "settings" | "file-manager" | "playground" | "utils-docs"): void;
+  (e: "changeTab", tab: "workspace" | "system" | "tools" | "navigation" | "ai" | "image-workbench" | "settings" | "file-manager" | "playground" | "utils-docs"): void;
   (e: "toggleCollapse"): void;
   (e: "checkUpdateManual"): void;
 }>();
@@ -55,6 +56,11 @@ const items = [
     key: "ai",
     titleKey: "sidebar.ai",
     icon: Bot,
+  },
+  {
+    key: "image-workbench",
+    titleKey: "sidebar.imageWorkbench",
+    icon: Images,
   },
 ] as const;
 </script>

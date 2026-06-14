@@ -42,6 +42,7 @@ impl DatabaseService {
         self.init_test_logs_db()?;
         let db_path = self.path_provider.get_db_file_path()?;
         crate::infra::ai_generation_schema::init_ai_generation_schema(&db_path)?;
+        crate::infra::image_workbench_schema::init_image_workbench_schema(&db_path)?;
         Ok(())
     }
 }

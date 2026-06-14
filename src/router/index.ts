@@ -31,6 +31,11 @@ export const router = createRouter({
       component: () => import("../views/ai/AiPage.vue"),
     },
     {
+      path: "/image-workbench",
+      name: "image-workbench",
+      component: () => import("../views/image-workbench/ImageWorkbenchPage.vue"),
+    },
+    {
       path: "/settings",
       name: "settings",
       component: () => import("../views/settings/SettingsPage.vue"),

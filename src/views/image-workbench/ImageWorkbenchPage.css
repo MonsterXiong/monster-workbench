@@ -1,0 +1,393 @@
+.image-workbench-page {
+  @apply flex h-full min-h-0 w-full flex-col gap-3 overflow-hidden bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100;
+}
+
+.image-workbench-topbar {
+  @apply flex shrink-0 items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3 dark:border-slate-800 dark:bg-slate-950;
+}
+
+.image-workbench-title,
+.image-workbench-toolbar,
+.image-workbench-chip,
+.image-workbench-action,
+.image-workbench-icon-button,
+.image-workbench-section__head,
+.image-workbench-taskbar,
+.image-workbench-taskbar button,
+.image-workbench-inspector-actions {
+  @apply flex items-center;
+}
+
+.image-workbench-title {
+  @apply min-w-0 gap-3;
+}
+
+.image-workbench-title__mark {
+  @apply flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary text-white;
+}
+
+.image-workbench-title strong {
+  @apply block truncate text-sm font-black;
+}
+
+.image-workbench-title small {
+  @apply block truncate text-xs font-semibold text-slate-500 dark:text-slate-400;
+}
+
+.image-workbench-toolbar {
+  @apply shrink-0 gap-2;
+}
+
+.image-workbench-chip,
+.image-workbench-action,
+.image-workbench-icon-button,
+.image-workbench-secondary,
+.image-workbench-tabs button,
+.image-workbench-taskbar button,
+.image-workbench-inspector-actions button,
+.image-workbench-template-save button {
+  @apply inline-flex h-8 items-center justify-center gap-1.5 rounded-md border border-slate-200 bg-slate-50 px-3 text-xs font-bold text-slate-600 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800;
+}
+
+.image-workbench-chip--primary,
+.image-workbench-action:not(:disabled) {
+  @apply border-primary bg-primary text-white hover:bg-primary/90;
+}
+
+.image-workbench-action--danger:not(:disabled),
+.image-workbench-secondary--danger:not(:disabled) {
+  @apply border-red-500 bg-red-500 text-white hover:bg-red-600;
+}
+
+.image-workbench-icon-button {
+  @apply w-8 px-0;
+}
+
+.image-workbench-error {
+  @apply mx-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs font-bold text-red-700 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-300;
+}
+
+.image-workbench-notice-banner {
+  @apply mx-4 rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-xs font-bold text-sky-700 dark:border-sky-900/60 dark:bg-sky-950/40 dark:text-sky-300;
+}
+
+.image-workbench-layout {
+  @apply grid min-h-0 flex-1 grid-cols-[320px_minmax(0,1fr)_340px] gap-3 overflow-hidden px-3;
+}
+
+.image-workbench-panel,
+.image-workbench-section {
+  @apply min-h-0 overflow-hidden border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950;
+}
+
+.image-workbench-panel--left {
+  @apply flex flex-col gap-3 border-0 bg-transparent dark:bg-transparent;
+}
+
+.image-workbench-section {
+  @apply flex min-h-0 flex-col;
+}
+
+.image-workbench-section--templates {
+  @apply max-h-[260px];
+}
+
+.image-workbench-section--history {
+  @apply flex-1;
+}
+
+.image-workbench-section__head {
+  @apply h-10 shrink-0 justify-between gap-2 border-b border-slate-100 px-3 text-xs font-black text-slate-700 dark:border-slate-800 dark:text-slate-200;
+}
+
+.image-workbench-section__head > span {
+  @apply mr-auto;
+}
+
+.image-workbench-form,
+.image-workbench-template-list,
+.image-workbench-history-list,
+.image-workbench-inspector {
+  @apply min-h-0 flex-1 overflow-y-auto p-3;
+}
+
+.image-workbench-form {
+  @apply space-y-3;
+}
+
+.image-workbench-form label {
+  @apply block space-y-1.5;
+}
+
+.image-workbench-form label > span {
+  @apply block text-[11px] font-bold text-slate-500 dark:text-slate-400;
+}
+
+.image-workbench-model-hint {
+  @apply block truncate text-[11px] font-semibold text-slate-400 dark:text-slate-500;
+}
+
+.image-workbench-form input,
+.image-workbench-form select,
+.image-workbench-form textarea,
+.image-workbench-template-save input {
+  @apply w-full rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-600 outline-none focus:border-primary dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300;
+}
+
+.image-workbench-form textarea {
+  @apply h-28 resize-none leading-5;
+}
+
+.image-workbench-form__grid {
+  @apply grid grid-cols-2 gap-2;
+}
+
+.image-workbench-reference {
+  @apply space-y-2 rounded-md border border-slate-200 bg-slate-50 p-2 dark:border-slate-800 dark:bg-slate-900;
+}
+
+.image-workbench-reference__head {
+  @apply flex items-center justify-between gap-2;
+}
+
+.image-workbench-reference__head span,
+.image-workbench-reverse-prompt span {
+  @apply text-[11px] font-black text-slate-500 dark:text-slate-400;
+}
+
+.image-workbench-reference__head button,
+.image-workbench-reference-card button,
+.image-workbench-reverse-prompt button {
+  @apply inline-flex h-7 shrink-0 items-center justify-center gap-1 rounded-md border border-slate-200 bg-white px-2 text-[11px] font-bold text-slate-600 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:bg-slate-800;
+}
+
+.image-workbench-reference-card {
+  @apply grid grid-cols-[54px_minmax(0,1fr)_auto] items-center gap-2 rounded-md bg-white p-2 dark:bg-slate-950;
+}
+
+.image-workbench-reference-card img {
+  @apply h-12 w-12 rounded object-cover;
+}
+
+.image-workbench-reference-card strong {
+  @apply block text-xs font-black text-slate-700 dark:text-slate-200;
+}
+
+.image-workbench-reference-card small,
+.image-workbench-reverse-prompt small {
+  @apply block break-all text-[11px] font-semibold leading-4 text-slate-500 dark:text-slate-400;
+}
+
+.image-workbench-reverse-prompt {
+  @apply space-y-2 rounded-md bg-white p-2 dark:bg-slate-950;
+}
+
+.image-workbench-reverse-prompt p {
+  @apply text-xs font-semibold leading-5 text-slate-700 dark:text-slate-200;
+}
+
+.image-workbench-reverse-prompt div {
+  @apply flex flex-wrap gap-2;
+}
+
+.image-workbench-notice {
+  @apply rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-300;
+}
+
+.image-workbench-template-save {
+  @apply flex shrink-0 gap-2 border-b border-slate-100 p-3 dark:border-slate-800;
+}
+
+.image-workbench-template-save input {
+  @apply min-w-0 flex-1;
+}
+
+.image-workbench-template-item,
+.image-workbench-history-item {
+  @apply flex w-full items-center justify-between gap-2 rounded-md px-2 py-2 text-left text-xs hover:bg-slate-50 dark:hover:bg-slate-900;
+}
+
+.image-workbench-template-item strong,
+.image-workbench-history-item strong {
+  @apply line-clamp-1 font-black text-slate-700 dark:text-slate-200;
+}
+
+.image-workbench-template-item small,
+.image-workbench-history-item span {
+  @apply mt-1 block truncate text-[11px] font-semibold text-slate-500 dark:text-slate-400;
+}
+
+.image-workbench-history-item.is-active {
+  @apply bg-primary/10 text-primary;
+}
+
+.image-workbench-main {
+  @apply grid min-h-0 grid-rows-[150px_minmax(0,1fr)] gap-3 overflow-hidden;
+}
+
+.image-workbench-panel--tasks,
+.image-workbench-panel--gallery,
+.image-workbench-panel--details {
+  @apply flex flex-col;
+}
+
+.image-workbench-progress {
+  @apply h-1 shrink-0 bg-slate-100 dark:bg-slate-900;
+}
+
+.image-workbench-progress span {
+  @apply block h-full bg-primary transition-all;
+}
+
+.image-workbench-task-list {
+  @apply grid min-h-0 flex-1 grid-cols-2 gap-2 overflow-y-auto p-3;
+}
+
+.image-workbench-task-item {
+  @apply flex min-w-0 items-center gap-2 rounded-md border border-slate-100 bg-slate-50 px-2 py-2 text-xs dark:border-slate-800 dark:bg-slate-900;
+}
+
+.image-workbench-task-item span {
+  @apply shrink-0 font-black text-primary;
+}
+
+.image-workbench-task-item strong {
+  @apply shrink-0 font-black;
+}
+
+.image-workbench-task-item small {
+  @apply truncate text-slate-500 dark:text-slate-400;
+}
+
+.image-workbench-gallery-head {
+  @apply flex shrink-0 items-center justify-between border-b border-slate-100 dark:border-slate-800;
+}
+
+.image-workbench-gallery-head .image-workbench-section__head {
+  @apply border-b-0;
+}
+
+.image-workbench-tabs {
+  @apply flex shrink-0 gap-2 px-3;
+}
+
+.image-workbench-tabs button.is-active {
+  @apply border-primary bg-primary text-white;
+}
+
+.image-workbench-grid {
+  @apply grid min-h-0 flex-1 grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-3 overflow-y-auto p-3;
+}
+
+.image-workbench-asset-card {
+  @apply relative aspect-square overflow-hidden rounded-md border border-slate-200 bg-slate-100 text-left dark:border-slate-800 dark:bg-slate-900;
+}
+
+.image-workbench-asset-card.is-active {
+  @apply ring-2 ring-primary;
+}
+
+.image-workbench-asset-card img {
+  @apply h-full w-full object-cover;
+}
+
+.image-workbench-asset-card span {
+  @apply absolute bottom-2 left-2 right-2 flex items-center gap-1 rounded bg-black/60 px-2 py-1 text-[11px] font-bold text-white;
+}
+
+.image-workbench-empty,
+.image-workbench-mini-empty {
+  @apply flex min-h-0 flex-1 flex-col items-center justify-center gap-2 p-6 text-center text-slate-400 dark:text-slate-500;
+}
+
+.image-workbench-empty--compact {
+  @apply min-h-[260px];
+}
+
+.image-workbench-empty strong {
+  @apply text-sm font-black text-slate-600 dark:text-slate-300;
+}
+
+.image-workbench-empty span,
+.image-workbench-mini-empty {
+  @apply text-xs font-medium leading-5;
+}
+
+.image-workbench-preview {
+  @apply aspect-square overflow-hidden rounded-md border border-slate-200 bg-slate-100 dark:border-slate-800 dark:bg-slate-900;
+}
+
+.image-workbench-preview img {
+  @apply h-full w-full object-contain;
+}
+
+.image-workbench-inspector {
+  @apply space-y-3;
+}
+
+.image-workbench-inspector-actions {
+  @apply flex-wrap gap-2;
+}
+
+.image-workbench-details {
+  @apply space-y-2;
+}
+
+.image-workbench-details div {
+  @apply rounded-md bg-slate-50 p-2 dark:bg-slate-900;
+}
+
+.image-workbench-details dt,
+.image-workbench-audit span {
+  @apply text-[11px] font-bold text-slate-500 dark:text-slate-400;
+}
+
+.image-workbench-details dd {
+  @apply mt-1 break-words text-xs font-bold text-slate-700 dark:text-slate-200;
+}
+
+.image-workbench-audit {
+  @apply space-y-2;
+}
+
+.image-workbench-audit pre {
+  @apply max-h-36 overflow-auto whitespace-pre-wrap rounded-md bg-slate-950 p-3 text-[11px] leading-5 text-slate-100;
+}
+
+.image-workbench-taskbar {
+  @apply h-11 shrink-0 gap-2 overflow-hidden border-t border-slate-200 bg-white px-4 text-xs dark:border-slate-800 dark:bg-slate-950;
+}
+
+.image-workbench-taskbar span {
+  @apply shrink-0 rounded-md bg-slate-100 px-2 py-1 font-bold text-slate-500 dark:bg-slate-900 dark:text-slate-400;
+}
+
+.image-workbench-taskbar button {
+  @apply ml-auto h-8 shrink-0;
+}
+
+@media (max-width: 1280px) {
+  .image-workbench-layout {
+    @apply grid-cols-[280px_minmax(360px,1fr)_300px];
+  }
+}
+
+@media (max-width: 960px) {
+  .image-workbench-page {
+    @apply overflow-y-auto;
+  }
+
+  .image-workbench-layout {
+    @apply grid-cols-1 overflow-visible;
+  }
+
+  .image-workbench-main {
+    @apply grid-rows-none;
+  }
+
+  .image-workbench-topbar,
+  .image-workbench-toolbar,
+  .image-workbench-taskbar {
+    @apply flex-wrap;
+  }
+}
