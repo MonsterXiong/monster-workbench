@@ -1,0 +1,275 @@
+.workspace-page {
+  @apply relative flex h-full flex-col gap-5 overflow-y-auto pb-5;
+}
+
+.workspace-hero {
+  @apply grid gap-5 overflow-hidden border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900;
+  grid-template-columns: minmax(0, 1.4fr) minmax(320px, 0.9fr);
+}
+
+.workspace-badge,
+.workspace-block__eyebrow,
+.workspace-hero__eyebrow {
+  @apply inline-flex w-fit items-center rounded-full bg-primary/10 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-primary;
+}
+
+.workspace-hero__copy {
+  @apply flex min-w-0 flex-col gap-3;
+}
+
+.workspace-hero__copy h1 {
+  @apply text-[28px] font-black tracking-tight text-slate-900 dark:text-slate-100;
+}
+
+.workspace-hero__copy p {
+  @apply max-w-2xl text-sm font-medium leading-6 text-slate-500 dark:text-slate-400;
+}
+
+.workspace-hero__actions {
+  @apply flex flex-wrap gap-2 pt-2;
+}
+
+.workspace-hero__summary {
+  @apply flex min-h-full flex-col gap-4 rounded-[24px] border border-slate-200 bg-slate-50/80 p-4 dark:border-slate-800 dark:bg-slate-950/70;
+}
+
+.workspace-hero__panel {
+  @apply rounded-[20px] border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900;
+}
+
+.workspace-hero__panel strong {
+  @apply mt-2 block text-lg font-black text-slate-900 dark:text-slate-100;
+}
+
+.workspace-hero__panel p {
+  @apply mt-2 text-xs font-semibold leading-5 text-slate-500 dark:text-slate-400;
+}
+
+.workspace-hero__pill-group {
+  @apply flex flex-wrap gap-2;
+}
+
+.workspace-pill {
+  @apply inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-2 text-[11px] font-bold text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300;
+}
+
+.workspace-stats {
+  @apply grid gap-4;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.workspace-stat-card {
+  @apply flex items-start gap-3 border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900;
+}
+
+.workspace-stat-card__icon,
+.workspace-action__icon,
+.workspace-list__icon {
+  @apply flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200;
+}
+
+.workspace-stat-card strong {
+  @apply block text-2xl font-black text-slate-900 dark:text-slate-100;
+}
+
+.workspace-stat-card span {
+  @apply mt-1 block text-xs font-black text-slate-700 dark:text-slate-300;
+}
+
+.workspace-stat-card small {
+  @apply mt-1 block text-[11px] font-semibold text-slate-500 dark:text-slate-400;
+}
+
+.workspace-grid {
+  @apply grid gap-5;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+}
+
+.workspace-grid--lower {
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 0.92fr);
+}
+
+.workspace-block {
+  @apply border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900;
+}
+
+.workspace-block__head {
+  @apply flex items-start justify-between gap-3 border-b border-slate-100 pb-4 dark:border-slate-800;
+}
+
+.workspace-block__head h2 {
+  @apply mt-1 text-base font-black text-slate-900 dark:text-slate-100;
+}
+
+.workspace-readiness {
+  @apply mt-4 grid gap-3;
+}
+
+.workspace-readiness__item {
+  @apply flex items-start gap-3 rounded-2xl border px-3 py-3;
+}
+
+.workspace-readiness__item strong {
+  @apply block text-xs font-black text-slate-800 dark:text-slate-200;
+}
+
+.workspace-readiness__item p {
+  @apply mt-1 text-[11px] font-semibold leading-5 text-slate-500 dark:text-slate-400;
+}
+
+.workspace-readiness__dot {
+  @apply mt-1 h-2.5 w-2.5 shrink-0 rounded-full;
+}
+
+.workspace-readiness__item.is-good {
+  @apply border-emerald-200 bg-emerald-50/70 dark:border-emerald-900/40 dark:bg-emerald-950/20;
+}
+
+.workspace-readiness__item.is-good .workspace-readiness__dot {
+  @apply bg-emerald-500;
+}
+
+.workspace-readiness__item.is-warn {
+  @apply border-amber-200 bg-amber-50/80 dark:border-amber-900/40 dark:bg-amber-950/20;
+}
+
+.workspace-readiness__item.is-warn .workspace-readiness__dot {
+  @apply bg-amber-500;
+}
+
+.workspace-readiness__item.is-neutral {
+  @apply border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-950/60;
+}
+
+.workspace-readiness__item.is-neutral .workspace-readiness__dot {
+  @apply bg-slate-400;
+}
+
+.workspace-actions,
+.workspace-list {
+  @apply mt-4 grid gap-3;
+}
+
+.workspace-action,
+.workspace-list__item,
+.workspace-shortcuts__item {
+  @apply flex w-full items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-left transition-all hover:border-primary/30 hover:bg-white dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-900;
+}
+
+.workspace-action__body,
+.workspace-list__body {
+  @apply min-w-0 flex-1;
+}
+
+.workspace-action__body strong,
+.workspace-list__body strong {
+  @apply block truncate text-sm font-black text-slate-800 dark:text-slate-100;
+}
+
+.workspace-action__body p,
+.workspace-list__body p {
+  @apply mt-1 line-clamp-2 text-[11px] font-semibold leading-5 text-slate-500 dark:text-slate-400;
+}
+
+.workspace-list__body small {
+  @apply mt-1 block text-[10px] font-bold text-slate-400 dark:text-slate-500;
+}
+
+.workspace-action__arrow {
+  @apply shrink-0 text-slate-400 transition-transform;
+}
+
+.workspace-action:hover .workspace-action__arrow {
+  @apply translate-x-0.5 text-primary;
+}
+
+.workspace-assets {
+  @apply mt-4 grid gap-3;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.workspace-assets__item {
+  @apply overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 text-left transition hover:border-primary/30 dark:border-slate-800 dark:bg-slate-950;
+}
+
+.workspace-assets__item img {
+  @apply aspect-[4/3] h-auto w-full object-cover;
+}
+
+.workspace-assets__item span {
+  @apply block truncate px-3 py-2 text-[11px] font-bold text-slate-600 dark:text-slate-300;
+}
+
+.workspace-system {
+  @apply mt-4 grid gap-3;
+}
+
+.workspace-system__item {
+  @apply flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 dark:border-slate-800 dark:bg-slate-950;
+}
+
+.workspace-system__item span {
+  @apply shrink-0 text-[11px] font-black uppercase tracking-[0.12em] text-slate-400 dark:text-slate-500;
+}
+
+.workspace-system__item strong {
+  @apply min-w-0 truncate text-right text-xs font-bold text-slate-700 dark:text-slate-200;
+}
+
+.workspace-shortcuts {
+  @apply mt-4 grid grid-cols-2 gap-3;
+}
+
+.workspace-shortcuts__item {
+  @apply justify-center rounded-2xl bg-white py-4 text-xs font-black text-slate-700 dark:bg-slate-950 dark:text-slate-200;
+}
+
+.workspace-empty {
+  @apply mt-4 flex min-h-[220px] flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-slate-200 bg-slate-50/80 p-6 text-center dark:border-slate-800 dark:bg-slate-950/60;
+}
+
+.workspace-empty strong {
+  @apply text-sm font-black text-slate-700 dark:text-slate-200;
+}
+
+.workspace-empty p {
+  @apply max-w-sm text-xs font-semibold leading-5 text-slate-500 dark:text-slate-400;
+}
+
+.workspace-loading {
+  @apply sticky bottom-4 ml-auto inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.03);
+}
+
+@media (max-width: 1240px) {
+  .workspace-hero,
+  .workspace-grid,
+  .workspace-grid--lower {
+    grid-template-columns: 1fr;
+  }
+
+  .workspace-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .workspace-page {
+    @apply gap-4;
+  }
+
+  .workspace-hero,
+  .workspace-block {
+    @apply rounded-2xl p-4;
+  }
+
+  .workspace-hero__copy h1 {
+    @apply text-2xl;
+  }
+
+  .workspace-stats,
+  .workspace-assets,
+  .workspace-shortcuts {
+    grid-template-columns: 1fr;
+  }
+}
