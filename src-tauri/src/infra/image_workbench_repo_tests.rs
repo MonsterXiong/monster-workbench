@@ -152,7 +152,7 @@ fn image_workbench_task_running_claim_is_single_owner() {
     let task_ids = vec![task_id.clone()];
 
     let claimed = repo
-        .claim_next_runnable_task(&snapshot.job.id, Some(&task_ids), 60_000)
+        .claim_next_runnable_task_for_worker(&snapshot.job.id, Some(&task_ids), 60_000, None)
         .expect("first claim should not error");
     assert!(claimed.is_some());
     let claimed_snapshot = claimed.unwrap().snapshot;
@@ -161,7 +161,7 @@ fn image_workbench_task_running_claim_is_single_owner() {
     assert!(claimed_snapshot.tasks[0].leased_until_ms.is_some());
 
     let duplicate = repo
-        .claim_next_runnable_task(&snapshot.job.id, Some(&task_ids), 60_000)
+        .claim_next_runnable_task_for_worker(&snapshot.job.id, Some(&task_ids), 60_000, None)
         .expect("second claim should not error");
     assert!(duplicate.is_none());
 }
@@ -502,7 +502,7 @@ fn image_workbench_recovers_interrupted_jobs() {
         .all(|task| task.leased_until_ms.is_none()));
 
     let claimed = repo
-        .claim_next_runnable_task(&job_id, None, 60_000)
+        .claim_next_runnable_task_for_worker(&job_id, None, 60_000, None)
         .expect("recovered task should be claimable")
         .expect("recovered task should claim");
     assert_eq!(claimed.snapshot.job.status, "running");

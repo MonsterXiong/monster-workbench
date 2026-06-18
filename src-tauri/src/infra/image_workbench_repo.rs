@@ -337,11 +337,15 @@ impl ImageWorkbenchRepo {
         self.get_snapshot(&task.job_id)
     }
 
-    pub fn claim_next_runnable_task(
+    /// claim 时可选写入 worker_id：A2 阶段 service 透传当前进程 worker_id，
+    /// janitor 据此区分跨进程残留 vs 本进程当前任务。worker_id=None 时保持
+    /// 旧行为，列写为 NULL，janitor (1) 仍会按"非当前 worker"回收。
+    pub fn claim_next_runnable_task_for_worker(
         &self,
         job_id: &str,
         task_ids: Option<&[String]>,
         lease_ms: i64,
+        worker_id: Option<&str>,
     ) -> AppResult<Option<ImageWorkbenchTaskClaim>> {
         let conn = self.connect()?;
         let now = now_ms();
@@ -362,8 +366,11 @@ impl ImageWorkbenchRepo {
             "UPDATE image_workbench_tasks
              SET status = 'running',
                  error = NULL,
+                 worker_id = ?,
                  claim_token = ?,
+                 claimed_at_ms = ?,
                  leased_until_ms = ?,
+                 last_heartbeat_ms = ?,
                  started_at_ms = COALESCE(started_at_ms, ?),
                  finished_at_ms = NULL,
                  updated_at_ms = ?
@@ -376,7 +383,18 @@ impl ImageWorkbenchRepo {
                         AND (leased_until_ms IS NULL OR leased_until_ms <= ?)
                     )
                )",
-            params![claim_token, leased_until_ms, now, now, task.id, job_id, now],
+            params![
+                worker_id,
+                claim_token,
+                now,
+                leased_until_ms,
+                now,
+                now,
+                now,
+                task.id,
+                job_id,
+                now
+            ],
         )?;
         if affected == 0 {
             return Ok(None);

@@ -347,6 +347,7 @@ impl ImageWorkbenchService {
         &self,
         app_handle: AppHandle,
         job_id: &str,
+        worker_id: String,
     ) -> AppResult<ImageWorkbenchSnapshot> {
         let job_id = normalize_required_id("图片工作台作业 ID", job_id)?;
         let snapshot = self.get_snapshot(&job_id)?;
@@ -354,9 +355,12 @@ impl ImageWorkbenchService {
         tauri::async_runtime::spawn_blocking(move || {
             let service = ImageWorkbenchService::new(path_provider);
             let ai_service = AiProviderService::new(app_handle);
-            let _ = service.run_image_tasks_with_generator(&job_id, None, |request| {
-                ai_service.run_business_generation_blocking(request)
-            });
+            let _ = service.run_image_tasks_with_generator(
+                &job_id,
+                None,
+                Some(worker_id.as_str()),
+                |request| ai_service.run_business_generation_blocking(request),
+            );
         });
         Ok(snapshot)
     }
@@ -758,18 +762,22 @@ impl ImageWorkbenchService {
         &self,
         job_id: &str,
         task_ids: Option<&[String]>,
+        worker_id: Option<&str>,
         mut generate: F,
     ) -> AppResult<ImageWorkbenchSnapshot>
     where
         F: FnMut(AiBusinessGenerationRequest) -> Result<AiGenerationResult, String>,
     {
-        self.run_image_tasks_with_generator(job_id, task_ids, |request| generate(request))
+        self.run_image_tasks_with_generator(job_id, task_ids, worker_id, |request| {
+            generate(request)
+        })
     }
 
     fn run_image_tasks_with_generator<F>(
         &self,
         job_id: &str,
         task_ids: Option<&[String]>,
+        worker_id: Option<&str>,
         mut generate: F,
     ) -> AppResult<ImageWorkbenchSnapshot>
     where
@@ -779,10 +787,11 @@ impl ImageWorkbenchService {
         validate_workbench_mode(&latest.job.mode, false)?;
 
         loop {
-            let Some(claim) = self.repo()?.claim_next_runnable_task(
+            let Some(claim) = self.repo()?.claim_next_runnable_task_for_worker(
                 job_id,
                 task_ids,
                 IMAGE_WORKBENCH_TASK_LEASE_MS,
+                worker_id,
             )?
             else {
                 break;

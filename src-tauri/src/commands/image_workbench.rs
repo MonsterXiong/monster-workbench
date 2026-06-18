@@ -11,11 +11,13 @@ use crate::services::image_workbench_service::{
     RecordImageWorkbenchAssetRequest, SaveImageWorkbenchTemplateRequest,
     SetImageWorkbenchAssetFavoriteRequest, UpdateImageWorkbenchTaskStatusRequest,
 };
+use crate::services::runtime_janitor::WorkerIdentity;
 use std::sync::Mutex;
 use tauri::{AppHandle, State};
 
 type ImageWorkbenchState<'a> = State<'a, Mutex<ImageWorkbenchService>>;
 type AiProviderState<'a> = State<'a, Mutex<AiProviderService>>;
+type WorkerIdentityState<'a> = State<'a, WorkerIdentity>;
 
 #[tauri::command]
 pub fn get_image_workbench_contract(
@@ -90,10 +92,12 @@ pub fn start_image_workbench_job_runner(
     job_id: String,
     app_handle: AppHandle,
     state: ImageWorkbenchState<'_>,
+    worker_identity: WorkerIdentityState<'_>,
 ) -> Result<ImageWorkbenchSnapshot, String> {
     let service = state.lock().unwrap_or_else(|e| e.into_inner());
+    let worker_id = worker_identity.worker_id.clone();
     service
-        .start_job_runner(app_handle, &job_id)
+        .start_job_runner(app_handle, &job_id, worker_id)
         .map_err(|e| e.to_json_string())
 }
 

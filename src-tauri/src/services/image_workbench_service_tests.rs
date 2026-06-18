@@ -435,7 +435,7 @@ fn image_workbench_service_worker_records_txt2img_result() {
     fs::write(&generated_path, b"png").expect("generated image should write");
 
     let finished = service
-        .run_txt2img_tasks_with_generator(&snapshot.job.id, None, |request| {
+        .run_txt2img_tasks_with_generator(&snapshot.job.id, None, None, |request| {
             assert_eq!(
                 request.provider_config_id.as_deref(),
                 Some("model-config-1")

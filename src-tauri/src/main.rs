@@ -19,6 +19,7 @@ use services::file_service::FileService;
 use services::image_workbench_service::ImageWorkbenchService;
 use services::log_service::LogService;
 use services::navigation_service::NavigationService;
+use services::runtime_janitor::{spawn_runtime_janitor, WorkerIdentity};
 use services::system_service::SystemService;
 use services::task_service::TaskService;
 
@@ -67,6 +68,13 @@ fn main() {
             // 初始化运行时数据库表，具体 DB/Repo 细节保持在 Service 层内。
             database_service.init_runtime_schema()?;
 
+            // worker_id 在进程启动时生成，全程不变；重启即换。janitor 据此区分跨进程残留。
+            let worker_identity = WorkerIdentity::new();
+
+            // 启动 runtime janitor：立即跑一次替代旧的 startup 硬重置（worker_id 是新的，
+            // 上次进程的 running 全部会被识别为"跨进程残留"回收），随后每 30s 巡检一次。
+            spawn_runtime_janitor(handle.clone(), worker_identity.worker_id.clone());
+
             // 通用 AI 业务生成任务使用持久 job 恢复，避免 Chat/Image 刷新或重启后 requestId 丢失。
             let _ = ai_provider_service.resume_persisted_business_generations();
 
@@ -80,7 +88,11 @@ fn main() {
                     for job in jobs.iter().filter(|job| {
                         matches!(job.status.as_str(), "queued" | "running" | "validating")
                     }) {
-                        let _ = image_workbench_service.start_job_runner(handle.clone(), &job.id);
+                        let _ = image_workbench_service.start_job_runner(
+                            handle.clone(),
+                            &job.id,
+                            worker_identity.worker_id.clone(),
+                        );
                     }
                 }
             }
@@ -97,6 +109,7 @@ fn main() {
             app.manage(std::sync::Mutex::new(navigation_service));
             app.manage(std::sync::Mutex::new(ai_provider_service));
             app.manage(std::sync::Mutex::new(image_workbench_service));
+            app.manage(worker_identity);
 
             // 3. 创建托盘菜单
             let quit_i = MenuItem::with_id(app.handle(), "quit", "退出应用", true, None::<&str>)?;

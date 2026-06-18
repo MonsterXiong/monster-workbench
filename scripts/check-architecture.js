@@ -149,7 +149,7 @@ const oversizedFileBaselines = new Map(
   Object.entries({
     "src-tauri/src/services/image_workbench_service.rs": 1620,
     "src-tauri/src/services/ai_service.rs": 1318,
-    "src-tauri/src/infra/image_workbench_repo.rs": 967,
+    "src-tauri/src/infra/image_workbench_repo.rs": 980,
     "src/services/mocks/image-workbench.mock.ts": 849,
     "src/views/image-workbench/ImageWorkbenchPage.vue": 944,
     "src/views/ai/components/image/AiImageMessageList.vue": 792,
