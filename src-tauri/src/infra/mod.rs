@@ -8,7 +8,9 @@ pub mod fs;
 #[allow(dead_code)]
 pub mod http;
 pub mod image_workbench_repo;
+pub mod image_workbench_row_mapper;
 pub mod image_workbench_schema;
+pub mod image_workbench_task_transition;
 pub mod image_workbench_types;
 pub mod logger;
 pub mod path;
