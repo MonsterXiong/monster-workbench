@@ -2,6 +2,7 @@ import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 import { getTranslation } from "../locales";
 import { imageWorkbenchService } from "../services/image-workbench.service";
+import { resolveDisplayImageSrc } from "../services/image-source.service";
 import { isTauriRuntime } from "../services/runtime";
 import { systemService } from "../services/system.service";
 import {
@@ -149,7 +150,7 @@ export const useImageWorkbenchStore = defineStore("image-workbench", () => {
   const libraryAssetCards = computed(() => assetLibrary.value.map(toAssetCard));
   const hasReferenceImage = computed(() => Boolean(referenceImagePath.value));
   const referenceImageDisplayUrl = computed(() =>
-    referenceImagePath.value ? fileManagerStore.getImgUrl(referenceImagePath.value) : ""
+    referenceImagePath.value ? resolveDisplayImageSrc(referenceImagePath.value) : ""
   );
   const jobProgress = computed(() => buildImageWorkbenchJobProgress(tasks.value));
   const canRetryFailedTasks = computed(() =>
@@ -458,12 +459,16 @@ export const useImageWorkbenchStore = defineStore("image-workbench", () => {
     if (!uploadedPath && isTauriRuntime()) {
       return "";
     }
-    const nextPath = uploadedPath || BROWSER_REFERENCE_IMAGE_PATH;
-    referenceImagePath.value = nextPath;
-    externalReversePrompt.value = buildApproxReversePrompt(nextPath);
+    const selectedPath = uploadedPath || BROWSER_REFERENCE_IMAGE_PATH;
+    const importedPath =
+      uploadedPath && isTauriRuntime()
+        ? (await imageWorkbenchService.importReference({ sourcePath: uploadedPath })).filePath
+        : selectedPath;
+    referenceImagePath.value = importedPath;
+    externalReversePrompt.value = buildApproxReversePrompt(selectedPath);
     mode.value = "img2img";
     notice.value = t("imageWorkbench.reference.selectedNotice");
-    return nextPath;
+    return importedPath;
   }
 
   function clearReferenceImage() {

@@ -68,6 +68,20 @@ export const AI_ACTIVE_CONFIG_KEYS: AiActiveConfigIdKey[] = [
   "video",
 ];
 
+export const AI_PROVIDER_CAPABILITIES: AiProviderCapability[] = [
+  "models",
+  "chat",
+  "image",
+  "txt2img",
+  "img2img",
+  "inpaint",
+  "upscale_2x",
+  "upscale_4x",
+  "person_consistency",
+  "audio",
+  "video",
+];
+
 const AI_ACTIVE_CONFIG_FALLBACKS: Record<AiActiveConfigIdKey, AiActiveConfigIdKey[]> = {
   chat: ["chat"],
   image: ["image", "txt2img"],
@@ -116,7 +130,7 @@ function createId(prefix: string) {
 }
 
 type AiProviderCapabilityConfig =
-  | Partial<Pick<AiProviderConfig, "provider" | "baseUrl" | "adapterId">>
+  | Partial<Pick<AiProviderConfig, "provider" | "baseUrl" | "adapterId" | "capabilities">>
   | null
   | undefined;
 
@@ -191,6 +205,11 @@ function normalizeProviderModel(_provider: AiProviderType, _baseUrl: string, mod
 export function resolveAiProviderCapabilities(
   configLike: AiProviderCapabilityConfig
 ): AiProviderCapability[] {
+  const explicitCapabilities = normalizeAiProviderCapabilities(configLike?.capabilities);
+  if (explicitCapabilities.length) {
+    return explicitCapabilities;
+  }
+
   const provider = normalizeAiProviderType(configLike?.provider);
   const providerConfig = aiProviderRegistry.providers[provider];
   const adapterId = resolveAiProviderAdapterId(configLike);
@@ -205,6 +224,30 @@ export function resolveAiProviderCapabilities(
   }
 
   return [...(adapter?.capabilities || aiProviderRegistry.adapters[aiProviderRegistry.defaultAdapterId].capabilities)];
+}
+
+export function normalizeAiProviderCapabilities(value: unknown): AiProviderCapability[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const allowed = new Set(AI_PROVIDER_CAPABILITIES);
+  const result = value
+    .map((item) => toTrimmedString(item) as AiProviderCapability)
+    .filter((item) => allowed.has(item));
+  const unique = Array.from(new Set(result));
+  const hasImageFamily = unique.some((item) =>
+    ["image", "txt2img", "img2img", "inpaint", "upscale_2x", "upscale_4x", "person_consistency"].includes(item)
+  );
+
+  if (hasImageFamily && !unique.includes("image")) {
+    unique.push("image");
+  }
+  if (hasImageFamily && !unique.includes("txt2img")) {
+    unique.push("txt2img");
+  }
+
+  return AI_PROVIDER_CAPABILITIES.filter((item) => unique.includes(item));
 }
 
 export function supportsAiProviderCapability(
@@ -282,6 +325,7 @@ export function normalizeAiProviderConfig(
     ),
     queueMode: normalizeAiProviderQueueMode(raw?.queueMode),
     maxConcurrency: normalizeAiProviderMaxConcurrency(raw?.maxConcurrency),
+    capabilities: normalizeAiProviderCapabilities(raw?.capabilities),
   };
 }
 

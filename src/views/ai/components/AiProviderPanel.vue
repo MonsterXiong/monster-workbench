@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted } from "vue";
 import { Bot, CheckCircle2, Gauge, KeyRound, Link, ListChecks, Plus, Save, TestTube2, Trash2 } from "lucide-vue-next";
+import { AI_PROVIDER_CAPABILITIES } from "../../../stores/ai-provider";
 import { useAiStore } from "../../../stores/ai";
 import { useI18n } from "../../../composables/useI18n";
 import type { AiProviderCapability, AiProviderQueueMode, AiProviderTestAction } from "../../../types/ai";
@@ -47,6 +48,13 @@ const selectedCapabilityItems = computed(() =>
     label: getCapabilityLabel(capability),
   }))
 );
+const capabilityOptions = computed(() =>
+  AI_PROVIDER_CAPABILITIES.map((capability) => ({
+    key: capability,
+    label: getCapabilityLabel(capability),
+    checked: aiStore.selectedConfigCapabilities.includes(capability),
+  }))
+);
 
 const emit = defineEmits<{
   (e: "saved"): void;
@@ -84,6 +92,14 @@ function actionSupported(action: AiProviderTestAction) {
 
 function getCapabilityLabel(capability: AiProviderCapability) {
   return t(capabilityLabelKeys[capability]);
+}
+
+function handleCapabilityToggle(capability: AiProviderCapability, checked: boolean) {
+  const current = aiStore.selectedConfigCapabilities;
+  const next = checked
+    ? [...current, capability]
+    : current.filter((item) => item !== capability);
+  aiStore.patchConfig({ capabilities: next });
 }
 
 function actionUnavailableTitle(action: AiProviderTestAction) {
@@ -217,7 +233,18 @@ async function handleDeleteConfig() {
 
         <div class="capability-row">
           <span class="field-label">{{ t("settings.aiProvider.capabilityLabel") }}</span>
-          <div class="capability-list">
+          <div class="capability-editor">
+            <BaseCheckbox
+              v-for="item in capabilityOptions"
+              :key="item.key"
+              :model-value="item.checked"
+              :label="item.label"
+              compact
+              size="xs"
+              @update:model-value="handleCapabilityToggle(item.key, $event)"
+            />
+          </div>
+          <div class="capability-list" aria-live="polite">
             <span v-for="item in selectedCapabilityItems" :key="item.key" class="capability-chip">
               {{ item.label }}
             </span>
@@ -448,6 +475,9 @@ async function handleDeleteConfig() {
 }
 .capability-list {
   @apply flex flex-wrap gap-1.5;
+}
+.capability-editor {
+  @apply grid grid-cols-2 gap-1.5 md:grid-cols-3;
 }
 .capability-chip {
   @apply inline-flex h-6 items-center rounded-full border border-primary/20 bg-primary/5 px-2.5 text-[10px] font-black text-primary dark:bg-primary/10;

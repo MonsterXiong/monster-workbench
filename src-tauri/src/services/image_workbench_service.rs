@@ -120,6 +120,22 @@ pub struct SetImageWorkbenchAssetFavoriteRequest {
     pub favorite: bool,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportImageWorkbenchReferenceRequest {
+    pub source_path: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportImageWorkbenchReferenceResult {
+    pub file_path: String,
+    pub original_path: String,
+    pub mime_type: Option<String>,
+    pub size_bytes: u64,
+    pub created_at_ms: i64,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ImageWorkbenchContractSummary {
@@ -266,6 +282,27 @@ impl ImageWorkbenchService {
 
     pub fn list_assets(&self, limit: Option<u32>) -> AppResult<Vec<ImageWorkbenchAsset>> {
         self.repo()?.list_recent_assets(limit.unwrap_or(100))
+    }
+
+    pub fn import_reference_image(
+        &self,
+        request: ImportImageWorkbenchReferenceRequest,
+    ) -> AppResult<ImportImageWorkbenchReferenceResult> {
+        let source_path = normalize_limited_required_string(
+            "Image Workbench reference image path",
+            request.source_path,
+            IMAGE_WORKBENCH_TEXT_MAX_CHARS,
+        )?;
+        let imported = self
+            .asset_path_policy()
+            .import_reference_image("Image Workbench reference image", &source_path)?;
+        Ok(ImportImageWorkbenchReferenceResult {
+            file_path: imported.file_path,
+            original_path: imported.original_path,
+            mime_type: imported.mime_type,
+            size_bytes: imported.size_bytes,
+            created_at_ms: imported.created_at_ms,
+        })
     }
 
     pub fn get_snapshot(&self, job_id: &str) -> AppResult<ImageWorkbenchSnapshot> {

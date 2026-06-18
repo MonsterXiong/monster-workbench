@@ -7,6 +7,7 @@ use crate::services::image_workbench_mask::{
 };
 use crate::services::image_workbench_service::{
     CreateImageWorkbenchJobRequest, ImageWorkbenchContractSummary, ImageWorkbenchService,
+    ImportImageWorkbenchReferenceRequest, ImportImageWorkbenchReferenceResult,
     RecordImageWorkbenchAssetRequest, SaveImageWorkbenchTemplateRequest,
     SetImageWorkbenchAssetFavoriteRequest, UpdateImageWorkbenchTaskStatusRequest,
 };
@@ -49,6 +50,17 @@ pub fn list_image_workbench_assets(
 ) -> Result<Vec<ImageWorkbenchAsset>, String> {
     let service = state.lock().unwrap_or_else(|e| e.into_inner());
     service.list_assets(limit).map_err(|e| e.to_json_string())
+}
+
+#[tauri::command]
+pub fn import_image_workbench_reference(
+    request: ImportImageWorkbenchReferenceRequest,
+    state: ImageWorkbenchState<'_>,
+) -> Result<ImportImageWorkbenchReferenceResult, String> {
+    let service = state.lock().unwrap_or_else(|e| e.into_inner());
+    service
+        .import_reference_image(request)
+        .map_err(|e| e.to_json_string())
 }
 
 #[tauri::command]

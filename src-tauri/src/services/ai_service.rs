@@ -42,6 +42,7 @@ pub struct AiProviderService<R: Runtime = Wry> {
 }
 
 struct AiSidecarGenerationInput {
+    capability: String,
     prompt: String,
     model: String,
     options: AiGenerationOptions,
@@ -669,6 +670,7 @@ impl<R: Runtime> AiProviderService<R> {
                     request_id,
                     cancel_token,
                     Some(AiSidecarGenerationInput {
+                        capability: "chat".to_string(),
                         prompt,
                         model: config.model.clone(),
                         options,
@@ -707,6 +709,7 @@ impl<R: Runtime> AiProviderService<R> {
                     request_id,
                     cancel_token,
                     Some(AiSidecarGenerationInput {
+                        capability: capability.to_string(),
                         prompt: config.image_prompt.clone(),
                         model: config.image_model.clone(),
                         options,
@@ -730,6 +733,7 @@ impl<R: Runtime> AiProviderService<R> {
                     request_id,
                     cancel_token,
                     Some(AiSidecarGenerationInput {
+                        capability: capability.clone(),
                         prompt,
                         model: config.model.clone(),
                         options,
@@ -763,6 +767,7 @@ impl<R: Runtime> AiProviderService<R> {
                 &action,
                 request_id.as_deref(),
                 &output_dir,
+                &generation.capability,
                 &generation.prompt,
                 &generation.model,
                 &generation.options,

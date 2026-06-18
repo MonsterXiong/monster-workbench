@@ -158,6 +158,18 @@ export interface CreateImageWorkbenchJobRequest {
   fallbackPolicy?: string | null;
 }
 
+export interface ImportImageWorkbenchReferenceRequest {
+  sourcePath: string;
+}
+
+export interface ImportImageWorkbenchReferenceResult {
+  filePath: string;
+  originalPath: string;
+  mimeType?: string | null;
+  sizeBytes: number;
+  createdAtMs: number;
+}
+
 export interface ImageWorkbenchMaskPoint {
   x: number;
   y: number;

@@ -212,6 +212,7 @@ fn main() {
             commands::image_workbench::create_image_workbench_job,
             commands::image_workbench::list_image_workbench_jobs,
             commands::image_workbench::list_image_workbench_assets,
+            commands::image_workbench::import_image_workbench_reference,
             commands::image_workbench::get_image_workbench_job_snapshot,
             commands::image_workbench::update_image_workbench_task_status,
             commands::image_workbench::start_image_workbench_job_runner,

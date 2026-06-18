@@ -230,7 +230,10 @@ mod tests {
                 tool: "paint".to_string(),
                 brush_size: 24.0,
                 points: vec![
-                    ImageWorkbenchMaskPointInput { x: f64::NAN, y: 20.0 },
+                    ImageWorkbenchMaskPointInput {
+                        x: f64::NAN,
+                        y: 20.0
+                    },
                     ImageWorkbenchMaskPointInput { x: 100.0, y: 80.0 },
                 ],
             }],

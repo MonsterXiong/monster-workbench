@@ -12,6 +12,7 @@ class ProviderRequestContext:
     output_dir: str
     request_id: str
     generation: dict
+    generation_capability: str
     generation_options: dict
     provider: str
     base_url: str
@@ -30,12 +31,28 @@ def parse_provider_request(payload, started):
     config = payload.get("config") or {}
     action = payload.get("action") or "chat"
     generation = payload.get("generation") or {}
+    generation_capability = str(generation.get("capability") or action).strip().lower()
     generation_options = generation.get("options") or {}
 
     model = str(config.get("model") or "").strip()
     prompt = generation.get("prompt") or config.get("testPrompt") or "ping"
     generation_model = str(generation.get("model") or model).strip()
-    image_model = str(config.get("imageModel") or model).strip()
+    image_model_source = (
+        generation.get("model")
+        if action == "image" and generation.get("model")
+        else config.get("imageModel") or model
+    )
+    image_model = str(image_model_source).strip()
+    image_prompt = (
+        generation.get("prompt")
+        if action == "image" and generation.get("prompt")
+        else config.get("imagePrompt") or prompt
+    )
+    image_size = (
+        generation_options.get("size")
+        if action == "image" and generation_options.get("size")
+        else config.get("imageSize") or "1024x1024"
+    )
     timeout_ms = int(config.get("timeoutMs") or 20000)
 
     return ProviderRequestContext(
@@ -46,6 +63,7 @@ def parse_provider_request(payload, started):
         output_dir=payload.get("outputDir") or "",
         request_id=payload.get("requestId") or "",
         generation=generation,
+        generation_capability=generation_capability,
         generation_options=generation_options,
         provider=config.get("provider") or "custom",
         base_url=normalize_base_url(config.get("baseUrl") or ""),
@@ -53,8 +71,8 @@ def parse_provider_request(payload, started):
         prompt=prompt,
         generation_model=generation_model,
         image_model=image_model,
-        image_prompt=config.get("imagePrompt") or prompt,
-        image_size=config.get("imageSize") or "1024x1024",
+        image_prompt=image_prompt,
+        image_size=image_size,
         timeout_ms=timeout_ms,
         timeout=max(timeout_ms / 1000, 3),
     )

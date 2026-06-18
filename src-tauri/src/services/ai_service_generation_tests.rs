@@ -1060,6 +1060,7 @@ fn provider_config(base_url: String) -> AiProviderConfig {
         timeout_ms: 5_000,
         queue_mode: "serial".to_string(),
         max_concurrency: 3,
+        capabilities: Vec::new(),
         queue_key: String::new(),
     }
 }

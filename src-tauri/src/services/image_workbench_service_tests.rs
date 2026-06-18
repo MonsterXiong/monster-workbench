@@ -216,6 +216,106 @@ fn image_workbench_service_rejects_asset_path_outside_generated_root() {
 }
 
 #[test]
+fn image_workbench_service_imports_uploaded_reference_image() {
+    let (service, app_dir) = test_service("imports-reference");
+    let upload_dir = app_dir
+        .join("uploads")
+        .join("images")
+        .join("2026")
+        .join("06");
+    fs::create_dir_all(&upload_dir).expect("upload dir should create");
+    let upload_path = upload_dir.join("reference.png");
+    fs::write(&upload_path, b"png").expect("reference image should write");
+
+    let result = service
+        .import_reference_image(ImportImageWorkbenchReferenceRequest {
+            source_path: "uploads/images/2026/06/reference.png".to_string(),
+        })
+        .expect("reference image should import");
+
+    assert!(PathBuf::from(&result.file_path).exists());
+    assert!(result
+        .file_path
+        .replace('\\', "/")
+        .contains("/ai/image-workbench/references/"));
+    assert!(result
+        .original_path
+        .replace('\\', "/")
+        .ends_with("/uploads/images/2026/06/reference.png"));
+    assert_eq!(result.mime_type.as_deref(), Some("image/png"));
+    assert_eq!(result.size_bytes, 3);
+}
+
+#[test]
+fn image_workbench_service_rejects_uncontrolled_reference_image() {
+    let (service, app_dir) = test_service("rejects-reference");
+    let upload_dir = app_dir
+        .join("uploads")
+        .join("files")
+        .join("2026")
+        .join("06");
+    fs::create_dir_all(&upload_dir).expect("upload dir should create");
+    fs::write(upload_dir.join("reference.txt"), b"not-image").expect("file should write");
+
+    let wrong_dir = service
+        .import_reference_image(ImportImageWorkbenchReferenceRequest {
+            source_path: "uploads/files/2026/06/reference.txt".to_string(),
+        })
+        .expect_err("uploads/files should be rejected");
+    let data_url = service
+        .import_reference_image(ImportImageWorkbenchReferenceRequest {
+            source_path: "data:image/png;base64,abc".to_string(),
+        })
+        .expect_err("data url should be rejected");
+
+    assert!(matches!(wrong_dir, AppError::Permission(_)));
+    assert!(matches!(data_url, AppError::Permission(_)));
+}
+
+#[test]
+fn image_workbench_service_creates_img2img_job_with_imported_reference_path() {
+    let (service, app_dir) = test_service("img2img-imported-reference");
+    let upload_dir = app_dir
+        .join("uploads")
+        .join("images")
+        .join("2026")
+        .join("06");
+    fs::create_dir_all(&upload_dir).expect("upload dir should create");
+    fs::write(upload_dir.join("source.webp"), b"webp").expect("reference image should write");
+    let imported = service
+        .import_reference_image(ImportImageWorkbenchReferenceRequest {
+            source_path: "uploads/images/2026/06/source.webp".to_string(),
+        })
+        .expect("reference image should import");
+
+    let snapshot = service
+        .create_job(CreateImageWorkbenchJobRequest {
+            mode: "img2img".to_string(),
+            prompt: "".to_string(),
+            negative_prompt: None,
+            quantity: 1,
+            provider_config_id: None,
+            model: Some("gpt-image-2".to_string()),
+            size: Some("1024x1024".to_string()),
+            reference_asset_ids: Vec::new(),
+            reference_asset_ids_json: None,
+            source_asset_id: None,
+            source_image_path: Some(imported.file_path.clone()),
+            mask_path: None,
+            person_context_json: None,
+            upscale_scale: None,
+            fallback_policy: Some("txt2img_prompt_fallback".to_string()),
+        })
+        .expect("img2img job should create with imported path");
+
+    assert_eq!(
+        snapshot.job.source_image_path.as_deref(),
+        Some(imported.file_path.as_str())
+    );
+    assert!(snapshot.job.reference_asset_ids_json.is_none());
+}
+
+#[test]
 fn image_workbench_service_sanitizes_model_run_request_json() {
     let (service, app_dir) = test_service("sanitizes-request-json");
     let task_id = create_single_task(&service);

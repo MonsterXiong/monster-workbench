@@ -40,6 +40,88 @@ def resolve_api_image_size(image_size):
     return str(image_size or "1024x1024")
 
 
+def clean_text(value):
+    return str(value or "").strip()
+
+
+def normalize_image_generation_capability(value):
+    clean = clean_text(value).lower()
+    if clean in {
+        "image",
+        "txt2img",
+        "img2img",
+        "inpaint",
+        "person_consistency",
+        "upscale_2x",
+        "upscale_4x",
+    }:
+        return clean
+    return "image"
+
+
+def normalize_reference_asset_ids(value):
+    if not isinstance(value, list):
+        return []
+    result = []
+    for item in value:
+        clean = clean_text(item)
+        if clean:
+            result.append(clean)
+    return result
+
+
+def native_image_capability_supported(adapter, capability):
+    if capability in {"image", "txt2img"}:
+        return True
+    return hasattr(adapter, "supports_capability") and adapter.supports_capability(capability)
+
+
+def image_capability_can_prompt_fallback(adapter, capability):
+    if capability not in {"img2img", "inpaint", "person_consistency"}:
+        return False
+    return (
+        hasattr(adapter, "supports_capability")
+        and (adapter.supports_capability("txt2img") or adapter.supports_capability("image"))
+    )
+
+
+def build_image_generation_request(ctx, adapter, api_image_size, image_count):
+    capability = normalize_image_generation_capability(ctx.generation_capability)
+    options = ctx.generation_options or {}
+    fallback_mode = clean_text(options.get("fallbackMode")).lower()
+    native_supported = native_image_capability_supported(adapter, capability)
+    prompt_fallback = False
+
+    if not native_supported and capability in {"upscale_2x", "upscale_4x"}:
+        raise RuntimeError(
+            "provider adapter {0} does not support {1}".format(adapter.adapter_id, capability)
+        )
+
+    if not native_supported and capability not in {"image", "txt2img"}:
+        if fallback_mode == "native" or not image_capability_can_prompt_fallback(adapter, capability):
+            raise RuntimeError(
+                "provider adapter {0} does not support {1}".format(adapter.adapter_id, capability)
+            )
+        prompt_fallback = True
+        fallback_mode = fallback_mode or "txt2img_prompt_fallback"
+
+    return {
+        "capability": capability,
+        "imageSize": api_image_size,
+        "imageCount": image_count,
+        "referenceAssetIds": normalize_reference_asset_ids(options.get("referenceAssetIds")),
+        "referenceImagePath": clean_text(options.get("referenceImagePath")),
+        "sourceAssetId": clean_text(options.get("sourceAssetId")),
+        "sourceImagePath": clean_text(options.get("sourceImagePath")),
+        "maskPath": clean_text(options.get("maskPath")),
+        "personContextJson": clean_text(options.get("personContextJson")),
+        "scale": options.get("scale"),
+        "fallbackMode": fallback_mode,
+        "nativeSupported": native_supported,
+        "promptFallback": prompt_fallback,
+    }
+
+
 def probe_model_listed(adapter, model, limits):
     try:
         result = adapter.list_models(
@@ -76,12 +158,15 @@ def run_models_action(ctx, adapter, limits):
 
 def run_image_action(ctx, image_adapter, limits):
     api_image_size = resolve_api_image_size(ctx.image_size)
-    image_count = max(1, min(MAX_IMAGE_ITEMS, int(ctx.config.get("imageCount") or 1)))
+    requested_count = ctx.generation_options.get("count") or ctx.config.get("imageCount") or 1
+    image_count = max(1, min(MAX_IMAGE_ITEMS, int(requested_count)))
+    image_request = build_image_generation_request(ctx, image_adapter, api_image_size, image_count)
     provider_result = image_adapter.image(
         ctx.image_prompt,
         api_image_size,
         image_count=image_count,
         max_response_bytes=limits.max_image_response_bytes,
+        image_request=image_request,
     )
     parsed = provider_result["raw"]
     image_urls, image_paths, saved_files = parse_images(parsed, ctx.output_dir, ctx.timeout, ctx.base_url)

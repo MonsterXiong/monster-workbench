@@ -176,8 +176,7 @@ export function buildImageWorkbenchJobContext(options: {
   activeImageConfig: AiModelConfig | null | undefined;
 }) {
   const { mode, source, referenceImagePath, maskPath, activeImageConfig } = options;
-  const externalReferenceId = !source && referenceImagePath ? `external:${referenceImagePath}` : "";
-  const referenceAssetIds = source ? [source.id] : externalReferenceId ? [externalReferenceId] : [];
+  const referenceAssetIds = source ? [source.id] : [];
   const sourceImagePath = source?.filePath || referenceImagePath || null;
   const personContextJson =
     mode === "person_consistency" && source

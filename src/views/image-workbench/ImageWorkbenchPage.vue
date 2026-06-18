@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import {
   Ban,
   BookTemplate,
+  CheckCircle2,
   Clock3,
   Copy,
   Database,
@@ -13,6 +14,7 @@ import {
   ImagePlus,
   Images,
   Info,
+  Layers3,
   ListChecks,
   Paintbrush,
   Play,
@@ -26,7 +28,7 @@ import {
 import { useI18n } from "../../composables/useI18n";
 import { useImageWorkbenchStore } from "../../stores/image-workbench";
 import { buildImageSizeOptions } from "../ai/components/image/aiImageSizeOptions";
-import { formatBytes, formatDateTime } from "../../utils";
+import { formatBytes, formatDateTime, formatTemplate } from "../../utils";
 import "./ImageWorkbenchPage.css";
 import type {
   ImageWorkbenchAsset,
@@ -61,8 +63,9 @@ const contractStatusText = computed(() => {
   return t("imageWorkbench.status.contractReady");
 });
 const maxQuantity = computed(() => imageWorkbenchStore.contract?.maxQuantity ?? 16);
+const currentJob = computed(() => imageWorkbenchStore.currentJob);
 const currentJobStatusText = computed(() => {
-  const status = imageWorkbenchStore.currentJob?.status;
+  const status = currentJob.value?.status;
   return status ? t(`imageWorkbench.jobStatuses.${status}`) : t("imageWorkbench.taskbar.waiting");
 });
 const visibleAssetCards = computed(() =>
@@ -90,6 +93,62 @@ const canSaveInpaintMask = computed(
     isInpaintWorkspace.value &&
     inpaintMaskStrokes.value.some((stroke) => stroke.points.length >= 2)
 );
+const taskStatusSummary = computed(() => {
+  const tasks = imageWorkbenchStore.tasks;
+  const total = tasks.length;
+  const finished = tasks.filter((task) => task.status === "succeeded").length;
+  const running = tasks.filter((task) => ["queued", "running", "validating", "retrying"].includes(task.status)).length;
+  const failed = tasks.filter((task) => task.status === "failed").length;
+  return { total, finished, running, failed };
+});
+const galleryAssetCount = computed(() =>
+  galleryTab.value === "current"
+    ? imageWorkbenchStore.currentAssetCards.length
+    : imageWorkbenchStore.libraryAssetCards.length
+);
+const selectedAssetSummary = computed(() => {
+  if (!selectedAsset.value) {
+    return t("imageWorkbench.review.noSelection");
+  }
+  return `${selectedAsset.value.width || "-"}x${selectedAsset.value.height || "-"} · ${formatAssetSize(selectedAsset.value)}`;
+});
+const reviewSummaryCards = computed(() => [
+  {
+    key: "job",
+    icon: Sparkles,
+    label: t("imageWorkbench.review.cards.job"),
+    value: currentJob.value ? currentJobStatusText.value : t("imageWorkbench.review.emptyValue"),
+    meta: currentJob.value
+      ? formatMs(currentJob.value.updatedAtMs)
+      : t("imageWorkbench.review.noJobMeta"),
+  },
+  {
+    key: "tasks",
+    icon: ListChecks,
+    label: t("imageWorkbench.review.cards.tasks"),
+    value: `${taskStatusSummary.value.finished}/${taskStatusSummary.value.total || 0}`,
+    meta: formatTemplate(t("imageWorkbench.review.cards.tasksMeta"), {
+      running: taskStatusSummary.value.running,
+      failed: taskStatusSummary.value.failed,
+    }),
+  },
+  {
+    key: "assets",
+    icon: Images,
+    label: t("imageWorkbench.review.cards.assets"),
+    value: String(imageWorkbenchStore.assets.length),
+    meta: formatTemplate(t("imageWorkbench.review.cards.assetsMeta"), {
+      count: imageWorkbenchStore.assetLibrary.length,
+    }),
+  },
+  {
+    key: "selection",
+    icon: CheckCircle2,
+    label: t("imageWorkbench.review.cards.selection"),
+    value: selectedAsset.value ? t("imageWorkbench.review.selectionReady") : t("imageWorkbench.review.selectionEmpty"),
+    meta: selectedAssetSummary.value,
+  },
+]);
 
 function modeLabel(mode: ImageWorkbenchMode | string) {
   return t(`imageWorkbench.modes.${mode}`);
@@ -535,7 +594,7 @@ onBeforeUnmount(() => {
           </div>
         </section>
 
-        <section class="image-workbench-section image-workbench-section--history">
+      <section class="image-workbench-section image-workbench-section--history">
           <div class="image-workbench-section__head">
             <History class="h-4 w-4" />
             <span>{{ t("imageWorkbench.history.title") }}</span>
@@ -560,6 +619,63 @@ onBeforeUnmount(() => {
       </aside>
 
       <section class="image-workbench-main">
+        <section class="image-workbench-panel image-workbench-panel--review">
+          <div class="image-workbench-review-head">
+            <div class="image-workbench-review-copy">
+              <span class="image-workbench-review-eyebrow">{{ t("imageWorkbench.review.kicker") }}</span>
+              <strong>{{ t("imageWorkbench.review.title") }}</strong>
+              <p>{{ t("imageWorkbench.review.subtitle") }}</p>
+            </div>
+            <div class="image-workbench-review-chips">
+              <span class="image-workbench-chip image-workbench-chip--primary">
+                <Sparkles class="h-3.5 w-3.5" />
+                {{ currentJobStatusText }}
+              </span>
+              <span class="image-workbench-chip">
+                <Layers3 class="h-3.5 w-3.5" />
+                {{ formatTemplate(t("imageWorkbench.review.galleryCount"), { count: galleryAssetCount }) }}
+              </span>
+            </div>
+          </div>
+
+          <div class="image-workbench-review-cards">
+            <article v-for="item in reviewSummaryCards" :key="item.key" class="image-workbench-review-card">
+              <div class="image-workbench-review-card__icon">
+                <component :is="item.icon" class="h-4 w-4" />
+              </div>
+              <div class="min-w-0">
+                <span>{{ item.label }}</span>
+                <strong>{{ item.value }}</strong>
+                <small>{{ item.meta }}</small>
+              </div>
+            </article>
+          </div>
+
+          <div v-if="currentJob" class="image-workbench-review-focus">
+            <div class="image-workbench-review-focus__copy">
+              <span>{{ t("imageWorkbench.review.currentJob") }}</span>
+              <strong>{{ currentJob.prompt || t("imageWorkbench.review.emptyPrompt") }}</strong>
+              <small>
+                {{ modeLabel(currentJob.mode) }} · {{ currentJob.quantity }} · {{ currentJob.model || imageWorkbenchStore.activeImageModelName }}
+              </small>
+            </div>
+            <div class="image-workbench-review-focus__actions">
+              <button class="image-workbench-secondary" type="button" :disabled="!imageWorkbenchStore.canRetryFailedTasks" @click="handleRetry">
+                <RotateCcw class="h-3.5 w-3.5" />
+                {{ t("imageWorkbench.toolbar.retry") }}
+              </button>
+              <button class="image-workbench-secondary image-workbench-secondary--danger" type="button" :disabled="!imageWorkbenchStore.canCancelCurrentJob" @click="handleCancel">
+                <Ban class="h-3.5 w-3.5" />
+                {{ t("imageWorkbench.toolbar.cancel") }}
+              </button>
+              <button class="image-workbench-secondary" type="button" :disabled="!imageWorkbenchStore.canExportCurrentJob" @click="handleExportJob">
+                <Download class="h-3.5 w-3.5" />
+                {{ t("imageWorkbench.taskbar.exportAll") }}
+              </button>
+            </div>
+          </div>
+        </section>
+
         <section class="image-workbench-panel image-workbench-panel--tasks">
           <div class="image-workbench-section__head">
             <ListChecks class="h-4 w-4" />
@@ -572,8 +688,8 @@ onBeforeUnmount(() => {
           <div class="image-workbench-task-list">
             <div v-for="task in imageWorkbenchStore.tasks" :key="task.id" class="image-workbench-task-item">
               <span>#{{ task.queueIndex + 1 }}</span>
-              <strong>{{ statusLabel(task.status, "taskStatuses") }}</strong>
-              <small>{{ task.error || task.id }}</small>
+              <strong>{{ statusLabel(task.status, 'taskStatuses') }}</strong>
+              <small>{{ task.error || formatMs(task.updatedAtMs) }}</small>
             </div>
             <div v-if="!imageWorkbenchStore.tasks.length" class="image-workbench-mini-empty">
               {{ t("imageWorkbench.taskbar.waiting") }}
@@ -589,10 +705,10 @@ onBeforeUnmount(() => {
             </div>
             <div class="image-workbench-tabs">
               <button type="button" :class="{ 'is-active': galleryTab === 'current' }" @click="galleryTab = 'current'">
-                {{ t("imageWorkbench.workspace.current") }}
+                {{ t("imageWorkbench.workspace.current") }} {{ imageWorkbenchStore.currentAssetCards.length }}
               </button>
               <button type="button" :class="{ 'is-active': galleryTab === 'library' }" @click="galleryTab = 'library'">
-                {{ t("imageWorkbench.workspace.library") }}
+                {{ t("imageWorkbench.workspace.library") }} {{ imageWorkbenchStore.libraryAssetCards.length }}
               </button>
             </div>
           </div>
@@ -665,57 +781,69 @@ onBeforeUnmount(() => {
       <aside class="image-workbench-panel image-workbench-panel--details">
         <div class="image-workbench-section__head">
           <Info class="h-4 w-4" />
-          <span>{{ t("imageWorkbench.details.title") }}</span>
+          <span>{{ t("imageWorkbench.review.selectionTitle") }}</span>
         </div>
         <div v-if="selectedAsset" class="image-workbench-inspector">
           <div class="image-workbench-preview">
             <img :src="selectedAssetDisplayUrl" alt="" />
           </div>
-          <div class="image-workbench-inspector-actions">
-            <button type="button" @click="handleToggleFavorite(selectedAsset)">
-              <Star class="h-3.5 w-3.5" />
-              {{ selectedAsset.favorite ? t("imageWorkbench.asset.unfavorite") : t("imageWorkbench.asset.favorite") }}
-            </button>
-            <button type="button" @click="handleOpenAssetLocation">
-              <FolderOpen class="h-3.5 w-3.5" />
-              {{ t("imageWorkbench.asset.openLocation") }}
-            </button>
-            <button type="button" :disabled="!imageWorkbenchStore.canExportSelectedAsset" @click="handleExportSelectedAsset">
-              <Download class="h-3.5 w-3.5" />
-              {{ t("imageWorkbench.asset.exportAsset") }}
-            </button>
-            <button type="button" @click="imageWorkbenchStore.reuseSelectedAssetPrompt()">
-              <RotateCcw class="h-3.5 w-3.5" />
-              {{ t("imageWorkbench.asset.reusePrompt") }}
-            </button>
-            <button type="button" @click="handleCopyMetaPrompt">
-              <Copy class="h-3.5 w-3.5" />
-              {{ t("imageWorkbench.asset.copyMetaPrompt") }}
-            </button>
-            <button type="button" @click="handleRegenerateSelectedAsset">
-              <RefreshCcw class="h-3.5 w-3.5" />
-              {{ t("imageWorkbench.asset.regenerate") }}
-            </button>
-            <button type="button" @click="handleContinueSelectedStyle">
-              <Sparkles class="h-3.5 w-3.5" />
-              {{ t("imageWorkbench.asset.continueStyle") }}
-            </button>
-            <button type="button" :disabled="!selectedAsset" :title="t('imageWorkbench.errors.maskRequired')" @click="handleStartInpaintSelectedAsset">
-              <Sparkles class="h-3.5 w-3.5" />
-              {{ t("imageWorkbench.asset.inpaint") }}
-            </button>
-            <button type="button" :disabled="!imageWorkbenchStore.canRunPersonConsistency" :title="t('imageWorkbench.errors.personDeferred')" @click="handleContinueSelectedPerson">
-              <Sparkles class="h-3.5 w-3.5" />
-              {{ t("imageWorkbench.asset.personContinue") }}
-            </button>
-            <button type="button" :disabled="!imageWorkbenchStore.canRunUpscale2x" :title="t('imageWorkbench.errors.upscaleDeferred')" @click="handleUpscaleSelectedAsset(2)">
-              <Sparkles class="h-3.5 w-3.5" />
-              {{ t("imageWorkbench.asset.upscale2x") }}
-            </button>
-            <button type="button" :disabled="!imageWorkbenchStore.canRunUpscale4x" :title="t('imageWorkbench.errors.upscale4Unsupported')" @click="handleUpscaleSelectedAsset(4)">
-              <Sparkles class="h-3.5 w-3.5" />
-              {{ t("imageWorkbench.asset.upscale4x") }}
-            </button>
+          <div class="image-workbench-selection-summary">
+            <strong>{{ selectedMetadata?.originalPrompt || selectedMetadata?.expandedPrompt || t("imageWorkbench.review.emptyPrompt") }}</strong>
+            <small>{{ selectedAssetSummary }}</small>
+          </div>
+          <div class="image-workbench-action-group">
+            <span>{{ t("imageWorkbench.review.createNext") }}</span>
+            <div class="image-workbench-inspector-actions">
+              <button type="button" @click="imageWorkbenchStore.reuseSelectedAssetPrompt()">
+                <RotateCcw class="h-3.5 w-3.5" />
+                {{ t("imageWorkbench.asset.reusePrompt") }}
+              </button>
+              <button type="button" @click="handleRegenerateSelectedAsset">
+                <RefreshCcw class="h-3.5 w-3.5" />
+                {{ t("imageWorkbench.asset.regenerate") }}
+              </button>
+              <button type="button" @click="handleContinueSelectedStyle">
+                <Sparkles class="h-3.5 w-3.5" />
+                {{ t("imageWorkbench.asset.continueStyle") }}
+              </button>
+              <button type="button" :disabled="!selectedAsset" :title="t('imageWorkbench.errors.maskRequired')" @click="handleStartInpaintSelectedAsset">
+                <Sparkles class="h-3.5 w-3.5" />
+                {{ t("imageWorkbench.asset.inpaint") }}
+              </button>
+              <button type="button" :disabled="!imageWorkbenchStore.canRunPersonConsistency" :title="t('imageWorkbench.errors.personDeferred')" @click="handleContinueSelectedPerson">
+                <Sparkles class="h-3.5 w-3.5" />
+                {{ t("imageWorkbench.asset.personContinue") }}
+              </button>
+              <button type="button" :disabled="!imageWorkbenchStore.canRunUpscale2x" :title="t('imageWorkbench.errors.upscaleDeferred')" @click="handleUpscaleSelectedAsset(2)">
+                <Sparkles class="h-3.5 w-3.5" />
+                {{ t("imageWorkbench.asset.upscale2x") }}
+              </button>
+              <button type="button" :disabled="!imageWorkbenchStore.canRunUpscale4x" :title="t('imageWorkbench.errors.upscale4Unsupported')" @click="handleUpscaleSelectedAsset(4)">
+                <Sparkles class="h-3.5 w-3.5" />
+                {{ t("imageWorkbench.asset.upscale4x") }}
+              </button>
+            </div>
+          </div>
+          <div class="image-workbench-action-group">
+            <span>{{ t("imageWorkbench.review.deliver") }}</span>
+            <div class="image-workbench-inspector-actions">
+              <button type="button" @click="handleToggleFavorite(selectedAsset)">
+                <Star class="h-3.5 w-3.5" />
+                {{ selectedAsset.favorite ? t("imageWorkbench.asset.unfavorite") : t("imageWorkbench.asset.favorite") }}
+              </button>
+              <button type="button" :disabled="!imageWorkbenchStore.canExportSelectedAsset" @click="handleExportSelectedAsset">
+                <Download class="h-3.5 w-3.5" />
+                {{ t("imageWorkbench.asset.exportAsset") }}
+              </button>
+              <button type="button" @click="handleOpenAssetLocation">
+                <FolderOpen class="h-3.5 w-3.5" />
+                {{ t("imageWorkbench.asset.openLocation") }}
+              </button>
+              <button type="button" @click="handleCopyMetaPrompt">
+                <Copy class="h-3.5 w-3.5" />
+                {{ t("imageWorkbench.asset.copyMetaPrompt") }}
+              </button>
+            </div>
           </div>
 
           <dl class="image-workbench-details">
@@ -760,8 +888,8 @@ onBeforeUnmount(() => {
         </div>
         <div v-else class="image-workbench-empty image-workbench-empty--compact">
           <Clock3 class="h-8 w-8" />
-          <strong>{{ t("imageWorkbench.details.emptyTitle") }}</strong>
-          <span>{{ t("imageWorkbench.details.emptyDesc") }}</span>
+          <strong>{{ t("imageWorkbench.review.selectionEmpty") }}</strong>
+          <span>{{ t("imageWorkbench.review.selectionEmptyDesc") }}</span>
         </div>
       </aside>
     </section>

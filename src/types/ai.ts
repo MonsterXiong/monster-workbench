@@ -68,6 +68,7 @@ export interface AiProviderConfig {
   timeoutMs: number;
   queueMode: AiProviderQueueMode;
   maxConcurrency: number;
+  capabilities?: AiProviderCapability[];
   queueKey?: string;
 }
 

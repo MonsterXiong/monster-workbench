@@ -39,6 +39,8 @@ pub struct AiProviderConfig {
     #[serde(default = "default_max_concurrency")]
     pub max_concurrency: usize,
     #[serde(default)]
+    pub capabilities: Vec<String>,
+    #[serde(default)]
     pub queue_key: String,
 }
 

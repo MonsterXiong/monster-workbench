@@ -125,7 +125,7 @@ pub(super) fn validate_generation_config(
             && !can_fallback_to_txt2img(config, capability)
         {
             return Err(AppError::Config(
-                "褰撳墠 AI 妯″瀷閰嶇疆涓嶆敮鎸佽鍥剧墖鍘熷瓙鑳藉姏".to_string(),
+                "当前 AI 模型配置不支持该图片原子能力".to_string(),
             ));
         }
         return Ok(());
@@ -239,6 +239,7 @@ pub(super) fn build_generation_sidecar_input(
     action: &str,
     request_id: Option<&str>,
     output_dir: &str,
+    capability: &str,
     prompt: &str,
     model: &str,
     options: &AiGenerationOptions,
@@ -249,6 +250,7 @@ pub(super) fn build_generation_sidecar_input(
         request_id,
         output_dir,
         Some(json!({
+            "capability": capability,
             "prompt": prompt,
             "model": model,
             "options": options,
@@ -382,6 +384,10 @@ fn resolve_provider_adapter_id(registry: &Value, config: &AiProviderConfig) -> S
 }
 
 fn provider_supports_test_action(config: &AiProviderConfig, action: &str) -> bool {
+    if config_declares_capabilities(config) {
+        return config_has_capability(config, action);
+    }
+
     let registry = ai_provider_registry();
     let adapter_id = resolve_provider_adapter_id(&registry, config);
     let provider_adapter_id = registry_provider_adapter_id(&registry, &config.provider);
@@ -401,6 +407,28 @@ fn provider_supports_test_action(config: &AiProviderConfig, action: &str) -> boo
     registry_adapter(&registry, &adapter_id)
         .map(|adapter| registry_record_has_capability(adapter, action))
         .unwrap_or(false)
+}
+
+fn config_declares_capabilities(config: &AiProviderConfig) -> bool {
+    !config.capabilities.is_empty()
+}
+
+fn config_has_capability(config: &AiProviderConfig, capability: &str) -> bool {
+    let has = |target: &str| config.capabilities.iter().any(|item| item.trim() == target);
+    if has(capability) {
+        return true;
+    }
+    capability == "image"
+        && [
+            "txt2img",
+            "img2img",
+            "inpaint",
+            "upscale_2x",
+            "upscale_4x",
+            "person_consistency",
+        ]
+        .iter()
+        .any(|item| has(item))
 }
 
 fn validate_text_len(label: &str, value: &str, max_chars: usize) -> AppResult<()> {
@@ -435,6 +463,7 @@ mod tests {
             timeout_ms: 5_000,
             queue_mode: "serial".to_string(),
             max_concurrency: 3,
+            capabilities: Vec::new(),
             queue_key: String::new(),
         }
     }
@@ -476,6 +505,16 @@ mod tests {
             format: Some("wav".to_string()),
             voice: Some("nova".to_string()),
             duration_seconds: Some(3),
+            reference_asset_ids: vec!["asset-1".to_string()],
+            reference_image_path: Some("C:/Monster/reference.png".to_string()),
+            source_asset_id: Some("asset-source".to_string()),
+            source_image_path: Some("C:/Monster/source.png".to_string()),
+            mask_path: Some("C:/Monster/mask.svg".to_string()),
+            person_context_json: Some(
+                "{\"promise\":\"best_effort_identity_consistency\"}".to_string(),
+            ),
+            scale: Some(2),
+            fallback_mode: Some("native".to_string()),
             ..Default::default()
         };
 
@@ -484,6 +523,7 @@ mod tests {
             "video",
             Some("req-video"),
             "C:/tmp/output",
+            "video",
             "make a clip",
             "sora-test",
             &options,
@@ -494,6 +534,7 @@ mod tests {
         assert_eq!(parsed["action"], "video");
         assert_eq!(parsed["requestId"], "req-video");
         assert_eq!(parsed["outputDir"], "C:/tmp/output");
+        assert_eq!(parsed["generation"]["capability"], "video");
         assert_eq!(parsed["generation"]["prompt"], "make a clip");
         assert_eq!(parsed["generation"]["model"], "sora-test");
         assert_eq!(parsed["generation"]["options"]["maxTokens"], 256);
@@ -506,6 +547,32 @@ mod tests {
         assert_eq!(parsed["generation"]["options"]["format"], "wav");
         assert_eq!(parsed["generation"]["options"]["voice"], "nova");
         assert_eq!(parsed["generation"]["options"]["durationSeconds"], 3);
+        assert_eq!(
+            parsed["generation"]["options"]["referenceAssetIds"][0],
+            "asset-1"
+        );
+        assert_eq!(
+            parsed["generation"]["options"]["referenceImagePath"],
+            "C:/Monster/reference.png"
+        );
+        assert_eq!(
+            parsed["generation"]["options"]["sourceAssetId"],
+            "asset-source"
+        );
+        assert_eq!(
+            parsed["generation"]["options"]["sourceImagePath"],
+            "C:/Monster/source.png"
+        );
+        assert_eq!(
+            parsed["generation"]["options"]["maskPath"],
+            "C:/Monster/mask.svg"
+        );
+        assert_eq!(
+            parsed["generation"]["options"]["personContextJson"],
+            "{\"promise\":\"best_effort_identity_consistency\"}"
+        );
+        assert_eq!(parsed["generation"]["options"]["scale"], 2);
+        assert_eq!(parsed["generation"]["options"]["fallbackMode"], "native");
     }
 
     #[test]
@@ -525,6 +592,28 @@ mod tests {
                 .to_response()
                 .detail
                 .contains("不支持该原子能力")
+        );
+    }
+
+    #[test]
+    fn validate_generation_config_uses_model_config_capability_override() {
+        let mut config = make_config();
+        config.capabilities = vec![
+            "models".to_string(),
+            "chat".to_string(),
+            "image".to_string(),
+            "txt2img".to_string(),
+            "inpaint".to_string(),
+        ];
+
+        validate_generation_config(&config, "inpaint", "edit masked area", "image-test")
+            .expect("explicit model capability should enable inpaint");
+        assert!(
+            validate_generation_config(&config, "upscale_2x", "upscale", "image-test")
+                .expect_err("upscale should require explicit native capability")
+                .to_response()
+                .detail
+                .contains("不支持该图片原子能力")
         );
     }
 

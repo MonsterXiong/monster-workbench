@@ -19,6 +19,7 @@ fn test_config(timeout_ms: u64) -> AiProviderConfig {
         timeout_ms,
         queue_mode: "serial".to_string(),
         max_concurrency: 3,
+        capabilities: Vec::new(),
         queue_key: String::new(),
     }
 }

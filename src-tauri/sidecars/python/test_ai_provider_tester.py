@@ -170,6 +170,7 @@ class MockProviderHandler(BaseHTTPRequestHandler):
             return
 
         if self.path == "/v1/images/generations":
+            self.server.last_image_body = body
             prompt = str(body.get("prompt") or "")
             if "unsupported size image" in prompt:
                 self._write_json({"error": {"message": "unsupported image size"}}, status=400)
@@ -281,6 +282,34 @@ class AiProviderTesterContractTest(unittest.TestCase):
         )
         self.assertEqual(completed.returncode, 0, completed.stderr.decode("utf-8", errors="ignore"))
         return json.loads(completed.stdout.decode("utf-8"))
+
+    def enhanced_registry_env(self, registry_path):
+        registry = {
+            "defaultAdapterId": "openai-compatible",
+            "adapters": {
+                "openai-compatible": {
+                    "capabilities": [
+                        "models",
+                        "chat",
+                        "image",
+                        "txt2img",
+                        "img2img",
+                        "inpaint",
+                        "person_consistency",
+                        "upscale_2x",
+                        "upscale_4x",
+                        "audio",
+                        "video",
+                    ],
+                },
+                "anthropic-messages": {
+                    "capabilities": ["chat"],
+                    "baseUrlHostPatterns": ["api.anthropic.com"],
+                },
+            },
+        }
+        registry_path.write_text(json.dumps(registry), encoding="utf-8")
+        return {"MONSTER_AI_PROVIDER_REGISTRY_PATH": str(registry_path)}
 
     def test_models_contract(self):
         result = self.run_sidecar("models", request_id="models-contract")
@@ -603,6 +632,117 @@ class AiProviderTesterContractTest(unittest.TestCase):
             self.assertEqual(saved_file["sizeBytes"], len(PNG_BYTES))
             self.assertEqual(saved_file["mimeType"], "image/png")
             self.assertEqual(saved_file["dimensions"], "1x1")
+
+    def test_image_generation_native_inpaint_forwards_source_and_mask(self):
+        with tempfile.TemporaryDirectory(prefix="monster-ai-sidecar-native-inpaint-") as temp_dir:
+            registry_path = Path(temp_dir) / "ai-provider-registry.json"
+            result = self.run_sidecar(
+                "image",
+                output_dir=temp_dir,
+                request_id="image-native-inpaint",
+                env_patch=self.enhanced_registry_env(registry_path),
+                generation={
+                    "capability": "inpaint",
+                    "prompt": "replace the sky",
+                    "model": "image-test",
+                    "options": {
+                        "size": "1024x1024",
+                        "count": 1,
+                        "sourceAssetId": "asset-source",
+                        "sourceImagePath": "C:/Monster/source.png",
+                        "maskPath": "C:/Monster/mask.svg",
+                        "fallbackMode": "native",
+                    },
+                },
+            )
+
+            self.assertTrue(result["ok"], result)
+            self.assertEqual(self.server.last_image_body["model"], "image-test")
+            self.assertEqual(self.server.last_image_body["prompt"], "replace the sky")
+            self.assertEqual(self.server.last_image_body["generation_mode"], "inpaint")
+            self.assertEqual(self.server.last_image_body["image"], "C:/Monster/source.png")
+            self.assertEqual(self.server.last_image_body["mask"], "C:/Monster/mask.svg")
+            self.assertEqual(self.server.last_image_body["source_asset_id"], "asset-source")
+            self.assertEqual(self.server.last_image_body["fallback_mode"], "native")
+
+    def test_image_generation_uses_model_config_capability_override(self):
+        with tempfile.TemporaryDirectory(prefix="monster-ai-sidecar-config-capability-") as temp_dir:
+            result = self.run_sidecar(
+                "image",
+                output_dir=temp_dir,
+                request_id="image-config-capability-inpaint",
+                config_patch={
+                    "capabilities": ["models", "chat", "image", "txt2img", "inpaint"],
+                },
+                generation={
+                    "capability": "inpaint",
+                    "prompt": "paint a new sign",
+                    "model": "image-test",
+                    "options": {
+                        "size": "1024x1024",
+                        "count": 1,
+                        "sourceImagePath": "C:/Monster/source.png",
+                        "maskPath": "C:/Monster/mask.svg",
+                        "fallbackMode": "native",
+                    },
+                },
+            )
+
+            self.assertTrue(result["ok"], result)
+            self.assertEqual(self.server.last_image_body["generation_mode"], "inpaint")
+            self.assertEqual(self.server.last_image_body["image"], "C:/Monster/source.png")
+            self.assertEqual(self.server.last_image_body["mask"], "C:/Monster/mask.svg")
+
+    def test_image_generation_prompt_fallback_does_not_forward_native_paths(self):
+        with tempfile.TemporaryDirectory(prefix="monster-ai-sidecar-fallback-inpaint-") as temp_dir:
+            result = self.run_sidecar(
+                "image",
+                output_dir=temp_dir,
+                request_id="image-fallback-inpaint",
+                generation={
+                    "capability": "inpaint",
+                    "prompt": "prompt fallback inpaint",
+                    "model": "image-test",
+                    "options": {
+                        "size": "1024x1024",
+                        "count": 1,
+                        "sourceImagePath": "C:/Monster/source.png",
+                        "maskPath": "C:/Monster/mask.svg",
+                        "fallbackMode": "txt2img_prompt_fallback",
+                    },
+                },
+            )
+
+            self.assertTrue(result["ok"], result)
+            self.assertEqual(self.server.last_image_body["prompt"], "prompt fallback inpaint")
+            self.assertNotIn("generation_mode", self.server.last_image_body)
+            self.assertNotIn("image", self.server.last_image_body)
+            self.assertNotIn("mask", self.server.last_image_body)
+
+    def test_image_generation_upscale_requires_native_capability(self):
+        with tempfile.TemporaryDirectory(prefix="monster-ai-sidecar-upscale-required-") as temp_dir:
+            self.server.last_image_body = None
+            result = self.run_sidecar(
+                "image",
+                output_dir=temp_dir,
+                request_id="image-upscale-native-required",
+                generation={
+                    "capability": "upscale_2x",
+                    "prompt": "upscale source",
+                    "model": "image-test",
+                    "options": {
+                        "size": "1024x1024",
+                        "count": 1,
+                        "sourceImagePath": "C:/Monster/source.png",
+                        "scale": 2,
+                        "fallbackMode": "txt2img_prompt_fallback",
+                    },
+                },
+            )
+
+            self.assertFalse(result["ok"], result)
+            self.assertIn("does not support upscale_2x", result["message"])
+            self.assertIsNone(self.server.last_image_body)
 
     def test_image_contract_does_not_fallback_size_after_disconnect(self):
         with tempfile.TemporaryDirectory(prefix="monster-ai-sidecar-fallback-size-") as temp_dir:

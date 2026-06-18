@@ -4,6 +4,8 @@ import type {
   ImageWorkbenchAsset,
   ImageWorkbenchContractSummary,
   ImageWorkbenchJob,
+  ImportImageWorkbenchReferenceRequest,
+  ImportImageWorkbenchReferenceResult,
   SaveImageWorkbenchMaskRequest,
   SaveImageWorkbenchMaskResult,
   ImageWorkbenchSnapshot,
@@ -29,6 +31,12 @@ export const imageWorkbenchService = {
 
   async listAssets(limit = 100): Promise<ImageWorkbenchAsset[]> {
     return callTauri<ImageWorkbenchAsset[]>("list_image_workbench_assets", { limit });
+  },
+
+  async importReference(
+    request: ImportImageWorkbenchReferenceRequest
+  ): Promise<ImportImageWorkbenchReferenceResult> {
+    return callTauri<ImportImageWorkbenchReferenceResult>("import_image_workbench_reference", { request });
   },
 
   async recoverInterruptedJobs(): Promise<number> {

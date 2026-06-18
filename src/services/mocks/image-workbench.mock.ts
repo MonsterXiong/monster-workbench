@@ -4,6 +4,7 @@ import {
   sortByMany,
 } from "../../utils";
 import { handleAiProviderMock } from "./ai-provider.mock";
+import { importMockImageWorkbenchReference } from "./image-workbench-reference.mock";
 import {
   buildMockImageWorkbenchMaskResult,
   buildMockExpandedPrompt,
@@ -809,6 +810,8 @@ export function handleImageWorkbenchMock(command: string, args: Record<string, u
       return { handled: true, value: listMockImageWorkbenchJobs(args) };
     case "list_image_workbench_assets":
       return { handled: true, value: listMockImageWorkbenchAssets(args) };
+    case "import_image_workbench_reference":
+      return { handled: true, value: importMockImageWorkbenchReference(args) };
     case "get_image_workbench_job_snapshot":
       return { handled: true, value: getMockImageWorkbenchSnapshot(String(args.jobId || "")) };
     case "update_image_workbench_task_status":

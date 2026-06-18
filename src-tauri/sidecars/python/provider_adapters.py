@@ -111,6 +111,16 @@ def resolve_adapter_capabilities(adapter_id, fallback):
     return frozenset(fallback)
 
 
+def normalize_capability_override(value):
+    if not isinstance(value, list):
+        return frozenset()
+    capabilities = {str(item).strip() for item in value if str(item or "").strip()}
+    if capabilities.intersection({"image", "txt2img", "img2img", "inpaint", "upscale_2x", "upscale_4x", "person_consistency"}):
+        capabilities.add("image")
+        capabilities.add("txt2img")
+    return frozenset(capabilities)
+
+
 def base_url_matches_adapter(adapter_id, base_url):
     adapter = get_registry_adapter(adapter_id) or {}
     patterns = adapter.get("baseUrlHostPatterns") or []
@@ -340,6 +350,72 @@ def parse_openai_chat_text(payload, max_text_chars=None):
     return trim_text(text, max_text_chars) if max_text_chars else text
 
 
+def clean_optional_text(value):
+    return str(value or "").strip()
+
+
+def parse_json_or_text(value):
+    text = clean_optional_text(value)
+    if not text:
+        return None
+    try:
+        return json.loads(text)
+    except Exception:
+        return text
+
+
+def normalize_positive_int(value):
+    try:
+        number = int(value)
+    except Exception:
+        return None
+    return number if number > 0 else None
+
+
+def openai_compatible_image_extension_fields(image_request):
+    request = image_request if isinstance(image_request, dict) else {}
+    if not request.get("nativeSupported") or request.get("promptFallback"):
+        return {}
+
+    capability = clean_optional_text(request.get("capability")).lower()
+    if capability in ("", "image", "txt2img"):
+        return {}
+
+    fields = {"generation_mode": capability}
+    reference_image_path = clean_optional_text(request.get("referenceImagePath"))
+    source_image_path = clean_optional_text(request.get("sourceImagePath"))
+    mask_path = clean_optional_text(request.get("maskPath"))
+    source_asset_id = clean_optional_text(request.get("sourceAssetId"))
+    reference_asset_ids = request.get("referenceAssetIds")
+
+    if capability in ("img2img", "person_consistency"):
+        reference_image = reference_image_path or source_image_path
+        if reference_image:
+            fields["reference_image"] = reference_image
+    if capability in ("inpaint", "upscale_2x", "upscale_4x") and source_image_path:
+        fields["image"] = source_image_path
+    if capability == "inpaint" and mask_path:
+        fields["mask"] = mask_path
+    if source_asset_id:
+        fields["source_asset_id"] = source_asset_id
+    if isinstance(reference_asset_ids, list) and reference_asset_ids:
+        fields["reference_asset_ids"] = reference_asset_ids
+
+    person_context = parse_json_or_text(request.get("personContextJson"))
+    if capability == "person_consistency" and person_context is not None:
+        fields["person_context"] = person_context
+
+    scale = normalize_positive_int(request.get("scale"))
+    if capability in ("upscale_2x", "upscale_4x") and scale:
+        fields["scale"] = scale
+
+    fallback_mode = clean_optional_text(request.get("fallbackMode"))
+    if fallback_mode:
+        fields["fallback_mode"] = fallback_mode
+
+    return fields
+
+
 class ProviderAdapter:
     adapter_id = "base"
     capabilities = frozenset()
@@ -347,7 +423,11 @@ class ProviderAdapter:
     def __init__(self, provider, timeout, adapter_id=None):
         self.provider = provider or {}
         self.adapter_id = adapter_id or self.adapter_id
-        self.capabilities = resolve_adapter_capabilities(self.adapter_id, self.capabilities)
+        explicit_capabilities = normalize_capability_override(self.provider.get("capabilities"))
+        self.capabilities = explicit_capabilities or resolve_adapter_capabilities(
+            self.adapter_id,
+            self.capabilities,
+        )
         self.base_url = normalize_base_url(self.provider.get("baseUrl"))
         self.model = str(self.provider.get("model") or "").strip()
         self.timeout = max(float(timeout or 3), 3)
@@ -366,6 +446,9 @@ class ProviderAdapter:
             raise ProviderCapabilityError(
                 "provider adapter {0} does not support {1}".format(self.adapter_id, capability)
             )
+
+    def supports_capability(self, capability):
+        return capability in self.capabilities
 
     def metadata(self):
         return {
@@ -471,7 +554,14 @@ class OpenAICompatibleAdapter(ProviderAdapter):
             "raw": parsed,
         }
 
-    def image(self, prompt, image_size, image_count=1, max_response_bytes=DEFAULT_MAX_RESPONSE_BYTES):
+    def image(
+        self,
+        prompt,
+        image_size,
+        image_count=1,
+        max_response_bytes=DEFAULT_MAX_RESPONSE_BYTES,
+        image_request=None,
+    ):
         self.ensure_base_model()
         self.ensure_capability("image")
         body = {
@@ -480,6 +570,7 @@ class OpenAICompatibleAdapter(ProviderAdapter):
             "n": image_count,
             "size": image_size or "1024x1024",
         }
+        body.update(openai_compatible_image_extension_fields(image_request))
         status, parsed = request_json(
             self._images_url(),
             "POST",
