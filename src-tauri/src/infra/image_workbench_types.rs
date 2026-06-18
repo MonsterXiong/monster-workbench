@@ -125,6 +125,7 @@ pub struct ImageWorkbenchSnapshot {
 #[derive(Debug, Clone)]
 pub struct ImageWorkbenchTaskClaim {
     pub task_id: String,
+    pub claim_token: String,
     pub snapshot: ImageWorkbenchSnapshot,
 }
 

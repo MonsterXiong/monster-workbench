@@ -404,6 +404,7 @@ impl ImageWorkbenchRepo {
         let snapshot = self.get_snapshot(&task.job_id)?;
         Ok(Some(ImageWorkbenchTaskClaim {
             task_id: task.id,
+            claim_token,
             snapshot,
         }))
     }

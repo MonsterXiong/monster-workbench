@@ -17,6 +17,7 @@ use crate::services::image_workbench_mask::{
     build_mask_svg, normalize_mask_strokes, SaveImageWorkbenchMaskRequest,
     SaveImageWorkbenchMaskResult,
 };
+use crate::services::runtime_heartbeat::spawn_image_task_heartbeat;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::fs;
@@ -798,6 +799,7 @@ impl ImageWorkbenchService {
             };
             latest = claim.snapshot;
             let task_id = claim.task_id;
+            let claim_token = claim.claim_token;
 
             if latest.assets.iter().any(|asset| asset.task_id == task_id) {
                 latest = self.update_task_status(UpdateImageWorkbenchTaskStatusRequest {
@@ -828,7 +830,27 @@ impl ImageWorkbenchService {
                 options: generation_options_for_job(&job, target_size.clone()),
             };
 
+            // 阶段 B1：worker 阻塞 generate 期间起独立心跳线程续租，避免视频 / 高清放大
+            // 等长任务被 60s lease 误回收。心跳触发取消时通过 ai_provider_cancel_registry
+            // 翻转 generate 的 cancel_token，generate 80ms try_wait 循环立即 terminate sidecar。
+            // 终态写入前必须先 stop()——见设计文档 §4.3 race-condition 防护。
+            let heartbeat = match worker_id {
+                Some(wid) => match self.repo() {
+                    Ok(repo) => Some(spawn_image_task_heartbeat(
+                        repo,
+                        task_id.clone(),
+                        wid.to_string(),
+                        claim_token.clone(),
+                    )),
+                    Err(_) => None,
+                },
+                None => None,
+            };
+
             let generation_result = generate(request);
+            if let Some(handle) = heartbeat {
+                handle.stop();
+            }
             let current = self.get_snapshot(job_id)?;
             let Some(current_task) = current.tasks.iter().find(|task| task.id == task_id) else {
                 latest = current;

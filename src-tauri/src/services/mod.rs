@@ -20,6 +20,7 @@ pub mod image_workbench_service;
 pub mod log_service;
 pub mod navigation_service;
 pub mod runtime_constants;
+pub mod runtime_heartbeat;
 pub mod runtime_janitor;
 pub mod system_service;
 pub mod task_service;
