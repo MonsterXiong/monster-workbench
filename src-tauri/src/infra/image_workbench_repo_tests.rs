@@ -568,3 +568,272 @@ fn image_workbench_updates_asset_favorite_and_templates() {
         .expect("template should delete");
     assert!(repo.list_templates().expect("templates").is_empty());
 }
+
+fn seed_single_task_repo() -> (ImageWorkbenchRepo, String) {
+    let repo = test_repo();
+    let snapshot = repo
+        .create_job(NewImageWorkbenchJob {
+            mode: "txt2img".to_string(),
+            prompt: "心跳测试".to_string(),
+            negative_prompt: None,
+            task_prompts: Vec::new(),
+            quantity: 1,
+            provider_config_id: Some("model-1".to_string()),
+            model: Some("gpt-image-2".to_string()),
+            size: Some("1024x1024".to_string()),
+            reference_asset_ids_json: None,
+            source_asset_id: None,
+            source_image_path: None,
+            mask_path: None,
+            person_context_json: None,
+            upscale_scale: None,
+            fallback_policy: None,
+        })
+        .expect("create job");
+    let task_id = snapshot.tasks[0].id.clone();
+    (repo, task_id)
+}
+
+fn now_ms_for_test() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|dur| dur.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+#[test]
+fn renew_image_task_lease_succeeds_when_worker_and_token_match() {
+    let (repo, task_id) = seed_single_task_repo();
+    let claimed_at = now_ms_for_test();
+    repo.test_only_seed_running_task(
+        &task_id,
+        Some("worker-A"),
+        Some("claim-tok-1"),
+        claimed_at,
+        claimed_at + 60_000,
+        Some(claimed_at),
+    )
+    .expect("seed running");
+
+    let ok = repo
+        .renew_image_task_lease(&task_id, "worker-A", "claim-tok-1", claimed_at + 120_000)
+        .expect("renew");
+    assert!(ok, "matching worker_id + claim_token should renew");
+}
+
+#[test]
+fn renew_image_task_lease_fails_when_worker_id_mismatch() {
+    let (repo, task_id) = seed_single_task_repo();
+    let claimed_at = now_ms_for_test();
+    repo.test_only_seed_running_task(
+        &task_id,
+        Some("worker-A"),
+        Some("claim-tok-1"),
+        claimed_at,
+        claimed_at + 60_000,
+        Some(claimed_at),
+    )
+    .expect("seed running");
+
+    let ok = repo
+        .renew_image_task_lease(&task_id, "worker-B", "claim-tok-1", claimed_at + 120_000)
+        .expect("renew");
+    assert!(!ok);
+}
+
+#[test]
+fn renew_image_task_lease_fails_when_claim_token_mismatch() {
+    let (repo, task_id) = seed_single_task_repo();
+    let claimed_at = now_ms_for_test();
+    repo.test_only_seed_running_task(
+        &task_id,
+        Some("worker-A"),
+        Some("claim-tok-1"),
+        claimed_at,
+        claimed_at + 60_000,
+        Some(claimed_at),
+    )
+    .expect("seed running");
+
+    let ok = repo
+        .renew_image_task_lease(&task_id, "worker-A", "claim-tok-other", claimed_at + 120_000)
+        .expect("renew");
+    assert!(!ok);
+}
+
+#[test]
+fn reset_running_image_tasks_by_other_worker_only_resets_foreign_workers() {
+    let repo = test_repo();
+    let snapshot = repo
+        .create_job(NewImageWorkbenchJob {
+            mode: "txt2img".to_string(),
+            prompt: "并行".to_string(),
+            negative_prompt: None,
+            task_prompts: Vec::new(),
+            quantity: 2,
+            provider_config_id: None,
+            model: None,
+            size: None,
+            reference_asset_ids_json: None,
+            source_asset_id: None,
+            source_image_path: None,
+            mask_path: None,
+            person_context_json: None,
+            upscale_scale: None,
+            fallback_policy: None,
+        })
+        .expect("create job");
+    let own_task = snapshot.tasks[0].id.clone();
+    let foreign_task = snapshot.tasks[1].id.clone();
+    let claimed_at = now_ms_for_test();
+
+    repo.test_only_seed_running_task(
+        &own_task,
+        Some("worker-current"),
+        Some("tok-own"),
+        claimed_at,
+        claimed_at + 60_000,
+        Some(claimed_at),
+    )
+    .expect("seed own");
+    repo.test_only_seed_running_task(
+        &foreign_task,
+        Some("worker-stale"),
+        Some("tok-foreign"),
+        claimed_at,
+        claimed_at + 60_000,
+        Some(claimed_at),
+    )
+    .expect("seed foreign");
+
+    let n = repo
+        .reset_running_image_tasks_by_other_worker("worker-current")
+        .expect("reset");
+    assert_eq!(n, 1);
+
+    let snap = repo.get_snapshot(&snapshot.job.id).expect("snapshot");
+    let own = snap.tasks.iter().find(|t| t.id == own_task).unwrap();
+    let foreign = snap.tasks.iter().find(|t| t.id == foreign_task).unwrap();
+    assert_eq!(own.status, "running");
+    assert_eq!(foreign.status, "queued");
+    assert!(foreign.claim_token.is_none());
+    assert!(foreign.leased_until_ms.is_none());
+}
+
+#[test]
+fn reset_running_image_tasks_with_expired_lease_only_resets_expired() {
+    let repo = test_repo();
+    let snapshot = repo
+        .create_job(NewImageWorkbenchJob {
+            mode: "txt2img".to_string(),
+            prompt: "lease".to_string(),
+            negative_prompt: None,
+            task_prompts: Vec::new(),
+            quantity: 2,
+            provider_config_id: None,
+            model: None,
+            size: None,
+            reference_asset_ids_json: None,
+            source_asset_id: None,
+            source_image_path: None,
+            mask_path: None,
+            person_context_json: None,
+            upscale_scale: None,
+            fallback_policy: None,
+        })
+        .expect("create job");
+    let fresh_task = snapshot.tasks[0].id.clone();
+    let expired_task = snapshot.tasks[1].id.clone();
+    let claimed_at = now_ms_for_test();
+    let cutoff = claimed_at + 30_000;
+
+    repo.test_only_seed_running_task(
+        &fresh_task,
+        Some("worker-current"),
+        Some("tok-fresh"),
+        claimed_at,
+        cutoff + 60_000,
+        Some(claimed_at),
+    )
+    .expect("seed fresh");
+    repo.test_only_seed_running_task(
+        &expired_task,
+        Some("worker-current"),
+        Some("tok-expired"),
+        claimed_at,
+        cutoff - 1_000,
+        Some(claimed_at),
+    )
+    .expect("seed expired");
+
+    let n = repo
+        .reset_running_image_tasks_with_expired_lease("worker-current", cutoff)
+        .expect("reset");
+    assert_eq!(n, 1);
+
+    let snap = repo.get_snapshot(&snapshot.job.id).expect("snapshot");
+    let fresh = snap.tasks.iter().find(|t| t.id == fresh_task).unwrap();
+    let expired = snap.tasks.iter().find(|t| t.id == expired_task).unwrap();
+    assert_eq!(fresh.status, "running");
+    assert_eq!(expired.status, "queued");
+}
+
+#[test]
+fn fail_stuck_running_image_tasks_marks_oldest_as_failed_and_increments_retry() {
+    let repo = test_repo();
+    let snapshot = repo
+        .create_job(NewImageWorkbenchJob {
+            mode: "txt2img".to_string(),
+            prompt: "stuck".to_string(),
+            negative_prompt: None,
+            task_prompts: Vec::new(),
+            quantity: 2,
+            provider_config_id: None,
+            model: None,
+            size: None,
+            reference_asset_ids_json: None,
+            source_asset_id: None,
+            source_image_path: None,
+            mask_path: None,
+            person_context_json: None,
+            upscale_scale: None,
+            fallback_policy: None,
+        })
+        .expect("create job");
+    let fresh_task = snapshot.tasks[0].id.clone();
+    let stuck_task = snapshot.tasks[1].id.clone();
+    let now = now_ms_for_test();
+    let stuck_threshold = now - 6 * 60 * 60 * 1000;
+
+    repo.test_only_seed_running_task(
+        &fresh_task,
+        Some("worker-current"),
+        Some("tok-fresh"),
+        now - 60_000,
+        now + 60_000,
+        Some(now),
+    )
+    .expect("seed fresh");
+    repo.test_only_seed_running_task(
+        &stuck_task,
+        Some("worker-current"),
+        Some("tok-stuck"),
+        stuck_threshold - 1_000,
+        now + 60_000,
+        Some(now),
+    )
+    .expect("seed stuck");
+
+    let n = repo
+        .fail_stuck_running_image_tasks(stuck_threshold, "worker_stuck")
+        .expect("fail stuck");
+    assert_eq!(n, 1);
+
+    let snap = repo.get_snapshot(&snapshot.job.id).expect("snapshot");
+    let fresh = snap.tasks.iter().find(|t| t.id == fresh_task).unwrap();
+    let stuck = snap.tasks.iter().find(|t| t.id == stuck_task).unwrap();
+    assert_eq!(fresh.status, "running");
+    assert_eq!(stuck.status, "failed");
+    assert_eq!(stuck.error.as_deref(), Some("worker_stuck"));
+    assert_eq!(stuck.retry_count, 1, "retry_count should increment");
+}

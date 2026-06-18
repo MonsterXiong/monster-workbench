@@ -125,6 +125,43 @@ pub fn init_image_workbench_schema(db_path: &Path) -> AppResult<()> {
             ON image_workbench_model_runs(job_id, created_at_ms);",
     )?;
     ensure_image_workbench_job_columns(&conn)?;
+    ensure_image_workbench_task_runtime_columns(&conn)?;
+
+    Ok(())
+}
+
+fn ensure_image_workbench_task_runtime_columns(conn: &Connection) -> AppResult<()> {
+    let mut stmt = conn.prepare("PRAGMA table_info(image_workbench_tasks)")?;
+    let columns = stmt
+        .query_map([], |row| row.get::<_, String>(1))?
+        .collect::<Result<HashSet<_>, _>>()?;
+
+    // Worker heartbeat / lease 巡检所需的运行时列。所有列均可空，旧
+    // 行保留 NULL；A1 阶段不主动写入这些列，service 接入在 A2 完成。
+    for (name, sql) in [
+        (
+            "worker_id",
+            "ALTER TABLE image_workbench_tasks ADD COLUMN worker_id TEXT",
+        ),
+        (
+            "claimed_at_ms",
+            "ALTER TABLE image_workbench_tasks ADD COLUMN claimed_at_ms INTEGER",
+        ),
+        (
+            "last_heartbeat_ms",
+            "ALTER TABLE image_workbench_tasks ADD COLUMN last_heartbeat_ms INTEGER",
+        ),
+    ] {
+        if !columns.contains(name) {
+            conn.execute(sql, [])?;
+        }
+    }
+
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_image_workbench_tasks_lease
+            ON image_workbench_tasks(status, leased_until_ms)",
+        [],
+    )?;
 
     Ok(())
 }
