@@ -38,6 +38,7 @@
 - [x] `/image-workbench` 真实 Provider 成功链路已闭环：2026-06-13 使用 active image config `ai-model-1780916920189-5krffy` / `gpt-image-2` 生成 PNG，创建真实 job `iw-job-1781361589184-1`，写入 succeeded task、asset、metadata 和 succeeded model_run；资产文件存在于 `~/.monster-tools/ai/image-workbench/assets/iw-task-1781361589185-2/`，且大小与 DB `size_bytes` 一致。Windows UIA 截图自动化仍不稳定，后续只保留真实窗口最终观感/交互复核，不再阻塞后端/Provider/DB 闭环结论。
 - [ ] `/image-workbench` 真实窗口最终观感/交互复核：确认成功 job、资产图、详情审计、历史列表和图库切换在 Tauri WebView 中显示正常；优先用 WebView2 CDP，若 dev watcher 被 `__pycache__` 干扰，先停止 dev、清理缓存并设置 `PYTHONDONTWRITEBYTECODE=1` 后再测。2026-06-14 Windows Computer Use 可截图真实 `Monster Tools` 窗口并用键盘导航，但坐标点击/滚动接口绑定不稳定，暂不作为真实窗口复核主路径。
 - [ ] `/image-workbench` 新版“审片优先”首屏仍需真实窗口观感复核：确认作业概览、任务摘要、图库计数、选中结果动作分组和移动端/窄宽度降级布局都成立，再决定是否继续拆资产组/版本链。
+- [ ] `/image-workbench` 在“审片优先”首屏之后，下一轮优先考虑资产组/版本链：让同一作业或同一风格延续结果有更清晰的归属关系，避免图库继续停留在缩略图平铺层。
 - [ ] 图片工作台增强模式（图生图、局部重绘、人物一致性、高清放大）已进入 mode / capability / UI 降级清单；参考图/外部图入口已能自动切到图生图并显示近似反推提示词；局部重绘已补前端 mask 画布保存、受控 SVG mask 路径和浏览器 mock inpaint job 闭环。2026-06-14 已补模型配置 capability override 和 Python sidecar 增强图片请求契约：Provider 配置页可持久勾选模型能力，Rust/Python 都优先按模型配置能力判断；`img2img/inpaint/person_consistency` 支持 `txt2img_prompt_fallback`，声明原生能力时透传 reference/source/mask/person/scale 扩展字段，`upscale_2x/upscale_4x` 必须有 Provider 原生能力。后续需补真实 Provider adapter family / smoke、受控参考资产导入和真实窗口复核后再开放生产级直接生成。
 
 ## 文档维护
@@ -50,3 +51,9 @@
 - [ ] 将 `/workspace` 从欢迎页升级为工作台总览：展示 Provider 就绪状态、未完成任务、最近资产、高频入口和下一步建议。
 - [ ] 重新梳理主导航分组：按“创作 / 资产 / 工具 / 系统诊断”组织现有 AI、图片工作台、文件、导航、工具和设置模块。
 - [ ] 为 `/image-workbench` 设计生产化工作流：补模式引导、资产组/版本链、模板配方复用、失败原因和下一步动作，避免只在现有三栏界面继续追加按钮。
+- [ ] `/image-workbench` 已完成“审片优先 + 下一步分支卡片”的第三轮收束，下一步优先把“资产组 / 版本链”做成真实语义和界面承载，避免图库继续停留在平铺缩略图层。
+- [ ] `/image-workbench` 已先基于 `job.sourceAssetId` 落地轻量“版本链”展示与跨 job 选图切快照；下一步继续补更完整的资产组 / 版本链数据语义，而不是只停留在 UI 提示层。
+- [ ] `/image-workbench` 当前链路已能在图库分组和卡片徽标层表达“来源 / 已选 / 分支”；下一步继续把这套关系升级成更完整的资产组语义，例如直接分辨交付版本、链路层级和同源分支归属。
+- [ ] `/image-workbench` 已有前端级“交付”徽标判断（收藏且无后续分支），下一步应把它升级为更稳定的正式语义，避免长期依赖前端推断代替资产组/交付状态。
+- [ ] `/image-workbench` 已把“可交付结果”单独提升为 `library` 分组；下一步应把这套前端编排沉淀成正式数据语义，否则跨端、一致性和后续筛选都会受限。
+- [ ] `/image-workbench` 的图库分组头已经能显示来源/分支/交付数量摘要；下一步更适合把这些摘要背后的角色判断下沉为正式字段或资产组关系，而不是继续扩大前端推断范围。

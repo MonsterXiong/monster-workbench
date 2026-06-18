@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, onMounted, ref } from "vue";
 import {
   Ban,
   BookTemplate,
@@ -29,23 +29,28 @@ import { useI18n } from "../../composables/useI18n";
 import { useImageWorkbenchStore } from "../../stores/image-workbench";
 import { buildImageSizeOptions } from "../ai/components/image/aiImageSizeOptions";
 import { formatBytes, formatDateTime, formatTemplate } from "../../utils";
+import {
+  buildBranchActions,
+  type ImageWorkbenchAssetCard,
+  buildAssetBadges,
+  buildCompareStrip,
+  buildGallerySections,
+  buildRelatedAssetGroups,
+  buildSelectionContextItems,
+  buildTaskStatusSummary,
+  buildVersionChain,
+} from "./imageWorkbenchReview";
+import { useImageWorkbenchMaskCanvas } from "./useImageWorkbenchMaskCanvas";
+import { buildImageWorkbenchHandlers } from "./useImageWorkbenchHandlers";
 import "./ImageWorkbenchPage.css";
 import type {
   ImageWorkbenchAsset,
-  ImageWorkbenchJob,
-  ImageWorkbenchMaskStroke,
   ImageWorkbenchMode,
-  ImageWorkbenchTemplate,
 } from "../../types/image-workbench";
 
 const { t } = useI18n();
 const imageWorkbenchStore = useImageWorkbenchStore();
 const galleryTab = ref<"current" | "library">("current");
-const maskCanvasRef = ref<HTMLCanvasElement | null>(null);
-const maskTool = ref<"paint" | "erase">("paint");
-const maskBrushSize = ref(32);
-const inpaintMaskStrokes = ref<ImageWorkbenchMaskStroke[]>([]);
-let activeMaskStroke: ImageWorkbenchMaskStroke | null = null;
 
 const modeOptions: ImageWorkbenchMode[] = [
   "txt2img",
@@ -88,23 +93,59 @@ const inpaintAspectRatio = computed(() => {
   const height = selectedAsset.value?.height || 1;
   return `${width} / ${height}`;
 });
-const canSaveInpaintMask = computed(
-  () =>
-    isInpaintWorkspace.value &&
-    inpaintMaskStrokes.value.some((stroke) => stroke.points.length >= 2)
-);
-const taskStatusSummary = computed(() => {
-  const tasks = imageWorkbenchStore.tasks;
-  const total = tasks.length;
-  const finished = tasks.filter((task) => task.status === "succeeded").length;
-  const running = tasks.filter((task) => ["queued", "running", "validating", "retrying"].includes(task.status)).length;
-  const failed = tasks.filter((task) => task.status === "failed").length;
-  return { total, finished, running, failed };
+
+// Inpaint 蒙版画布逻辑全部沉在 useImageWorkbenchMaskCanvas，Page 只暴露
+// 必要的 ref / 事件 handler 给 template；mode/selectedAsset 切换时也由
+// composable 自身按 watchKey 重新初始化。
+// Inpaint mask canvas state lives in the composable. The page only wires
+// refs and handlers into the template, while mode and asset switches reset
+// internal canvas state through the watch key.
+const {
+  maskCanvasRef,
+  maskTool,
+  maskBrushSize,
+  canSaveInpaintMask,
+  handleMaskPointerDown,
+  handleMaskPointerMove,
+  finishMaskStroke,
+  resetInpaintMask,
+  handleMaskImageLoad,
+  handleSaveInpaintMask,
+} = useImageWorkbenchMaskCanvas({
+  isActive: isInpaintWorkspace,
+  onSave: ({ width, height, strokes }) => {
+    void imageWorkbenchStore.saveInpaintMaskDraft({ width, height, strokes });
+  },
+  onClearStoreMask: () => imageWorkbenchStore.clearInpaintMask(),
+  watchKey: () => [
+    imageWorkbenchStore.mode,
+    selectedAsset.value?.id,
+    selectedAssetDisplayUrl.value,
+  ],
 });
+void maskCanvasRef;
+const taskStatusSummary = computed(() => buildTaskStatusSummary(imageWorkbenchStore.tasks));
 const galleryAssetCount = computed(() =>
   galleryTab.value === "current"
     ? imageWorkbenchStore.currentAssetCards.length
     : imageWorkbenchStore.libraryAssetCards.length
+);
+const gallerySections = computed(() =>
+  buildGallerySections({
+    galleryTab: galleryTab.value,
+    jobs: imageWorkbenchStore.jobs,
+    currentAssets: imageWorkbenchStore.currentAssetCards,
+    libraryAssets: imageWorkbenchStore.libraryAssetCards,
+    currentJob: currentJob.value,
+    selectedAssetId: selectedAsset.value?.id || "",
+    t,
+  })
+);
+const compareStripItems = computed(() =>
+  buildCompareStrip({
+    currentAssets: imageWorkbenchStore.currentAssetCards,
+    selectedAssetId: selectedAsset.value?.id || "",
+  })
 );
 const selectedAssetSummary = computed(() => {
   if (!selectedAsset.value) {
@@ -112,6 +153,42 @@ const selectedAssetSummary = computed(() => {
   }
   return `${selectedAsset.value.width || "-"}x${selectedAsset.value.height || "-"} · ${formatAssetSize(selectedAsset.value)}`;
 });
+const selectionContextItems = computed(() =>
+  buildSelectionContextItems({
+    selectedMetadata: selectedMetadata.value,
+    selectedModelRun: selectedModelRun.value,
+    t,
+  })
+);
+const relatedAssetGroups = computed(() =>
+  buildRelatedAssetGroups({
+    selectedAssetId: selectedAsset.value?.id || "",
+    selectedJobId: selectedAsset.value?.jobId || "",
+    currentAssets: imageWorkbenchStore.currentAssetCards,
+    libraryAssets: imageWorkbenchStore.libraryAssetCards,
+    t,
+  })
+);
+const versionChainItems = computed(() =>
+  buildVersionChain({
+    selectedAssetId: selectedAsset.value?.id || "",
+    selectedJobId: selectedAsset.value?.jobId || "",
+    currentJob: currentJob.value,
+    jobs: imageWorkbenchStore.jobs,
+    currentAssets: imageWorkbenchStore.currentAssetCards,
+    libraryAssets: imageWorkbenchStore.libraryAssetCards,
+    t,
+  })
+);
+const branchActions = computed(() =>
+  buildBranchActions({
+    canInpaint: Boolean(selectedAsset.value),
+    canPersonConsistency: imageWorkbenchStore.canRunPersonConsistency,
+    canUpscale2x: imageWorkbenchStore.canRunUpscale2x,
+    canUpscale4x: imageWorkbenchStore.canRunUpscale4x,
+    t,
+  })
+);
 const reviewSummaryCards = computed(() => [
   {
     key: "job",
@@ -166,256 +243,44 @@ function formatAssetSize(asset: ImageWorkbenchAsset | null) {
   return asset?.sizeBytes ? formatBytes(asset.sizeBytes, { decimals: 1 }) : "-";
 }
 
-function handleGenerate() {
-  void imageWorkbenchStore.runTxt2imgBatch();
-}
-
-function handleCancel() {
-  void imageWorkbenchStore.cancelCurrentJob();
-}
-
-function handleRetry() {
-  void imageWorkbenchStore.retryFailedTasks();
-}
-
-function handleDeleteJob() {
-  void imageWorkbenchStore.deleteCurrentJob();
-}
-
-function handleSelectJob(job: ImageWorkbenchJob) {
-  void imageWorkbenchStore.selectJob(job.id);
-}
-
-function handleToggleFavorite(asset: ImageWorkbenchAsset) {
-  void imageWorkbenchStore.toggleAssetFavorite(asset);
-}
-
-function handleApplyTemplate(template: ImageWorkbenchTemplate) {
-  imageWorkbenchStore.applyTemplate(template);
-}
-
-function handleDeleteTemplate(template: ImageWorkbenchTemplate) {
-  void imageWorkbenchStore.deleteTemplate(template.id);
-}
-
-function handleSaveTemplate() {
-  void imageWorkbenchStore.saveCurrentTemplate();
-}
-
-function handleSelectReferenceImage() {
-  void imageWorkbenchStore.selectReferenceImage();
-}
-
-function handleClearReferenceImage() {
-  imageWorkbenchStore.clearReferenceImage();
-}
-
-function handleCopyExternalReversePrompt() {
-  void imageWorkbenchStore.copyExternalReversePrompt();
-}
-
-function handleUseExternalReversePrompt() {
-  imageWorkbenchStore.useExternalReversePrompt();
-}
-
-function handleRefresh() {
-  void imageWorkbenchStore.loadInitialState();
-}
-
-function handleOpenAssetLocation() {
-  void imageWorkbenchStore.openSelectedAssetLocation();
-}
-
-function handleExportJob() {
-  void imageWorkbenchStore.exportCurrentJob();
-}
-
-function handleExportSelectedAsset() {
-  void imageWorkbenchStore.exportSelectedAsset();
-}
-
-function handleCopyMetaPrompt() {
-  void imageWorkbenchStore.copySelectedMetaPrompt();
-}
-
-function handleRegenerateSelectedAsset() {
-  void imageWorkbenchStore.regenerateSelectedAsset();
-}
-
-function handleContinueSelectedStyle() {
-  void imageWorkbenchStore.continueSelectedStyle();
-}
-
-function handleStartInpaintSelectedAsset() {
-  void imageWorkbenchStore.startInpaintSelectedAsset();
-}
-
-function handleContinueSelectedPerson() {
-  void imageWorkbenchStore.continueSelectedPerson();
-}
-
-function handleUpscaleSelectedAsset(scale: 2 | 4) {
-  void imageWorkbenchStore.upscaleSelectedAsset(scale);
-}
-
-function handleModelConfigChange(event: Event) {
-  const target = event.target as HTMLSelectElement | null;
-  imageWorkbenchStore.selectImageModelConfig(target?.value || "");
-}
-
-function syncMaskCanvasSize() {
-  const canvas = maskCanvasRef.value;
-  if (!canvas) {
-    return;
-  }
-  const rect = canvas.getBoundingClientRect();
-  const width = Math.max(16, Math.round(rect.width));
-  const height = Math.max(16, Math.round(rect.height));
-  if (canvas.width !== width || canvas.height !== height) {
-    canvas.width = width;
-    canvas.height = height;
-    replayMaskCanvas();
-  }
-}
-
-function getMaskCanvasPoint(event: PointerEvent) {
-  const canvas = maskCanvasRef.value;
-  if (!canvas) {
-    return null;
-  }
-  const rect = canvas.getBoundingClientRect();
-  const scaleX = canvas.width / Math.max(rect.width, 1);
-  const scaleY = canvas.height / Math.max(rect.height, 1);
-  return {
-    x: (event.clientX - rect.left) * scaleX,
-    y: (event.clientY - rect.top) * scaleY,
-  };
-}
-
-function drawMaskStroke(stroke: ImageWorkbenchMaskStroke, fromIndex = 0) {
-  const canvas = maskCanvasRef.value;
-  const ctx = canvas?.getContext("2d");
-  if (!canvas || !ctx || stroke.points.length < 2) {
-    return;
-  }
-  ctx.save();
-  ctx.lineCap = "round";
-  ctx.lineJoin = "round";
-  ctx.lineWidth = stroke.brushSize;
-  ctx.strokeStyle = "rgba(56, 189, 248, 0.78)";
-  ctx.globalCompositeOperation = stroke.tool === "erase" ? "destination-out" : "source-over";
-  const startIndex = Math.max(1, fromIndex);
-  for (let index = startIndex; index < stroke.points.length; index += 1) {
-    const previous = stroke.points[index - 1];
-    const point = stroke.points[index];
-    ctx.beginPath();
-    ctx.moveTo(previous.x, previous.y);
-    ctx.lineTo(point.x, point.y);
-    ctx.stroke();
-  }
-  ctx.restore();
-}
-
-function replayMaskCanvas() {
-  const canvas = maskCanvasRef.value;
-  const ctx = canvas?.getContext("2d");
-  if (!canvas || !ctx) {
-    return;
-  }
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  inpaintMaskStrokes.value.forEach((stroke) => drawMaskStroke(stroke));
-}
-
-function handleMaskPointerDown(event: PointerEvent) {
-  if (!isInpaintWorkspace.value) {
-    return;
-  }
-  syncMaskCanvasSize();
-  const point = getMaskCanvasPoint(event);
-  if (!point) {
-    return;
-  }
-  event.preventDefault();
-  imageWorkbenchStore.clearInpaintMask();
-  const canvas = maskCanvasRef.value;
-  canvas?.setPointerCapture(event.pointerId);
-  activeMaskStroke = {
-    tool: maskTool.value,
-    brushSize: maskBrushSize.value,
-    points: [point],
-  };
-  inpaintMaskStrokes.value = [...inpaintMaskStrokes.value, activeMaskStroke];
-}
-
-function handleMaskPointerMove(event: PointerEvent) {
-  if (!activeMaskStroke) {
-    return;
-  }
-  const point = getMaskCanvasPoint(event);
-  if (!point) {
-    return;
-  }
-  event.preventDefault();
-  const fromIndex = activeMaskStroke.points.length - 1;
-  activeMaskStroke.points.push(point);
-  drawMaskStroke(activeMaskStroke, fromIndex);
-}
-
-function finishMaskStroke(event: PointerEvent) {
-  if (!activeMaskStroke) {
-    return;
-  }
-  if (maskCanvasRef.value?.hasPointerCapture(event.pointerId)) {
-    maskCanvasRef.value.releasePointerCapture(event.pointerId);
-  }
-  if (activeMaskStroke.points.length < 2) {
-    inpaintMaskStrokes.value = inpaintMaskStrokes.value.filter((stroke) => stroke !== activeMaskStroke);
-  } else {
-    inpaintMaskStrokes.value = [...inpaintMaskStrokes.value];
-  }
-  activeMaskStroke = null;
-}
-
-function resetInpaintMask() {
-  activeMaskStroke = null;
-  inpaintMaskStrokes.value = [];
-  imageWorkbenchStore.clearInpaintMask();
-  replayMaskCanvas();
-}
-
-function handleMaskImageLoad() {
-  nextTick(() => syncMaskCanvasSize());
-}
-
-function handleSaveInpaintMask() {
-  const canvas = maskCanvasRef.value;
-  if (!canvas || !canSaveInpaintMask.value) {
-    return;
-  }
-  void imageWorkbenchStore.saveInpaintMaskDraft({
-    width: canvas.width,
-    height: canvas.height,
-    strokes: inpaintMaskStrokes.value.filter((stroke) => stroke.points.length >= 2),
+function assetBadges(asset: ImageWorkbenchAssetCard) {
+  return buildAssetBadges({
+    asset,
+    selectedAssetId: selectedAsset.value?.id || "",
+    jobs: imageWorkbenchStore.jobs,
+    currentAssets: imageWorkbenchStore.currentAssetCards,
+    libraryAssets: imageWorkbenchStore.libraryAssetCards,
+    t,
   });
 }
 
-watch(
-  () => [imageWorkbenchStore.mode, selectedAsset.value?.id, selectedAssetDisplayUrl.value],
-  () => {
-    resetInpaintMask();
-    if (imageWorkbenchStore.mode === "inpaint") {
-      void nextTick(() => syncMaskCanvasSize());
-    }
-  }
-);
+const {
+  handleSelectReviewAsset,
+  handleGenerate,
+  handleCancel,
+  handleRetry,
+  handleDeleteJob,
+  handleSelectJob,
+  handleToggleFavorite,
+  handleApplyTemplate,
+  handleDeleteTemplate,
+  handleSaveTemplate,
+  handleSelectReferenceImage,
+  handleClearReferenceImage,
+  handleCopyExternalReversePrompt,
+  handleUseExternalReversePrompt,
+  handleRefresh,
+  handleOpenAssetLocation,
+  handleExportJob,
+  handleExportSelectedAsset,
+  handleCopyMetaPrompt,
+  handleRegenerateSelectedAsset,
+  handleBranchAction,
+  handleModelConfigChange,
+} = buildImageWorkbenchHandlers(imageWorkbenchStore);
 
 onMounted(() => {
   void imageWorkbenchStore.loadInitialState();
-  window.addEventListener("resize", syncMaskCanvasSize);
-});
-
-onBeforeUnmount(() => {
-  window.removeEventListener("resize", syncMaskCanvasSize);
 });
 </script>
 
@@ -697,6 +562,32 @@ onBeforeUnmount(() => {
           </div>
         </section>
 
+        <section v-if="compareStripItems.length > 1" class="image-workbench-panel image-workbench-panel--compare">
+          <div class="image-workbench-section__head">
+            <Layers3 class="h-4 w-4" />
+            <span>{{ t("imageWorkbench.review.compareTitle") }}</span>
+            <strong>{{ compareStripItems.length }}</strong>
+          </div>
+          <div class="image-workbench-compare-strip">
+            <button
+              v-for="item in compareStripItems"
+              :key="item.asset.id"
+              type="button"
+              class="image-workbench-compare-card"
+              :class="{ 'is-selected': item.role === 'selected' }"
+              @click="handleSelectReviewAsset(item.asset)"
+            >
+              <img :src="item.asset.displayUrl" alt="" />
+              <div class="image-workbench-compare-card__body">
+                <span class="image-workbench-compare-card__role">
+                  {{ item.role === 'selected' ? t("imageWorkbench.review.compareSelected") : t("imageWorkbench.review.compareCandidate") }}
+                </span>
+                <strong>{{ item.asset.width || "-" }}x{{ item.asset.height || "-" }}</strong>
+              </div>
+            </button>
+          </div>
+        </section>
+
         <section class="image-workbench-panel image-workbench-panel--gallery">
           <div class="image-workbench-gallery-head">
             <div class="image-workbench-section__head">
@@ -754,21 +645,55 @@ onBeforeUnmount(() => {
               <small v-if="imageWorkbenchStore.inpaintMaskPath">{{ imageWorkbenchStore.inpaintMaskPath }}</small>
             </div>
           </div>
-          <div v-else-if="visibleAssetCards.length" class="image-workbench-grid">
-            <button
-              v-for="asset in visibleAssetCards"
-              :key="asset.id"
-              type="button"
-              class="image-workbench-asset-card"
-              :class="{ 'is-active': asset.id === imageWorkbenchStore.selectedAssetId }"
-              @click="imageWorkbenchStore.selectAsset(asset.id)"
+          <div v-else-if="visibleAssetCards.length" class="image-workbench-gallery-sections">
+            <section
+              v-for="section in gallerySections"
+              :key="section.key"
+              class="image-workbench-gallery-section"
             >
-              <img :src="asset.displayUrl" alt="" />
-              <span>
-                <Star v-if="asset.favorite" class="h-3.5 w-3.5" />
-                {{ asset.width || "-" }}x{{ asset.height || "-" }}
-              </span>
-            </button>
+              <div class="image-workbench-gallery-section__head">
+                <div>
+                  <strong>{{ section.title }}</strong>
+                  <small>{{ section.description }}</small>
+                  <div v-if="section.highlights?.length" class="image-workbench-gallery-section__highlights">
+                    <span
+                      v-for="item in section.highlights"
+                      :key="item.key"
+                      class="image-workbench-gallery-section__highlight"
+                    >
+                      {{ item.label }}
+                    </span>
+                  </div>
+                </div>
+                <span>{{ section.items.length }}</span>
+              </div>
+              <div class="image-workbench-grid">
+                <button
+                  v-for="asset in section.items"
+                  :key="asset.id"
+                  type="button"
+                  class="image-workbench-asset-card"
+                  :class="{ 'is-active': asset.id === imageWorkbenchStore.selectedAssetId }"
+                  @click="handleSelectReviewAsset(asset)"
+                >
+                  <img :src="asset.displayUrl" alt="" />
+                  <div class="image-workbench-asset-card__badges">
+                    <span
+                      v-for="badge in assetBadges(asset)"
+                      :key="badge.key"
+                      class="image-workbench-asset-card__badge"
+                      :class="`is-${badge.tone}`"
+                    >
+                      {{ badge.label }}
+                    </span>
+                  </div>
+                  <span>
+                    <Star v-if="asset.favorite" class="h-3.5 w-3.5" />
+                    {{ asset.width || "-" }}x{{ asset.height || "-" }}
+                  </span>
+                </button>
+              </div>
+            </section>
           </div>
           <div v-else class="image-workbench-empty">
             <Images class="h-10 w-10" />
@@ -791,9 +716,88 @@ onBeforeUnmount(() => {
             <strong>{{ selectedMetadata?.originalPrompt || selectedMetadata?.expandedPrompt || t("imageWorkbench.review.emptyPrompt") }}</strong>
             <small>{{ selectedAssetSummary }}</small>
           </div>
+          <div v-if="selectionContextItems.length" class="image-workbench-selection-context">
+            <span v-for="item in selectionContextItems" :key="item.key" class="image-workbench-selection-context__item">
+              {{ item.label }} · {{ item.value }}
+            </span>
+          </div>
+          <section v-if="versionChainItems.length" class="image-workbench-version-chain">
+            <div class="image-workbench-version-chain__head">
+              <strong>{{ t("imageWorkbench.review.versionChainTitle") }}</strong>
+              <small>{{ t("imageWorkbench.review.versionChainDesc") }}</small>
+            </div>
+            <div class="image-workbench-version-chain__strip">
+              <template v-for="(item, index) in versionChainItems" :key="item.key">
+                <button
+                  type="button"
+                  class="image-workbench-version-card"
+                  :class="[`is-${item.tone}`, { 'is-active': item.asset.id === selectedAsset?.id }]"
+                  @click="handleSelectReviewAsset(item.asset)"
+                >
+                  <div class="image-workbench-version-card__tag">{{ item.label }}</div>
+                  <img :src="item.asset.displayUrl" alt="" />
+                  <div class="image-workbench-version-card__body">
+                    <strong>{{ item.asset.width || "-" }}x{{ item.asset.height || "-" }}</strong>
+                    <small>{{ item.description }}</small>
+                  </div>
+                </button>
+                <span
+                  v-if="index < versionChainItems.length - 1"
+                  class="image-workbench-version-chain__arrow"
+                  aria-hidden="true"
+                >&gt;</span>
+              </template>
+            </div>
+          </section>
+          <div v-if="relatedAssetGroups.length" class="image-workbench-related-groups">
+            <section v-for="group in relatedAssetGroups" :key="group.key" class="image-workbench-related-group">
+              <div class="image-workbench-related-group__head">
+                <strong>{{ group.title }}</strong>
+                <small>{{ group.description }}</small>
+              </div>
+              <div class="image-workbench-related-strip">
+                <button
+                  v-for="asset in group.items"
+                  :key="asset.id"
+                  type="button"
+                  class="image-workbench-related-card"
+                  @click="handleSelectReviewAsset(asset)"
+                >
+                  <img :src="asset.displayUrl" alt="" />
+                  <span>{{ asset.width || "-" }}x{{ asset.height || "-" }}</span>
+                </button>
+              </div>
+            </section>
+          </div>
           <div class="image-workbench-action-group">
             <span>{{ t("imageWorkbench.review.createNext") }}</span>
-            <div class="image-workbench-inspector-actions">
+            <small>{{ t("imageWorkbench.review.createNextDesc") }}</small>
+            <div class="image-workbench-branch-grid">
+              <article
+                v-for="action in branchActions"
+                :key="action.key"
+                class="image-workbench-branch-card"
+                :class="{ 'is-disabled': action.disabled }"
+              >
+                <div class="image-workbench-branch-card__copy">
+                  <strong>{{ action.title }}</strong>
+                  <p>{{ action.description }}</p>
+                </div>
+                <button
+                  type="button"
+                  :disabled="action.disabled"
+                  :title="action.disabledReason || action.description"
+                  @click="handleBranchAction(action.key)"
+                >
+                  <Sparkles class="h-3.5 w-3.5" />
+                  {{ action.actionLabel }}
+                </button>
+                <small v-if="action.disabled && action.disabledReason" class="image-workbench-branch-card__hint">
+                  {{ action.disabledReason }}
+                </small>
+              </article>
+            </div>
+            <div class="image-workbench-inspector-actions image-workbench-inspector-actions--supporting">
               <button type="button" @click="imageWorkbenchStore.reuseSelectedAssetPrompt()">
                 <RotateCcw class="h-3.5 w-3.5" />
                 {{ t("imageWorkbench.asset.reusePrompt") }}
@@ -801,26 +805,6 @@ onBeforeUnmount(() => {
               <button type="button" @click="handleRegenerateSelectedAsset">
                 <RefreshCcw class="h-3.5 w-3.5" />
                 {{ t("imageWorkbench.asset.regenerate") }}
-              </button>
-              <button type="button" @click="handleContinueSelectedStyle">
-                <Sparkles class="h-3.5 w-3.5" />
-                {{ t("imageWorkbench.asset.continueStyle") }}
-              </button>
-              <button type="button" :disabled="!selectedAsset" :title="t('imageWorkbench.errors.maskRequired')" @click="handleStartInpaintSelectedAsset">
-                <Sparkles class="h-3.5 w-3.5" />
-                {{ t("imageWorkbench.asset.inpaint") }}
-              </button>
-              <button type="button" :disabled="!imageWorkbenchStore.canRunPersonConsistency" :title="t('imageWorkbench.errors.personDeferred')" @click="handleContinueSelectedPerson">
-                <Sparkles class="h-3.5 w-3.5" />
-                {{ t("imageWorkbench.asset.personContinue") }}
-              </button>
-              <button type="button" :disabled="!imageWorkbenchStore.canRunUpscale2x" :title="t('imageWorkbench.errors.upscaleDeferred')" @click="handleUpscaleSelectedAsset(2)">
-                <Sparkles class="h-3.5 w-3.5" />
-                {{ t("imageWorkbench.asset.upscale2x") }}
-              </button>
-              <button type="button" :disabled="!imageWorkbenchStore.canRunUpscale4x" :title="t('imageWorkbench.errors.upscale4Unsupported')" @click="handleUpscaleSelectedAsset(4)">
-                <Sparkles class="h-3.5 w-3.5" />
-                {{ t("imageWorkbench.asset.upscale4x") }}
               </button>
             </div>
           </div>
