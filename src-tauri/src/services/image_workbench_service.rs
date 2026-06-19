@@ -17,7 +17,6 @@ use crate::services::image_workbench_mask::{
     build_mask_svg, normalize_mask_strokes, SaveImageWorkbenchMaskRequest,
     SaveImageWorkbenchMaskResult,
 };
-use crate::services::runtime_heartbeat::spawn_image_task_heartbeat;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::fs;
@@ -30,7 +29,7 @@ const IMAGE_WORKBENCH_SHORT_TEXT_MAX_CHARS: usize = 256;
 const IMAGE_WORKBENCH_JSON_MAX_CHARS: usize = 16_384;
 const IMAGE_WORKBENCH_PREVIEW_MAX_CHARS: usize = 4_096;
 const IMAGE_WORKBENCH_TEMPLATE_NAME_MAX_CHARS: usize = 80;
-const IMAGE_WORKBENCH_TASK_LEASE_MS: i64 = 2 * 60 * 60 * 1000;
+pub(crate) const IMAGE_WORKBENCH_TASK_LEASE_MS: i64 = 2 * 60 * 60 * 1000;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -764,14 +763,14 @@ impl ImageWorkbenchService {
         job_id: &str,
         task_ids: Option<&[String]>,
         worker_id: Option<&str>,
-        mut generate: F,
+        generate: F,
     ) -> AppResult<ImageWorkbenchSnapshot>
     where
         F: FnMut(AiBusinessGenerationRequest) -> Result<AiGenerationResult, String>,
     {
-        self.run_image_tasks_with_generator(job_id, task_ids, worker_id, |request| {
-            generate(request)
-        })
+        crate::services::image_workbench_runner::run_image_tasks_with_generator(
+            self, job_id, task_ids, worker_id, generate,
+        )
     }
 
     fn run_image_tasks_with_generator<F>(
@@ -779,181 +778,17 @@ impl ImageWorkbenchService {
         job_id: &str,
         task_ids: Option<&[String]>,
         worker_id: Option<&str>,
-        mut generate: F,
+        generate: F,
     ) -> AppResult<ImageWorkbenchSnapshot>
     where
         F: FnMut(AiBusinessGenerationRequest) -> Result<AiGenerationResult, String>,
     {
-        let mut latest = self.get_snapshot(job_id)?;
-        validate_workbench_mode(&latest.job.mode, false)?;
-
-        loop {
-            let Some(claim) = self.repo()?.claim_next_runnable_task_for_worker(
-                job_id,
-                task_ids,
-                IMAGE_WORKBENCH_TASK_LEASE_MS,
-                worker_id,
-            )?
-            else {
-                break;
-            };
-            latest = claim.snapshot;
-            let task_id = claim.task_id;
-            let claim_token = claim.claim_token;
-
-            if latest.assets.iter().any(|asset| asset.task_id == task_id) {
-                latest = self.update_task_status(UpdateImageWorkbenchTaskStatusRequest {
-                    task_id: task_id.clone(),
-                    status: "succeeded".to_string(),
-                    error: None,
-                    model_run: None,
-                })?;
-                continue;
-            }
-
-            let job = latest.job.clone();
-            let Some(task) = latest.tasks.iter().find(|task| task.id == task_id) else {
-                continue;
-            };
-            let prompt = task
-                .prompt
-                .clone()
-                .filter(|value| !value.trim().is_empty())
-                .unwrap_or_else(|| job.prompt.clone());
-            let target_size = job.size.clone();
-            let request = AiBusinessGenerationRequest {
-                capability: job.mode.clone(),
-                provider_config_id: job.provider_config_id.clone(),
-                prompt: prompt.clone(),
-                model: job.model.clone(),
-                request_id: Some(task_id.clone()),
-                options: generation_options_for_job(&job, target_size.clone()),
-            };
-
-            // 阶段 B1：worker 阻塞 generate 期间起独立心跳线程续租，避免视频 / 高清放大
-            // 等长任务被 60s lease 误回收。心跳触发取消时通过 ai_provider_cancel_registry
-            // 翻转 generate 的 cancel_token，generate 80ms try_wait 循环立即 terminate sidecar。
-            // 终态写入前必须先 stop()——见设计文档 §4.3 race-condition 防护。
-            let heartbeat = match worker_id {
-                Some(wid) => match self.repo() {
-                    Ok(repo) => Some(spawn_image_task_heartbeat(
-                        repo,
-                        task_id.clone(),
-                        wid.to_string(),
-                        claim_token.clone(),
-                    )),
-                    Err(_) => None,
-                },
-                None => None,
-            };
-
-            let generation_result = generate(request);
-            if let Some(handle) = heartbeat {
-                handle.stop();
-            }
-            let current = self.get_snapshot(job_id)?;
-            let Some(current_task) = current.tasks.iter().find(|task| task.id == task_id) else {
-                latest = current;
-                continue;
-            };
-            if matches!(
-                current_task.status.as_str(),
-                "succeeded" | "failed" | "cancelled"
-            ) {
-                latest = current;
-                continue;
-            }
-
-            match generation_result {
-                Ok(result) => {
-                    if !result.ok {
-                        latest = self.fail_generation_task(
-                            job_id,
-                            &task_id,
-                            &job,
-                            "failed",
-                            result.message.clone(),
-                            Some(&result),
-                        )?;
-                        continue;
-                    }
-
-                    let Some(artifact) = pick_image_artifact(&result.artifacts) else {
-                        latest = self.fail_generation_task(
-                            job_id,
-                            &task_id,
-                            &job,
-                            "failed",
-                            "AI 生成结果缺少本地图片路径".to_string(),
-                            Some(&result),
-                        )?;
-                        continue;
-                    };
-                    let Some(artifact_path) = artifact.path.clone() else {
-                        latest = self.fail_generation_task(
-                            job_id,
-                            &task_id,
-                            &job,
-                            "failed",
-                            "AI 生成结果缺少本地图片路径".to_string(),
-                            Some(&result),
-                        )?;
-                        continue;
-                    };
-
-                    self.record_asset(RecordImageWorkbenchAssetRequest {
-                        task_id: task_id.clone(),
-                        file_path: artifact_path,
-                        thumbnail_path: None,
-                        width: parse_artifact_dimensions(artifact.dimensions.as_deref()).0,
-                        height: parse_artifact_dimensions(artifact.dimensions.as_deref()).1,
-                        mime_type: artifact
-                            .mime_type
-                            .clone()
-                            .or_else(|| Some("image/png".to_string())),
-                        size_bytes: artifact.size_bytes,
-                        metadata: Some(RecordImageWorkbenchMetadataInput {
-                            original_prompt: Some(job.prompt.clone()),
-                            expanded_prompt: Some(prompt.clone()),
-                            negative_prompt: job.negative_prompt.clone(),
-                            seed: None,
-                            model: Some(result.model.clone()),
-                            mode: Some(job.mode.clone()),
-                            provider: Some(result.provider.clone()),
-                            reference_asset_ids_json: job.reference_asset_ids_json.clone(),
-                            mask_path: job.mask_path.clone(),
-                            person_context_json: job.person_context_json.clone(),
-                        }),
-                        model_run: Some(generation_result_model_run(
-                            &job,
-                            "succeeded",
-                            Some(&result),
-                            None,
-                        )),
-                    })?;
-                    latest = self.update_task_status(UpdateImageWorkbenchTaskStatusRequest {
-                        task_id: task_id.clone(),
-                        status: "succeeded".to_string(),
-                        error: None,
-                        model_run: None,
-                    })?;
-                }
-                Err(error) => {
-                    let status = if is_cancel_error(&error) {
-                        "cancelled"
-                    } else {
-                        "failed"
-                    };
-                    latest =
-                        self.fail_generation_task(job_id, &task_id, &job, status, error, None)?;
-                }
-            }
-        }
-
-        Ok(latest)
+        crate::services::image_workbench_runner::run_image_tasks_with_generator(
+            self, job_id, task_ids, worker_id, generate,
+        )
     }
 
-    fn fail_generation_task(
+    pub(crate) fn fail_generation_task(
         &self,
         job_id: &str,
         task_id: &str,
@@ -983,7 +818,7 @@ impl ImageWorkbenchService {
         })
     }
 
-    fn repo(&self) -> AppResult<ImageWorkbenchRepo> {
+    pub(crate) fn repo(&self) -> AppResult<ImageWorkbenchRepo> {
         Ok(ImageWorkbenchRepo::new(
             self.path_provider.get_db_file_path()?,
         ))
@@ -1275,7 +1110,7 @@ fn normalize_model_run_status(value: Option<String>) -> AppResult<Option<String>
     Ok(Some(status))
 }
 
-fn validate_workbench_mode(mode: &str, allow_deferred: bool) -> AppResult<()> {
+pub(crate) fn validate_workbench_mode(mode: &str, allow_deferred: bool) -> AppResult<()> {
     let supported = matches!(
         mode,
         "img2img" | "inpaint" | "person_consistency" | "upscale_2x" | "upscale_4x"
@@ -1440,13 +1275,13 @@ fn now_ms_for_export() -> i64 {
         .unwrap_or(0)
 }
 
-fn pick_image_artifact(artifacts: &[AiGenerationArtifact]) -> Option<&AiGenerationArtifact> {
+pub(crate) fn pick_image_artifact(artifacts: &[AiGenerationArtifact]) -> Option<&AiGenerationArtifact> {
     artifacts
         .iter()
         .find(|artifact| artifact.kind == "image" && artifact.path.is_some())
 }
 
-fn parse_artifact_dimensions(value: Option<&str>) -> (Option<u32>, Option<u32>) {
+pub(crate) fn parse_artifact_dimensions(value: Option<&str>) -> (Option<u32>, Option<u32>) {
     let Some(value) = value else {
         return (None, None);
     };
@@ -1470,7 +1305,7 @@ fn parse_reference_asset_ids(value: Option<&str>) -> Vec<String> {
         .collect()
 }
 
-fn generation_options_for_job(
+pub(crate) fn generation_options_for_job(
     job: &crate::infra::image_workbench_types::ImageWorkbenchJob,
     target_size: Option<String>,
 ) -> AiGenerationOptions {
@@ -1489,7 +1324,7 @@ fn generation_options_for_job(
     }
 }
 
-fn generation_result_model_run(
+pub(crate) fn generation_result_model_run(
     job: &crate::infra::image_workbench_types::ImageWorkbenchJob,
     status: &str,
     result: Option<&AiGenerationResult>,
@@ -1547,7 +1382,7 @@ fn cancelled_generation_model_run(
     }
 }
 
-fn is_cancel_error(error: &str) -> bool {
+pub(crate) fn is_cancel_error(error: &str) -> bool {
     error.contains("取消")
         || error.contains("中止")
         || error.to_ascii_lowercase().contains("cancel")
