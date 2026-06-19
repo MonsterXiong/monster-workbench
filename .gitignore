@@ -13,3 +13,7 @@ __pycache__/
 *.pyc
 .gemini
 public/mock/*.json
+
+# unplugin-auto-import 在每次 dev 启动时重写本文件；项目实际不依赖它
+# 自动注入的全局类型（vue/pinia API 都是显式 import），保持工具产物不入库。
+auto-imports.d.ts
