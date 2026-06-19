@@ -68,6 +68,18 @@ pub fn update_navigation(
 }
 
 #[tauri::command]
+pub fn batch_update_navigation(
+    db_path: String,
+    items: Vec<NavigationItem>,
+    state: NavState<'_>,
+) -> Result<(), String> {
+    let service = state.lock().unwrap_or_else(|e| e.into_inner());
+    service
+        .batch_update_navigation(&db_path, items)
+        .map_err(|e| e.to_json_string())
+}
+
+#[tauri::command]
 pub fn delete_navigation(db_path: String, id: i32, state: NavState<'_>) -> Result<(), String> {
     let service = state.lock().unwrap_or_else(|e| e.into_inner());
     service

@@ -104,6 +104,20 @@ export const useNavigationStore = defineStore("navigation", {
     },
 
     /**
+     * 一次事务批量更新多条导航；用于整理建议面板的"标常用 / 补描述"
+     * 等批量动作。空数组直接返回。
+     */
+    async updateMany(items: NavigationItem[]) {
+      if (items.length === 0) return;
+      const appStore = useAppStore();
+      if (!appStore.initialized) {
+        await appStore.initialize();
+      }
+      await navigationService.batchUpdateNavigation(appStore.localPath, items);
+      await this.fetchList();
+    },
+
+    /**
      * 删除单条导航
      */
     async delete(id: number) {

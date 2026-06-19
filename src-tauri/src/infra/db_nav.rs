@@ -295,6 +295,39 @@ impl DbNavInfra {
         Ok(())
     }
 
+    /// 一次事务内更新多条 navigation；用于整理建议面板的"标常用 / 补描述"
+    /// 等批量动作，避免逐条 IPC 往返。任意一条失败 transaction 整体回滚，
+    /// 跳过没有 id 的入参。
+    pub fn batch_update_navigation(db_dir: &str, items: Vec<NavigationItem>) -> AppResult<()> {
+        if items.is_empty() {
+            return Ok(());
+        }
+        let mut conn = Self::connect_nav_db(db_dir)?;
+        let tx = conn.transaction()?;
+        {
+            let mut stmt = tx.prepare(
+                "UPDATE navigation SET title = ?, url = ?, description = ?, category = ?, is_featured = ?, is_hot = ?, logo_path = ?, bg_path = ?, tags = ? WHERE id = ?",
+            )?;
+            for item in &items {
+                let Some(id) = item.id else { continue };
+                stmt.execute(params![
+                    item.title,
+                    item.url,
+                    item.description,
+                    item.category,
+                    item.is_featured,
+                    item.is_hot,
+                    item.logo_path,
+                    item.bg_path,
+                    encode_tags(&item.tags),
+                    id,
+                ])?;
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
     pub fn delete_navigation(db_dir: &str, id: i32) -> AppResult<()> {
         let conn = Self::connect_nav_db(db_dir)?;
         conn.execute("DELETE FROM navigation WHERE id = ?", params![id])?;
@@ -638,6 +671,73 @@ mod tests {
         assert_eq!(page.total, 1);
         assert_eq!(page.items.len(), 1);
         assert_eq!(page.items[0].title, "AI");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn batch_update_navigation_writes_all_items_in_one_transaction() {
+        let dir = temp_nav_dir("batch-update");
+        let db_dir = dir.to_string_lossy().into_owned();
+        let _ = std::fs::remove_dir_all(&dir);
+
+        DbNavInfra::init_navigation_db(&db_dir).expect("db should initialize");
+        DbNavInfra::add_navigation(&db_dir, nav_item("A", "https://a.test", None))
+            .expect("seed A");
+        DbNavInfra::add_navigation(&db_dir, nav_item("B", "https://b.test", None))
+            .expect("seed B");
+        DbNavInfra::add_navigation(&db_dir, nav_item("C", "https://c.test", None))
+            .expect("seed C");
+
+        let mut items = DbNavInfra::get_all_navigation_list(&db_dir).expect("load");
+        // 给前两条标 is_hot=1 + 补描述，第三条不动来确保 batch 不影响未传入的记录
+        items[0].is_hot = 1;
+        items[0].description = "首条描述".to_string();
+        items[1].is_hot = 1;
+        items[1].description = "次条描述".to_string();
+        let updates = vec![items[0].clone(), items[1].clone()];
+
+        DbNavInfra::batch_update_navigation(&db_dir, updates).expect("batch update");
+
+        let after = DbNavInfra::get_all_navigation_list(&db_dir).expect("reload");
+        let by_title = |title: &str| after.iter().find(|i| i.title == title).cloned().unwrap();
+        let a = by_title("A");
+        let b = by_title("B");
+        let c = by_title("C");
+        assert_eq!(a.is_hot, 1);
+        assert_eq!(a.description, "首条描述");
+        assert_eq!(b.is_hot, 1);
+        assert_eq!(b.description, "次条描述");
+        assert_eq!(c.is_hot, 0, "未传入的 C 不应被改动");
+        assert_eq!(c.description, "");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn batch_update_navigation_skips_items_without_id_and_handles_empty() {
+        let dir = temp_nav_dir("batch-skip");
+        let db_dir = dir.to_string_lossy().into_owned();
+        let _ = std::fs::remove_dir_all(&dir);
+
+        DbNavInfra::init_navigation_db(&db_dir).expect("db should initialize");
+        DbNavInfra::add_navigation(&db_dir, nav_item("A", "https://a.test", None))
+            .expect("seed A");
+
+        // 空数组直接 Ok 返回
+        DbNavInfra::batch_update_navigation(&db_dir, vec![]).expect("empty batch");
+
+        // 没 id 的 item 静默跳过，不影响其他正常 item
+        let mut items = DbNavInfra::get_all_navigation_list(&db_dir).expect("load");
+        items[0].is_hot = 1;
+        let mut new_item = nav_item("ghost", "https://ghost.test", None);
+        new_item.is_hot = 1;
+        DbNavInfra::batch_update_navigation(&db_dir, vec![new_item, items[0].clone()])
+            .expect("mixed batch");
+
+        let after = DbNavInfra::get_all_navigation_list(&db_dir).expect("reload");
+        assert_eq!(after.len(), 1, "无 id 的不应作为新增插入");
+        assert_eq!(after[0].is_hot, 1);
 
         let _ = std::fs::remove_dir_all(&dir);
     }

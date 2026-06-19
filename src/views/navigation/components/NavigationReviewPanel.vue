@@ -36,7 +36,7 @@ const duplicateCount = computed(() => {
 const missingDescriptionCount = computed(() => props.items.filter((item) => !item.description?.trim()).length);
 const missingLogoCount = computed(() => props.items.filter((item) => !item.logo_path).length);
 const frequentUnfeaturedCount = computed(
-  () => props.items.filter((item) => item.clicks >= FREQUENT_CLICK_THRESHOLD && item.is_featured !== 1).length,
+  () => props.items.filter((item) => item.clicks >= FREQUENT_CLICK_THRESHOLD && item.is_hot !== 1).length,
 );
 const longUnvisitedCount = computed(() => props.items.filter((item) => !item.last_visited_at && item.clicks === 0).length);
 

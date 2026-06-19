@@ -309,6 +309,20 @@ export async function mockCallTauri<T = unknown>(
       return null as T;
     }
 
+    case "batch_update_navigation": {
+      const incoming = (args.items as any[]) || [];
+      for (const updateItem of incoming) {
+        const idx = findIndexByValue(navigationsStore, (item) => item.id, updateItem.id);
+        if (idx !== -1) {
+          navigationsStore[idx] = {
+            ...navigationsStore[idx],
+            ...updateItem,
+          };
+        }
+      }
+      return null as T;
+    }
+
     case "delete_navigation":
       navigationsStore = removeByValue(navigationsStore, (item) => item.id, args.id as number);
       return null as T;

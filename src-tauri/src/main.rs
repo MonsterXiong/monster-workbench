@@ -198,6 +198,7 @@ fn main() {
             commands::navigation::get_navigation_list,
             commands::navigation::add_navigation,
             commands::navigation::update_navigation,
+            commands::navigation::batch_update_navigation,
             commands::navigation::delete_navigation,
             commands::navigation::batch_delete_navigation,
             commands::navigation::increment_navigation_clicks,

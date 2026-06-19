@@ -61,6 +61,15 @@ impl NavigationService {
         DbNavInfra::update_navigation(&db_dir, item)
     }
 
+    pub fn batch_update_navigation(
+        &self,
+        _db_dir: &str,
+        items: Vec<NavigationItem>,
+    ) -> AppResult<()> {
+        let db_dir = self.navigation_db_dir()?;
+        DbNavInfra::batch_update_navigation(&db_dir, items)
+    }
+
     pub fn delete_navigation(&self, _db_dir: &str, id: i32) -> AppResult<()> {
         let db_dir = self.navigation_db_dir()?;
         DbNavInfra::delete_navigation(&db_dir, id)

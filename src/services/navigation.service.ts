@@ -336,6 +336,18 @@ export const navigationService = {
     });
   },
 
+  async batchUpdateNavigation(appDataPath: string, items: NavigationItem[]): Promise<void> {
+    assertDesktopNavigationData();
+    if (items.length === 0) return;
+    await callTauri<void>("batch_update_navigation", {
+      dbPath: appDataPath,
+      items: items.map((item) => ({
+        ...item,
+        tags: normalizeNavigationTags(item.tags),
+      })),
+    });
+  },
+
   async deleteNavigation(appDataPath: string, id: number): Promise<void> {
     assertDesktopNavigationData();
     await callTauri<void>("delete_navigation", { dbPath: appDataPath, id });

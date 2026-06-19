@@ -287,26 +287,34 @@ async function handleBatchPasteSubmit(items: any[]) {
 
 async function handleFillDescriptions() {
   const targets = reviewItems.value.filter((item) => item.id && !item.description?.trim());
-  for (const item of targets) {
+  if (targets.length === 0) {
+    triggerToast(formatTemplate(t('navigation.reviewFilledDescriptions'), { count: 0 }), "success");
+    return;
+  }
+  const updates = targets.map((item) => {
     const suggestion = navigationStore.suggestFromUrl(item.url);
-    await navigationStore.update({
+    return {
       ...item,
       description: suggestion.description,
       tags: item.tags || suggestion.tags,
-    });
-  }
+    };
+  });
+  await navigationStore.updateMany(updates);
   triggerToast(formatTemplate(t('navigation.reviewFilledDescriptions'), { count: targets.length }), "success");
   await refreshNavigationData();
 }
 
 async function handleMarkCommon() {
   const targets = reviewItems.value.filter((item) => item.id && item.clicks >= 20 && item.is_hot !== 1);
-  for (const item of targets) {
-    await navigationStore.update({
-      ...item,
-      is_hot: 1,
-    });
+  if (targets.length === 0) {
+    triggerToast(formatTemplate(t('navigation.reviewMarkedCommon'), { count: 0 }), "success");
+    return;
   }
+  const updates = targets.map((item) => ({
+    ...item,
+    is_hot: 1,
+  }));
+  await navigationStore.updateMany(updates);
   triggerToast(formatTemplate(t('navigation.reviewMarkedCommon'), { count: targets.length }), "success");
   await refreshNavigationData();
 }
