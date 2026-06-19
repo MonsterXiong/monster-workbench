@@ -242,7 +242,14 @@ AI Provider 工作台是当前保留的 AI 能力入口，也是公共 AI 原子
 - 恢复与审计边界：Tauri 启动和 Store 初始化都会调用恢复逻辑；Rust 将重启后遗留的 running/validating task 清租约并重排为 queued，queued/retrying task 保持可领取，再由后端 runner 继续推进。Provider 调用失败时也会写入脱敏后的 model_run，保留 provider/model/capability/status/latency/request/response/error 审计线索。当前真实 DB 已同时存在 cancelled、failed 和 succeeded job，其中 succeeded 链路包含真实 asset、metadata 和 model_run。
 - 真实环境结论：2026-06-13 已启动真实 Tauri dev 并确认 `monster_workbench.db` 中 `image_workbench_*` 表存在；当前 root anyrouter 仍对 `/images/generations` 返回 404，但 active image config `localhost:4444` 的 `gpt-image-2` 已成功生成 PNG，并由 `ImageWorkbenchService` 复制到 `~/.monster-tools/ai/image-workbench/assets` 后写入真实 DB。2026-06-14 Windows Computer Use 可截图真实 `Monster Tools` 窗口并用键盘进入 AI 工作台，但坐标点击/滚动接口对 WebView 绑定不稳定，窗口视觉与交互复核作为单独观感项处理。
 - 2026-06-14 起，`runTxt2imgBatch()` / `retryFailedTasks()` 先创建或恢复持久 job/task 快照，然后调用 `start_image_workbench_job_runner` 启动 Rust 后端 runner；页面点击不等待整批任务结束，前端只轮询轻量 snapshot。图片工作台 task 已有 DB claim_token / leased_until_ms 防重复领取，Tauri 启动和页面初始化会恢复未完成 job 并启动 runner；通用 `/ai` Chat/Image 业务生成已有 `ai_generation_tasks` 持久任务表和 Tauri 启动恢复，服务级测试已覆盖从持久 queued 任务恢复并继续生成，直连原子测试仍保持非持久。
-- 未闭环：长耗时 worker heartbeat、受控导入参考图/蒙版、资产删除文件清理、下载/导出仍按 `agent/open-loops.md` 继续推进。
+- Worker heartbeat / lease 巡检已分阶段闭环（设计文档 `agent/worker-heartbeat-design.md` 已并入实现并删除）：
+    - **Schema**：`image_workbench_tasks` 与 `ai_generation_tasks` 均含 `worker_id` / `claim_token` / `claimed_at_ms` / `leased_until_ms` / `last_heartbeat_ms` 列与 `(status, leased_until_ms)` 索引；迁移走 `ensure_*_runtime_columns`，新列均可空，旧记录 NULL 兼容。
+    - **Janitor**：`services/runtime_janitor.rs` 在 Tauri 启动期立即跑一次三段巡检（跨进程残留 / 过期 lease / 6h 真挂死兜底），随后每 30s 一轮；`STUCK_RUNNING_MAX_MS = 6h` 是兜底标 failed 阈值，常规长任务由 heartbeat 续租覆盖。
+    - **Heartbeat**：`services/runtime_heartbeat.rs` 在 worker 阻塞 `generate(request)` 期间起独立 OS 线程，每 15s `renew_*_lease` CAS 续租；CAS 失败立刻调 `ai_provider_cancel_registry().cancel(request_id)`，让 sidecar 80ms try_wait 循环 terminate；终态写入前必须 `handle.stop()` 防 race。
+    - **全局并发上限**：`services/runtime_dispatcher.rs` 提供 `GLOBAL_WORKER_LIMIT = 4` 的进程级 permit pool；image_workbench `start_job_runner` spawn_blocking 入口先 `acquire_global_worker_permit("iw-job:*", 30s)`，permit RAII drop 自动归还，避免多 job 叠加压垮本地 sidecar / Provider queue。AI 生成 business task 路径仍由 `ai_provider_test_queue` 按 Provider 维度 clamp，未走全局 permit。
+    - **常量集中**：`services/runtime_constants.rs` 收 `HEARTBEAT_INTERVAL_MS / LEASE_INITIAL_MS / LEASE_RENEW_MS / JANITOR_INTERVAL_MS / JANITOR_GRACE_MS / STUCK_RUNNING_MAX_MS / GLOBAL_WORKER_LIMIT / DISPATCH_TICK_MS`；后续阶段调参或回归中央 dispatcher 模型只改这一处。
+    - **Worker 模型保留**：图片工作台仍是"每个 job 一条 `spawn_blocking` 串行循环"；worker 主体已抽到 `services/image_workbench_runner.rs`，service 不再持有循环代码。设计文档原方案的"中央 dispatcher 主循环"未实现（折衷换取小 diff），如后续要回归再启用 `DISPATCH_TICK_MS`。
+- 未闭环：受控导入参考图/蒙版、资产删除文件清理、下载/导出仍按 `agent/open-loops.md` 继续推进。
 - 增强能力：图生图、局部重绘、人物一致性、高清放大已进入 mode / capability / UI 降级清单；Provider 原生入参、降级规则和真实 smoke 稳定前不直接生成。
 
 ## 7. 大文件与拆分优先级
@@ -280,7 +287,7 @@ AI Provider 工作台是当前保留的 AI 能力入口，也是公共 AI 原子
 ## 9. 当前风险点
 
 1. AI Provider 后端已完成当前 P0 拆分；后续改动要保护 `ai_service.rs`、`ai_provider_queue.rs`、`ai_provider_task.rs`、`ai_provider_config.rs`、`ai_provider_process.rs`、`ai_provider_output.rs` 之间的内部 contract。
-2. `/image-workbench` 已完成 schema / repo / command / service / store / route、浏览器/mock 文生图闭环、历史/资产库/模板/收藏/取消/重试、路径白名单、持久资产复制、状态机、事务写入、Rust 后端 runner、DB claim/lease、重启孤儿任务恢复、失败 model_run 审计和真实 Provider 成功落图落库；repo 类型/测试与 service 资产路径 policy 已完成首轮拆分。后续长耗时 worker heartbeat 和增强能力接入前必须继续保护 Provider 调用边界。
+2. `/image-workbench` 已完成 schema / repo / command / service / store / route、浏览器/mock 文生图闭环、历史/资产库/模板/收藏/取消/重试、路径白名单、持久资产复制、状态机、事务写入、Rust 后端 runner、DB claim/lease、重启孤儿任务恢复、失败 model_run 审计、真实 Provider 成功落图落库；repo 类型/测试与 service 资产路径 policy 已完成首轮拆分；worker_id / heartbeat / janitor / GLOBAL_WORKER_LIMIT permit 已落地；后续增强能力接入前必须继续保护 Provider 调用边界，并保留 `services/runtime_constants.rs` 集中调参口径。
 3. AI 生图前端热点已有 UI、helper、预览 state、会话动作和生成 actions 拆分；继续加功能前应保持新增草稿/pending 状态逻辑先抽 helper。
 4. AI runtime helper 已拆出 image result patch、message builders、pending recovery 和 cancel sync；后续新增恢复/取消语义时继续放入对应 helper。
 5. Browser mock 必须继续跟 Tauri contract 对齐，避免只在浏览器成立。
