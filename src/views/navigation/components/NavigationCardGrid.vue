@@ -5,9 +5,12 @@ import {
   Bookmark,
   ExternalLink,
   GripVertical,
+  MoreHorizontal,
+  ListPlus,
+  Upload,
 } from "lucide-vue-next";
 import { useDragSort } from "../../../composables/useDragSort";
-import { toRef } from "vue";
+import { ref, toRef } from "vue";
 import { useI18n } from "../../../composables/useI18n";
 import { formatTemplate, getInitials, hasSelectionKey } from "../../../utils";
 
@@ -26,16 +29,29 @@ const emit = defineEmits<{
   (e: "toggleSelection", id: number): void;
   (e: "openEditModal", item: any, event: Event): void;
   (e: "delete", id: number, title: string, event: Event): void;
+  (e: "openAddModal"): void;
+  (e: "openBatchPaste"): void;
+  (e: "importData"): void;
 }>();
 
 const itemsRef = toRef(props, "items");
 const { isDraggingIndex, handleDragStart, handleDragEnter, handleDragEnd } = useDragSort(itemsRef);
+const openMenuId = ref<number | null>(null);
 
 function getCategoryName(cat: string): string {
   if (!cat) return "";
   const key = `navigation.categories.${cat}`;
   const val = t(key);
   return val === key ? cat : val;
+}
+
+function toggleCardMenu(id: number, event: Event) {
+  event.stopPropagation();
+  openMenuId.value = openMenuId.value === id ? null : id;
+}
+
+function closeCardMenu() {
+  openMenuId.value = null;
 }
 </script>
 
@@ -49,6 +65,19 @@ function getCategoryName(cat: string): string {
       <div>
         <h3 class="text-xs font-bold text-slate-800 dark:text-slate-200">{{ t('navigation.noData') }}</h3>
         <p class="text-[10px] text-slate-400 dark:text-slate-500 font-semibold mt-1">{{ t('navigation.noDataDesc') }}</p>
+      </div>
+      <div class="flex flex-wrap justify-center gap-2 pt-2">
+        <BaseButton type="primary" size="sm" @click="emit('openAddModal')">
+          {{ t('navigation.add') }}
+        </BaseButton>
+        <BaseButton type="neutral" outline size="sm" @click="emit('openBatchPaste')">
+          <template #icon><ListPlus class="h-3.5 w-3.5" /></template>
+          {{ t('navigation.batchPaste') }}
+        </BaseButton>
+        <BaseButton type="neutral" outline size="sm" @click="emit('importData')">
+          <template #icon><Upload class="h-3.5 w-3.5" /></template>
+          {{ t('navigation.import') }}
+        </BaseButton>
       </div>
     </div>
 
@@ -116,7 +145,7 @@ function getCategoryName(cat: string): string {
           <!-- 属性徽标 -->
           <div class="flex gap-1 shrink-0">
             <span v-if="item.is_featured === 1" class="badge-feature">{{ t('navigation.featured') }}</span>
-            <span v-if="item.is_hot === 1" class="badge-hot">{{ t('navigation.hot') }}</span>
+            <span v-if="item.is_hot === 1" class="badge-hot">{{ t('navigation.common') }}</span>
           </div>
         </div>
 
@@ -141,27 +170,41 @@ function getCategoryName(cat: string): string {
           </span>
         </div>
 
-        <!-- 操作悬浮 -->
+        <div v-if="item.tags?.length" class="mt-2 flex flex-wrap gap-1">
+          <span
+            v-for="tag in item.tags.slice(0, 4)"
+            :key="tag"
+            class="rounded-full bg-slate-100 px-1.5 py-0.5 text-[9px] font-black text-slate-500 dark:bg-slate-800 dark:text-slate-400"
+          >
+            #{{ tag }}
+          </span>
+        </div>
+
+        <!-- 操作菜单 -->
         <div
           v-if="!isBatchMode && !isSortMode"
-          class="absolute right-3.5 top-3.5 flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity duration-150"
+          class="absolute right-3.5 top-3.5"
           @click.stop
         >
-          <div
-            role="button"
-            class="card-action-btn hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-500 hover:text-slate-900 dark:hover:text-slate-100 cursor-pointer shadow-sm"
-            :title="t('navigation.editNav')"
-            @click="emit('openEditModal', item, $event)"
+          <button
+            class="card-action-btn text-slate-500 hover:bg-slate-200 hover:text-slate-900 dark:hover:bg-slate-700 dark:hover:text-slate-100"
+            :title="t('navigation.moreActions')"
+            @click="toggleCardMenu(item.id!, $event)"
           >
-            <Edit3 class="h-3 w-3" />
-          </div>
+            <MoreHorizontal class="h-3.5 w-3.5" />
+          </button>
           <div
-            role="button"
-            class="card-action-btn hover:bg-red-500/20 hover:text-red-600 hover:border-red-500/30 text-slate-500 cursor-pointer shadow-sm"
-            :title="t('navigation.deleteNav')"
-            @click="emit('delete', item.id!, item.title, $event)"
+            v-if="openMenuId === item.id"
+            class="absolute right-0 top-8 z-20 w-28 rounded-xl border border-slate-200 bg-white p-1 shadow-workbench-lg dark:border-slate-800 dark:bg-slate-900"
           >
-            <Trash2 class="h-3 w-3" />
+            <button class="card-menu-item" @click="closeCardMenu(); emit('openEditModal', item, $event)">
+              <Edit3 class="h-3.5 w-3.5" />
+              {{ t('navigation.editNav') }}
+            </button>
+            <button class="card-menu-item text-red-500 hover:bg-red-500/10 hover:text-red-600" @click="closeCardMenu(); emit('delete', item.id!, item.title, $event)">
+              <Trash2 class="h-3.5 w-3.5" />
+              {{ t('navigation.deleteNav') }}
+            </button>
           </div>
         </div>
       </div>
@@ -200,7 +243,10 @@ function getCategoryName(cat: string): string {
   border: 1px solid rgba(230, 162, 60, 0.2);
 }
 .card-action-btn {
-  @apply flex h-6 w-6 items-center justify-center rounded-md bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-sm transition;
+  @apply flex h-7 w-7 items-center justify-center rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-sm transition;
+}
+.card-menu-item {
+  @apply flex w-full items-center gap-1.5 rounded-lg px-2 py-1.5 text-left text-[10px] font-black text-slate-600 transition hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800;
 }
 
 /* 列表避让平移动画 */

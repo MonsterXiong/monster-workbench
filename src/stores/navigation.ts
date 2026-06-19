@@ -4,12 +4,13 @@ import {
   NavigationBackupValidationError,
   type NavigationBackupSaveResult,
   type NavigationItem,
+  type NavigationView,
 } from "../services/navigation.service";
 import { useAppStore } from "./app";
 import { normalizePage, uniqueArray } from "../utils";
 
 export { NavigationBackupValidationError };
-export type { NavigationBackupSaveResult, NavigationItem };
+export type { NavigationBackupSaveResult, NavigationItem, NavigationView };
 
 export const useNavigationStore = defineStore("navigation", {
   state: () => ({
@@ -22,6 +23,8 @@ export const useNavigationStore = defineStore("navigation", {
     category: "",
     isFeatured: undefined as number | undefined,
     isHot: undefined as number | undefined,
+    view: "all" as NavigationView,
+    tag: "",
     // 系统内置的核心分类
     categories: ["Utility", "Community", "Documentation", "Design", "Leisure"] as string[],
   }),
@@ -47,6 +50,8 @@ export const useNavigationStore = defineStore("navigation", {
           category: this.category || undefined,
           isFeatured: this.isFeatured,
           isHot: this.isHot,
+          view: this.view,
+          tag: this.tag || undefined,
         });
         this.items = res.items;
         this.total = res.total;
@@ -217,6 +222,28 @@ export const useNavigationStore = defineStore("navigation", {
       const count = await navigationService.importNavigationList(appStore.localPath, items);
       await this.fetchList();
       return count;
+    },
+
+    async addMany(items: NavigationItem[]): Promise<number> {
+      if (items.length === 0) return 0;
+      return this.importData(items);
+    },
+
+    async previewImport(items: NavigationItem[]) {
+      const existing = await this.exportData();
+      return navigationService.getImportPreview(existing, items);
+    },
+
+    createItemsFromText(rawText: string): NavigationItem[] {
+      return navigationService.createItemsFromText(rawText, this.category || "Utility");
+    },
+
+    suggestFromUrl(url: string) {
+      return navigationService.buildNavigationSuggestion(url);
+    },
+
+    parseTagsText(rawText: string): string[] {
+      return navigationService.parseTagsText(rawText);
     },
 
     getImgUrl(relPath: string): string {

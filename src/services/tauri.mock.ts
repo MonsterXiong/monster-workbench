@@ -36,6 +36,8 @@ const mockNavigations = [
     logo_path: null,
     bg_path: null,
     sort_order: 1,
+    last_visited_at: "2026-06-18 09:30:00",
+    tags: ["search", "daily"],
   },
   {
     id: 2,
@@ -50,6 +52,8 @@ const mockNavigations = [
     logo_path: null,
     bg_path: null,
     sort_order: 2,
+    last_visited_at: "2026-06-18 10:00:00",
+    tags: ["code", "repo"],
   },
   {
     id: 3,
@@ -64,6 +68,8 @@ const mockNavigations = [
     logo_path: null,
     bg_path: null,
     sort_order: 3,
+    last_visited_at: null,
+    tags: ["docs", "frontend"],
   },
 ];
 
@@ -211,6 +217,8 @@ export async function mockCallTauri<T = unknown>(
       const category = args.category as string | undefined;
       const isFeatured = args.isFeatured as number | undefined;
       const isHot = args.isHot as number | undefined;
+      const view = String(args.view || "all");
+      const tag = String(args.tag || "");
       const page = (args.page as number) || 1;
       const pageSize = (args.pageSize as number) || 20;
 
@@ -224,11 +232,34 @@ export async function mockCallTauri<T = unknown>(
         { getValue: (item) => item.is_featured, value: isFeatured },
         { getValue: (item) => item.is_hot, value: isHot },
       ]);
+      if (tag) {
+        filtered = filtered.filter((item) => Array.isArray(item.tags) && item.tags.includes(tag));
+      }
+      if (view === "recent") {
+        filtered = filtered.filter((item) => Boolean(item.last_visited_at));
+      } else if (view === "featured") {
+        filtered = filtered.filter((item) => item.is_featured === 1);
+      } else if (view === "common") {
+        filtered = filtered.filter((item) => item.is_hot === 1 || item.clicks > 0);
+      }
 
-      filtered = sortByMany(filtered, [
-        { getValue: (item) => item.sort_order },
-        { getValue: (item) => item.clicks, direction: "desc" },
-      ]);
+      filtered = sortByMany(
+        filtered,
+        view === "recent"
+          ? [
+              { getValue: (item) => item.last_visited_at || "", direction: "desc" },
+              { getValue: (item) => item.clicks, direction: "desc" },
+            ]
+          : view === "frequent" || view === "common"
+            ? [
+                { getValue: (item) => item.clicks, direction: "desc" },
+                { getValue: (item) => item.last_visited_at || "", direction: "desc" },
+              ]
+            : [
+                { getValue: (item) => item.sort_order },
+                { getValue: (item) => item.clicks, direction: "desc" },
+              ]
+      );
 
       const pageResult = paginateArray(filtered, page, pageSize);
 
@@ -260,6 +291,8 @@ export async function mockCallTauri<T = unknown>(
         logo_path: newItem.logo_path || null,
         bg_path: newItem.bg_path || null,
         sort_order: nextSortOrder,
+        last_visited_at: newItem.last_visited_at || null,
+        tags: Array.isArray(newItem.tags) ? newItem.tags : [],
       });
       return null as T;
     }
@@ -288,6 +321,7 @@ export async function mockCallTauri<T = unknown>(
       const item = findByValue(navigationsStore, (navigation) => navigation.id, args.id as number);
       if (item) {
         item.clicks += 1;
+        item.last_visited_at = formatCurrentIsoDateTime(" ");
       }
       return null as T;
     }
@@ -347,6 +381,8 @@ export async function mockCallTauri<T = unknown>(
           logo_path: item.logo_path || null,
           bg_path: item.bg_path || null,
           sort_order: nextSortOrder,
+          last_visited_at: item.last_visited_at || null,
+          tags: Array.isArray(item.tags) ? item.tags : [],
         });
         nextSortOrder += 1;
         existingUrls.add(url.toLowerCase());

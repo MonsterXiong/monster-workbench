@@ -32,6 +32,8 @@ impl NavigationService {
         category: Option<String>,
         is_featured: Option<i32>,
         is_hot: Option<i32>,
+        view: Option<String>,
+        tag: Option<String>,
         page: u32,
         page_size: u32,
     ) -> AppResult<PagedResult<NavigationItem>> {
@@ -42,6 +44,8 @@ impl NavigationService {
             category,
             is_featured,
             is_hot,
+            view,
+            tag,
             page,
             page_size,
         )
@@ -143,6 +147,8 @@ mod tests {
             logo_path: None,
             bg_path: None,
             sort_order: None,
+            last_visited_at: None,
+            tags: None,
         }
     }
 

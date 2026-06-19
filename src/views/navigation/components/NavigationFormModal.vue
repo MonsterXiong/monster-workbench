@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed } from "vue";
-import { Star, Flame } from "lucide-vue-next";
+import { Star, Flame, WandSparkles } from "lucide-vue-next";
 import { useNavigationStore } from "../../../stores/navigation";
 import { useToast } from "../../../composables/useToast";
 import AppImageUploader from "../../../components/common/AppImageUploader.vue";
@@ -24,6 +24,7 @@ const props = defineProps<{
     is_hot: number;
     logo_path: string;
     bg_path: string;
+    tags: string[];
   };
 }>();
 
@@ -37,6 +38,29 @@ const emit = defineEmits<{
 
 function patchForm(patch: Partial<NavigationForm>) {
   emit("update:form", applyObjectPatch(props.form, patch));
+}
+
+const tagsText = computed({
+  get: () => (props.form.tags || []).join(", "),
+  set: (value: string) => patchForm({ tags: navigationStore.parseTagsText(value) }),
+});
+
+function applyLocalSuggestion() {
+  if (isBlank(props.form.url)) {
+    triggerToast(t('navigation.urlRequired'));
+    return;
+  }
+  const suggestion = navigationStore.suggestFromUrl(ensureHttpProtocol(props.form.url));
+  const canApplyCategory =
+    !props.isEdit &&
+    (!props.form.category || props.form.category === "Utility" || props.form.category === navigationStore.category);
+  patchForm({
+    title: isBlank(props.form.title) ? suggestion.title : props.form.title,
+    description: isBlank(props.form.description) ? suggestion.description : props.form.description,
+    category: canApplyCategory ? suggestion.category : props.form.category,
+    tags: props.form.tags?.length ? props.form.tags : suggestion.tags,
+  });
+  triggerToast(t('navigation.suggestionApplied'), "success");
 }
 
 // 自定义分类切换
@@ -104,6 +128,7 @@ async function handleSave() {
         clicks: 0,
         logo_path: props.form.logo_path || undefined,
         bg_path: props.form.bg_path || undefined,
+        tags: props.form.tags || [],
       });
       triggerToast(t('navigation.modifySuccess'), "success");
     } else {
@@ -116,6 +141,7 @@ async function handleSave() {
         is_hot: props.form.is_hot,
         logo_path: props.form.logo_path || undefined,
         bg_path: props.form.bg_path || undefined,
+        tags: props.form.tags || [],
       });
       triggerToast(t('navigation.addSuccess'), "success");
     }
@@ -147,7 +173,7 @@ function closeModal() {
   <BaseDialog
     v-model="showModalValue"
     :title="isEdit ? t('navigation.editTitle') : t('navigation.addTitle')"
-    width="max-w-[440px]"
+    width="520px"
   >
     <!-- 表单内容 -->
     <div class="space-y-4">
@@ -169,12 +195,24 @@ function closeModal() {
         <label class="text-[11px] font-extrabold text-slate-500 dark:text-slate-400 flex items-center gap-1">
           {{ t('navigation.urlLabel') }} <span class="text-error font-extrabold">*</span>
         </label>
-        <BaseInput
-          :model-value="form.url"
-          :placeholder="t('navigation.urlPlaceholder')"
-          size="sm"
-          @update:model-value="patchForm({ url: String($event) })"
-        />
+        <div class="flex items-center gap-2">
+          <BaseInput
+            :model-value="form.url"
+            :placeholder="t('navigation.urlPlaceholder')"
+            size="sm"
+            class="min-w-0 flex-1"
+            @update:model-value="patchForm({ url: String($event) })"
+          />
+          <BaseButton
+            type="neutral"
+            outline
+            size="sm"
+            :title="t('navigation.applySuggestion')"
+            @click="applyLocalSuggestion"
+          >
+            <template #icon><WandSparkles class="h-3.5 w-3.5" /></template>
+          </BaseButton>
+        </div>
       </div>
 
       <!-- 分类下拉 -->
@@ -245,9 +283,19 @@ function closeModal() {
           />
           <span class="flex items-center gap-1">
             <Flame class="h-3.5 w-3.5 text-amber-500" />
-            {{ t('navigation.setHot') }}
+            {{ t('navigation.setCommon') }}
           </span>
         </label>
+      </div>
+
+      <!-- 标签 -->
+      <div class="flex flex-col gap-2">
+        <label class="text-[11px] font-extrabold text-slate-500 dark:text-slate-400">{{ t('navigation.tagsLabel') }}</label>
+        <BaseInput
+          v-model="tagsText"
+          :placeholder="t('navigation.tagsPlaceholder')"
+          size="sm"
+        />
       </div>
 
       <!-- Logo 和封面上传区 -->

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onBeforeUnmount, onMounted, watch } from "vue";
+import { computed, ref, onBeforeUnmount, onMounted, watch } from "vue";
 import {
   NavigationBackupValidationError,
   useNavigationStore,
@@ -18,6 +18,7 @@ import {
   resetTimeoutHandle,
   toggleAllSelectionKeys,
   toggleSelectionKey,
+  uniqueArray,
   type TimeoutHandle,
 } from "../../utils";
 
@@ -25,6 +26,8 @@ import NavigationToolbar from "./components/NavigationToolbar.vue";
 import NavigationCardGrid from "./components/NavigationCardGrid.vue";
 import NavigationPagination from "./components/NavigationPagination.vue";
 import NavigationFormModal from "./components/NavigationFormModal.vue";
+import NavigationBatchPasteModal from "./components/NavigationBatchPasteModal.vue";
+import NavigationReviewPanel from "./components/NavigationReviewPanel.vue";
 
 const navigationStore = useNavigationStore();
 const { triggerToast } = useToast();
@@ -35,9 +38,11 @@ const { t } = useI18n();
 const isBatchMode = ref(false);
 const isSortMode = ref(false);
 const selectedIds = ref<number[]>([]);
+const reviewItems = ref<ReturnType<typeof useNavigationStore>["items"]>([]);
 
 // 弹窗表单状态
 const showFormModal = ref(false);
+const showBatchPasteModal = ref(false);
 const isEdit = ref(false);
 const currentId = ref<number | undefined>(undefined);
 const form = ref({
@@ -49,7 +54,21 @@ const form = ref({
   is_hot: 0,
   logo_path: "",
   bg_path: "",
+  tags: [] as string[],
 });
+
+const allTags = computed(() => {
+  return uniqueArray([...reviewItems.value, ...navigationStore.items].flatMap((item) => item.tags || [])).slice(0, 16);
+});
+
+async function refreshReviewItems() {
+  reviewItems.value = await navigationStore.exportData();
+}
+
+async function refreshNavigationData() {
+  await navigationStore.fetchList();
+  await refreshReviewItems();
+}
 
 // 进入排序模式
 async function enterSortMode() {
@@ -77,7 +96,7 @@ async function handleSaveSort() {
     isSortMode.value = false;
     navigationStore.pageSize = 12;
     navigationStore.page = 1;
-    await navigationStore.fetchList();
+    await refreshNavigationData();
   }
 }
 
@@ -86,7 +105,7 @@ async function handleCancelSort() {
   isSortMode.value = false;
   navigationStore.pageSize = 12;
   navigationStore.page = 1;
-  await navigationStore.fetchList();
+  await refreshNavigationData();
 }
 
 // 导出导航备份 JSON 文件
@@ -125,15 +144,22 @@ async function handleImportData() {
       t('navigation.restoreFailed')
     );
     if (!parsedData) return;
+    const preview = await navigationStore.previewImport(parsedData);
 
     const ok = await confirm({
       title: t('navigation.restoreConfirmTitle'),
-      message: formatTemplate(t('navigation.restoreConfirmMsg'), { count: parsedData.length }),
+      message: formatTemplate(t('navigation.restoreConfirmMsg'), {
+        count: parsedData.length,
+        valid: preview.validCount,
+        skipped: preview.duplicateCount,
+        invalid: preview.invalidCount,
+      }),
       confirmText: t('navigation.restoreConfirmBtn'),
     });
     if (!ok) return;
 
     const importedCount = await navigationStore.importData(parsedData);
+    await refreshReviewItems();
     triggerToast(
       formatTemplate(t('navigation.restoreSuccess'), {
         imported: importedCount,
@@ -151,7 +177,7 @@ async function handleImportData() {
 }
 
 onMounted(async () => {
-  await navigationStore.fetchList();
+  await refreshNavigationData();
 });
 
 // 监听查询参数变更
@@ -161,10 +187,12 @@ watch(
     navigationStore.category,
     navigationStore.isFeatured,
     navigationStore.isHot,
+    navigationStore.view,
+    navigationStore.tag,
   ],
   () => {
     if (isSortMode.value) return; // 排序模式下屏蔽副作用刷新
-    navigationStore.fetchList();
+    refreshNavigationData();
   }
 );
 
@@ -175,7 +203,7 @@ watch(
   () => {
     searchTimeout = resetTimeoutHandle(searchTimeout, () => {
       navigationStore.page = 1;
-      navigationStore.fetchList();
+      refreshNavigationData();
       searchTimeout = null;
     }, 250);
   }
@@ -225,9 +253,62 @@ async function handleBatchDelete() {
     await navigationStore.batchDelete(selectedIds.value);
     triggerToast(t('navigation.batchDeleteSuccess'));
     exitBatchMode();
+    await refreshReviewItems();
   } catch {
     triggerToast(t('navigation.batchDeleteFailed'));
   }
+}
+
+function handleChangeView(view: typeof navigationStore.view) {
+  navigationStore.view = view;
+  navigationStore.page = 1;
+}
+
+function handleChangeTag(tag: string) {
+  navigationStore.tag = tag;
+  navigationStore.page = 1;
+}
+
+async function handleBatchPasteSubmit(items: any[]) {
+  try {
+    const preview = await navigationStore.previewImport(items);
+    if (preview.validCount === 0) {
+      triggerToast(t('navigation.batchPasteNoValid'), "warning");
+      return;
+    }
+    const imported = await navigationStore.addMany(items);
+    showBatchPasteModal.value = false;
+    triggerToast(formatTemplate(t('navigation.batchPasteSuccess'), { count: imported }), "success");
+    await refreshReviewItems();
+  } catch (err) {
+    triggerToast(getErrorMessage(err, t('navigation.saveFailed')), "error");
+  }
+}
+
+async function handleFillDescriptions() {
+  const targets = reviewItems.value.filter((item) => item.id && !item.description?.trim());
+  for (const item of targets) {
+    const suggestion = navigationStore.suggestFromUrl(item.url);
+    await navigationStore.update({
+      ...item,
+      description: suggestion.description,
+      tags: item.tags || suggestion.tags,
+    });
+  }
+  triggerToast(formatTemplate(t('navigation.reviewFilledDescriptions'), { count: targets.length }), "success");
+  await refreshNavigationData();
+}
+
+async function handleMarkCommon() {
+  const targets = reviewItems.value.filter((item) => item.id && item.clicks >= 20 && item.is_hot !== 1);
+  for (const item of targets) {
+    await navigationStore.update({
+      ...item,
+      is_hot: 1,
+    });
+  }
+  triggerToast(formatTemplate(t('navigation.reviewMarkedCommon'), { count: targets.length }), "success");
+  await refreshNavigationData();
 }
 
 // 快速访问
@@ -238,6 +319,7 @@ async function handleVisit(item: any) {
   }
   await navigationStore.clickItem(item);
   triggerToast(formatTemplate(t('navigation.visiting'), { title: item.title }));
+  await refreshReviewItems();
 }
 
 // 打开新增弹窗
@@ -253,6 +335,7 @@ function openAddModal() {
     is_hot: 0,
     logo_path: "",
     bg_path: "",
+    tags: [],
   };
   showFormModal.value = true;
 }
@@ -271,6 +354,7 @@ function openEditModal(item: any, event: Event) {
     is_hot: item.is_hot,
     logo_path: item.logo_path || "",
     bg_path: item.bg_path || "",
+    tags: item.tags || [],
   };
   showFormModal.value = true;
 }
@@ -288,6 +372,7 @@ async function handleDelete(id: number, title: string, event: Event) {
   try {
     await navigationStore.delete(id);
     triggerToast(t('navigation.deleteSuccess'));
+    await refreshReviewItems();
   } catch {
     triggerToast(t('navigation.deleteFailed'));
   }
@@ -307,6 +392,9 @@ function changePage(newPage: number) {
       :is-sort-mode="isSortMode"
       :selected-count="selectedIds.length"
       :total-count="navigationStore.items.length"
+      :active-view="navigationStore.view"
+      :active-tag="navigationStore.tag"
+      :tags="allTags"
       @enter-batch-mode="enterBatchMode"
       @exit-batch-mode="exitBatchMode"
       @toggle-select-all="toggleSelectAll"
@@ -317,6 +405,18 @@ function changePage(newPage: number) {
       @cancel-sort="handleCancelSort"
       @export-data="handleExportData"
       @import-data="handleImportData"
+      @open-batch-paste="showBatchPasteModal = true"
+      @change-view="handleChangeView"
+      @change-tag="handleChangeTag"
+    />
+
+    <NavigationReviewPanel
+      v-if="!isSortMode && reviewItems.length > 0"
+      class="mt-4"
+      :items="reviewItems"
+      @mark-common="handleMarkCommon"
+      @fill-descriptions="handleFillDescriptions"
+      @refresh="refreshReviewItems"
     />
 
     <!-- 卡片网格 -->
@@ -330,6 +430,9 @@ function changePage(newPage: number) {
       @toggle-selection="toggleSelection"
       @open-edit-modal="openEditModal"
       @delete="handleDelete"
+      @open-add-modal="openAddModal"
+      @open-batch-paste="showBatchPasteModal = true"
+      @import-data="handleImportData"
     />
 
     <!-- 分页器 -->
@@ -349,7 +452,12 @@ function changePage(newPage: number) {
       :form="form"
       @update:visible="showFormModal = $event"
       @update:form="form = $event"
-      @saved="() => {}"
+      @saved="refreshNavigationData"
+    />
+
+    <NavigationBatchPasteModal
+      v-model:visible="showBatchPasteModal"
+      @submit="handleBatchPasteSubmit"
     />
   </div>
 </template>

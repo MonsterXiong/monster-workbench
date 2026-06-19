@@ -13,7 +13,13 @@ import {
   Check,
   Download,
   Upload,
+  MoreHorizontal,
+  Clock3,
+  TrendingUp,
+  Sparkles,
+  ListPlus,
 } from "lucide-vue-next";
+import { ref } from "vue";
 import { useNavigationStore } from "../../../stores/navigation";
 import { useConfirm } from "../../../composables/useConfirm";
 import { useToast } from "../../../composables/useToast";
@@ -30,6 +36,9 @@ defineProps<{
   isSortMode: boolean;
   selectedCount: number;
   totalCount: number;
+  activeView: "all" | "recent" | "frequent" | "featured" | "common";
+  activeTag: string;
+  tags: string[];
 }>();
 
 const emit = defineEmits<{
@@ -43,7 +52,20 @@ const emit = defineEmits<{
   (e: "cancelSort"): void;
   (e: "exportData"): void;
   (e: "importData"): void;
+  (e: "openBatchPaste"): void;
+  (e: "changeView", view: "all" | "recent" | "frequent" | "featured" | "common"): void;
+  (e: "changeTag", tag: string): void;
 }>();
+
+const showMoreMenu = ref(false);
+
+const quickViews = [
+  { key: "all", titleKey: "navigation.viewAll", icon: Compass },
+  { key: "recent", titleKey: "navigation.viewRecent", icon: Clock3 },
+  { key: "frequent", titleKey: "navigation.viewFrequent", icon: TrendingUp },
+  { key: "featured", titleKey: "navigation.viewFeatured", icon: Star },
+  { key: "common", titleKey: "navigation.viewCommon", icon: Flame },
+] as const;
 
 function changeCategory(cat: string) {
   navigationStore.category = cat;
@@ -73,6 +95,11 @@ function handleSearch() {
   navigationStore.fetchList();
 }
 
+function handleMoreAction(action: () => void) {
+  showMoreMenu.value = false;
+  action();
+}
+
 // 删除自定义分类
 async function handleDeleteCategory(cat: string) {
   const ok = await confirm({
@@ -100,6 +127,7 @@ async function handleDeleteCategory(cat: string) {
       </div>
       <div>
         <h2 class="text-sm font-black text-slate-850 dark:text-slate-100 tracking-wide">{{ t('navigation.title') }}</h2>
+        <p class="mt-0.5 text-[10px] font-semibold text-slate-500 dark:text-slate-400">{{ t('navigation.subtitle') }}</p>
       </div>
     </div>
 
@@ -108,46 +136,52 @@ async function handleDeleteCategory(cat: string) {
       <!-- 正常模式 -->
       <template v-if="!isBatchMode && !isSortMode">
         <div class="toolbar-action-group">
-          <BaseButton
-            type="neutral"
-            outline
-            size="sm"
-            class="toolbar-icon-btn"
-            :title="t('navigation.export') || 'Export Backup (JSON)'"
-            @click="emit('exportData')"
-          >
-            <template #icon><Download class="h-3.5 w-3.5" /></template>
-          </BaseButton>
-          <BaseButton
-            type="neutral"
-            outline
-            size="sm"
-            class="toolbar-icon-btn"
-            :title="t('navigation.import') || 'Import Backup (JSON)'"
-            @click="emit('importData')"
-          >
-            <template #icon><Upload class="h-3.5 w-3.5" /></template>
-          </BaseButton>
-          <BaseButton
-            type="neutral"
-            outline
-            size="sm"
-            class="toolbar-ghost-btn"
-            @click="emit('enterBatchMode')"
-          >
-            <template #icon><SlidersHorizontal class="h-3 w-3" /></template>
-            {{ t('navigation.manage') }}
-          </BaseButton>
-          <BaseButton
-            type="neutral"
-            outline
-            size="sm"
-            class="toolbar-ghost-btn"
-            @click="emit('enterSortMode')"
-          >
-            <template #icon><ArrowUpDown class="h-3 w-3" /></template>
-            {{ t('navigation.sort') }}
-          </BaseButton>
+          <div class="relative">
+            <BaseButton
+              type="neutral"
+              outline
+              size="sm"
+              class="toolbar-ghost-btn"
+              @click="showMoreMenu = !showMoreMenu"
+            >
+              <template #icon><MoreHorizontal class="h-3.5 w-3.5" /></template>
+              {{ t('navigation.moreManage') }}
+            </BaseButton>
+            <transition
+              enter-active-class="transition duration-100 ease-out"
+              enter-from-class="opacity-0 scale-95 -translate-y-1"
+              enter-to-class="opacity-100 scale-100 translate-y-0"
+              leave-active-class="transition duration-75 ease-in"
+              leave-from-class="opacity-100 scale-100 translate-y-0"
+              leave-to-class="opacity-0 scale-95 -translate-y-1"
+            >
+              <div
+                v-if="showMoreMenu"
+                class="absolute right-0 top-full z-30 mt-2 w-48 rounded-2xl border border-slate-200 bg-white p-1.5 shadow-workbench-lg dark:border-slate-800 dark:bg-slate-900"
+              >
+                <button class="more-menu-item" @click="handleMoreAction(() => emit('importData'))">
+                  <Upload class="h-3.5 w-3.5" />
+                  {{ t('navigation.import') }}
+                </button>
+                <button class="more-menu-item" @click="handleMoreAction(() => emit('exportData'))">
+                  <Download class="h-3.5 w-3.5" />
+                  {{ t('navigation.export') }}
+                </button>
+                <button class="more-menu-item" @click="handleMoreAction(() => emit('openBatchPaste'))">
+                  <ListPlus class="h-3.5 w-3.5" />
+                  {{ t('navigation.batchPaste') }}
+                </button>
+                <button class="more-menu-item" @click="handleMoreAction(() => emit('enterSortMode'))">
+                  <ArrowUpDown class="h-3.5 w-3.5" />
+                  {{ t('navigation.sort') }}
+                </button>
+                <button class="more-menu-item" @click="handleMoreAction(() => emit('enterBatchMode'))">
+                  <SlidersHorizontal class="h-3.5 w-3.5" />
+                  {{ t('navigation.manage') }}
+                </button>
+              </div>
+            </transition>
+          </div>
           <BaseButton
             type="warning"
             size="sm"
@@ -243,25 +277,33 @@ async function handleDeleteCategory(cat: string) {
 
     <!-- 条件筛选栏 -->
     <div class="flex flex-col md:flex-row md:items-center justify-between gap-3 shrink-0">
-      <div class="flex items-center gap-2 select-none">
-        <div
-          role="button"
+      <div class="flex flex-wrap items-center gap-2 select-none">
+        <button
+          v-for="view in quickViews"
+          :key="view.key"
+          class="filter-badge-btn cursor-pointer"
+          :class="activeView === view.key ? 'bg-primary/10 text-primary border border-primary/20 font-bold' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-700'"
+          @click="emit('changeView', view.key)"
+        >
+          <component :is="view.icon" class="h-3.5 w-3.5" />
+          {{ t(view.titleKey) }}
+        </button>
+        <button
           class="filter-badge-btn cursor-pointer"
           :class="navigationStore.isFeatured === 1 ? 'bg-primary/10 text-primary border border-primary/20 font-bold' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-700'"
           @click="toggleFeatured"
         >
           <Star class="h-3.5 w-3.5" :class="{ 'fill-primary': navigationStore.isFeatured === 1 }" />
           {{ t('navigation.featured') }}
-        </div>
-        <div
-          role="button"
+        </button>
+        <button
           class="filter-badge-btn cursor-pointer"
           :class="navigationStore.isHot === 1 ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 font-bold' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-700'"
           @click="toggleHot"
         >
           <Flame class="h-3.5 w-3.5" :class="{ 'fill-amber-500': navigationStore.isHot === 1 }" />
-          {{ t('navigation.hot') }}
-        </div>
+          {{ t('navigation.common') }}
+        </button>
       </div>
 
       <!-- 搜索框 (改用 BaseInput) -->
@@ -280,6 +322,29 @@ async function handleDeleteCategory(cat: string) {
         />
       </div>
     </div>
+
+    <div v-if="tags.length > 0" class="flex items-center gap-2 overflow-x-auto no-scrollbar select-none">
+      <div class="flex items-center gap-1.5 text-[10px] font-black text-slate-400">
+        <Sparkles class="h-3.5 w-3.5" />
+        {{ t('navigation.tagsFilter') }}
+      </div>
+      <button
+        class="tag-filter-btn"
+        :class="!activeTag ? 'bg-primary/10 text-primary border-primary/20' : 'bg-slate-100 text-slate-500 border-slate-200 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-400'"
+        @click="emit('changeTag', '')"
+      >
+        {{ t('navigation.allTags') }}
+      </button>
+      <button
+        v-for="tag in tags"
+        :key="tag"
+        class="tag-filter-btn"
+        :class="activeTag === tag ? 'bg-primary/10 text-primary border-primary/20' : 'bg-slate-100 text-slate-500 border-slate-200 hover:bg-slate-200 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-700'"
+        @click="emit('changeTag', tag)"
+      >
+        #{{ tag }}
+      </button>
+    </div>
   </div>
 </template>
 
@@ -289,6 +354,12 @@ async function handleDeleteCategory(cat: string) {
 }
 .filter-badge-btn {
   @apply px-3 py-1.5 rounded-full text-[10px] font-bold transition flex items-center gap-1;
+}
+.tag-filter-btn {
+  @apply flex-shrink-0 rounded-full border px-2.5 py-1 text-[10px] font-black transition;
+}
+.more-menu-item {
+  @apply flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-xs font-bold text-slate-600 transition hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-slate-100;
 }
 .toolbar-action-group {
   @apply flex flex-wrap items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50/90 px-1.5 py-1 shadow-sm dark:border-slate-800 dark:bg-slate-900/70;

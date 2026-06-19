@@ -1,27 +1,18 @@
-import { isTauriRuntime } from "./runtime";
+import { ensureBrowserMessage, isTauriRuntime } from "./runtime";
 import { callTauri, convertFileSrc } from "./tauri";
 import { systemService } from "./system.service";
 import {
   buildUrlWithQuery,
-  createSearchTextMatcher,
   downloadTextFile,
-  filterByOptionalValues,
   firstOf,
-  getCurrentIsoString,
-  getNextNumberBy,
-  findByValue,
-  findIndexByValue,
   isBlank,
   joinPathIfPresent,
   keySetBy,
   normalizeStringKey,
   openExternalUrl,
-  paginateArray,
-  removeByValue,
-  removeByValues,
   readBrowserTextFile,
   safeJsonStringifyPretty,
-  sortByMany,
+  toTrimmedString,
   tryJsonParse,
   uniqueMappedValues,
 } from "../utils";
@@ -32,13 +23,15 @@ export interface NavigationItem {
   url: string;
   description: string;
   category: string;
-  is_featured: number; // 0 或 1
-  is_hot: number;      // 0 或 1
+  is_featured: number;
+  is_hot: number;
   clicks: number;
   created_at?: string;
   logo_path?: string;
   bg_path?: string;
   sort_order?: number;
+  last_visited_at?: string;
+  tags?: string[];
 }
 
 export interface PagedResult<T> {
@@ -49,6 +42,7 @@ export interface PagedResult<T> {
 }
 
 export type NavigationBackupSaveResult = "empty" | "desktop" | "browser" | "cancelled";
+export type NavigationView = "all" | "recent" | "frequent" | "featured" | "common";
 export type NavigationBackupValidationCode =
   | "empty"
   | "invalid_json"
@@ -67,17 +61,11 @@ export class NavigationBackupValidationError extends Error {
 
 const NAVIGATION_BACKUP_FILE_NAME = "monster_navigation_backup.json";
 
-// Mock 内存数据（浏览器降级模式下使用）
-let mockDb: NavigationItem[] = [
-  { id: 1, title: "Baidu", url: "https://www.baidu.com", description: "A popular Chinese search engine to find web resources.", category: "Utility", is_featured: 1, is_hot: 1, clicks: 120 },
-  { id: 2, title: "GitHub", url: "https://github.com", description: "The world's largest open-source development and collaboration platform.", category: "Community", is_featured: 1, is_hot: 1, clicks: 350 },
-  { id: 3, title: "Vue.js", url: "https://vuejs.org", description: "The Progressive JavaScript Framework for building user interfaces.", category: "Documentation", is_featured: 1, is_hot: 0, clicks: 88 },
-  { id: 4, title: "Tailwind CSS", url: "https://tailwindcss.com", description: "A utility-first CSS framework for rapid UI development.", category: "Documentation", is_featured: 0, is_hot: 0, clicks: 45 },
-  { id: 5, title: "Tauri", url: "https://tauri.app", description: "Build smaller, faster, and more secure desktop applications with web technologies.", category: "Documentation", is_featured: 1, is_hot: 1, clicks: 200 },
-  { id: 6, title: "Dribbble", url: "https://dribbble.com", description: "The world's leading community for creative designers to share work and get inspired.", category: "Design", is_featured: 1, is_hot: 0, clicks: 76 },
-  { id: 7, title: "Unsplash", url: "https://unsplash.com", description: "Free high-resolution, copyright-free photography and stock photos.", category: "Design", is_featured: 0, is_hot: 1, clicks: 110 },
-  { id: 8, title: "Bilibili", url: "https://www.bilibili.com", description: "A popular video sharing and anime streaming community.", category: "Leisure", is_featured: 0, is_hot: 0, clicks: 95 }
-];
+function assertDesktopNavigationData() {
+  if (!isTauriRuntime()) {
+    throw new Error("[ERR_NAV_BROWSER_UNSUPPORTED] " + ensureBrowserMessage("导航菜单真实数据"));
+  }
+}
 
 function assertNavigationBackupItem(item: unknown): item is NavigationItem {
   return Boolean(
@@ -107,7 +95,123 @@ function parseNavigationBackup(rawContent: string): NavigationItem[] {
     throw new NavigationBackupValidationError("missing_fields");
   }
 
-  return parsedData;
+  return parsedData.map(normalizeNavigationItem);
+}
+
+function normalizeNavigationItem(item: NavigationItem): NavigationItem {
+  return {
+    ...item,
+    title: String(item.title || ""),
+    url: String(item.url || ""),
+    description: item.description || "",
+    category: item.category || "Utility",
+    is_featured: item.is_featured ?? 0,
+    is_hot: item.is_hot ?? 0,
+    clicks: item.clicks ?? 0,
+    tags: normalizeNavigationTags(item.tags),
+    last_visited_at: item.last_visited_at || undefined,
+  };
+}
+
+function normalizeNavigationTags(tags: unknown): string[] {
+  if (!Array.isArray(tags)) return [];
+  return uniqueMappedValues(
+    tags
+      .map((tag) => toTrimmedString(tag))
+      .filter((tag) => tag.length > 0),
+    (tag) => tag.toLowerCase()
+  );
+}
+
+function parseTagsText(raw: string): string[] {
+  return normalizeNavigationTags(raw.split(/[,，\s#]+/));
+}
+
+function normalizeUrlForCompare(url: string): string {
+  return normalizeStringKey(url).replace(/^https?:\/\//, "").replace(/\/$/, "");
+}
+
+function getDomainTitle(url: string): string {
+  try {
+    const parsed = new URL(url);
+    return parsed.hostname.replace(/^www\./, "");
+  } catch {
+    return url.replace(/^https?:\/\//, "").split("/")[0] || url;
+  }
+}
+
+function buildNavigationSuggestion(url: string): Pick<NavigationItem, "title" | "description" | "category" | "tags"> {
+  const ensuredUrl = url.startsWith("http://") || url.startsWith("https://") ? url : `https://${url}`;
+  const domain = getDomainTitle(ensuredUrl);
+  const lowered = domain.toLowerCase();
+  const tags = parseTagsText(domain.replace(/\./g, " "));
+  let category = "Utility";
+  if (/(github|gitlab|stackoverflow|npmjs)/.test(lowered)) category = "Community";
+  if (/(docs|developer|vue|react|tauri|tailwind|mdn)/.test(lowered)) category = "Documentation";
+  if (/(figma|dribbble|behance|unsplash|icon|design)/.test(lowered)) category = "Design";
+  return {
+    title: domain,
+    description: `${domain} personal resource shortcut.`,
+    category,
+    tags,
+  };
+}
+
+function createItemsFromText(rawText: string, defaultCategory: string): NavigationItem[] {
+  const seen = new Set<string>();
+  const items: NavigationItem[] = [];
+  rawText
+    .split(/\r?\n/)
+    .map((line) => toTrimmedString(line))
+    .filter(Boolean)
+    .forEach((line) => {
+      const [urlPart, ...rest] = line.split(/\s+/);
+      const url = urlPart.startsWith("http://") || urlPart.startsWith("https://") ? urlPart : `https://${urlPart}`;
+      const normalized = normalizeUrlForCompare(url);
+      if (!normalized || seen.has(normalized)) return;
+      seen.add(normalized);
+      const suggestion = buildNavigationSuggestion(url);
+      items.push({
+        title: rest.join(" ") || suggestion.title,
+        url,
+        description: suggestion.description,
+        category: defaultCategory || suggestion.category,
+        is_featured: 0,
+        is_hot: 0,
+        clicks: 0,
+        tags: suggestion.tags,
+      });
+    });
+  return items;
+}
+
+function getImportPreview(existingItems: NavigationItem[], incomingItems: NavigationItem[]) {
+  const existingUrls = keySetBy(existingItems, (item) => normalizeUrlForCompare(item.url));
+  let validCount = 0;
+  let duplicateCount = 0;
+  let invalidCount = 0;
+  const seenIncoming = new Set<string>();
+
+  incomingItems.forEach((item) => {
+    const urlKey = normalizeUrlForCompare(item.url || "");
+    if (!item.title || !item.url || !urlKey) {
+      invalidCount += 1;
+      return;
+    }
+    if (existingUrls.has(urlKey) || seenIncoming.has(urlKey)) {
+      duplicateCount += 1;
+      return;
+    }
+    seenIncoming.add(urlKey);
+    validCount += 1;
+  });
+
+  return {
+    total: incomingItems.length,
+    validCount,
+    duplicateCount,
+    invalidCount,
+  };
 }
 
 async function saveNavigationBackupFile(
@@ -172,24 +276,11 @@ async function openNavigationUrl(url: string): Promise<void> {
 }
 
 export const navigationService = {
-  /**
-   * 初始化数据库连接（底座层代理）
-   */
   async getDb(appDataPath: string): Promise<void> {
-    if (!isTauriRuntime()) {
-      return;
-    }
-    try {
-      await callTauri<void>("init_navigation_db", { dbPath: appDataPath });
-    } catch (err) {
-      console.error("[ERR_SQLITE_INIT] SQLite 数据库初始化失败:", err);
-      throw err;
-    }
+    assertDesktopNavigationData();
+    await callTauri<void>("init_navigation_db", { dbPath: appDataPath });
   },
 
-  /**
-   * 分页条件查询
-   */
   async getNavigationList(
     appDataPath: string,
     params: {
@@ -199,66 +290,27 @@ export const navigationService = {
       category?: string;
       isFeatured?: number;
       isHot?: number;
+      view?: NavigationView;
+      tag?: string;
     }
   ): Promise<PagedResult<NavigationItem>> {
-    const { page, pageSize, keyword, category, isFeatured, isHot } = params;
-    if (!isTauriRuntime()) {
-      // 浏览器降级 Mock 过滤与分页
-      let filtered = [...mockDb];
-      filtered = filtered.filter(createSearchTextMatcher<NavigationItem>(keyword ?? "", [
-        (navigation) => navigation.title,
-        (navigation) => navigation.description,
-        (navigation) => navigation.url,
-      ]));
-      filtered = filterByOptionalValues(filtered, [
-        { getValue: (item) => item.category, value: category },
-        { getValue: (item) => item.is_featured, value: isFeatured, isActive: (value) => value !== undefined },
-        { getValue: (item) => item.is_hot, value: isHot, isActive: (value) => value !== undefined },
-      ]);
-
-      // 默认排序：优先按 sort_order 升序，而后点击量降序
-      filtered = sortByMany(filtered, [
-        { getValue: (item) => item.sort_order ?? 0 },
-        { getValue: (item) => item.clicks, direction: "desc" },
-      ]);
-
-      const pageResult = paginateArray(filtered, page, pageSize);
-      return {
-        items: pageResult.items,
-        total: pageResult.total,
-        page,
-        pageSize
-      };
-    }
-
-    // 调用底座 Command
+    assertDesktopNavigationData();
+    const { page, pageSize, keyword, category, isFeatured, isHot, view = "all", tag } = params;
     return callTauri<PagedResult<NavigationItem>>("get_navigation_list", {
       dbPath: appDataPath,
       keyword: keyword || null,
       category: category || null,
       isFeatured: isFeatured !== undefined ? isFeatured : null,
       isHot: isHot !== undefined ? isHot : null,
+      view,
+      tag: tag || null,
       page,
-      pageSize
+      pageSize,
     });
   },
 
-  /**
-   * 新增导航
-   */
   async addNavigation(appDataPath: string, item: Omit<NavigationItem, "id" | "clicks">): Promise<void> {
-    if (!isTauriRuntime()) {
-      const nextId = getNextNumberBy(mockDb, (navigation) => navigation.id);
-      const newItem: NavigationItem = {
-        ...item,
-        id: nextId,
-        clicks: 0,
-        created_at: getCurrentIsoString()
-      };
-      mockDb.push(newItem);
-      return;
-    }
-
+    assertDesktopNavigationData();
     await callTauri<void>("add_navigation", {
       dbPath: appDataPath,
       item: {
@@ -266,212 +318,77 @@ export const navigationService = {
         clicks: 0,
         id: null,
         created_at: null,
-        sort_order: null
-      }
+        sort_order: null,
+        last_visited_at: item.last_visited_at || null,
+        tags: normalizeNavigationTags(item.tags),
+      },
     });
   },
 
-  /**
-   * 修改导航
-   */
   async updateNavigation(appDataPath: string, item: NavigationItem): Promise<void> {
-    if (!isTauriRuntime()) {
-      const index = findIndexByValue(mockDb, (navigation) => navigation.id, item.id);
-      if (index !== -1) {
-        mockDb[index] = { ...mockDb[index], ...item };
-      }
-      return;
-    }
-
+    assertDesktopNavigationData();
     await callTauri<void>("update_navigation", {
       dbPath: appDataPath,
-      item
+      item: {
+        ...item,
+        tags: normalizeNavigationTags(item.tags),
+      },
     });
   },
 
-  /**
-   * 删除单条导航
-   */
   async deleteNavigation(appDataPath: string, id: number): Promise<void> {
-    if (!isTauriRuntime()) {
-      mockDb = removeByValue(mockDb, (item) => item.id, id);
-      return;
-    }
-
-    await callTauri<void>("delete_navigation", {
-      dbPath: appDataPath,
-      id
-    });
+    assertDesktopNavigationData();
+    await callTauri<void>("delete_navigation", { dbPath: appDataPath, id });
   },
 
-  /**
-   * 批量删除导航
-   */
   async batchDeleteNavigation(appDataPath: string, ids: number[]): Promise<void> {
     if (ids.length === 0) return;
-
-    if (!isTauriRuntime()) {
-      mockDb = removeByValues(mockDb, (item) => item.id || 0, ids);
-      return;
-    }
-
-    await callTauri<void>("batch_delete_navigation", {
-      dbPath: appDataPath,
-      ids
-    });
+    assertDesktopNavigationData();
+    await callTauri<void>("batch_delete_navigation", { dbPath: appDataPath, ids });
   },
 
-  /**
-   * 增加点击量计数
-   */
   async incrementClicks(appDataPath: string, id: number): Promise<void> {
-    if (!isTauriRuntime()) {
-      const item = findByValue(mockDb, (navigation) => navigation.id, id);
-      if (item) {
-        item.clicks += 1;
-      }
-      return;
-    }
-
-    await callTauri<void>("increment_navigation_clicks", {
-      dbPath: appDataPath,
-      id
-    });
+    assertDesktopNavigationData();
+    await callTauri<void>("increment_navigation_clicks", { dbPath: appDataPath, id });
   },
 
-  /**
-   * 获取所有已录入的分类
-   */
   async getCategories(appDataPath: string): Promise<string[]> {
-    if (!isTauriRuntime()) {
-      return uniqueMappedValues(mockDb, (item) => item.category);
-    }
-
-    return callTauri<string[]>("get_navigation_categories", {
-      dbPath: appDataPath
-    });
+    assertDesktopNavigationData();
+    return callTauri<string[]>("get_navigation_categories", { dbPath: appDataPath });
   },
 
-  /**
-   * 迁移/合并分类 (删除分类的核心逻辑)
-   */
   async migrateCategory(appDataPath: string, fromCat: string, toCat: string): Promise<void> {
-    if (!isTauriRuntime()) {
-      mockDb.forEach(item => {
-        if (item.category === fromCat) {
-          item.category = toCat;
-        }
-      });
-      return;
-    }
-
-    await callTauri<void>("migrate_navigation_category", {
-      dbPath: appDataPath,
-      fromCat,
-      toCat
-    });
+    assertDesktopNavigationData();
+    await callTauri<void>("migrate_navigation_category", { dbPath: appDataPath, fromCat, toCat });
   },
 
-  /**
-   * 清除引用了指定相对路径的 logo_path / bg_path
-   */
   async clearFileReferences(appDataPath: string, relPath: string): Promise<void> {
-    if (!isTauriRuntime()) {
-      // 浏览器环境清除 Mock 数据中的引用
-      mockDb.forEach(item => {
-        if (item.logo_path === relPath) item.logo_path = undefined;
-        if (item.bg_path === relPath) item.bg_path = undefined;
-      });
-      return;
-    }
-
-    await callTauri<void>("clear_navigation_file_references", {
-      dbPath: appDataPath,
-      relPath
-    });
+    assertDesktopNavigationData();
+    await callTauri<void>("clear_navigation_file_references", { dbPath: appDataPath, relPath });
   },
 
-  /**
-   * 批量保存排序权重
-   */
   async saveSortOrder(appDataPath: string, orders: { id: number; sort_order: number }[]): Promise<void> {
-    if (!isTauriRuntime()) {
-      orders.forEach(o => {
-        const item = findByValue(mockDb, (navigation) => navigation.id, o.id);
-        if (item) {
-          item.sort_order = o.sort_order;
-        }
-      });
-      return;
-    }
-
-    await callTauri<void>("save_navigation_sort_order", {
-      dbPath: appDataPath,
-      orders
-    });
+    assertDesktopNavigationData();
+    await callTauri<void>("save_navigation_sort_order", { dbPath: appDataPath, orders });
   },
 
-  /**
-   * 获取所有网址列表（不分页，用于备份导出）
-   */
   async getAllNavigationList(appDataPath: string): Promise<NavigationItem[]> {
-    if (!isTauriRuntime()) {
-      return sortByMany(mockDb, [
-        { getValue: (item) => item.sort_order ?? 0 },
-        { getValue: (item) => item.clicks, direction: "desc" },
-      ]);
-    }
-
-    return callTauri<NavigationItem[]>("get_all_navigation_list", {
-      dbPath: appDataPath
-    });
+    assertDesktopNavigationData();
+    return callTauri<NavigationItem[]>("get_all_navigation_list", { dbPath: appDataPath });
   },
 
-  /**
-   * 批量导入网址导航（根据 URL 智能去重）
-   * @returns 实际导入的新条数
-   */
   async importNavigationList(appDataPath: string, items: NavigationItem[]): Promise<number> {
-    if (!isTauriRuntime()) {
-      const existing = await this.getAllNavigationList(appDataPath);
-      const existingUrls = keySetBy(existing, (item) => normalizeStringKey(item.url));
-
-      let maxSortOrder = getNextNumberBy(existing, (navigation) => navigation.sort_order ?? 0) - 1;
-
-      let importedCount = 0;
-
-      items.forEach(item => {
-        const cleanUrl = normalizeStringKey(item.url);
-        if (!existingUrls.has(cleanUrl)) {
-          maxSortOrder += 1;
-          mockDb.push({
-            title: item.title,
-            url: item.url,
-            description: item.description || "",
-            category: item.category || "Utility",
-            is_featured: item.is_featured ?? 0,
-            is_hot: item.is_hot ?? 0,
-            clicks: 0,
-            logo_path: item.logo_path || undefined,
-            bg_path: item.bg_path || undefined,
-            sort_order: maxSortOrder,
-            created_at: getCurrentIsoString()
-          });
-          importedCount += 1;
-        }
-      });
-      return importedCount;
-    }
-
-    // Tauri 底座模式下导入并返回实际新增条数
+    assertDesktopNavigationData();
     return callTauri<number>("import_navigation_list", {
       dbPath: appDataPath,
-      items: items.map(item => ({
+      items: items.map((item) => ({
         ...item,
         id: item.id || null,
         created_at: item.created_at || null,
-        sort_order: item.sort_order || null
-      }))
+        sort_order: item.sort_order || null,
+        last_visited_at: item.last_visited_at || null,
+        tags: normalizeNavigationTags(item.tags),
+      })),
     });
   },
 
@@ -479,4 +396,9 @@ export const navigationService = {
   readNavigationBackupFile,
   buildNavigationImageUrl,
   openNavigationUrl,
+  buildNavigationSuggestion,
+  createItemsFromText,
+  getImportPreview,
+  parseTagsText,
+  normalizeNavigationTags,
 };

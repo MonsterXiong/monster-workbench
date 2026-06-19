@@ -21,6 +21,8 @@ pub fn get_navigation_list(
     category: Option<String>,
     is_featured: Option<i32>,
     is_hot: Option<i32>,
+    view: Option<String>,
+    tag: Option<String>,
     page: u32,
     page_size: u32,
     state: NavState<'_>,
@@ -33,6 +35,8 @@ pub fn get_navigation_list(
             category,
             is_featured,
             is_hot,
+            view,
+            tag,
             page,
             page_size,
         )
