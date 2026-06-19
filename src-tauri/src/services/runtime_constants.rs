@@ -29,3 +29,14 @@ pub(crate) const JANITOR_GRACE_MS: u64 = 5_000;
 /// 真挂死兜底：claim 已超过 6 小时仍 running 视为挂死，标 failed。
 /// 该值需要高于真实视频生成等长任务的最大耗时；2026-06-18 取 6h。
 pub(crate) const STUCK_RUNNING_MAX_MS: u64 = 6 * 60 * 60 * 1000;
+
+/// 阶段 B2b：全局并发 worker 数上限。同时 running 的 worker（无论属于
+/// 哪个 image_workbench job）累加不超过该值，避免多 job 同跑把本地 Provider
+/// queue / sidecar 子进程压垮。默认 4，可在 runtime 通过 env override。
+pub(crate) const GLOBAL_WORKER_LIMIT: usize = 4;
+
+/// dispatcher 主循环节拍。500ms 内能响应 wake notify 也能在没事时低 CPU 自旋。
+/// B2b 简化方案没有真主循环（直接靠 spawn_blocking + permit 阻塞），保留常量
+/// 给后续若回归"中央 dispatcher"模型使用。
+#[allow(dead_code)]
+pub(crate) const DISPATCH_TICK_MS: u64 = 500;

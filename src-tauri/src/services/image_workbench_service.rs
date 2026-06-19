@@ -353,6 +353,21 @@ impl ImageWorkbenchService {
         let snapshot = self.get_snapshot(&job_id)?;
         let path_provider = self.path_provider.clone();
         tauri::async_runtime::spawn_blocking(move || {
+            // 阶段 B2b：先 acquire 全局 permit 再进入 worker 循环；同时 running 的
+            // worker 数 ≤ GLOBAL_WORKER_LIMIT，避免多 job 并发把 sidecar / Provider
+            // queue 压垮。permit RAII drop 自动释放；超时（30s）跳过本次启动，由
+            // janitor / 用户重试机制后续兜底。
+            let permit = crate::services::runtime_dispatcher::acquire_global_worker_permit(
+                &format!("iw-job:{}", job_id),
+                std::time::Duration::from_secs(30),
+            );
+            if permit.is_none() {
+                eprintln!(
+                    "[image_workbench] start_job_runner 跳过：等待 worker permit 超时 job={}",
+                    job_id
+                );
+                return;
+            }
             let service = ImageWorkbenchService::new(path_provider);
             let ai_service = AiProviderService::new(app_handle);
             let _ = service.run_image_tasks_with_generator(
@@ -361,6 +376,7 @@ impl ImageWorkbenchService {
                 Some(worker_id.as_str()),
                 |request| ai_service.run_business_generation_blocking(request),
             );
+            // permit 在闭包结束时 drop，自动归还 pool。
         });
         Ok(snapshot)
     }
