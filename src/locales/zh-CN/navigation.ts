@@ -48,7 +48,6 @@ export default {
     addCategory: "+ 新增分类",
     customCategoryPlaceholder: "请输入新分类名称...",
     setFeatured: "设为精选",
-    setHot: "设为常用",
     setCommon: "设为常用",
     tagsLabel: "标签",
     tagsPlaceholder: "例如: ai, 文档, 常用",

@@ -11,6 +11,7 @@ import {
 } from "lucide-vue-next";
 import { useDragSort } from "../../../composables/useDragSort";
 import { ref, toRef } from "vue";
+import { useClickOutside } from "../../../composables/useClickOutside";
 import { useI18n } from "../../../composables/useI18n";
 import { formatTemplate, getInitials, hasSelectionKey } from "../../../utils";
 
@@ -37,6 +38,11 @@ const emit = defineEmits<{
 const itemsRef = toRef(props, "items");
 const { isDraggingIndex, handleDragStart, handleDragEnter, handleDragEnd } = useDragSort(itemsRef);
 const openMenuId = ref<number | null>(null);
+const gridContainer = ref<HTMLElement | null>(null);
+
+useClickOutside(gridContainer, () => {
+  openMenuId.value = null;
+});
 
 function getCategoryName(cat: string): string {
   if (!cat) return "";
@@ -56,7 +62,7 @@ function closeCardMenu() {
 </script>
 
 <template>
-  <div class="flex-1 overflow-y-auto mt-4.5 pt-2 pr-0.5 min-h-0 relative">
+  <div ref="gridContainer" class="flex-1 overflow-y-auto mt-4.5 pt-2 pr-0.5 min-h-0 relative">
     <!-- 空白占位 -->
     <div v-if="items.length === 0" class="flex flex-col items-center justify-center py-20 gap-3 text-center">
       <div class="h-14 w-14 rounded-2xl bg-slate-50 dark:bg-slate-800 flex items-center justify-center text-slate-400 border border-slate-200 dark:border-slate-700">

@@ -21,6 +21,7 @@ import {
 } from "lucide-vue-next";
 import { ref } from "vue";
 import { useNavigationStore } from "../../../stores/navigation";
+import { useClickOutside } from "../../../composables/useClickOutside";
 import { useConfirm } from "../../../composables/useConfirm";
 import { useToast } from "../../../composables/useToast";
 import { useI18n } from "../../../composables/useI18n";
@@ -58,6 +59,10 @@ const emit = defineEmits<{
 }>();
 
 const showMoreMenu = ref(false);
+const moreMenuContainer = ref<HTMLElement | null>(null);
+useClickOutside(moreMenuContainer, () => {
+  showMoreMenu.value = false;
+});
 
 const quickViews = [
   { key: "all", titleKey: "navigation.viewAll", icon: Compass },
@@ -136,7 +141,7 @@ async function handleDeleteCategory(cat: string) {
       <!-- 正常模式 -->
       <template v-if="!isBatchMode && !isSortMode">
         <div class="toolbar-action-group">
-          <div class="relative">
+          <div class="relative" ref="moreMenuContainer">
             <BaseButton
               type="neutral"
               outline

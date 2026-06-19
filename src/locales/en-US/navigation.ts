@@ -48,7 +48,6 @@ export default {
     addCategory: "+ Add Category",
     customCategoryPlaceholder: "Enter new category name...",
     setFeatured: "Set Featured",
-    setHot: "Set Common",
     setCommon: "Set Common",
     tagsLabel: "Tags",
     tagsPlaceholder: "e.g., ai, docs, daily",

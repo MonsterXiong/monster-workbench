@@ -175,6 +175,11 @@ impl DbNavInfra {
         count_sql.push_str(&filter_sql);
 
         // 先查总数；标签存为 JSON，精确标签筛选在解析后完成。
+        // SAFETY / 性能：tag 模式下 SQL 不带 LIMIT/OFFSET，会把 view+filter 全量
+        // 加载到内存再 Rust 端 tag_matches 过滤+切片。当 navigation 数据上千时
+        // 是性能/内存风险点。后续若上量，应把 tags 拆成关联表（含 INDEX）或
+        // 改用 LIKE %"tag"% + 函数索引方案；也可以考虑 SQLite JSON1 扩展的
+        // json_each 配合 INNER JOIN 做服务端过滤。
         let total: i64 = if active_tag.is_none() {
             conn.query_row(
                 &count_sql,

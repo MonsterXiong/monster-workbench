@@ -4,6 +4,12 @@ import { Activity, BadgeCheck, FileQuestion, Link2Off, Sparkles, Star } from "lu
 import type { NavigationItem } from "../../../stores/navigation";
 import { useI18n } from "../../../composables/useI18n";
 
+/**
+ * 整理建议面板里"高频未精选"的点击数阈值。clicks ≥ 此值且尚未被精选
+ * 的资源会被建议加精。提到顶部便于以后调整或迁到 appStore 设置。
+ */
+const FREQUENT_CLICK_THRESHOLD = 20;
+
 const props = defineProps<{
   items: NavigationItem[];
 }>();
@@ -29,7 +35,9 @@ const duplicateCount = computed(() => {
 
 const missingDescriptionCount = computed(() => props.items.filter((item) => !item.description?.trim()).length);
 const missingLogoCount = computed(() => props.items.filter((item) => !item.logo_path).length);
-const frequentUnfeaturedCount = computed(() => props.items.filter((item) => item.clicks >= 20 && item.is_featured !== 1).length);
+const frequentUnfeaturedCount = computed(
+  () => props.items.filter((item) => item.clicks >= FREQUENT_CLICK_THRESHOLD && item.is_featured !== 1).length,
+);
 const longUnvisitedCount = computed(() => props.items.filter((item) => !item.last_visited_at && item.clicks === 0).length);
 
 const suggestions = computed(() => [
