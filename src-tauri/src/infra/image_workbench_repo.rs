@@ -1,12 +1,11 @@
-use crate::infra::image_workbench_row_mapper::{
-    collect_rows, map_asset, map_job, map_metadata, map_model_run, map_task, map_template,
-};
+use crate::infra::image_workbench_query;
+use crate::infra::image_workbench_row_mapper::{collect_rows, map_job, map_template};
 use crate::infra::image_workbench_schema::init_image_workbench_schema;
 use crate::infra::image_workbench_task_transition::{
     is_claimable_task, is_job_terminal_status, is_terminal_status, validate_task_status_transition,
 };
 use crate::infra::{AppError, AppResult};
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -14,11 +13,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 static ID_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
 use crate::infra::image_workbench_types::{
-    ImageWorkbenchAsset, ImageWorkbenchJob, ImageWorkbenchMetadata, ImageWorkbenchModelRun,
-    ImageWorkbenchSnapshot, ImageWorkbenchTask, ImageWorkbenchTaskClaim,
-    ImageWorkbenchTaskStatusPatch, ImageWorkbenchTemplate, NewImageWorkbenchAsset,
-    NewImageWorkbenchJob, NewImageWorkbenchMetadata, NewImageWorkbenchModelRun,
-    NewImageWorkbenchTemplate,
+    ImageWorkbenchAsset, ImageWorkbenchAssetQuery, ImageWorkbenchGroup, ImageWorkbenchJob,
+    ImageWorkbenchSnapshot, ImageWorkbenchTaskClaim, ImageWorkbenchTaskStatusPatch,
+    ImageWorkbenchTemplate, NewImageWorkbenchAsset, NewImageWorkbenchGroup, NewImageWorkbenchJob,
+    NewImageWorkbenchMetadata, NewImageWorkbenchModelRun, NewImageWorkbenchTemplate,
 };
 
 pub struct ImageWorkbenchRepo {
@@ -103,11 +101,11 @@ impl ImageWorkbenchRepo {
 
     pub fn get_snapshot(&self, job_id: &str) -> AppResult<ImageWorkbenchSnapshot> {
         let conn = self.connect()?;
-        let job = self.get_job(&conn, job_id)?;
-        let tasks = self.list_tasks(&conn, job_id)?;
-        let assets = self.list_assets(&conn, job_id)?;
-        let metadata = self.list_metadata(&conn, job_id)?;
-        let model_runs = self.list_model_runs(&conn, job_id)?;
+        let job = image_workbench_query::get_job(&conn, job_id)?;
+        let tasks = image_workbench_query::list_tasks(&conn, job_id)?;
+        let assets = image_workbench_query::list_assets(&conn, job_id)?;
+        let metadata = image_workbench_query::list_metadata(&conn, job_id)?;
+        let model_runs = image_workbench_query::list_model_runs(&conn, job_id)?;
         Ok(ImageWorkbenchSnapshot {
             job,
             tasks,
@@ -134,21 +132,25 @@ impl ImageWorkbenchRepo {
     }
 
     pub fn list_recent_assets(&self, limit: u32) -> AppResult<Vec<ImageWorkbenchAsset>> {
+        self.query_assets(ImageWorkbenchAssetQuery {
+            limit,
+            ..Default::default()
+        })
+    }
+
+    /// 跨作业资产库查询：支持 group_id / min_rating 筛选、分页与排序。
+    /// 默认条件等价于历史 `list_recent_assets`。command 层本轮仍只暴露 limit。
+    pub fn query_assets(
+        &self,
+        query: ImageWorkbenchAssetQuery,
+    ) -> AppResult<Vec<ImageWorkbenchAsset>> {
         let conn = self.connect()?;
-        let limit = limit.clamp(1, 200) as i64;
-        let mut stmt = conn.prepare(
-            "SELECT id, job_id, task_id, file_path, thumbnail_path, width, height, mime_type, size_bytes, favorite, created_at_ms
-             FROM image_workbench_assets
-             ORDER BY favorite DESC, created_at_ms DESC
-             LIMIT ?",
-        )?;
-        let rows = stmt.query_map(params![limit], map_asset)?;
-        collect_rows(rows)
+        image_workbench_query::query_assets(&conn, &query)
     }
 
     pub fn get_asset_by_id(&self, asset_id: &str) -> AppResult<ImageWorkbenchAsset> {
         let conn = self.connect()?;
-        self.get_asset(&conn, asset_id)
+        image_workbench_query::get_asset(&conn, asset_id)
     }
 
     pub fn delete_job(&self, job_id: &str) -> AppResult<()> {
@@ -169,7 +171,7 @@ impl ImageWorkbenchRepo {
     pub fn cancel_job(&self, job_id: &str) -> AppResult<ImageWorkbenchSnapshot> {
         let conn = self.connect()?;
         let now = now_ms();
-        self.get_job(&conn, job_id)?;
+        image_workbench_query::get_job(&conn, job_id)?;
         conn.execute(
             "UPDATE image_workbench_tasks
              SET status = 'cancelled',
@@ -193,9 +195,9 @@ impl ImageWorkbenchRepo {
         model_run: NewImageWorkbenchModelRun,
     ) -> AppResult<()> {
         let conn = self.connect()?;
-        self.get_job(&conn, job_id)?;
+        image_workbench_query::get_job(&conn, job_id)?;
         if let Some(task_id) = task_id {
-            let task = self.get_task(&conn, task_id)?;
+            let task = image_workbench_query::get_task(&conn, task_id)?;
             if task.job_id != job_id {
                 return Err(AppError::Database(format!(
                     "图片工作台任务不属于作业: {}",
@@ -209,8 +211,8 @@ impl ImageWorkbenchRepo {
     pub fn retry_failed_tasks(&self, job_id: &str) -> AppResult<ImageWorkbenchSnapshot> {
         let conn = self.connect()?;
         let now = now_ms();
-        self.get_job(&conn, job_id)?;
-        let tasks = self.list_tasks(&conn, job_id)?;
+        image_workbench_query::get_job(&conn, job_id)?;
+        let tasks = image_workbench_query::list_tasks(&conn, job_id)?;
         let mut updated = 0;
         for task in tasks
             .iter()
@@ -275,7 +277,7 @@ impl ImageWorkbenchRepo {
     ) -> AppResult<ImageWorkbenchSnapshot> {
         let conn = self.connect()?;
         let now = now_ms();
-        let task = self.get_task(&conn, &patch.task_id)?;
+        let task = image_workbench_query::get_task(&conn, &patch.task_id)?;
         validate_task_status_transition(&task, &patch.status)?;
         let retry_count = if task.status == "failed" && patch.status == "retrying" {
             task.retry_count + 1
@@ -349,8 +351,8 @@ impl ImageWorkbenchRepo {
     ) -> AppResult<Option<ImageWorkbenchTaskClaim>> {
         let conn = self.connect()?;
         let now = now_ms();
-        self.get_job(&conn, job_id)?;
-        let task = self.list_tasks(&conn, job_id)?.into_iter().find(|task| {
+        image_workbench_query::get_job(&conn, job_id)?;
+        let task = image_workbench_query::list_tasks(&conn, job_id)?.into_iter().find(|task| {
             task_ids
                 .map(|ids| ids.iter().any(|id| id == &task.id))
                 .unwrap_or(true)
@@ -575,15 +577,16 @@ impl ImageWorkbenchRepo {
     ) -> AppResult<ImageWorkbenchSnapshot> {
         let mut conn = self.connect()?;
         let now = now_ms();
-        let task = self.get_task(&conn, &asset.task_id)?;
+        let task = image_workbench_query::get_task(&conn, &asset.task_id)?;
         let asset_id = next_id("iw-asset");
         let job_id = task.job_id.clone();
 
         let tx = conn.transaction()?;
         tx.execute(
             "INSERT INTO image_workbench_assets
-                (id, job_id, task_id, file_path, thumbnail_path, width, height, mime_type, size_bytes, favorite, created_at_ms)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)",
+                (id, job_id, task_id, file_path, thumbnail_path, width, height, mime_type, size_bytes, favorite, created_at_ms,
+                 group_id, rating, parent_asset_id, root_asset_id, version_index)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)",
             params![
                 asset_id,
                 job_id,
@@ -594,7 +597,12 @@ impl ImageWorkbenchRepo {
                 asset.height.map(|value| value as i64),
                 asset.mime_type,
                 asset.size_bytes.map(|value| value as i64),
-                now
+                now,
+                asset.group_id,
+                asset.rating.map(|value| value as i64),
+                asset.parent_asset_id,
+                asset.root_asset_id,
+                asset.version_index.map(|value| value as i64)
             ],
         )?;
 
@@ -655,7 +663,7 @@ impl ImageWorkbenchRepo {
         favorite: bool,
     ) -> AppResult<ImageWorkbenchSnapshot> {
         let conn = self.connect()?;
-        let asset = self.get_asset(&conn, asset_id)?;
+        let asset = image_workbench_query::get_asset(&conn, asset_id)?;
         let now = now_ms();
         conn.execute(
             "UPDATE image_workbench_assets
@@ -670,6 +678,74 @@ impl ImageWorkbenchRepo {
             params![now, asset.job_id],
         )?;
         self.get_snapshot(&asset.job_id)
+    }
+
+    /// 设置资产评分（0..5）。与 favorite 并存、互不影响；rating=None 表示清除评分。
+    /// command 接入留后续轮次，本轮由 repo 单测覆盖。
+    #[allow(dead_code)]
+    pub fn set_asset_rating(
+        &self,
+        asset_id: &str,
+        rating: Option<u32>,
+    ) -> AppResult<ImageWorkbenchSnapshot> {
+        let conn = self.connect()?;
+        let asset = image_workbench_query::get_asset(&conn, asset_id)?;
+        let now = now_ms();
+        conn.execute(
+            "UPDATE image_workbench_assets
+             SET rating = ?
+             WHERE id = ?",
+            params![rating.map(|value| value as i64), asset_id],
+        )?;
+        conn.execute(
+            "UPDATE image_workbench_jobs
+             SET updated_at_ms = ?
+             WHERE id = ?",
+            params![now, asset.job_id],
+        )?;
+        self.get_snapshot(&asset.job_id)
+    }
+
+    /// 创建资产组。本轮仅落存储与读写，grouped job 业务编排留后续轮次。
+    /// command 接入留后续轮次，本轮由 repo 单测覆盖。
+    #[allow(dead_code)]
+    pub fn create_group(&self, input: NewImageWorkbenchGroup) -> AppResult<ImageWorkbenchGroup> {
+        let conn = self.connect()?;
+        image_workbench_query::get_job(&conn, &input.job_id)?;
+        let now = now_ms();
+        let group_id = next_id("iw-group");
+        conn.execute(
+            "INSERT INTO image_workbench_groups
+                (id, job_id, source_id, name, type, agent_preset, agent_ids_json, base_prompt,
+                 count, created_at_ms, updated_at_ms)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            params![
+                group_id,
+                input.job_id,
+                input.source_id,
+                input.name,
+                input.r#type,
+                input.agent_preset,
+                input.agent_ids_json,
+                input.base_prompt,
+                input.count as i64,
+                now,
+                now
+            ],
+        )?;
+        image_workbench_query::get_group(&conn, &group_id)
+    }
+
+    #[allow(dead_code)]
+    pub fn list_groups(&self, job_id: &str) -> AppResult<Vec<ImageWorkbenchGroup>> {
+        let conn = self.connect()?;
+        image_workbench_query::list_groups(&conn, job_id)
+    }
+
+    #[allow(dead_code)]
+    pub fn get_group_by_id(&self, group_id: &str) -> AppResult<ImageWorkbenchGroup> {
+        let conn = self.connect()?;
+        image_workbench_query::get_group(&conn, group_id)
     }
 
     pub fn list_templates(&self) -> AppResult<Vec<ImageWorkbenchTemplate>> {
@@ -690,7 +766,7 @@ impl ImageWorkbenchRepo {
         let conn = self.connect()?;
         let now = now_ms();
         let id = input.id.unwrap_or_else(|| next_id("iw-template"));
-        let existing = self.get_template_optional(&conn, &id)?;
+        let existing = image_workbench_query::get_template_optional(&conn, &id)?;
         if existing.as_ref().is_some_and(|template| template.is_system) {
             return Err(AppError::Permission("系统模板不能被覆盖".to_string()));
         }
@@ -726,12 +802,12 @@ impl ImageWorkbenchRepo {
             )?;
         }
 
-        self.get_template(&conn, &id)
+        image_workbench_query::get_template(&conn, &id)
     }
 
     pub fn delete_template(&self, template_id: &str) -> AppResult<()> {
         let conn = self.connect()?;
-        let template = self.get_template(&conn, template_id)?;
+        let template = image_workbench_query::get_template(&conn, template_id)?;
         if template.is_system {
             return Err(AppError::Permission("系统模板不能删除".to_string()));
         }
@@ -740,128 +816,6 @@ impl ImageWorkbenchRepo {
             params![template_id],
         )?;
         Ok(())
-    }
-
-    fn get_job(&self, conn: &Connection, job_id: &str) -> AppResult<ImageWorkbenchJob> {
-        conn.query_row(
-            "SELECT id, mode, status, prompt, negative_prompt, quantity, provider_config_id, model, size,
-                    reference_asset_ids_json, source_asset_id, source_image_path, mask_path, person_context_json,
-                    upscale_scale, fallback_policy, created_at_ms, updated_at_ms, queued_at_ms,
-                    started_at_ms, finished_at_ms, error
-             FROM image_workbench_jobs
-             WHERE id = ?",
-            params![job_id],
-            map_job,
-        )
-        .optional()?
-        .ok_or_else(|| AppError::Database(format!("未找到图片工作台作业: {}", job_id)))
-    }
-
-    fn get_task(&self, conn: &Connection, task_id: &str) -> AppResult<ImageWorkbenchTask> {
-        conn.query_row(
-            "SELECT id, job_id, queue_index, status, retry_count, max_retries, claim_token, leased_until_ms,
-                    prompt, created_at_ms, updated_at_ms, started_at_ms, finished_at_ms, error
-             FROM image_workbench_tasks
-             WHERE id = ?",
-            params![task_id],
-            map_task,
-        )
-        .optional()?
-        .ok_or_else(|| AppError::Database(format!("未找到图片工作台任务: {}", task_id)))
-    }
-
-    fn get_asset(&self, conn: &Connection, asset_id: &str) -> AppResult<ImageWorkbenchAsset> {
-        conn.query_row(
-            "SELECT id, job_id, task_id, file_path, thumbnail_path, width, height, mime_type, size_bytes, favorite, created_at_ms
-             FROM image_workbench_assets
-             WHERE id = ?",
-            params![asset_id],
-            map_asset,
-        )
-        .optional()?
-        .ok_or_else(|| AppError::Database(format!("未找到图片工作台资产: {}", asset_id)))
-    }
-
-    fn get_template(
-        &self,
-        conn: &Connection,
-        template_id: &str,
-    ) -> AppResult<ImageWorkbenchTemplate> {
-        self.get_template_optional(conn, template_id)?
-            .ok_or_else(|| AppError::Database(format!("未找到图片工作台模板: {}", template_id)))
-    }
-
-    fn get_template_optional(
-        &self,
-        conn: &Connection,
-        template_id: &str,
-    ) -> AppResult<Option<ImageWorkbenchTemplate>> {
-        conn.query_row(
-            "SELECT id, name, prompt, negative_prompt, mode, is_system, created_at_ms, updated_at_ms
-             FROM image_workbench_templates
-             WHERE id = ?",
-            params![template_id],
-            map_template,
-        )
-        .optional()
-        .map_err(AppError::from)
-    }
-
-    fn list_tasks(&self, conn: &Connection, job_id: &str) -> AppResult<Vec<ImageWorkbenchTask>> {
-        let mut stmt = conn.prepare(
-            "SELECT id, job_id, queue_index, status, retry_count, max_retries, claim_token, leased_until_ms,
-                    prompt, created_at_ms, updated_at_ms, started_at_ms, finished_at_ms, error
-             FROM image_workbench_tasks
-             WHERE job_id = ?
-             ORDER BY queue_index ASC",
-        )?;
-        let rows = stmt.query_map(params![job_id], map_task)?;
-        collect_rows(rows)
-    }
-
-    fn list_assets(&self, conn: &Connection, job_id: &str) -> AppResult<Vec<ImageWorkbenchAsset>> {
-        let mut stmt = conn.prepare(
-            "SELECT id, job_id, task_id, file_path, thumbnail_path, width, height, mime_type, size_bytes, favorite, created_at_ms
-             FROM image_workbench_assets
-             WHERE job_id = ?
-             ORDER BY created_at_ms ASC",
-        )?;
-        let rows = stmt.query_map(params![job_id], map_asset)?;
-        collect_rows(rows)
-    }
-
-    fn list_metadata(
-        &self,
-        conn: &Connection,
-        job_id: &str,
-    ) -> AppResult<Vec<ImageWorkbenchMetadata>> {
-        let mut stmt = conn.prepare(
-            "SELECT m.id, m.asset_id, m.task_id, m.original_prompt, m.expanded_prompt, m.negative_prompt,
-                    m.seed, m.model, m.mode, m.provider, m.reference_asset_ids_json, m.mask_path,
-                    m.person_context_json, m.created_at_ms
-             FROM image_workbench_metadata m
-             INNER JOIN image_workbench_assets a ON a.id = m.asset_id
-             WHERE a.job_id = ?
-             ORDER BY m.created_at_ms ASC",
-        )?;
-        let rows = stmt.query_map(params![job_id], map_metadata)?;
-        collect_rows(rows)
-    }
-
-    fn list_model_runs(
-        &self,
-        conn: &Connection,
-        job_id: &str,
-    ) -> AppResult<Vec<ImageWorkbenchModelRun>> {
-        let mut stmt = conn.prepare(
-            "SELECT id, job_id, task_id, provider, model, capability, status, latency_ms, request_json,
-                    response_preview, error, created_at_ms, finished_at_ms
-             FROM image_workbench_model_runs
-             WHERE job_id = ?
-             ORDER BY created_at_ms ASC",
-        )?;
-        let rows = stmt.query_map(params![job_id], map_model_run)?;
-        collect_rows(rows)
     }
 
     fn insert_model_run(
@@ -896,7 +850,7 @@ impl ImageWorkbenchRepo {
     }
 
     fn recalculate_job_status(&self, conn: &Connection, job_id: &str, now: i64) -> AppResult<()> {
-        let tasks = self.list_tasks(conn, job_id)?;
+        let tasks = image_workbench_query::list_tasks(conn, job_id)?;
         if tasks.is_empty() {
             return Ok(());
         }

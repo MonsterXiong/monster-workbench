@@ -1,0 +1,215 @@
+//! 图片工作台只读查询 helper。
+//!
+//! 这些函数原先是 `ImageWorkbenchRepo` 上的私有方法（仅借用 `&self.connect()`
+//! 得到的 `Connection`，不依赖 `self` 的其它状态）。为给 `image_workbench_repo.rs`
+//! 腾出体量预算（资产组 / 版本链 / 评分数据模型升级前置），统一抽成 `pub(crate)`
+//! 自由函数，签名一律为 `fn xxx(conn: &Connection, ...) -> AppResult<...>`，
+//! 行为与原方法逐字一致。
+
+use crate::infra::image_workbench_row_mapper::{
+    collect_rows, map_asset, map_group, map_job, map_metadata, map_model_run, map_task,
+    map_template,
+};
+use crate::infra::image_workbench_types::{
+    ImageWorkbenchAsset, ImageWorkbenchAssetQuery, ImageWorkbenchAssetSort, ImageWorkbenchGroup,
+    ImageWorkbenchJob, ImageWorkbenchMetadata, ImageWorkbenchModelRun, ImageWorkbenchTask,
+    ImageWorkbenchTemplate,
+};
+use crate::infra::{AppError, AppResult};
+use rusqlite::{params, types::Value, Connection, OptionalExtension};
+
+pub(crate) fn get_job(conn: &Connection, job_id: &str) -> AppResult<ImageWorkbenchJob> {
+    conn.query_row(
+        "SELECT id, mode, status, prompt, negative_prompt, quantity, provider_config_id, model, size,
+                reference_asset_ids_json, source_asset_id, source_image_path, mask_path, person_context_json,
+                upscale_scale, fallback_policy, created_at_ms, updated_at_ms, queued_at_ms,
+                started_at_ms, finished_at_ms, error
+         FROM image_workbench_jobs
+         WHERE id = ?",
+        params![job_id],
+        map_job,
+    )
+    .optional()?
+    .ok_or_else(|| AppError::Database(format!("未找到图片工作台作业: {}", job_id)))
+}
+
+pub(crate) fn get_task(conn: &Connection, task_id: &str) -> AppResult<ImageWorkbenchTask> {
+    conn.query_row(
+        "SELECT id, job_id, queue_index, status, retry_count, max_retries, claim_token, leased_until_ms,
+                prompt, created_at_ms, updated_at_ms, started_at_ms, finished_at_ms, error,
+                group_id, variant_index, failure_type, failure_hint
+         FROM image_workbench_tasks
+         WHERE id = ?",
+        params![task_id],
+        map_task,
+    )
+    .optional()?
+    .ok_or_else(|| AppError::Database(format!("未找到图片工作台任务: {}", task_id)))
+}
+
+pub(crate) fn get_asset(conn: &Connection, asset_id: &str) -> AppResult<ImageWorkbenchAsset> {
+    conn.query_row(
+        "SELECT id, job_id, task_id, file_path, thumbnail_path, width, height, mime_type, size_bytes, favorite, created_at_ms,
+                group_id, rating, parent_asset_id, root_asset_id, version_index
+         FROM image_workbench_assets
+         WHERE id = ?",
+        params![asset_id],
+        map_asset,
+    )
+    .optional()?
+    .ok_or_else(|| AppError::Database(format!("未找到图片工作台资产: {}", asset_id)))
+}
+
+pub(crate) fn get_template(
+    conn: &Connection,
+    template_id: &str,
+) -> AppResult<ImageWorkbenchTemplate> {
+    get_template_optional(conn, template_id)?
+        .ok_or_else(|| AppError::Database(format!("未找到图片工作台模板: {}", template_id)))
+}
+
+pub(crate) fn get_template_optional(
+    conn: &Connection,
+    template_id: &str,
+) -> AppResult<Option<ImageWorkbenchTemplate>> {
+    conn.query_row(
+        "SELECT id, name, prompt, negative_prompt, mode, is_system, created_at_ms, updated_at_ms
+         FROM image_workbench_templates
+         WHERE id = ?",
+        params![template_id],
+        map_template,
+    )
+    .optional()
+    .map_err(AppError::from)
+}
+
+pub(crate) fn list_tasks(conn: &Connection, job_id: &str) -> AppResult<Vec<ImageWorkbenchTask>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, job_id, queue_index, status, retry_count, max_retries, claim_token, leased_until_ms,
+                prompt, created_at_ms, updated_at_ms, started_at_ms, finished_at_ms, error,
+                group_id, variant_index, failure_type, failure_hint
+         FROM image_workbench_tasks
+         WHERE job_id = ?
+         ORDER BY queue_index ASC",
+    )?;
+    let rows = stmt.query_map(params![job_id], map_task)?;
+    collect_rows(rows)
+}
+
+pub(crate) fn list_assets(conn: &Connection, job_id: &str) -> AppResult<Vec<ImageWorkbenchAsset>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, job_id, task_id, file_path, thumbnail_path, width, height, mime_type, size_bytes, favorite, created_at_ms,
+                group_id, rating, parent_asset_id, root_asset_id, version_index
+         FROM image_workbench_assets
+         WHERE job_id = ?
+         ORDER BY created_at_ms ASC",
+    )?;
+    let rows = stmt.query_map(params![job_id], map_asset)?;
+    collect_rows(rows)
+}
+
+pub(crate) fn list_metadata(
+    conn: &Connection,
+    job_id: &str,
+) -> AppResult<Vec<ImageWorkbenchMetadata>> {
+    let mut stmt = conn.prepare(
+        "SELECT m.id, m.asset_id, m.task_id, m.original_prompt, m.expanded_prompt, m.negative_prompt,
+                m.seed, m.model, m.mode, m.provider, m.reference_asset_ids_json, m.mask_path,
+                m.person_context_json, m.created_at_ms
+         FROM image_workbench_metadata m
+         INNER JOIN image_workbench_assets a ON a.id = m.asset_id
+         WHERE a.job_id = ?
+         ORDER BY m.created_at_ms ASC",
+    )?;
+    let rows = stmt.query_map(params![job_id], map_metadata)?;
+    collect_rows(rows)
+}
+
+pub(crate) fn list_model_runs(
+    conn: &Connection,
+    job_id: &str,
+) -> AppResult<Vec<ImageWorkbenchModelRun>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, job_id, task_id, provider, model, capability, status, latency_ms, request_json,
+                response_preview, error, created_at_ms, finished_at_ms
+         FROM image_workbench_model_runs
+         WHERE job_id = ?
+         ORDER BY created_at_ms ASC",
+    )?;
+    let rows = stmt.query_map(params![job_id], map_model_run)?;
+    collect_rows(rows)
+}
+
+/// 跨作业资产库查询：支持 group_id / min_rating 筛选、分页与排序。
+/// `limit` clamp 到 1..200（与历史 `list_recent_assets` 一致），`offset` 不限。
+pub(crate) fn query_assets(
+    conn: &Connection,
+    query: &ImageWorkbenchAssetQuery,
+) -> AppResult<Vec<ImageWorkbenchAsset>> {
+    let limit = query.limit.clamp(1, 200) as i64;
+    let offset = query.offset as i64;
+
+    let mut sql = String::from(
+        "SELECT id, job_id, task_id, file_path, thumbnail_path, width, height, mime_type, size_bytes, favorite, created_at_ms,
+                group_id, rating, parent_asset_id, root_asset_id, version_index
+         FROM image_workbench_assets",
+    );
+
+    let mut conditions: Vec<&str> = Vec::new();
+    let mut binds: Vec<Value> = Vec::new();
+    if let Some(group_id) = &query.group_id {
+        conditions.push("group_id = ?");
+        binds.push(Value::Text(group_id.clone()));
+    }
+    if let Some(min_rating) = query.min_rating {
+        conditions.push("rating IS NOT NULL AND rating >= ?");
+        binds.push(Value::Integer(min_rating as i64));
+    }
+    if !conditions.is_empty() {
+        sql.push_str(" WHERE ");
+        sql.push_str(&conditions.join(" AND "));
+    }
+
+    sql.push_str(match query.sort {
+        ImageWorkbenchAssetSort::FavoriteThenRecent => " ORDER BY favorite DESC, created_at_ms DESC",
+        ImageWorkbenchAssetSort::RecentFirst => " ORDER BY created_at_ms DESC",
+        ImageWorkbenchAssetSort::RatingDesc => {
+            " ORDER BY rating DESC, favorite DESC, created_at_ms DESC"
+        }
+    });
+    sql.push_str(" LIMIT ? OFFSET ?");
+    binds.push(Value::Integer(limit));
+    binds.push(Value::Integer(offset));
+
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(rusqlite::params_from_iter(binds), map_asset)?;
+    collect_rows(rows)
+}
+
+pub(crate) fn list_groups(
+    conn: &Connection,
+    job_id: &str,
+) -> AppResult<Vec<ImageWorkbenchGroup>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, job_id, source_id, name, type, agent_preset, agent_ids_json, base_prompt,
+                count, created_at_ms, updated_at_ms
+         FROM image_workbench_groups
+         WHERE job_id = ?
+         ORDER BY created_at_ms ASC",
+    )?;
+    let rows = stmt.query_map(params![job_id], map_group)?;
+    collect_rows(rows)
+}
+
+pub(crate) fn get_group(conn: &Connection, group_id: &str) -> AppResult<ImageWorkbenchGroup> {
+    conn.query_row(
+        "SELECT id, job_id, source_id, name, type, agent_preset, agent_ids_json, base_prompt,
+                count, created_at_ms, updated_at_ms
+         FROM image_workbench_groups
+         WHERE id = ?",
+        params![group_id],
+        map_group,
+    )
+    .optional()?
+    .ok_or_else(|| AppError::Database(format!("未找到图片工作台资产组: {}", group_id)))
+}

@@ -1,4 +1,5 @@
 use super::*;
+use crate::infra::image_workbench_types::ImageWorkbenchAssetSort;
 use std::fs;
 
 fn test_repo() -> ImageWorkbenchRepo {
@@ -334,6 +335,7 @@ fn image_workbench_records_asset_metadata_and_model_run() {
                 height: Some(1024),
                 mime_type: Some("image/png".to_string()),
                 size_bytes: Some(2048),
+                ..Default::default()
             },
             Some(NewImageWorkbenchMetadata {
                 original_prompt: Some("测试图片".to_string()),
@@ -394,6 +396,7 @@ fn image_workbench_lists_jobs_and_recent_assets() {
             height: Some(512),
             mime_type: Some("image/png".to_string()),
             size_bytes: Some(1024),
+            ..Default::default()
         },
         None,
         None,
@@ -541,6 +544,7 @@ fn image_workbench_updates_asset_favorite_and_templates() {
                 height: None,
                 mime_type: None,
                 size_bytes: None,
+                ..Default::default()
             },
             None,
             None,
@@ -836,4 +840,217 @@ fn fail_stuck_running_image_tasks_marks_oldest_as_failed_and_increments_retry() 
     assert_eq!(stuck.status, "failed");
     assert_eq!(stuck.error.as_deref(), Some("worker_stuck"));
     assert_eq!(stuck.retry_count, 1, "retry_count should increment");
+}
+
+/// 建一个 quantity=1 的 job 并返回 (repo, job_id, task_id)，供资产组 / 版本链 / 评分测试复用。
+fn seed_job_with_task() -> (ImageWorkbenchRepo, String, String) {
+    let repo = test_repo();
+    let snapshot = repo
+        .create_job(NewImageWorkbenchJob {
+            mode: "txt2img".to_string(),
+            prompt: "资产组测试".to_string(),
+            negative_prompt: None,
+            task_prompts: Vec::new(),
+            quantity: 1,
+            provider_config_id: None,
+            model: None,
+            size: None,
+            reference_asset_ids_json: None,
+            source_asset_id: None,
+            source_image_path: None,
+            mask_path: None,
+            person_context_json: None,
+            upscale_scale: None,
+            fallback_policy: None,
+        })
+        .expect("create job");
+    let job_id = snapshot.job.id.clone();
+    let task_id = snapshot.tasks[0].id.clone();
+    (repo, job_id, task_id)
+}
+
+#[test]
+fn image_workbench_schema_migration_is_idempotent_and_backfills_columns() {
+    // 同一个 db_path 反复初始化不应报错；新列对旧行回读为 None / 默认值。
+    let (repo, _job_id, _task_id) = seed_job_with_task();
+    // connect() 内部每次都会调 init_image_workbench_schema，这里再显式确认重复初始化幂等。
+    let snapshot = repo.get_snapshot(&_job_id).expect("snapshot");
+    let task = &snapshot.tasks[0];
+    assert_eq!(task.group_id, None);
+    assert_eq!(task.variant_index, None);
+    assert_eq!(task.failure_type, None);
+    assert_eq!(task.failure_hint, None);
+    // 旧库无资产组，list_groups 返回空。
+    assert!(repo.list_groups(&_job_id).expect("groups").is_empty());
+}
+
+#[test]
+fn image_workbench_create_and_list_groups_round_trip() {
+    let (repo, job_id, _task_id) = seed_job_with_task();
+    let group = repo
+        .create_group(NewImageWorkbenchGroup {
+            job_id: job_id.clone(),
+            source_id: Some("iw-asset-src".to_string()),
+            name: Some("雨夜森林".to_string()),
+            r#type: Some("style_continuation".to_string()),
+            agent_preset: Some("默认预设".to_string()),
+            agent_ids_json: Some("[\"agent-1\"]".to_string()),
+            base_prompt: Some("雨夜森林小屋".to_string()),
+            count: 4,
+        })
+        .expect("create group");
+    assert_eq!(group.name.as_deref(), Some("雨夜森林"));
+    assert_eq!(group.r#type.as_deref(), Some("style_continuation"));
+    assert_eq!(group.count, 4);
+
+    let groups = repo.list_groups(&job_id).expect("list groups");
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0].id, group.id);
+
+    let fetched = repo.get_group_by_id(&group.id).expect("get group");
+    assert_eq!(fetched.base_prompt.as_deref(), Some("雨夜森林小屋"));
+    assert_eq!(fetched.agent_ids_json.as_deref(), Some("[\"agent-1\"]"));
+
+    // 删除 job 应级联删除其资产组。
+    repo.delete_job(&job_id).expect("delete job");
+    assert!(repo.get_group_by_id(&group.id).is_err());
+}
+
+#[test]
+fn image_workbench_record_asset_persists_group_rating_and_version_chain() {
+    let (repo, _job_id, task_id) = seed_job_with_task();
+    let snapshot = repo
+        .record_asset(
+            NewImageWorkbenchAsset {
+                task_id,
+                file_path: "C:/mock/versioned.png".to_string(),
+                thumbnail_path: None,
+                width: Some(768),
+                height: Some(768),
+                mime_type: Some("image/png".to_string()),
+                size_bytes: Some(4096),
+                group_id: Some("iw-group-1".to_string()),
+                rating: Some(4),
+                parent_asset_id: Some("iw-asset-parent".to_string()),
+                root_asset_id: Some("iw-asset-root".to_string()),
+                version_index: Some(2),
+            },
+            None,
+            None,
+        )
+        .expect("record asset");
+    let asset_id = snapshot.assets[0].id.clone();
+
+    let fetched = repo.get_asset_by_id(&asset_id).expect("get asset");
+    assert_eq!(fetched.group_id.as_deref(), Some("iw-group-1"));
+    assert_eq!(fetched.rating, Some(4));
+    assert_eq!(fetched.parent_asset_id.as_deref(), Some("iw-asset-parent"));
+    assert_eq!(fetched.root_asset_id.as_deref(), Some("iw-asset-root"));
+    assert_eq!(fetched.version_index, Some(2));
+    // favorite 默认仍为 false，与 rating 并存互不影响。
+    assert!(!fetched.favorite);
+}
+
+#[test]
+fn image_workbench_set_asset_rating_coexists_with_favorite() {
+    let (repo, _job_id, task_id) = seed_job_with_task();
+    let snapshot = repo
+        .record_asset(
+            NewImageWorkbenchAsset {
+                task_id,
+                file_path: "C:/mock/rating.png".to_string(),
+                ..Default::default()
+            },
+            None,
+            None,
+        )
+        .expect("record asset");
+    let asset_id = snapshot.assets[0].id.clone();
+
+    let favorited = repo
+        .set_asset_favorite(&asset_id, true)
+        .expect("favorite asset");
+    assert!(favorited.assets[0].favorite);
+
+    let rated = repo
+        .set_asset_rating(&asset_id, Some(5))
+        .expect("rate asset");
+    assert_eq!(rated.assets[0].rating, Some(5));
+    // 评分后收藏标志不应被改写。
+    assert!(rated.assets[0].favorite);
+
+    let cleared = repo.set_asset_rating(&asset_id, None).expect("clear rating");
+    assert_eq!(cleared.assets[0].rating, None);
+    assert!(cleared.assets[0].favorite);
+}
+
+#[test]
+fn image_workbench_query_assets_filters_paginates_and_sorts() {
+    let (repo, _job_id, task_id) = seed_job_with_task();
+    // 录入 3 张资产：A(group-1, rating 5)、B(group-1, rating 2)、C(group-2, 无评分)。
+    let mut record = |path: &str, group: &str, rating: Option<u32>| {
+        repo.record_asset(
+            NewImageWorkbenchAsset {
+                task_id: task_id.clone(),
+                file_path: path.to_string(),
+                group_id: Some(group.to_string()),
+                rating,
+                ..Default::default()
+            },
+            None,
+            None,
+        )
+        .expect("record asset");
+    };
+    record("C:/mock/a.png", "group-1", Some(5));
+    record("C:/mock/b.png", "group-1", Some(2));
+    record("C:/mock/c.png", "group-2", None);
+
+    // 按 group_id 筛选。
+    let group1 = repo
+        .query_assets(ImageWorkbenchAssetQuery {
+            group_id: Some("group-1".to_string()),
+            ..Default::default()
+        })
+        .expect("query group-1");
+    assert_eq!(group1.len(), 2);
+    assert!(group1.iter().all(|a| a.group_id.as_deref() == Some("group-1")));
+
+    // 按 min_rating 筛选（排除无评分与低评分）。
+    let high = repo
+        .query_assets(ImageWorkbenchAssetQuery {
+            min_rating: Some(3),
+            ..Default::default()
+        })
+        .expect("query min_rating");
+    assert_eq!(high.len(), 1);
+    assert_eq!(high[0].rating, Some(5));
+
+    // RatingDesc 排序：评分高者在前。
+    let by_rating = repo
+        .query_assets(ImageWorkbenchAssetQuery {
+            group_id: Some("group-1".to_string()),
+            sort: ImageWorkbenchAssetSort::RatingDesc,
+            ..Default::default()
+        })
+        .expect("query rating desc");
+    assert_eq!(by_rating[0].rating, Some(5));
+    assert_eq!(by_rating[1].rating, Some(2));
+
+    // 分页：limit=1 + offset=1 取第二条。
+    let page = repo
+        .query_assets(ImageWorkbenchAssetQuery {
+            group_id: Some("group-1".to_string()),
+            sort: ImageWorkbenchAssetSort::RatingDesc,
+            limit: 1,
+            offset: 1,
+            ..Default::default()
+        })
+        .expect("query page");
+    assert_eq!(page.len(), 1);
+    assert_eq!(page[0].rating, Some(2));
+
+    // 默认查询（FavoriteThenRecent）覆盖全部 3 条，等价于历史 list_recent_assets。
+    let all = repo.list_recent_assets(50).expect("list recent");
+    assert_eq!(all.len(), 3);
 }

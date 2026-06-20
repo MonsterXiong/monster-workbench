@@ -1,7 +1,7 @@
 use crate::infra::AppResult;
 use crate::infra::image_workbench_types::{
-    ImageWorkbenchAsset, ImageWorkbenchJob, ImageWorkbenchMetadata, ImageWorkbenchModelRun,
-    ImageWorkbenchTask, ImageWorkbenchTemplate,
+    ImageWorkbenchAsset, ImageWorkbenchGroup, ImageWorkbenchJob, ImageWorkbenchMetadata,
+    ImageWorkbenchModelRun, ImageWorkbenchTask, ImageWorkbenchTemplate,
 };
 
 /// 把 rusqlite 的行迭代器收敛成 Vec<T>，遇到错误立即返回。
@@ -59,6 +59,10 @@ pub(crate) fn map_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<ImageWorkben
         started_at_ms: row.get(11)?,
         finished_at_ms: row.get(12)?,
         error: row.get(13)?,
+        group_id: row.get(14)?,
+        variant_index: row.get::<_, Option<i64>>(15)?.map(|value| value as u32),
+        failure_type: row.get(16)?,
+        failure_hint: row.get(17)?,
     })
 }
 
@@ -75,6 +79,11 @@ pub(crate) fn map_asset(row: &rusqlite::Row<'_>) -> rusqlite::Result<ImageWorkbe
         size_bytes: row.get::<_, Option<i64>>(8)?.map(|value| value as u64),
         favorite: row.get::<_, i64>(9)? == 1,
         created_at_ms: row.get(10)?,
+        group_id: row.get(11)?,
+        rating: row.get::<_, Option<i64>>(12)?.map(|value| value as u32),
+        parent_asset_id: row.get(13)?,
+        root_asset_id: row.get(14)?,
+        version_index: row.get::<_, Option<i64>>(15)?.map(|value| value as u32),
     })
 }
 
@@ -125,5 +134,21 @@ pub(crate) fn map_template(row: &rusqlite::Row<'_>) -> rusqlite::Result<ImageWor
         is_system: row.get::<_, i64>(5)? == 1,
         created_at_ms: row.get(6)?,
         updated_at_ms: row.get(7)?,
+    })
+}
+
+pub(crate) fn map_group(row: &rusqlite::Row<'_>) -> rusqlite::Result<ImageWorkbenchGroup> {
+    Ok(ImageWorkbenchGroup {
+        id: row.get(0)?,
+        job_id: row.get(1)?,
+        source_id: row.get(2)?,
+        name: row.get(3)?,
+        r#type: row.get(4)?,
+        agent_preset: row.get(5)?,
+        agent_ids_json: row.get(6)?,
+        base_prompt: row.get(7)?,
+        count: row.get::<_, i64>(8)? as u32,
+        created_at_ms: row.get(9)?,
+        updated_at_ms: row.get(10)?,
     })
 }

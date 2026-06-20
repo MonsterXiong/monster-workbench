@@ -719,6 +719,7 @@ impl ImageWorkbenchService {
                 height: request.height,
                 mime_type: normalize_optional_string(request.mime_type),
                 size_bytes: request.size_bytes,
+                ..Default::default()
             },
             metadata,
             model_run,
