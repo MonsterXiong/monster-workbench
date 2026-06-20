@@ -213,3 +213,32 @@ pub(crate) fn get_group(conn: &Connection, group_id: &str) -> AppResult<ImageWor
     .optional()?
     .ok_or_else(|| AppError::Database(format!("未找到图片工作台资产组: {}", group_id)))
 }
+
+/// 资产版本链：复跑 job 产出的资产相对其源资产的父 / 链根 / 版本号。
+#[derive(Debug, Clone, Default)]
+pub(crate) struct AssetLineage {
+    pub parent_asset_id: Option<String>,
+    pub root_asset_id: Option<String>,
+    pub version_index: Option<u32>,
+}
+
+/// 根据 job 的 `source_asset_id` 派生版本链：
+/// - parent = 源资产 id
+/// - root = 源资产自身的 root（若有）否则源资产 id —— 让链根稳定向上收敛，
+///   与前端 `resolveRootAssetId` 语义一致
+/// - version = 源资产 version + 1（源无 version 视为 0）
+///
+/// 源资产不存在或 job 无 source_asset_id 时返回空版本链（全新生成）。
+pub(crate) fn resolve_lineage(conn: &Connection, job: &ImageWorkbenchJob) -> AppResult<AssetLineage> {
+    let Some(source_id) = job.source_asset_id.as_deref() else {
+        return Ok(AssetLineage::default());
+    };
+    let Some(source) = get_asset(conn, source_id).ok() else {
+        return Ok(AssetLineage::default());
+    };
+    Ok(AssetLineage {
+        parent_asset_id: Some(source.id.clone()),
+        root_asset_id: Some(source.root_asset_id.unwrap_or(source.id)),
+        version_index: Some(source.version_index.unwrap_or(0) + 1),
+    })
+}

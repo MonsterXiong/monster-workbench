@@ -73,6 +73,31 @@ impl ImageWorkbenchRepo {
             ],
         )?;
 
+        // 一 job 一 group：该作业的 N 张变体全部挂这个资产组，variant_index = 0..N。
+        // source_asset_id 有值视为复跑（rerun），否则为全新生成（fresh）。
+        let group_id = next_id("iw-group");
+        let group_type = if input.source_asset_id.is_some() {
+            "rerun"
+        } else {
+            "fresh"
+        };
+        tx.execute(
+            "INSERT INTO image_workbench_groups
+                (id, job_id, source_id, name, type, agent_preset, agent_ids_json, base_prompt,
+                 count, created_at_ms, updated_at_ms)
+             VALUES (?, ?, ?, NULL, ?, NULL, NULL, ?, ?, ?, ?)",
+            params![
+                group_id,
+                job_id,
+                input.source_asset_id,
+                group_type,
+                input.prompt,
+                input.quantity as i64,
+                now,
+                now
+            ],
+        )?;
+
         for index in 0..input.quantity {
             let task_prompt = input
                 .task_prompts
@@ -82,15 +107,18 @@ impl ImageWorkbenchRepo {
                 .unwrap_or_else(|| input.prompt.clone());
             tx.execute(
                 "INSERT INTO image_workbench_tasks
-                    (id, job_id, queue_index, status, retry_count, max_retries, prompt, created_at_ms, updated_at_ms)
-                 VALUES (?, ?, ?, 'queued', 0, 1, ?, ?, ?)",
+                    (id, job_id, queue_index, status, retry_count, max_retries, prompt, created_at_ms, updated_at_ms,
+                     group_id, variant_index)
+                 VALUES (?, ?, ?, 'queued', 0, 1, ?, ?, ?, ?, ?)",
                 params![
                     next_id("iw-task"),
                     job_id,
                     index as i64,
                     task_prompt,
                     now,
-                    now
+                    now,
+                    group_id,
+                    index as i64
                 ],
             )?;
         }
@@ -581,6 +609,15 @@ impl ImageWorkbenchRepo {
         let asset_id = next_id("iw-asset");
         let job_id = task.job_id.clone();
 
+        // 派生资产组与版本链：显式传入值优先（测试/导入场景），否则从 task 的
+        // group_id 与 job 的 source_asset_id 推导（生产路径走这条）。
+        let job = image_workbench_query::get_job(&conn, &job_id)?;
+        let lineage = image_workbench_query::resolve_lineage(&conn, &job)?;
+        let group_id = asset.group_id.clone().or(task.group_id.clone());
+        let parent_asset_id = asset.parent_asset_id.clone().or(lineage.parent_asset_id);
+        let root_asset_id = asset.root_asset_id.clone().or(lineage.root_asset_id);
+        let version_index = asset.version_index.or(lineage.version_index);
+
         let tx = conn.transaction()?;
         tx.execute(
             "INSERT INTO image_workbench_assets
@@ -598,11 +635,11 @@ impl ImageWorkbenchRepo {
                 asset.mime_type,
                 asset.size_bytes.map(|value| value as i64),
                 now,
-                asset.group_id,
+                group_id,
                 asset.rating.map(|value| value as i64),
-                asset.parent_asset_id,
-                asset.root_asset_id,
-                asset.version_index.map(|value| value as i64)
+                parent_asset_id,
+                root_asset_id,
+                version_index.map(|value| value as i64)
             ],
         )?;
 

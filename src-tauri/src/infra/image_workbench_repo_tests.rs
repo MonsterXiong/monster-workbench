@@ -871,17 +871,18 @@ fn seed_job_with_task() -> (ImageWorkbenchRepo, String, String) {
 
 #[test]
 fn image_workbench_schema_migration_is_idempotent_and_backfills_columns() {
-    // 同一个 db_path 反复初始化不应报错；新列对旧行回读为 None / 默认值。
+    // 同一个 db_path 反复初始化不应报错（connect() 内部每次都调 init schema）。
     let (repo, _job_id, _task_id) = seed_job_with_task();
-    // connect() 内部每次都会调 init_image_workbench_schema，这里再显式确认重复初始化幂等。
     let snapshot = repo.get_snapshot(&_job_id).expect("snapshot");
     let task = &snapshot.tasks[0];
-    assert_eq!(task.group_id, None);
-    assert_eq!(task.variant_index, None);
+    // create_job 现在会建 group 并给 task 写 group_id/variant_index。
+    assert!(task.group_id.is_some());
+    assert_eq!(task.variant_index, Some(0));
+    // 失败分类列本轮仍不写入，保持 None。
     assert_eq!(task.failure_type, None);
     assert_eq!(task.failure_hint, None);
-    // 旧库无资产组，list_groups 返回空。
-    assert!(repo.list_groups(&_job_id).expect("groups").is_empty());
+    // create_job 已建一个资产组。
+    assert_eq!(repo.list_groups(&_job_id).expect("groups").len(), 1);
 }
 
 #[test]
@@ -903,17 +904,18 @@ fn image_workbench_create_and_list_groups_round_trip() {
     assert_eq!(group.r#type.as_deref(), Some("style_continuation"));
     assert_eq!(group.count, 4);
 
+    // create_job 已自动建一个 group，这里再手动建一个 → 共 2 个，按 id 定位手建组。
     let groups = repo.list_groups(&job_id).expect("list groups");
-    assert_eq!(groups.len(), 1);
-    assert_eq!(groups[0].id, group.id);
+    assert!(groups.iter().any(|g| g.id == group.id));
 
     let fetched = repo.get_group_by_id(&group.id).expect("get group");
     assert_eq!(fetched.base_prompt.as_deref(), Some("雨夜森林小屋"));
     assert_eq!(fetched.agent_ids_json.as_deref(), Some("[\"agent-1\"]"));
 
-    // 删除 job 应级联删除其资产组。
+    // 删除 job 应级联删除其全部资产组。
     repo.delete_job(&job_id).expect("delete job");
     assert!(repo.get_group_by_id(&group.id).is_err());
+    assert!(repo.list_groups(&job_id).expect("groups").is_empty());
 }
 
 #[test]
@@ -988,7 +990,7 @@ fn image_workbench_set_asset_rating_coexists_with_favorite() {
 fn image_workbench_query_assets_filters_paginates_and_sorts() {
     let (repo, _job_id, task_id) = seed_job_with_task();
     // 录入 3 张资产：A(group-1, rating 5)、B(group-1, rating 2)、C(group-2, 无评分)。
-    let mut record = |path: &str, group: &str, rating: Option<u32>| {
+    let record = |path: &str, group: &str, rating: Option<u32>| {
         repo.record_asset(
             NewImageWorkbenchAsset {
                 task_id: task_id.clone(),
@@ -1053,4 +1055,145 @@ fn image_workbench_query_assets_filters_paginates_and_sorts() {
     // 默认查询（FavoriteThenRecent）覆盖全部 3 条，等价于历史 list_recent_assets。
     let all = repo.list_recent_assets(50).expect("list recent");
     assert_eq!(all.len(), 3);
+}
+
+/// 建一个指定 mode / source_asset_id / quantity 的 job，返回快照。
+fn create_job_with(
+    repo: &ImageWorkbenchRepo,
+    mode: &str,
+    prompt: &str,
+    quantity: u32,
+    source_asset_id: Option<String>,
+) -> ImageWorkbenchSnapshot {
+    repo.create_job(NewImageWorkbenchJob {
+        mode: mode.to_string(),
+        prompt: prompt.to_string(),
+        negative_prompt: None,
+        task_prompts: Vec::new(),
+        quantity,
+        provider_config_id: None,
+        model: None,
+        size: None,
+        reference_asset_ids_json: None,
+        source_asset_id,
+        source_image_path: None,
+        mask_path: None,
+        person_context_json: None,
+        upscale_scale: None,
+        fallback_policy: None,
+    })
+    .expect("create job")
+}
+
+/// 在指定 task 上录入一张资产，返回 asset id。
+fn record_asset_on(repo: &ImageWorkbenchRepo, task_id: &str, file_path: &str) -> String {
+    let snapshot = repo
+        .record_asset(
+            NewImageWorkbenchAsset {
+                task_id: task_id.to_string(),
+                file_path: file_path.to_string(),
+                ..Default::default()
+            },
+            None,
+            None,
+        )
+        .expect("record asset");
+    snapshot
+        .assets
+        .iter()
+        .find(|asset| asset.task_id == task_id)
+        .expect("recorded asset present")
+        .id
+        .clone()
+}
+
+#[test]
+fn image_workbench_create_job_builds_group_and_tags_variants() {
+    let repo = test_repo();
+    let snapshot = create_job_with(&repo, "txt2img", "雨夜森林", 3, None);
+    let job_id = snapshot.job.id.clone();
+
+    // 一 job 一 group：恰好一个组，count=quantity，全新生成 type=fresh。
+    let groups = repo.list_groups(&job_id).expect("list groups");
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0].count, 3);
+    assert_eq!(groups[0].r#type.as_deref(), Some("fresh"));
+    assert_eq!(groups[0].source_id, None);
+    assert_eq!(groups[0].base_prompt.as_deref(), Some("雨夜森林"));
+
+    // N 个 task 全挂同一 group，variant_index = 0..N。
+    let group_id = groups[0].id.clone();
+    assert!(snapshot
+        .tasks
+        .iter()
+        .all(|task| task.group_id.as_deref() == Some(group_id.as_str())));
+    let mut variants: Vec<u32> = snapshot
+        .tasks
+        .iter()
+        .map(|task| task.variant_index.expect("variant index"))
+        .collect();
+    variants.sort_unstable();
+    assert_eq!(variants, vec![0, 1, 2]);
+}
+
+#[test]
+fn image_workbench_rerun_job_group_marks_source() {
+    let repo = test_repo();
+    let snapshot = create_job_with(
+        &repo,
+        "img2img",
+        "继续风格",
+        1,
+        Some("iw-asset-source".to_string()),
+    );
+    let groups = repo.list_groups(&snapshot.job.id).expect("list groups");
+    assert_eq!(groups.len(), 1);
+    // 带 source_asset_id 视为复跑：type=rerun，source_id 落库。
+    assert_eq!(groups[0].r#type.as_deref(), Some("rerun"));
+    assert_eq!(groups[0].source_id.as_deref(), Some("iw-asset-source"));
+}
+
+#[test]
+fn image_workbench_fresh_job_asset_has_no_version_chain() {
+    let repo = test_repo();
+    let snapshot = create_job_with(&repo, "txt2img", "全新生成", 1, None);
+    let task_id = snapshot.tasks[0].id.clone();
+    let group_id = snapshot.tasks[0].group_id.clone();
+    let asset_id = record_asset_on(&repo, &task_id, "C:/mock/fresh.png");
+
+    let asset = repo.get_asset_by_id(&asset_id).expect("get asset");
+    // 全新 job：无父 / 无链根 / 无版本号，但跟随 task 的 group。
+    assert_eq!(asset.parent_asset_id, None);
+    assert_eq!(asset.root_asset_id, None);
+    assert_eq!(asset.version_index, None);
+    assert_eq!(asset.group_id, group_id);
+}
+
+#[test]
+fn image_workbench_rerun_chain_derives_parent_root_and_version() {
+    let repo = test_repo();
+
+    // α：全新 job 的资产，作为链根。
+    let job_a = create_job_with(&repo, "txt2img", "初版", 1, None);
+    let alpha = record_asset_on(&repo, &job_a.tasks[0].id, "C:/mock/alpha.png");
+
+    // β：以 α 为源复跑 → parent=α, root=α, version=1。
+    let job_b = create_job_with(&repo, "img2img", "复跑一", 1, Some(alpha.clone()));
+    let beta = record_asset_on(&repo, &job_b.tasks[0].id, "C:/mock/beta.png");
+    let beta_asset = repo.get_asset_by_id(&beta).expect("get beta");
+    assert_eq!(beta_asset.parent_asset_id.as_deref(), Some(alpha.as_str()));
+    assert_eq!(beta_asset.root_asset_id.as_deref(), Some(alpha.as_str()));
+    assert_eq!(beta_asset.version_index, Some(1));
+
+    // γ：以 β 为源复跑 → parent=β, root 收敛到 α, version=2。
+    let job_c = create_job_with(&repo, "img2img", "复跑二", 1, Some(beta.clone()));
+    let gamma = record_asset_on(&repo, &job_c.tasks[0].id, "C:/mock/gamma.png");
+    let gamma_asset = repo.get_asset_by_id(&gamma).expect("get gamma");
+    assert_eq!(gamma_asset.parent_asset_id.as_deref(), Some(beta.as_str()));
+    assert_eq!(
+        gamma_asset.root_asset_id.as_deref(),
+        Some(alpha.as_str()),
+        "链根应稳定收敛到 α"
+    );
+    assert_eq!(gamma_asset.version_index, Some(2));
 }

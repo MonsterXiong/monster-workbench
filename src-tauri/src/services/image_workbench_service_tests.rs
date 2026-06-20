@@ -484,6 +484,105 @@ fn image_workbench_service_worker_records_txt2img_result() {
         .contains("/ai/image-workbench/assets/"));
 }
 
+/// 端到端验证：create_job → worker 生成 → 落库资产带 group_id / variant_index；
+/// 带 source_asset_id 的复跑 job 产出的资产带正确版本链（parent/root/version）。
+#[test]
+fn image_workbench_service_worker_writes_group_and_version_chain() {
+    let (service, app_dir) = test_service("worker-group-version");
+    let generated_dir = app_dir.join("ai").join("generated").join("chain");
+    fs::create_dir_all(&generated_dir).expect("generated dir should create");
+
+    // 用 fake generator 跑完一个 job 的全部 task，返回落库后的 snapshot。
+    let run_job = |service: &ImageWorkbenchService, job_id: &str, tag: &str| {
+        let path = generated_dir.join(format!("{tag}.png"));
+        fs::write(&path, b"png").expect("generated image should write");
+        let path_str = path.to_string_lossy().to_string();
+        service
+            .run_txt2img_tasks_with_generator(job_id, None, None, move |request| {
+                Ok(AiGenerationResult {
+                    request_id: request.request_id,
+                    ok: true,
+                    capability: "txt2img".to_string(),
+                    provider: "custom".to_string(),
+                    model: "gpt-image-2".to_string(),
+                    base_url: "https://mock.local/v1".to_string(),
+                    latency_ms: 10,
+                    queue_wait_ms: Some(0),
+                    total_latency_ms: Some(10),
+                    message: "ok".to_string(),
+                    status_code: Some(200),
+                    text: None,
+                    artifacts: vec![AiGenerationArtifact {
+                        kind: "image".to_string(),
+                        url: None,
+                        path: Some(path_str.clone()),
+                        mime_type: Some("image/png".to_string()),
+                        size_bytes: Some(3),
+                        dimensions: Some("1024x1024".to_string()),
+                        duration_seconds: None,
+                    }],
+                    failure_kind: None,
+                    raw_preview: None,
+                })
+            })
+            .expect("worker should finish")
+    };
+
+    // 全新 job：资产带 group_id / variant_index，但无版本链。
+    let fresh = service
+        .create_job(CreateImageWorkbenchJobRequest {
+            mode: "txt2img".to_string(),
+            prompt: "初版".to_string(),
+            negative_prompt: None,
+            quantity: 1,
+            provider_config_id: Some("model-config-1".to_string()),
+            model: Some("gpt-image-2".to_string()),
+            size: Some("1024x1024".to_string()),
+            reference_asset_ids: Vec::new(),
+            reference_asset_ids_json: None,
+            source_asset_id: None,
+            source_image_path: None,
+            mask_path: None,
+            person_context_json: None,
+            upscale_scale: None,
+            fallback_policy: None,
+        })
+        .expect("fresh job should create");
+    let fresh = run_job(&service, &fresh.job.id, "alpha");
+    let alpha = &fresh.assets[0];
+    assert!(alpha.group_id.is_some(), "asset should carry group_id");
+    assert_eq!(fresh.tasks[0].variant_index, Some(0));
+    assert_eq!(alpha.parent_asset_id, None);
+    assert_eq!(alpha.version_index, None);
+    let alpha_id = alpha.id.clone();
+
+    // 复跑 job：source_asset_id 指向 α → 资产带版本链 parent=α, root=α, version=1。
+    let rerun = service
+        .create_job(CreateImageWorkbenchJobRequest {
+            mode: "img2img".to_string(),
+            prompt: "复跑".to_string(),
+            negative_prompt: None,
+            quantity: 1,
+            provider_config_id: Some("model-config-1".to_string()),
+            model: Some("gpt-image-2".to_string()),
+            size: Some("1024x1024".to_string()),
+            reference_asset_ids: vec![alpha_id.clone()],
+            reference_asset_ids_json: None,
+            source_asset_id: Some(alpha_id.clone()),
+            source_image_path: None,
+            mask_path: None,
+            person_context_json: None,
+            upscale_scale: None,
+            fallback_policy: None,
+        })
+        .expect("rerun job should create");
+    let rerun = run_job(&service, &rerun.job.id, "beta");
+    let beta = &rerun.assets[0];
+    assert_eq!(beta.parent_asset_id.as_deref(), Some(alpha_id.as_str()));
+    assert_eq!(beta.root_asset_id.as_deref(), Some(alpha_id.as_str()));
+    assert_eq!(beta.version_index, Some(1));
+}
+
 #[test]
 fn image_workbench_service_cancel_records_model_run_audit() {
     let (service, _app_dir) = test_service("cancel-records-model-run");
