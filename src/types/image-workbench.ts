@@ -63,6 +63,10 @@ export interface ImageWorkbenchTask {
   startedAtMs?: number | null;
   finishedAtMs?: number | null;
   error?: string | null;
+  groupId?: string | null;
+  variantIndex?: number | null;
+  failureType?: string | null;
+  failureHint?: string | null;
 }
 
 export interface ImageWorkbenchAsset {
@@ -77,6 +81,11 @@ export interface ImageWorkbenchAsset {
   sizeBytes?: number | null;
   favorite: boolean;
   createdAtMs: number;
+  groupId?: string | null;
+  rating?: number | null;
+  parentAssetId?: string | null;
+  rootAssetId?: string | null;
+  versionIndex?: number | null;
 }
 
 export interface ImageWorkbenchMetadata {

@@ -250,8 +250,10 @@ export function buildVersionChain(options: {
   libraryAssets: ImageWorkbenchAssetCard[];
   t: (key: string) => string;
 }) {
-  const { selectedAssetId, selectedJobId, currentJob, jobs, currentAssets, libraryAssets, t } = options;
-  if (!selectedAssetId || !selectedJobId) {
+  // jobs / selectedJobId / currentJob 入参保留以兼容现有调用点；版本链现在直读
+  // 后端字段（asset.parentAssetId / versionIndex），不再依赖 job.sourceAssetId。
+  const { selectedAssetId, currentAssets, libraryAssets, t } = options;
+  if (!selectedAssetId) {
     return [] as ImageWorkbenchVersionChainItem[];
   }
 
@@ -261,21 +263,19 @@ export function buildVersionChain(options: {
     return [] as ImageWorkbenchVersionChainItem[];
   }
 
-  const selectedJob = (currentJob?.id === selectedJobId ? currentJob : jobs.find((job) => job.id === selectedJobId)) || null;
-  const sourceAsset = selectedJob?.sourceAssetId
-    ? allAssets.find((asset) => asset.id === selectedJob.sourceAssetId) || null
+  const sourceAsset = selectedAsset.parentAssetId
+    ? allAssets.find((asset) => asset.id === selectedAsset.parentAssetId) || null
     : null;
 
-  const branchAssets = jobs
-    .filter((job) => job.sourceAssetId === selectedAssetId)
-    .sort((left, right) => right.updatedAtMs - left.updatedAtMs)
-    .map((job) => {
-      const jobAssets = allAssets
-        .filter((asset) => asset.jobId === job.id)
-        .sort((left, right) => right.createdAtMs - left.createdAtMs);
-      return jobAssets[0] || null;
+  // 后端的 versionIndex 升序代表演化先后；缺值兜底用 createdAtMs 升序。
+  const branchAssets = allAssets
+    .filter((asset) => asset.parentAssetId === selectedAssetId)
+    .sort((left, right) => {
+      const lv = left.versionIndex ?? Number.POSITIVE_INFINITY;
+      const rv = right.versionIndex ?? Number.POSITIVE_INFINITY;
+      if (lv !== rv) return lv - rv;
+      return left.createdAtMs - right.createdAtMs;
     })
-    .filter((asset): asset is ImageWorkbenchAssetCard => Boolean(asset))
     .slice(0, 3);
 
   const items: ImageWorkbenchVersionChainItem[] = [];
@@ -446,17 +446,17 @@ function buildLineageFamilyAssets(options: {
   currentAssets: ImageWorkbenchAssetCard[];
   libraryAssets: ImageWorkbenchAssetCard[];
 }) {
-  const { selectedAssetId, jobs, currentAssets, libraryAssets } = options;
+  // jobs 入参保留以兼容现有调用点；聚族现在直读 asset.rootAssetId。
+  const { selectedAssetId, currentAssets, libraryAssets } = options;
   if (!selectedAssetId) {
     return [] as ImageWorkbenchAssetCard[];
   }
 
   const allAssets = dedupeAssets(currentAssets.concat(libraryAssets));
-  const assetById = new Map(allAssets.map((asset) => [asset.id, asset]));
-  const jobById = new Map(jobs.map((job) => [job.id, job]));
-  const rootAssetId = resolveRootAssetId(selectedAssetId, assetById, jobById);
-
-  return allAssets.filter((asset) => resolveRootAssetId(asset.id, assetById, jobById) === rootAssetId);
+  const selected = allAssets.find((asset) => asset.id === selectedAssetId);
+  // 选中资产没有 rootAssetId（自身就是链根）时，以自身 id 作为聚族锚点。
+  const rootId = selected?.rootAssetId || selectedAssetId;
+  return allAssets.filter((asset) => (asset.rootAssetId || asset.id) === rootId);
 }
 
 function buildGallerySectionHighlights(options: {
@@ -529,7 +529,8 @@ function resolveLineageRole(options: {
   currentAssets: ImageWorkbenchAssetCard[];
   libraryAssets: ImageWorkbenchAssetCard[];
 }) {
-  const { assetId, selectedAssetId, jobs, currentAssets, libraryAssets } = options;
+  // jobs 入参保留以兼容现有调用点；角色判定现在直读 asset.rootAssetId / parentAssetId。
+  const { assetId, selectedAssetId, currentAssets, libraryAssets } = options;
   if (!assetId || !selectedAssetId) {
     return "";
   }
@@ -539,42 +540,18 @@ function resolveLineageRole(options: {
   }
 
   const allAssets = dedupeAssets(currentAssets.concat(libraryAssets));
-  const assetById = new Map(allAssets.map((asset) => [asset.id, asset]));
-  const jobById = new Map(jobs.map((job) => [job.id, job]));
-  const rootAssetId = resolveRootAssetId(selectedAssetId, assetById, jobById);
-  if (assetId === rootAssetId) {
+  const selected = allAssets.find((asset) => asset.id === selectedAssetId);
+  // selected 的链根 = rootAssetId（若有）否则自身。命中即为 source。
+  if (assetId === (selected?.rootAssetId || selectedAssetId)) {
     return "source";
   }
 
-  const asset = assetById.get(assetId);
-  const assetJob = asset ? jobById.get(asset.jobId) : null;
-  if (assetJob?.sourceAssetId === selectedAssetId) {
+  const asset = allAssets.find((item) => item.id === assetId);
+  if (asset?.parentAssetId === selectedAssetId) {
     return "branch";
   }
 
   return "";
-}
-
-function resolveRootAssetId(
-  assetId: string,
-  assetById: Map<string, ImageWorkbenchAssetCard>,
-  jobById: Map<string, ImageWorkbenchJob>
-) {
-  let currentAssetId = assetId;
-  const visited = new Set<string>();
-
-  while (currentAssetId && !visited.has(currentAssetId)) {
-    visited.add(currentAssetId);
-    const asset = assetById.get(currentAssetId);
-    const job = asset ? jobById.get(asset.jobId) : null;
-    const parentAssetId = job?.sourceAssetId || "";
-    if (!parentAssetId || !assetById.has(parentAssetId)) {
-      return currentAssetId;
-    }
-    currentAssetId = parentAssetId;
-  }
-
-  return assetId;
 }
 
 function resolveDeliveryCandidate(options: {
@@ -583,22 +560,24 @@ function resolveDeliveryCandidate(options: {
   currentAssets: ImageWorkbenchAssetCard[];
   libraryAssets: ImageWorkbenchAssetCard[];
 }) {
-  const { asset, jobs, currentAssets, libraryAssets } = options;
+  // jobs 入参保留以兼容现有调用点；交付判定现在直读 asset.parentAssetId。
+  const { asset, currentAssets, libraryAssets } = options;
   if (!asset.favorite) {
     return false;
   }
 
   const allAssets = dedupeAssets(currentAssets.concat(libraryAssets));
-  const assetIds = new Set(allAssets.map((item) => item.id));
-  const hasChildBranch = jobs.some((job) => job.sourceAssetId === asset.id && allAssets.some((item) => item.jobId === job.id));
+  // 有人以本资产为 parent → 还有后续分支，不算端点。
+  const hasChildBranch = allAssets.some((item) => item.parentAssetId === asset.id);
   if (hasChildBranch) {
     return false;
   }
 
-  const parentJob = jobs.find((job) => job.id === asset.jobId);
+  const assetIds = new Set(allAssets.map((item) => item.id));
+  // 上游有父（且父在当前集合）或下游有子节点（已在前面排除）→ 处于某条编辑链中。
   const hasLineage =
-    Boolean(parentJob?.sourceAssetId && assetIds.has(parentJob.sourceAssetId)) ||
-    jobs.some((job) => job.sourceAssetId === asset.id);
+    Boolean(asset.parentAssetId && assetIds.has(asset.parentAssetId)) ||
+    allAssets.some((item) => item.parentAssetId === asset.id);
 
   return hasLineage;
 }

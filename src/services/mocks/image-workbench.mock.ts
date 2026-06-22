@@ -24,6 +24,7 @@ const mockImageWorkbenchAssets = new Map<string, any>();
 const mockImageWorkbenchMetadata = new Map<string, any>();
 const mockImageWorkbenchModelRuns = new Map<string, any>();
 const mockImageWorkbenchTemplates = new Map<string, any>();
+const mockImageWorkbenchGroups = new Map<string, any>();
 
 const MOCK_IMAGE_WORKBENCH_MAX_QUANTITY = 16;
 const MOCK_IMAGE_WORKBENCH_TASK_STATUSES = new Set([
@@ -306,23 +307,23 @@ function createImageWorkbenchJob(args: Record<string, unknown>) {
     error: null,
   };
   mockImageWorkbenchJobs.set(jobId, job);
+  // 一 job 一 group：对齐后端 image_workbench_groups 表，浏览器降级也产出组语义。
+  const groupId = createMockImageWorkbenchId("iw-group");
+  mockImageWorkbenchGroups.set(groupId, {
+    id: groupId, jobId, sourceId: job.sourceAssetId, name: null,
+    type: job.sourceAssetId ? "rerun" : "fresh", agentPreset: null,
+    agentIdsJson: null, basePrompt: job.prompt, count: quantity,
+    createdAtMs: now, updatedAtMs: now,
+  });
   for (let index = 0; index < quantity; index += 1) {
     const taskId = createMockImageWorkbenchId("iw-task");
     mockImageWorkbenchTasks.set(taskId, {
-      id: taskId,
-      jobId,
-      queueIndex: index,
-      status: "queued",
-      retryCount: 0,
-      maxRetries: 1,
-      claimToken: null,
-      leasedUntilMs: null,
+      id: taskId, jobId, queueIndex: index, status: "queued",
+      retryCount: 0, maxRetries: 1, claimToken: null, leasedUntilMs: null,
       prompt: buildMockExpandedPrompt(job.prompt, index),
-      createdAtMs: now,
-      updatedAtMs: now,
-      startedAtMs: null,
-      finishedAtMs: null,
-      error: null,
+      createdAtMs: now, updatedAtMs: now, startedAtMs: null,
+      finishedAtMs: null, error: null,
+      groupId, variantIndex: index, failureType: null, failureHint: null,
     });
   }
   return getMockImageWorkbenchSnapshot(jobId);
@@ -657,6 +658,9 @@ function deleteImageWorkbenchJob(args: Record<string, unknown>) {
   mapValuesToArray(mockImageWorkbenchModelRuns)
     .filter((item) => item.jobId === jobId)
     .forEach((item) => mockImageWorkbenchModelRuns.delete(item.id));
+  mapValuesToArray(mockImageWorkbenchGroups)
+    .filter((item) => item.jobId === jobId)
+    .forEach((item) => mockImageWorkbenchGroups.delete(item.id));
   return null;
 }
 
@@ -690,25 +694,22 @@ function recordImageWorkbenchTaskAsset(args: Record<string, unknown>) {
     : null;
   const now = getCurrentTimestampMs();
   const assetId = createMockImageWorkbenchId("iw-asset");
+  // 派生版本链：对齐后端 resolve_lineage，从 job.sourceAssetId 向源资产推导。
+  const src = mockImageWorkbenchAssets.get(String(mockImageWorkbenchJobs.get(task.jobId)?.sourceAssetId || ""));
   mockImageWorkbenchAssets.set(assetId, {
-    id: assetId,
-    jobId: task.jobId,
-    taskId: task.id,
-    filePath,
-    thumbnailPath,
-    width: request.width || null,
-    height: request.height || null,
-    mimeType: request.mimeType || null,
-    sizeBytes: request.sizeBytes || null,
-    favorite: false,
-    createdAtMs: now,
+    id: assetId, jobId: task.jobId, taskId: task.id, filePath, thumbnailPath,
+    width: request.width || null, height: request.height || null,
+    mimeType: request.mimeType || null, sizeBytes: request.sizeBytes || null,
+    favorite: false, createdAtMs: now,
+    groupId: task.groupId ?? null, rating: null,
+    parentAssetId: src?.id ?? null,
+    rootAssetId: src ? src.rootAssetId ?? src.id : null,
+    versionIndex: src ? (src.versionIndex ?? 0) + 1 : null,
   });
   if (request.metadata) {
     const metadataId = createMockImageWorkbenchId("iw-meta");
     mockImageWorkbenchMetadata.set(metadataId, {
-      id: metadataId,
-      assetId,
-      taskId: task.id,
+      id: metadataId, assetId, taskId: task.id,
       originalPrompt: request.metadata.originalPrompt || null,
       expandedPrompt: request.metadata.expandedPrompt || null,
       negativePrompt: request.metadata.negativePrompt || null,
