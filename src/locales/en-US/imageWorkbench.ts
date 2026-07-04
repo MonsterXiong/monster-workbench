@@ -29,7 +29,6 @@ export default {
   input: {
     title: "Task and input",
     advanced: "More settings",
-    mode: "Task type",
     prompt: "Describe image",
     negativePrompt: "Avoid",
     quantity: "Quantity",

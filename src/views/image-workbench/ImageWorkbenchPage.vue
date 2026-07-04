@@ -71,14 +71,6 @@ const promptTextareaRef = ref<HTMLTextAreaElement | null>(null);
 const upscaleScale = ref<2 | 4>(2);
 const { handleImageLoad, handleImageLoadError } = useImageWorkbenchImageFallback();
 
-const modeOptions: ImageWorkbenchMode[] = [
-  "txt2img",
-  "img2img",
-  "inpaint",
-  "person_consistency",
-  "upscale_2x",
-  "upscale_4x",
-];
 const qualityOptions: ImageWorkbenchGenerationQuality[] = ["auto", "low", "medium", "high"];
 const outputFormatOptions: ImageWorkbenchOutputFormat[] = ["png", "jpeg", "webp"];
 const backgroundOptions: ImageWorkbenchBackground[] = ["auto", "opaque"];
@@ -557,15 +549,6 @@ function insertReferencePrompt(index: number) {
   });
 }
 
-function handleModeChange() {
-  syncTaskEntryFromMode();
-  if (imageWorkbenchStore.mode === "inpaint" && selectedAsset.value) {
-    imageWorkbenchStore.startInpaintSelectedAsset();
-    return;
-  }
-  imageWorkbenchStore.closeInpaintEditor();
-}
-
 function assetBadges(asset: ImageWorkbenchAssetCard) {
   return buildAssetBadges({
     asset,
@@ -587,6 +570,12 @@ async function handleOpenAssetPreview(asset: ImageWorkbenchAssetCard) {
 
 function handleApplyTemplateFromPicker(template: ImageWorkbenchTemplate) {
   handleApplyTemplate(template);
+  syncTaskEntryFromMode();
+  if (imageWorkbenchStore.mode === "inpaint" && selectedAsset.value) {
+    imageWorkbenchStore.startInpaintSelectedAsset();
+  } else if (imageWorkbenchStore.mode !== "inpaint") {
+    imageWorkbenchStore.closeInpaintEditor();
+  }
   templatePickerOpen.value = false;
 }
 
@@ -925,14 +914,6 @@ onMounted(async () => {
                 <ChevronDown class="h-3.5 w-3.5" />
               </summary>
               <div class="image-workbench-advanced__body">
-                <label>
-                  <span>{{ t("imageWorkbench.input.mode") }}</span>
-                  <select v-model="imageWorkbenchStore.mode" @change="handleModeChange">
-                    <option v-for="item in modeOptions" :key="item" :value="item">
-                      {{ modeLabel(item) }}
-                    </option>
-                  </select>
-                </label>
                 <label>
                   <span>{{ t("imageWorkbench.input.model") }}</span>
                   <select :value="imageWorkbenchStore.imageModelConfigId" @change="handleModelConfigChange">

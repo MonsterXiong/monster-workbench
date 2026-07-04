@@ -29,7 +29,6 @@ export default {
   input: {
     title: "任务和输入",
     advanced: "更多设置",
-    mode: "任务类型",
     prompt: "描述画面",
     negativePrompt: "避免出现",
     quantity: "数量",
