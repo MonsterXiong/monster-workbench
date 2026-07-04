@@ -299,16 +299,8 @@ const showsPromptInput = computed(() =>
 );
 const showsQuantityInput = computed(() => !["edit", "upscale"].includes(activeTaskEntry.value));
 const showsSizeInput = computed(() => !["edit", "upscale"].includes(activeTaskEntry.value));
-const promptLabel = computed(() =>
-  activeTaskEntry.value === "edit"
-    ? t("imageWorkbench.input.editPrompt")
-    : t("imageWorkbench.input.prompt")
-);
-const promptPlaceholder = computed(() =>
-  activeTaskEntry.value === "edit"
-    ? t("imageWorkbench.input.editPromptPlaceholder")
-    : t("imageWorkbench.input.promptPlaceholder")
-);
+const promptLabel = computed(() => t(`imageWorkbench.input.promptLabels.${activeTaskEntry.value}`));
+const promptPlaceholder = computed(() => t(`imageWorkbench.input.promptPlaceholders.${activeTaskEntry.value}`));
 const upscaleScaleOptions = computed(() => [
   {
     scale: 2 as const,
