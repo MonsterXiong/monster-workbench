@@ -289,8 +289,12 @@ const showsPromptInput = computed(() =>
   !(activeTaskEntry.value === "edit" && !selectedAsset.value) &&
   !(showsReferenceInput.value && !activeTaskGuidanceReady.value)
 );
-const showsQuantityInput = computed(() => !["edit", "upscale"].includes(activeTaskEntry.value));
-const showsSizeInput = computed(() => !["edit", "upscale"].includes(activeTaskEntry.value));
+const showsGenerationControls = computed(() =>
+  !["edit", "upscale"].includes(activeTaskEntry.value) &&
+  !(showsReferenceInput.value && !activeTaskGuidanceReady.value)
+);
+const showsQuantityInput = computed(() => showsGenerationControls.value);
+const showsSizeInput = computed(() => showsGenerationControls.value);
 const promptLabel = computed(() => t(`imageWorkbench.input.promptLabels.${activeTaskEntry.value}`));
 const promptPlaceholder = computed(() => t(`imageWorkbench.input.promptPlaceholders.${activeTaskEntry.value}`));
 const primaryActionLabel = computed(() =>
