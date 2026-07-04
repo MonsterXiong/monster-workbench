@@ -62,7 +62,7 @@ const { confirm } = useConfirm();
 const imageWorkbenchStore = useImageWorkbenchStore();
 const galleryTab = ref<"current" | "library">("current");
 const templatePickerOpen = ref(false);
-const sidePanel = ref<"tasks" | "details">("tasks");
+const sidePanel = ref<"tasks" | "details">("details");
 const referencePickMode = ref(false);
 const activeTaskEntry = ref<ImageWorkbenchTaskEntryKey>("create");
 const promptTextareaRef = ref<HTMLTextAreaElement | null>(null);
@@ -601,10 +601,6 @@ onMounted(async () => {
                 {{ referencePromptToken(index) }}
               </button>
             </div>
-            <label>
-              <span>{{ t("imageWorkbench.input.negativePrompt") }}</span>
-              <input v-model="imageWorkbenchStore.negativePrompt" :placeholder="t('imageWorkbench.input.negativePlaceholder')" />
-            </label>
             <section class="image-workbench-reference">
               <div class="image-workbench-reference__head">
                 <div class="image-workbench-reference__title">
@@ -745,6 +741,10 @@ onMounted(async () => {
                   <small class="image-workbench-model-hint">
                     {{ imageWorkbenchStore.activeImageModelName }}
                   </small>
+                </label>
+                <label>
+                  <span>{{ t("imageWorkbench.input.negativePrompt") }}</span>
+                  <input v-model="imageWorkbenchStore.negativePrompt" :placeholder="t('imageWorkbench.input.negativePlaceholder')" />
                 </label>
                 <div class="image-workbench-form__grid">
                   <label>
@@ -1018,13 +1018,13 @@ onMounted(async () => {
 
       <aside class="image-workbench-right-rail">
         <div class="image-workbench-side-switcher">
-          <button type="button" :class="{ 'is-active': sidePanel === 'tasks' }" @click="sidePanel = 'tasks'">
-            <ListChecks class="h-3.5 w-3.5" />
-            <span>{{ t("imageWorkbench.taskbar.title") }}</span>
-          </button>
           <button type="button" :class="{ 'is-active': sidePanel === 'details' }" @click="sidePanel = 'details'">
             <Info class="h-3.5 w-3.5" />
             <span>{{ t("imageWorkbench.details.title") }}</span>
+          </button>
+          <button type="button" :class="{ 'is-active': sidePanel === 'tasks' }" @click="sidePanel = 'tasks'">
+            <ListChecks class="h-3.5 w-3.5" />
+            <span>{{ t("imageWorkbench.taskbar.title") }}</span>
           </button>
         </div>
         <ImageWorkbenchTaskPanel v-if="sidePanel === 'tasks'" />
