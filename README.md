@@ -1,13 +1,14 @@
 # Monster Tools
 
-`monster-tools` 是一个基于 **Tauri v2 + Vue 3 + Vite** 的桌面端应用，集成了自动化双语 Changelog 交互式管理与 GitHub Actions 全平台（Windows, macOS, Linux）整体原生自动更新发布流。
+`monster-tools` 是一个基于 **Tauri v2 + Vue 3 + Vite** 的本地桌面工具箱。当前重点是把 AI Provider 配置、聊天/生图能力、图片工作台、文件/导航/系统诊断和常用工具收敛到同一个受控客户端里。
 
 ## 特性
 
-- **整体原生更新**：使用 Tauri v2 原生安全更新机制（`@tauri-apps/plugin-updater`），整包替换可执行程序，不再依赖复杂不稳定的资源热更新。
-- **一键自动化发布**：通过 `npm run release` 一个指令，自动提示 SemVer 版本选择、跨前后端同步版本号、唤起交互式双语 Changelog 编写、自动暂存并创建 Git Tag，并能一键推送到 GitHub 远端触发 CI/CD。
-- **双语更新日志自动管理**：支持交互式生成 `CHANGELOG.md` (英文) 与 `CHANGELOG.zh-CN.md` (中文)，并为 CI 构建自动提供单次 Release 的更新概要。
-- **全平台 CI/CD 打包流水线**：通过 GitHub Actions 自动编译出 Windows (`.msi`, `.exe`)、macOS (Intel/M系列通用 `.dmg` 镜像) 和 Linux (`.deb` 安装包)。
+- **AI 模型工作台**：管理 OpenAI-compatible / Anthropic Messages 等 Provider 配置，支持能力绑定、连接诊断和原子能力测试。
+- **AI 图片工作台**：支持生成、审片、参考图、局部重绘、资产导入、评分、收藏、版本链和受控资产落盘。
+- **本地工具集合**：包含文件管理、导航启动台、系统能力诊断、常用转换工具和组件沙箱。
+- **受控桌面边界**：通过 Rust command/service/infra 管理 SQLite、文件、系统能力和 Python sidecar，前端不直连底座能力。
+- **原生发布更新**：使用 Tauri v2 原生 updater，发布由 `npm run release` 和 GitHub Actions 流水线驱动。
 
 ---
 
@@ -16,7 +17,8 @@
 开发前建议先阅读：
 
 - [AGENTS.md](AGENTS.md)：AI / 人类协作的全局红线
-- [快速迭代工程手册](docs/engineering-playbook.md)：架构、目录、分层、质量门禁与完成标准
+- [docs/engineering-playbook.md](docs/engineering-playbook.md)：架构、目录、分层、质量门禁与完成标准
+- [docs/architecture-current-state.md](docs/architecture-current-state.md)：当前架构事实、运行时边界和风险点
 
 ### 1. 安装依赖
 
@@ -50,22 +52,22 @@ npm run test:ai-sidecar:stress
 
 ---
 
-## 一键发布新版本
+## 发布
 
-当您需要发布新版本时，仅需在终端运行以下一行指令：
+发布前建议先跑：
+
+```bash
+npm run verify
+npm run tauri:build:no-bundle
+```
+
+发布新版本：
 
 ```bash
 npm run release
 ```
 
-### 该指令会自动执行以下流程：
-1. **SemVer 建议**：计算并推荐 Patch、Minor、Major 版本供您选择（也可输入自定义版本）。
-2. **改写版本**：更新 `package.json` 中的版本号。
-3. **版本同步**：自动将新版本同步到 `tauri.conf.json` 和 `Cargo.toml`。
-4. **日志交互**：在终端打印最近 5 次 Git 提交参考，交互式引导您录入中文和英文更新内容，自动追加到中英文 Changelog 文件。
-5. **Git Commit**：自动暂存文件并进行 Git Commit 封包。
-6. **创建 Tag**：在本地创建对应的 `v<版本号>` 的 Git Tag。
-7. **推送上线**：询问并自动一键推送到您的 GitHub 远程仓库（自动执行 `git push` 及 `git push origin v<版本号>`）。
+该脚本会处理 SemVer 版本、`package.json` / `tauri.conf.json` / `Cargo.toml` 同步、双语 Changelog、提交和 Tag。发布测试命令见 [AGENTS.md](AGENTS.md) 的常用命令表。
 
 ---
 
@@ -92,4 +94,4 @@ npx tauri signer generate -w ~/.tauri/monster-tools.key
 
 ## 许可协议
 
-本项目基于 **[MIT License](file:///c:/Users/刘雄成/Desktop/monster-workbench/LICENSE)** 协议开源。
+本项目基于 [MIT License](LICENSE) 协议开源。

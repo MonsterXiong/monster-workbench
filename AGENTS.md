@@ -73,6 +73,7 @@ npm run check:architecture
 - 优先复用现有组件、工具、类型、Store、Service 和请求封装。
 - 不引入新依赖、不升级核心依赖、不重写架构，除非用户明确要求。
 - 不删除看似无用但可能有业务意义的代码，不格式化无关文件。
+- 不用固定行数作为代码是否合格的唯一标准；功能完成后审查文件职责、复杂度和复用边界，必要时再拆分，避免把业务、状态机、请求、UI 细节持续堆成巨型文件。
 - 对用户可见的说明、文档和提交信息使用简体中文；Commit message 必须使用 `类型：中文概要` 格式，例如 `docs：更新发布命令规范文档`，类型使用 `feat/fix/docs/style/refactor/perf/test/build/ci/chore/release/revert`。
 - 本地 Git hook 由 `.githooks/commit-msg` 执行提交信息校验；若 hook 未生效，先运行 `npm run setup:git-hooks`。
 - CI/CD 由 `v*` / `app-v*` 格式 Tag 触发，禁止修改 `.github/workflows/release.yml` 的触发逻辑。

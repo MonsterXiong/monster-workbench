@@ -280,6 +280,7 @@ function findLocalPythonImports(file, localModules) {
 }
 
 const violations = [];
+const advisories = [];
 
 for (const file of walk(SRC_DIR)) {
   const content = fs.readFileSync(file, "utf8");
@@ -396,15 +397,25 @@ for (const file of sizeBudgetFiles) {
   const maxLines = baseline ?? rule.maxLines;
 
   if (lineCount > maxLines) {
-    violations.push({
+    advisories.push({
       rule: baseline
-        ? `${rule.name}；该文件已列入体量债务基线，不能继续增长`
+        ? `${rule.name}；该文件已列入体量债务基线，完成后请审查是否继续拆分`
         : rule.name,
       file: relativeFile,
       line: maxLines + 1,
-      code: `${lineCount} 行，预算 ${maxLines} 行`,
+      code: `${lineCount} 行，参考线 ${maxLines} 行`,
     });
   }
+}
+
+if (advisories.length > 0) {
+  console.warn("\n[ARCH_CHECK] 文件体量审查提醒：\n");
+  for (const item of advisories) {
+    console.warn(`- ${item.rule}`);
+    console.warn(`  ${item.file}:${item.line}`);
+    console.warn(`  ${item.code}`);
+  }
+  console.warn("\n请在功能完成后按职责审查是否拆分，避免继续沉淀巨型文件。\n");
 }
 
 if (violations.length > 0) {

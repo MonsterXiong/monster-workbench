@@ -9,7 +9,7 @@
 - 小步交付：一次任务只解决一个明确问题，避免顺手重构无关模块。
 - 先读事实：修改前先读 `AGENTS.md`、相关专题文档和现有代码实现。
 - 分层推进：新增能力默认走 `Page/Component -> Store -> Service -> callTauri -> Rust Command -> Rust Service -> Repo/DB`。
-- 组件化预算：Page、组件、Store、Service、Mock、Rust Service/Repo 都有体量预算；热点文件只允许在显式债务基线内维护，继续加功能前优先拆分。
+- 组件化审查：Page、组件、Store、Service、Mock、Rust Service/Repo 都有体量提醒；行数不是硬失败条件，但功能完成后必须审查职责边界和复杂度，必要时拆分，避免继续沉淀巨型文件。
 - 浏览器可预览：所有 Tauri 原生能力必须有浏览器降级或 Mock，不让 `http://localhost:1420` 直接崩溃。
 - 文案可切换：用户可见文本进入 `locales/`，日志和异常保持 `[ERR_*] 中文描述`。
 - 验证前置：每次代码变更后至少运行 `npm run typecheck`，涉及分层边界时运行 `npm run check:architecture`。
@@ -156,7 +156,7 @@ AI 能力开发规则：
 
 | 命令 | 使用场景 |
 |------|----------|
-| `npm run check:architecture` | 检查 Tauri / IPC / fetch / SQLite 是否越层，防止 SQL/FS 插件、capability 与宽 HOME asset scope 回引，并检查组件化体量预算 |
+| `npm run check:architecture` | 检查 Tauri / IPC / fetch / SQLite 是否越层，防止 SQL/FS 插件、capability 与宽 HOME asset scope 回引，并输出组件化体量审查提醒 |
 | `npm run check:commit-message` | 检查最近一次 commit 是否符合 `类型：中文概要` |
 | `npm run setup:git-hooks` | 将本仓库 Git hooks 指向 `.githooks`，启用 commit-msg 自动拦截 |
 | `npm run typecheck` | 每次 TS / Vue 代码变更后必须运行 |
