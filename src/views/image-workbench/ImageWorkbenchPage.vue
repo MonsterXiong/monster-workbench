@@ -245,13 +245,13 @@ const upscaleScaleOptions = computed(() => [
     scale: 2 as const,
     label: t("imageWorkbench.input.upscale2x"),
     description: t("imageWorkbench.input.upscale2xDesc"),
-    disabled: !selectedAsset.value || !imageWorkbenchStore.canRunUpscale2x,
+    disabled: Boolean(selectedAsset.value && !imageWorkbenchStore.canRunUpscale2x),
   },
   {
     scale: 4 as const,
     label: t("imageWorkbench.input.upscale4x"),
     description: t("imageWorkbench.input.upscale4xDesc"),
-    disabled: !selectedAsset.value || !imageWorkbenchStore.canRunUpscale4x,
+    disabled: Boolean(selectedAsset.value && !imageWorkbenchStore.canRunUpscale4x),
   },
 ]);
 const canSubmitCurrentTask = computed(() => {
@@ -431,7 +431,7 @@ function handleTaskEntrySelect(key: ImageWorkbenchTaskEntryKey) {
     return;
   }
   if (key === "upscale") {
-    handleUpscaleScaleSelect(imageWorkbenchStore.canRunUpscale4x ? 4 : 2);
+    handleUpscaleScaleSelect(2);
     imageWorkbenchStore.notice = selectedAssetUnavailableReason.value ||
       (selectedAsset.value
       ? t("imageWorkbench.tasks.upscaleNotice")
@@ -1065,6 +1065,24 @@ onBeforeUnmount(() => {
                 <span>{{ t("imageWorkbench.reference.pickModeTitle") }}</span>
               </button>
             </div>
+            <div
+              v-if="activeTaskEntry === 'upscale'"
+              class="image-workbench-command-segment"
+              role="group"
+              :aria-label="t('imageWorkbench.input.upscaleTitle')"
+            >
+              <button
+                v-for="option in upscaleScaleOptions"
+                :key="option.scale"
+                type="button"
+                :class="{ 'is-active': upscaleScale === option.scale }"
+                :disabled="option.disabled"
+                :title="option.description"
+                @click="handleUpscaleScaleSelect(option.scale)"
+              >
+                {{ option.label }}
+              </button>
+            </div>
             <label v-if="showsSizeInput" class="image-workbench-command-select">
               <span>{{ t("imageWorkbench.input.size") }}</span>
               <select v-model="imageWorkbenchStore.size">
@@ -1096,26 +1114,6 @@ onBeforeUnmount(() => {
               {{ t("imageWorkbench.errors.modeDeferred") }}
             </div>
           </div>
-
-          <section v-if="activeTaskEntry === 'upscale'" class="image-workbench-upscale-panel">
-            <div class="image-workbench-upscale-panel__head">
-              <span>{{ t("imageWorkbench.input.upscaleTitle") }}</span>
-              <small>{{ selectedAssetNativeSize || t("imageWorkbench.review.noSelection") }}</small>
-            </div>
-            <div class="image-workbench-upscale-options" role="group" :aria-label="t('imageWorkbench.input.upscaleTitle')">
-              <button
-                v-for="option in upscaleScaleOptions"
-                :key="option.scale"
-                type="button"
-                :class="{ 'is-active': upscaleScale === option.scale }"
-                :disabled="option.disabled"
-                @click="handleUpscaleScaleSelect(option.scale)"
-              >
-                <strong>{{ option.label }}</strong>
-                <small>{{ option.description }}</small>
-              </button>
-            </div>
-          </section>
 
           <section v-if="shouldShowReferenceComposer" class="image-workbench-command-popover image-workbench-command-reference">
             <ImageWorkbenchReferenceSourcePicker
