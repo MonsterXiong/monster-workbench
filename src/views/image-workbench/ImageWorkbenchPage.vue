@@ -40,6 +40,7 @@ import ImageWorkbenchCompareStrip from "./ImageWorkbenchCompareStrip.vue";
 import ImageWorkbenchInspector from "./ImageWorkbenchInspector.vue";
 import ImageWorkbenchLightbox from "./ImageWorkbenchLightbox.vue";
 import ImageWorkbenchMaskEditor from "./ImageWorkbenchMaskEditor.vue";
+import ImageWorkbenchReferenceSourcePicker from "./ImageWorkbenchReferenceSourcePicker.vue";
 import ImageWorkbenchStartPanel from "./ImageWorkbenchStartPanel.vue";
 import ImageWorkbenchTaskLauncher from "./ImageWorkbenchTaskLauncher.vue";
 import ImageWorkbenchTaskPanel from "./ImageWorkbenchTaskPanel.vue";
@@ -323,6 +324,9 @@ const referenceLimitLabel = computed(() =>
     count: imageWorkbenchStore.referenceCount,
     limit: imageWorkbenchStore.referenceLimit,
   })
+);
+const selectedAssetIsReference = computed(() =>
+  Boolean(selectedAsset.value && imageWorkbenchStore.referenceAssets.some((asset) => asset.id === selectedAsset.value?.id))
 );
 const referencePickMeta = computed(() =>
   formatTemplate(t("imageWorkbench.reference.pickModeMeta"), {
@@ -835,29 +839,17 @@ onMounted(async () => {
                   <span>{{ t("imageWorkbench.reference.title") }}</span>
                   <small>{{ referenceLimitLabel }}</small>
                 </div>
-                <div class="image-workbench-reference__actions">
-                  <button
-                    type="button"
-                    :disabled="imageWorkbenchStore.referenceLimitReached && !imageWorkbenchStore.referenceImagePath"
-                    @click="handleSelectReferenceImage"
-                  >
-                    <ImagePlus class="h-3.5 w-3.5" />
-                    {{ t("imageWorkbench.reference.select") }}
-                  </button>
-                  <button type="button" @click="handlePickReferenceFromLibrary">
-                    <Images class="h-3.5 w-3.5" />
-                    {{ t("imageWorkbench.reference.openLibrary") }}
-                  </button>
-                  <button
-                    type="button"
-                    :disabled="!imageWorkbenchStore.canUseSelectedAssetAsReference"
-                    @click="handleUseSelectedReference"
-                  >
-                    <Sparkles class="h-3.5 w-3.5" />
-                    {{ t("imageWorkbench.reference.useSelected") }}
-                  </button>
-                </div>
               </div>
+              <ImageWorkbenchReferenceSourcePicker
+                :reference-limit-reached="imageWorkbenchStore.referenceLimitReached"
+                :has-uploaded-reference="Boolean(imageWorkbenchStore.referenceImagePath)"
+                :has-asset-reference="Boolean(imageWorkbenchStore.referenceAssets.length)"
+                :can-use-selected-asset="imageWorkbenchStore.canUseSelectedAssetAsReference"
+                :selected-asset-is-reference="selectedAssetIsReference"
+                @upload="handleSelectReferenceImage"
+                @open-library="handlePickReferenceFromLibrary"
+                @use-selected="handleUseSelectedReference"
+              />
               <div v-if="imageWorkbenchStore.hasReferenceImage" class="image-workbench-reference-list">
                 <div
                   v-for="(item, index) in imageWorkbenchStore.referenceItems"
