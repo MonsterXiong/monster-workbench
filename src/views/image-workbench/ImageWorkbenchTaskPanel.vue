@@ -262,6 +262,7 @@ function decodeJsonString(value: string) {
 
 async function selectTaskJob(job: ImageWorkbenchJob) {
   await imageWorkbenchStore.selectJob(job.id);
+  imageWorkbenchStore.clearSelectedAsset();
 }
 
 function cancelJob(job: ImageWorkbenchJob) {
@@ -308,9 +309,6 @@ function cancelSelectedTask() {
           <div class="image-workbench-task-job__meta">
             <span>{{ jobProgress(job).label }}</span>
             <small>{{ formatTemplate(t("imageWorkbench.taskbar.jobQuantity"), { count: job.quantity }) }}</small>
-          </div>
-          <div class="image-workbench-task-job__progress">
-            <i :style="{ width: `${jobProgress(job).percent}%` }" aria-hidden="true"></i>
           </div>
         </button>
         <div v-if="canCancelJob(job)" class="image-workbench-task-job__actions">

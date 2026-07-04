@@ -213,6 +213,10 @@ export function createImageWorkbenchReferenceState({
     removeReferenceRole("uploaded");
   }
 
+  function resolveReferenceDisplayUrl(sourcePath: string) {
+    return resolveDisplayImageSrc(sourcePath);
+  }
+
   function clearReferenceImage() {
     referenceAssetIds.value = [];
     referenceImagePath.value = "";
@@ -349,6 +353,7 @@ export function createImageWorkbenchReferenceState({
     setReferenceRole,
     setAssetReferences,
     setSingleAssetReference,
+    resolveReferenceDisplayUrl,
     removeReferenceAsset,
     removeUploadedReferenceImage,
     clearReferenceImage,

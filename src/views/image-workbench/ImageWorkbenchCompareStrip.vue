@@ -10,6 +10,7 @@ import type {
 
 const props = defineProps<{
   items: ImageWorkbenchCompareItem[];
+  compact?: boolean;
 }>();
 
 const { t } = useI18n();
@@ -47,7 +48,11 @@ const stripItems = computed(() =>
 </script>
 
 <template>
-  <section v-if="items.length > 1" class="image-workbench-panel image-workbench-panel--compare">
+  <section
+    v-if="items.length > 1"
+    class="image-workbench-panel image-workbench-panel--compare"
+    :class="{ 'is-compact': props.compact, 'has-before-after': beforeAfterItems.length }"
+  >
     <div class="image-workbench-section__head">
       <Layers3 class="h-4 w-4" />
       <span>{{ t("imageWorkbench.review.compareTitle") }}</span>

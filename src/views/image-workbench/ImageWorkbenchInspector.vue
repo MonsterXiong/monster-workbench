@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import {
-  Clock3,
   Copy,
   Download,
   FolderOpen,
@@ -13,38 +12,56 @@ import {
   Star,
 } from "lucide-vue-next";
 import { useI18n } from "../../composables/useI18n";
-import { parseGenerationOptionsJson } from "../../stores/image-workbench-draft";
 import { useImageWorkbenchStore } from "../../stores/image-workbench";
 import { formatBytes, formatDateTime, formatTemplate } from "../../utils";
 import { useImageWorkbenchImageFallback } from "./useImageWorkbenchImageFallback";
+import ImageWorkbenchRecentPanel from "./ImageWorkbenchRecentPanel.vue";
 import {
   buildAssetLineageSummary,
   buildBranchActions,
+  buildDeliveryUseKeys,
   buildRelatedAssetGroups,
+  buildSelectedAssetActionDisabledReason,
+  buildSelectedGenerationDetails,
   buildSelectionContextItems,
   buildVersionChain,
+  type ImageWorkbenchAssetShelfView,
   type ImageWorkbenchAssetCard,
 } from "./imageWorkbenchReview";
+import { buildImageWorkbenchJobReferenceViews } from "./imageWorkbenchReferences";
 import { buildImageWorkbenchHandlers } from "./useImageWorkbenchHandlers";
 import type {
   ImageWorkbenchAsset,
   ImageWorkbenchQualityIssue,
+  ImageWorkbenchReferenceRole,
 } from "../../types/image-workbench";
 import type { ImageWorkbenchTaskEntryKey } from "./imageWorkbenchTaskLauncher";
 
 const { t } = useI18n();
 const imageWorkbenchStore = useImageWorkbenchStore();
+const props = defineProps<{
+  assetShelfView: ImageWorkbenchAssetShelfView;
+  assetShelfDialogOpen: boolean;
+}>();
 const assetRatingOptions = [0, 1, 2, 3, 4, 5];
 const qualityIssueKeys: ImageWorkbenchQualityIssue[] = ["hands", "identity", "prop", "scene"];
 const { handleImageLoad, handleImageLoadError } = useImageWorkbenchImageFallback();
 const emit = defineEmits<{
   (event: "preview", asset: ImageWorkbenchAssetCard | null): void;
-  (event: "show-tasks"): void;
+  (event: "toggle-reference", asset: ImageWorkbenchAssetCard): void;
+  (event: "update:asset-shelf-view", view: ImageWorkbenchAssetShelfView): void;
+  (event: "update:asset-shelf-dialog-open", open: boolean): void;
   (event: "sync-task-entry"): void;
   (event: "task-entry-change", key: ImageWorkbenchTaskEntryKey): void;
+  (event: "prepare-task-entry", key: ImageWorkbenchTaskEntryKey): void;
 }>();
 
 const selectedAsset = computed(() => imageWorkbenchStore.selectedAsset);
+const inspectorTitle = computed(() =>
+  selectedAsset.value
+    ? t("imageWorkbench.review.selectionTitle")
+    : t("imageWorkbench.review.referenceShelfTitle")
+);
 const selectedMetadata = computed(() => imageWorkbenchStore.selectedAssetMetadata);
 const selectedModelRun = computed(() => imageWorkbenchStore.selectedAssetModelRuns[0] ?? null);
 const selectedGroup = computed(() => imageWorkbenchStore.selectedAssetGroup);
@@ -57,35 +74,8 @@ const selectedAssetCard = computed(() =>
 const selectedAssetDisplayUrl = computed(() => selectedAssetCard.value?.displayUrl || "");
 const selectedImageDimensions = computed(() => formatImageDimensions(selectedAsset.value));
 const selectedRequestedSize = computed(() => selectedAssetJob.value?.size?.trim() || "-");
-const selectedGenerationOptions = computed(() =>
-  parseGenerationOptionsJson(selectedAssetJob.value?.generationOptionsJson)
-);
-const selectedRequestedFormat = computed(() =>
-  selectedGenerationOptions.value.hasOptions
-    ? t(`imageWorkbench.output.format.${selectedGenerationOptions.value.outputFormat}`)
-    : "-"
-);
-const selectedActualFormat = computed(() => formatMimeTypeAsImageFormat(selectedAsset.value?.mimeType));
-const selectedOutputQuality = computed(() =>
-  selectedGenerationOptions.value.hasOptions
-    ? t(`imageWorkbench.output.quality.${selectedGenerationOptions.value.quality}`)
-    : "-"
-);
-const selectedOutputCompression = computed(() =>
-  selectedGenerationOptions.value.hasOptions &&
-  ["jpeg", "webp"].includes(selectedGenerationOptions.value.outputFormat)
-    ? `${selectedGenerationOptions.value.outputCompression}%`
-    : "-"
-);
-const selectedOutputBackground = computed(() =>
-  selectedGenerationOptions.value.hasOptions
-    ? t(`imageWorkbench.output.background.${selectedGenerationOptions.value.background}`)
-    : "-"
-);
-const selectedOutputModeration = computed(() =>
-  selectedGenerationOptions.value.hasOptions
-    ? t(`imageWorkbench.output.moderation.${selectedGenerationOptions.value.moderation}`)
-    : "-"
+const selectedGenerationDetails = computed(() =>
+  buildSelectedGenerationDetails({ asset: selectedAsset.value, job: selectedAssetJob.value, t })
 );
 const hasImageSizeMismatch = computed(() =>
   isKnownSize(selectedRequestedSize.value) &&
@@ -103,6 +93,32 @@ const selectedAssetSummary = computed(() => {
     return t("imageWorkbench.review.noSelection");
   }
   return `${selectedImageDimensions.value} · ${formatAssetSize(selectedAsset.value)}`;
+});
+const selectedJobReferenceViews = computed(() =>
+  buildImageWorkbenchJobReferenceViews({
+    job: selectedAssetJob.value,
+    currentAssets: imageWorkbenchStore.currentAssetCards,
+    libraryAssets: imageWorkbenchStore.libraryAssetCards,
+    referenceRoleLabel,
+    resolveDisplayUrl: imageWorkbenchStore.resolveReferenceDisplayUrl,
+  })
+);
+const selectedDeliveryReady = computed(() => selectedAsset.value?.deliveryStatus === "ready");
+const selectedDeliveryStatusLabel = computed(() =>
+  t(selectedDeliveryReady.value ? "imageWorkbench.review.lineageDeliveryReady" : "imageWorkbench.review.lineageDeliveryDraft")
+);
+const selectedDeliveryUses = computed(() => buildDeliveryUseKeys(selectedAsset.value));
+const useSelectedReferenceTitle = computed(() => {
+  if (imageWorkbenchStore.canUseSelectedAssetAsReference) {
+    return t("imageWorkbench.reference.useSelected");
+  }
+  if (selectedAsset.value?.integrityStatus && selectedAsset.value.integrityStatus !== "ok") {
+    return t("imageWorkbench.errors.invalidReferenceAsset");
+  }
+  if (imageWorkbenchStore.referenceLimitReached) {
+    return formatTemplate(t("imageWorkbench.errors.referenceLimitReached"), { count: imageWorkbenchStore.referenceLimit });
+  }
+  return t("imageWorkbench.reference.sourceSelectedEmpty");
 });
 const qualityIssueOptions = computed(() =>
   qualityIssueKeys.map((key) => ({
@@ -155,11 +171,24 @@ const versionChainItems = computed(() =>
     t,
   })
 );
+const continueStyleDisabledReason = computed(() =>
+  selectedAssetActionDisabledReason(imageWorkbenchStore.canRunStyleContinuation, "imageWorkbench.errors.styleDeferred")
+);
+const inpaintDisabledReason = computed(() =>
+  selectedAssetActionDisabledReason(imageWorkbenchStore.canRunInpaint, "imageWorkbench.errors.inpaintDeferred")
+);
+const personDisabledReason = computed(() =>
+  selectedAssetActionDisabledReason(imageWorkbenchStore.canRunPersonConsistency, "imageWorkbench.errors.personDeferred")
+);
+const upscaleDisabledReason = computed(() =>
+  selectedAssetActionDisabledReason(imageWorkbenchStore.canRunUpscale2x || imageWorkbenchStore.canRunUpscale4x, "imageWorkbench.errors.upscaleDeferred")
+);
 const branchActions = computed(() =>
   buildBranchActions({
-    canInpaint: Boolean(selectedAsset.value),
-    canPersonConsistency: imageWorkbenchStore.canRunPersonConsistency,
-    canUpscale2x: imageWorkbenchStore.canRunUpscale2x,
+    continueStyleDisabledReason: continueStyleDisabledReason.value,
+    inpaintDisabledReason: inpaintDisabledReason.value,
+    personDisabledReason: personDisabledReason.value,
+    upscaleDisabledReason: upscaleDisabledReason.value,
     canUpscale4x: imageWorkbenchStore.canRunUpscale4x,
     t,
   })
@@ -174,8 +203,7 @@ const {
   handleCopyMetaPrompt,
   handleRegenerateSelectedAsset,
   handleUseSelectedAssetAsReference,
-  handleFixSelectedAssetByQuality,
-  handleBranchAction,
+  handlePrepareSelectedAssetQualityFix,
 } = buildImageWorkbenchHandlers(imageWorkbenchStore);
 
 function formatMs(ms?: number | null) {
@@ -190,6 +218,15 @@ function formatImageDimensions(asset: ImageWorkbenchAsset | null) {
   return asset?.width && asset.height ? `${asset.width}x${asset.height}` : "-";
 }
 
+function selectedAssetActionDisabledReason(canRun: boolean, unavailableKey: string) {
+  return buildSelectedAssetActionDisabledReason({
+    selectedAsset: selectedAsset.value,
+    canRun,
+    unavailableKey,
+    t,
+  });
+}
+
 function normalizeImageSize(value: string) {
   return value.trim().toLowerCase().replace("×", "x");
 }
@@ -198,18 +235,11 @@ function isKnownSize(value: string) {
   return Boolean(value && value !== "-");
 }
 
-function formatMimeTypeAsImageFormat(mimeType?: string | null) {
-  const clean = String(mimeType || "").toLowerCase();
-  if (clean.includes("jpeg") || clean.includes("jpg")) {
-    return "JPEG";
-  }
-  if (clean.includes("webp")) {
-    return "WebP";
-  }
-  if (clean.includes("png")) {
-    return "PNG";
-  }
-  return mimeType || "-";
+function referenceRoleLabel(role: ImageWorkbenchReferenceRole | undefined, index = 0) {
+  const normalized = role && ["person", "prop", "scene", "style"].includes(role)
+    ? role
+    : (["person", "prop", "scene", "style"] as const)[index] || "style";
+  return t(`imageWorkbench.reference.roles.${normalized}`);
 }
 
 function ratingButtonLabel(rating: number) {
@@ -239,28 +269,19 @@ function handleReuseDescriptionClick() {
 function handleRegenerateClick() {
   handleRegenerateSelectedAsset();
   emit("task-entry-change", "create");
-  emit("show-tasks");
 }
 
 function handleBranchActionClick(actionKey: string) {
-  handleBranchAction(actionKey);
   const taskEntry = branchActionTaskEntry(actionKey);
   if (taskEntry) {
-    emit("task-entry-change", taskEntry);
-  }
-  if (isImmediateGenerationBranch(actionKey)) {
-    emit("show-tasks");
+    emit("prepare-task-entry", taskEntry);
   }
 }
 
 function handleQualityFixClick() {
-  const issue = imageWorkbenchStore.selectedAssetPrimaryQualityIssue;
-  handleFixSelectedAssetByQuality();
+  const issue = handlePrepareSelectedAssetQualityFix();
   if (issue) {
     emit("task-entry-change", issue === "identity" ? "person" : "edit");
-    if (issue === "identity") {
-      emit("show-tasks");
-    }
   }
 }
 
@@ -280,16 +301,13 @@ function branchActionTaskEntry(actionKey: string): ImageWorkbenchTaskEntryKey | 
   return "";
 }
 
-function isImmediateGenerationBranch(actionKey: string) {
-  return ["continue-style", "person", "upscale"].includes(actionKey);
-}
 </script>
 
 <template>
   <aside class="image-workbench-panel image-workbench-panel--details">
     <div class="image-workbench-section__head">
       <Info class="h-4 w-4" />
-      <span>{{ t("imageWorkbench.review.selectionTitle") }}</span>
+      <span>{{ inspectorTitle }}</span>
     </div>
     <div v-if="selectedAsset" class="image-workbench-inspector">
       <div class="image-workbench-preview">
@@ -306,21 +324,38 @@ function isImmediateGenerationBranch(actionKey: string) {
       <div class="image-workbench-selection-summary">
         <strong>{{ selectedMetadata?.originalPrompt || selectedMetadata?.expandedPrompt || t("imageWorkbench.review.emptyPrompt") }}</strong>
         <small>{{ selectedAssetSummary }}</small>
+        <div class="image-workbench-selection-summary__tags">
+          <span :class="{ 'is-ready': selectedDeliveryReady }">{{ selectedDeliveryStatusLabel }}</span>
+        </div>
         <small v-if="hasImageSizeMismatch" class="image-workbench-selection-summary__warning">
           {{ imageSizeMismatchText }}
         </small>
       </div>
-      <div v-if="selectionContextItems.length || selectedGroup" class="image-workbench-selection-context">
-        <span v-for="item in selectionContextItems" :key="item.key" class="image-workbench-selection-context__item">
-          {{ item.label }} · {{ item.value }}
-        </span>
-        <span v-if="selectedGroup" class="image-workbench-selection-context__item">
-          {{ t("imageWorkbench.groups.title") }} · {{ selectedGroupLabel }}
-        </span>
+      <div v-if="selectedJobReferenceViews.length" class="image-workbench-selection-references">
+        <span>{{ t("imageWorkbench.workspace.jobReferences") }}</span>
+        <button
+          v-for="reference in selectedJobReferenceViews"
+          :key="reference.key"
+          type="button"
+          :class="{ 'is-missing': !reference.asset }"
+          :disabled="!reference.asset"
+          :title="reference.sourcePath || reference.label"
+          @click="openAssetPreview(reference.asset)"
+        >
+          <img
+            v-if="reference.displayUrl"
+            :key="reference.displayUrl"
+            :src="reference.displayUrl"
+            alt=""
+            @load="handleImageLoad"
+            @error="handleImageLoadError($event, reference.sourcePath)"
+          />
+          <ImagePlus v-else class="h-3.5 w-3.5" />
+          <small>{{ reference.label }}</small>
+        </button>
       </div>
       <div class="image-workbench-action-group image-workbench-action-group--primary">
         <span>{{ t("imageWorkbench.review.createNext") }}</span>
-        <small>{{ t("imageWorkbench.review.createNextDesc") }}</small>
         <div class="image-workbench-branch-list">
           <button
             v-for="action in branchActions"
@@ -334,32 +369,34 @@ function isImmediateGenerationBranch(actionKey: string) {
           >
             <span>
               <strong>{{ action.title }}</strong>
-              <small>{{ action.disabledReason || action.description }}</small>
+              <small v-if="action.disabledReason">{{ action.disabledReason }}</small>
             </span>
             <Sparkles class="h-3.5 w-3.5" />
           </button>
-        </div>
-        <div class="image-workbench-inspector-actions image-workbench-inspector-actions--supporting">
           <button
             type="button"
+            class="image-workbench-branch-action"
             :disabled="!imageWorkbenchStore.canUseSelectedAssetAsReference"
+            :title="useSelectedReferenceTitle"
             @click="handleUseSelectedAsReferenceClick"
           >
+            <span>
+              <strong>{{ t("imageWorkbench.reference.useSelected") }}</strong>
+            </span>
             <ImagePlus class="h-3.5 w-3.5" />
-            {{ t("imageWorkbench.reference.useSelected") }}
-          </button>
-          <button type="button" @click="handleReuseDescriptionClick">
-            <RotateCcw class="h-3.5 w-3.5" />
-            {{ t("imageWorkbench.asset.reusePrompt") }}
-          </button>
-          <button type="button" @click="handleRegenerateClick">
-            <RefreshCcw class="h-3.5 w-3.5" />
-            {{ t("imageWorkbench.asset.regenerate") }}
           </button>
         </div>
       </div>
       <div class="image-workbench-action-group image-workbench-action-group--delivery">
         <span>{{ t("imageWorkbench.review.deliver") }}</span>
+        <div v-if="selectedDeliveryUses.length" class="image-workbench-delivery-uses">
+          <span>{{ t("imageWorkbench.asset.deliveryUseTitle") }}</span>
+          <div>
+            <strong v-for="item in selectedDeliveryUses" :key="item">
+              {{ t(`imageWorkbench.asset.deliveryUses.${item}`) }}
+            </strong>
+          </div>
+        </div>
         <div class="image-workbench-inspector-actions">
           <button type="button" @click="handleToggleFavorite(selectedAsset)">
             <Star class="h-3.5 w-3.5" />
@@ -380,6 +417,14 @@ function isImmediateGenerationBranch(actionKey: string) {
             <button type="button" @click="handleCopyMetaPrompt">
               <Copy class="h-3.5 w-3.5" />
               {{ t("imageWorkbench.asset.copyMetaPrompt") }}
+            </button>
+            <button type="button" @click="handleReuseDescriptionClick">
+              <RotateCcw class="h-3.5 w-3.5" />
+              {{ t("imageWorkbench.asset.reusePrompt") }}
+            </button>
+            <button type="button" @click="handleRegenerateClick">
+              <RefreshCcw class="h-3.5 w-3.5" />
+              {{ t("imageWorkbench.asset.regenerate") }}
             </button>
           </div>
           <div class="image-workbench-rating-control" role="group" :aria-label="t('imageWorkbench.asset.rating')">
@@ -407,6 +452,14 @@ function isImmediateGenerationBranch(actionKey: string) {
       <details class="image-workbench-inspector-foldout">
         <summary>{{ t("imageWorkbench.details.more") }}</summary>
         <div class="image-workbench-inspector-foldout__body">
+          <div v-if="selectionContextItems.length || selectedGroup" class="image-workbench-selection-context image-workbench-selection-context--foldout">
+            <span v-for="item in selectionContextItems" :key="item.key" class="image-workbench-selection-context__item">
+              {{ item.label }} · {{ item.value }}
+            </span>
+            <span v-if="selectedGroup" class="image-workbench-selection-context__item">
+              {{ t("imageWorkbench.groups.title") }} · {{ selectedGroupLabel }}
+            </span>
+          </div>
           <div class="image-workbench-action-group image-workbench-quality-panel">
             <span>{{ t("imageWorkbench.quality.title") }}</span>
             <div class="image-workbench-quality-tags" role="group" :aria-label="t('imageWorkbench.quality.ariaLabel')">
@@ -518,27 +571,27 @@ function isImmediateGenerationBranch(actionKey: string) {
             </div>
             <div>
               <dt>{{ t("imageWorkbench.details.requestedFormat") }}</dt>
-              <dd>{{ selectedRequestedFormat }}</dd>
+              <dd>{{ selectedGenerationDetails.requestedFormat }}</dd>
             </div>
             <div>
               <dt>{{ t("imageWorkbench.details.actualFormat") }}</dt>
-              <dd>{{ selectedActualFormat }}</dd>
+              <dd>{{ selectedGenerationDetails.actualFormat }}</dd>
             </div>
             <div>
               <dt>{{ t("imageWorkbench.details.outputQuality") }}</dt>
-              <dd>{{ selectedOutputQuality }}</dd>
+              <dd>{{ selectedGenerationDetails.outputQuality }}</dd>
             </div>
             <div>
               <dt>{{ t("imageWorkbench.details.outputCompression") }}</dt>
-              <dd>{{ selectedOutputCompression }}</dd>
+              <dd>{{ selectedGenerationDetails.outputCompression }}</dd>
             </div>
             <div>
               <dt>{{ t("imageWorkbench.details.background") }}</dt>
-              <dd>{{ selectedOutputBackground }}</dd>
+              <dd>{{ selectedGenerationDetails.outputBackground }}</dd>
             </div>
             <div>
               <dt>{{ t("imageWorkbench.details.moderation") }}</dt>
-              <dd>{{ selectedOutputModeration }}</dd>
+              <dd>{{ selectedGenerationDetails.outputModeration }}</dd>
             </div>
             <div>
               <dt>{{ t("imageWorkbench.details.assetSize") }}</dt>
@@ -602,10 +655,14 @@ function isImmediateGenerationBranch(actionKey: string) {
         </div>
       </details>
     </div>
-    <div v-else class="image-workbench-empty image-workbench-empty--compact">
-      <Clock3 class="h-8 w-8" />
-      <strong>{{ t("imageWorkbench.review.selectionEmpty") }}</strong>
-      <span>{{ t("imageWorkbench.review.selectionEmptyDesc") }}</span>
-    </div>
+    <ImageWorkbenchRecentPanel
+      v-else
+      :asset-shelf-view="props.assetShelfView"
+      :asset-shelf-dialog-open="props.assetShelfDialogOpen"
+      @preview="emit('preview', $event)"
+      @toggle-reference="emit('toggle-reference', $event)"
+      @update:asset-shelf-view="emit('update:asset-shelf-view', $event)"
+      @update:asset-shelf-dialog-open="emit('update:asset-shelf-dialog-open', $event)"
+    />
   </aside>
 </template>

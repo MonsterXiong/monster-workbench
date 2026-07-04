@@ -15,7 +15,6 @@ import {
   resolveInitialImageWorkbenchJobId,
   resolveImageModelConfig,
   supportsImageGenerationConfig,
-  supportsNativeModeForConfig,
   supportsModeForConfig,
   toAssetCard,
   toImageModelConfigOption,
@@ -118,11 +117,25 @@ export const useImageWorkbenchStore = defineStore("image-workbench", () => {
   const isModeSupported = computed(() => supportedModes.value.includes(mode.value));
   const isModeDeferred = computed(() => deferredModes.value.includes(mode.value));
   const supportsCurrentProviderMode = computed(() => supportsModeForConfig(activeImageConfig.value, mode.value));
+  const selectedAsset = computed(() => {
+    const allAssets = [...assets.value, ...assetLibrary.value];
+    return selectedAssetId.value ? allAssets.find((asset) => asset.id === selectedAssetId.value) ?? null : null;
+  });
+  const selectedAssetUsable = computed(() =>
+    Boolean(selectedAsset.value && (!selectedAsset.value.integrityStatus || selectedAsset.value.integrityStatus === "ok"))
+  );
+  const hasInvalidSelectedAsset = computed(() =>
+    Boolean(selectedAsset.value && !selectedAssetUsable.value)
+  );
+  const hasUsableReferenceImage = computed(() =>
+    Boolean(referenceImagePath.value || referenceAssets.value.some((asset) => !asset.integrityStatus || asset.integrityStatus === "ok"))
+  );
   const currentModeContextUnavailableReason = computed(() =>
     getModeContextUnavailableReason({
       targetMode: mode.value,
-      hasReferenceImage: hasReferenceImage.value,
-      hasSelectedAsset: Boolean(selectedAsset.value || referenceAssets.value.length),
+      hasReferenceImage: hasUsableReferenceImage.value,
+      hasSelectedAsset: Boolean(selectedAssetUsable.value || referenceAssets.value.some((asset) => !asset.integrityStatus || asset.integrityStatus === "ok")),
+      hasInvalidSelectedAsset: hasInvalidSelectedAsset.value,
       hasInpaintMask: hasInpaintMask.value,
       t,
     })
@@ -138,10 +151,6 @@ export const useImageWorkbenchStore = defineStore("image-workbench", () => {
       return currentModeContextUnavailableReason.value;
     }
     return "";
-  });
-  const selectedAsset = computed(() => {
-    const allAssets = [...assets.value, ...assetLibrary.value];
-    return selectedAssetId.value ? allAssets.find((asset) => asset.id === selectedAssetId.value) ?? null : null;
   });
   const selectedAssetJob = computed(() => {
     const asset = selectedAsset.value;
@@ -217,6 +226,7 @@ export const useImageWorkbenchStore = defineStore("image-workbench", () => {
     setReferenceRole,
     setAssetReferences,
     setSingleAssetReference,
+    resolveReferenceDisplayUrl,
     removeReferenceAsset,
     removeUploadedReferenceImage,
     clearReferenceImage,
@@ -247,23 +257,28 @@ export const useImageWorkbenchStore = defineStore("image-workbench", () => {
   const canExportCurrentJob = computed(() => Boolean(currentJob.value && assets.value.length));
   const canExportSelectedAsset = computed(() => Boolean(selectedAsset.value));
   const canCleanupDeletedAssets = computed(() => !loading.value);
+  const canRunInpaint = computed(() =>
+    selectedAssetUsable.value &&
+    supportsModeForConfig(activeImageConfig.value, "inpaint") &&
+    !loading.value
+  );
+  const canRunStyleContinuation = computed(() =>
+    selectedAssetUsable.value &&
+      supportsModeForConfig(activeImageConfig.value, "img2img") &&
+      !loading.value
+  );
   const canRunPersonConsistency = computed(() =>
-    (Boolean(selectedAsset.value || referenceAssets.value.length) || hasReferenceImage.value) &&
+    (selectedAssetUsable.value || hasUsableReferenceImage.value) &&
     supportsModeForConfig(activeImageConfig.value, "person_consistency") &&
     !loading.value
   );
-  const canRunUpscaleViaImg2img = computed(() =>
-    Boolean(selectedAsset.value) &&
-    supportsNativeModeForConfig(activeImageConfig.value, "img2img") &&
-    !loading.value
-  );
   const canRunUpscale2x = computed(() =>
-    Boolean(selectedAsset.value) &&
-    (supportsModeForConfig(activeImageConfig.value, "upscale_2x") || canRunUpscaleViaImg2img.value) &&
+    selectedAssetUsable.value &&
+    supportsModeForConfig(activeImageConfig.value, "upscale_2x") &&
     !loading.value
   );
   const canRunUpscale4x = computed(() =>
-    Boolean(selectedAsset.value) &&
+    selectedAssetUsable.value &&
     supportsModeForConfig(activeImageConfig.value, "upscale_4x") &&
     !loading.value
   );
@@ -597,6 +612,12 @@ export const useImageWorkbenchStore = defineStore("image-workbench", () => {
     selectedAssetId.value = assetId;
   }
 
+  function clearSelectedAsset() {
+    inpaintEditorActive.value = false;
+    clearInpaintMask();
+    selectedAssetId.value = "";
+  }
+
   async function copySelectedMetaPrompt() {
     const text = buildSelectedMetaPromptText({
       source: selectedAssetMetadata.value,
@@ -680,34 +701,20 @@ export const useImageWorkbenchStore = defineStore("image-workbench", () => {
     }
     const targetMode = scale === 4 ? "upscale_4x" : "upscale_2x";
     const supportsNativeUpscale = supportsModeForConfig(activeImageConfig.value, targetMode);
-    const supportsReferenceEnhance = supportsNativeModeForConfig(activeImageConfig.value, "img2img");
-    if (!supportsNativeUpscale && !supportsReferenceEnhance) {
+    if (!supportsNativeUpscale) {
       throw new Error(t(scale === 4 ? "imageWorkbench.errors.upscale4Unsupported" : "imageWorkbench.errors.upscaleDeferred"));
     }
     clearReferenceImage();
     clearInpaintMask();
     inpaintEditorActive.value = false;
     const targetModel = model.value.trim() || getImageModelName(activeImageConfig.value);
-    const requestedScale = supportsNativeUpscale ? scale : 2;
-    const upscaleSize = resolveUpscaleTargetSize(asset, requestedScale, targetModel);
+    const upscaleSize = resolveUpscaleTargetSize(asset, scale, targetModel);
     if (upscaleSize) {
       size.value = upscaleSize;
     }
     quantity.value = 1;
-    prompt.value = t(
-      supportsNativeUpscale
-        ? "imageWorkbench.asset.upscaleDefaultPrompt"
-        : "imageWorkbench.asset.upscaleRerenderPrompt"
-    );
-    if (supportsNativeUpscale) {
-      mode.value = targetMode;
-    } else {
-      if (!setSingleAssetReference(asset.id)) {
-        throw new Error(error.value || t("imageWorkbench.errors.invalidReferenceAsset"));
-      }
-      mode.value = "img2img";
-      notice.value = t("imageWorkbench.asset.upscaleRerenderNotice");
-    }
+    prompt.value = t("imageWorkbench.asset.upscaleDefaultPrompt");
+    mode.value = targetMode;
     return runTxt2imgBatch();
   }
 
@@ -741,7 +748,7 @@ export const useImageWorkbenchStore = defineStore("image-workbench", () => {
     notice.value = t("imageWorkbench.mask.fixHandsNotice");
   }
 
-  async function fixSelectedAssetByQualityIssue() {
+  function prepareSelectedAssetQualityFix() {
     if (!selectedAsset.value) {
       throw new Error(t("imageWorkbench.errors.noSelectedAsset"));
     }
@@ -751,17 +758,18 @@ export const useImageWorkbenchStore = defineStore("image-workbench", () => {
     }
     if (issue === "hands") {
       startFixHandsSelectedAsset();
-      return null;
+      return issue;
     }
     if (issue === "prop") {
       startLocalQualityFix("imageWorkbench.asset.propFixPrompt", "imageWorkbench.mask.localFixNotice");
-      return null;
+      return issue;
     }
     if (issue === "identity") {
-      return runIdentityQualityFix();
+      prepareIdentityQualityFix();
+      return issue;
     }
     startLocalQualityFix("imageWorkbench.asset.sceneFixPrompt", "imageWorkbench.mask.localFixNotice");
-    return null;
+    return issue;
   }
 
   function startLocalQualityFix(promptKey: string, noticeKey: string) {
@@ -785,7 +793,7 @@ export const useImageWorkbenchStore = defineStore("image-workbench", () => {
     }
   }
 
-  async function runIdentityQualityFix() {
+  function prepareIdentityQualityFix() {
     const targetAsset = selectedAsset.value;
     if (!targetAsset) {
       throw new Error(t("imageWorkbench.errors.noSelectedAsset"));
@@ -810,7 +818,7 @@ export const useImageWorkbenchStore = defineStore("image-workbench", () => {
     mode.value = "person_consistency";
     quantity.value = 1;
     prompt.value = t("imageWorkbench.asset.identityFixPrompt");
-    return runTxt2imgBatch();
+    notice.value = t("imageWorkbench.asset.identityFixNotice");
   }
 
   function resolveIdentityReferenceAsset(asset: ImageWorkbenchAsset) {
@@ -1017,6 +1025,8 @@ export const useImageWorkbenchStore = defineStore("image-workbench", () => {
     canExportSelectedAsset,
     canUseSelectedAssetAsReference,
     canCleanupDeletedAssets,
+    canRunInpaint,
+    canRunStyleContinuation,
     canRunPersonConsistency,
     canRunUpscale2x,
     canRunUpscale4x,
@@ -1049,12 +1059,14 @@ export const useImageWorkbenchStore = defineStore("image-workbench", () => {
     toggleAssetReference,
     setReferenceRole,
     setAssetReferences,
+    resolveReferenceDisplayUrl,
     removeReferenceAsset,
     removeUploadedReferenceImage,
     clearReferenceImage,
     selectImageModelConfig,
     closeInpaintEditor,
     selectAsset,
+    clearSelectedAsset,
     openSelectedAssetLocation,
     exportCurrentJob,
     exportSelectedAsset,
@@ -1064,8 +1076,7 @@ export const useImageWorkbenchStore = defineStore("image-workbench", () => {
     regenerateSelectedAsset,
     continueSelectedStyle,
     startInpaintSelectedAsset,
-    startFixHandsSelectedAsset,
-    fixSelectedAssetByQualityIssue,
+    prepareSelectedAssetQualityFix,
     saveInpaintMaskDraft,
     clearInpaintMask,
     continueSelectedPerson,

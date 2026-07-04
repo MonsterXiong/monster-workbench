@@ -64,17 +64,17 @@ function handleSourceClick(key: "upload" | "library" | "selected") {
       v-for="option in sourceOptions"
       :key="option.key"
       type="button"
-      :class="{ 'is-active': option.active }"
-      :disabled="option.disabled"
-      @click="handleSourceClick(option.key)"
-    >
-      <ImagePlus v-if="option.key === 'upload'" class="h-3.5 w-3.5" />
-      <Images v-else-if="option.key === 'library'" class="h-3.5 w-3.5" />
-      <Sparkles v-else class="h-3.5 w-3.5" />
-      <span>
-        <strong>{{ option.label }}</strong>
-        <small>{{ option.description }}</small>
-      </span>
-    </button>
-  </div>
+    :class="{ 'is-active': option.active }"
+    :disabled="option.disabled"
+    :title="option.description"
+    @click="handleSourceClick(option.key)"
+  >
+    <ImagePlus v-if="option.key === 'upload'" class="h-3.5 w-3.5" />
+    <Images v-else-if="option.key === 'library'" class="h-3.5 w-3.5" />
+    <Sparkles v-else class="h-3.5 w-3.5" />
+    <span>
+      <strong>{{ option.label }}</strong>
+    </span>
+  </button>
+</div>
 </template>

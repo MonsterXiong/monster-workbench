@@ -1,7 +1,15 @@
-import type { ImageWorkbenchGroup, ImageWorkbenchJob, ImageWorkbenchMetadata, ImageWorkbenchModelRun } from "../../types/image-workbench";
+import type {
+  ImageWorkbenchAsset,
+  ImageWorkbenchGroup,
+  ImageWorkbenchJob,
+  ImageWorkbenchMetadata,
+  ImageWorkbenchModelRun,
+} from "../../types/image-workbench";
+import { parseGenerationOptionsJson } from "../../stores/image-workbench-draft";
 import { toAssetCard } from "../../stores/image-workbench-helpers";
 
 export type ImageWorkbenchAssetCard = ReturnType<typeof toAssetCard>;
+export type ImageWorkbenchDeliveryUseKey = "original" | "avatar" | "cover" | "shortVideo" | "product" | "poster";
 
 export type ImageWorkbenchGallerySection = {
   key: string;
@@ -16,6 +24,7 @@ export type ImageWorkbenchGallerySection = {
 };
 
 export type ImageWorkbenchLibraryFilter = "recent" | "favorite" | "person" | "style" | "delivery";
+export type ImageWorkbenchAssetShelfView = "recent" | "library";
 
 export type ImageWorkbenchAssetBadge = {
   key: string;
@@ -44,6 +53,56 @@ export type ImageWorkbenchLineageSummaryItem = {
   value: string;
   tone: "primary" | "success" | "neutral" | "warning";
 };
+
+export function buildSelectedAssetActionDisabledReason(options: {
+  selectedAsset: ImageWorkbenchAsset | null;
+  canRun: boolean;
+  unavailableKey: string;
+  t: (key: string) => string;
+}) {
+  const { selectedAsset, canRun, unavailableKey, t } = options;
+  if (!selectedAsset) {
+    return t("imageWorkbench.errors.noSelectedAsset");
+  }
+  if (selectedAsset.integrityStatus && selectedAsset.integrityStatus !== "ok") {
+    return t("imageWorkbench.errors.invalidSelectedAsset");
+  }
+  return canRun ? "" : t(unavailableKey);
+}
+
+export function buildDeliveryUseKeys(asset: ImageWorkbenchAsset | null): ImageWorkbenchDeliveryUseKey[] {
+  if (!asset) return [];
+  const width = asset.width || 0;
+  const height = asset.height || 0;
+  if (!width || !height) return ["original"];
+  const ratio = width / height;
+  const keys: ImageWorkbenchDeliveryUseKey[] = ["original"];
+  if (ratio >= 0.86 && ratio <= 1.16) {
+    keys.push("avatar", "product");
+  } else if (ratio < 0.86) {
+    keys.push("shortVideo", "poster");
+  } else {
+    keys.push("cover", "poster");
+  }
+  return keys.slice(0, 3);
+}
+
+export function buildSelectedGenerationDetails(options: {
+  asset: ImageWorkbenchAsset | null;
+  job: ImageWorkbenchJob | null;
+  t: (key: string) => string;
+}) {
+  const generationOptions = parseGenerationOptionsJson(options.job?.generationOptionsJson);
+  const hasFormatCompression = ["jpeg", "webp"].includes(generationOptions.outputFormat);
+  return {
+    requestedFormat: generationOptions.hasOptions ? options.t(`imageWorkbench.output.format.${generationOptions.outputFormat}`) : "-",
+    actualFormat: formatMimeTypeAsImageFormat(options.asset?.mimeType),
+    outputQuality: generationOptions.hasOptions ? options.t(`imageWorkbench.output.quality.${generationOptions.quality}`) : "-",
+    outputCompression: generationOptions.hasOptions && hasFormatCompression ? `${generationOptions.outputCompression}%` : "-",
+    outputBackground: generationOptions.hasOptions ? options.t(`imageWorkbench.output.background.${generationOptions.background}`) : "-",
+    outputModeration: generationOptions.hasOptions ? options.t(`imageWorkbench.output.moderation.${generationOptions.moderation}`) : "-",
+  };
+}
 
 export type ImageWorkbenchAssetRelationContext = {
   selectedAsset: ImageWorkbenchAssetCard | null;
@@ -723,36 +782,47 @@ function isDeliveryReady(asset: ImageWorkbenchAssetCard) {
   return asset.deliveryStatus === "ready";
 }
 
+function formatMimeTypeAsImageFormat(mimeType?: string | null) {
+  const clean = String(mimeType || "").toLowerCase();
+  if (clean.includes("jpeg") || clean.includes("jpg")) return "JPEG";
+  if (clean.includes("webp")) return "WebP";
+  if (clean.includes("png")) return "PNG";
+  return mimeType || "-";
+}
+
 export function buildBranchActions(options: {
-  canInpaint: boolean;
-  canPersonConsistency: boolean;
-  canUpscale2x: boolean;
+  continueStyleDisabledReason: string;
+  inpaintDisabledReason: string;
+  personDisabledReason: string;
+  upscaleDisabledReason: string;
   canUpscale4x: boolean;
   t: (key: string) => string;
 }) {
-  const { canInpaint, canPersonConsistency, canUpscale2x, canUpscale4x, t } = options;
+  const { continueStyleDisabledReason, inpaintDisabledReason, personDisabledReason, upscaleDisabledReason, canUpscale4x, t } = options;
   return [
     {
       key: "continue-style",
       title: t("imageWorkbench.branches.continueStyleTitle"),
       description: t("imageWorkbench.branches.continueStyleDesc"),
       actionLabel: t("imageWorkbench.asset.continueStyle"),
+      disabled: Boolean(continueStyleDisabledReason),
+      disabledReason: continueStyleDisabledReason,
     },
     {
       key: "inpaint",
       title: t("imageWorkbench.branches.inpaintTitle"),
       description: t("imageWorkbench.branches.inpaintDesc"),
       actionLabel: t("imageWorkbench.asset.inpaint"),
-      disabled: !canInpaint,
-      disabledReason: !canInpaint ? t("imageWorkbench.errors.noSelectedAsset") : "",
+      disabled: Boolean(inpaintDisabledReason),
+      disabledReason: inpaintDisabledReason,
     },
     {
       key: "person",
       title: t("imageWorkbench.branches.personTitle"),
       description: t("imageWorkbench.branches.personDesc"),
       actionLabel: t("imageWorkbench.asset.personContinue"),
-      disabled: !canPersonConsistency,
-      disabledReason: !canPersonConsistency ? t("imageWorkbench.errors.personDeferred") : "",
+      disabled: Boolean(personDisabledReason),
+      disabledReason: personDisabledReason,
     },
     {
       key: "upscale",
@@ -761,8 +831,8 @@ export function buildBranchActions(options: {
         ? t("imageWorkbench.branches.upscaleDesc4x")
         : t("imageWorkbench.branches.upscaleDesc2x"),
       actionLabel: canUpscale4x ? t("imageWorkbench.asset.upscale4x") : t("imageWorkbench.asset.upscale2x"),
-      disabled: !canUpscale2x && !canUpscale4x,
-      disabledReason: !canUpscale2x && !canUpscale4x ? t("imageWorkbench.errors.upscaleDeferred") : "",
+      disabled: Boolean(upscaleDisabledReason),
+      disabledReason: upscaleDisabledReason,
     },
   ];
 }

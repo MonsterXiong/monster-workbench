@@ -140,23 +140,36 @@ export function getModeContextUnavailableReason(options: {
   targetMode: ImageWorkbenchMode;
   hasReferenceImage: boolean;
   hasSelectedAsset: boolean;
+  hasInvalidSelectedAsset?: boolean;
   hasInpaintMask: boolean;
   t: (key: string) => string;
 }) {
-  const { targetMode, hasReferenceImage, hasSelectedAsset, hasInpaintMask, t } = options;
+  const { targetMode, hasReferenceImage, hasSelectedAsset, hasInvalidSelectedAsset = false, hasInpaintMask, t } = options;
   if (targetMode === "txt2img") {
     return "";
   }
   if (targetMode === "img2img") {
+    if (hasInvalidSelectedAsset && !hasReferenceImage && !hasSelectedAsset) {
+      return t("imageWorkbench.errors.invalidSelectedAsset");
+    }
     return hasReferenceImage || hasSelectedAsset ? "" : t("imageWorkbench.errors.noReferenceImage");
   }
   if (targetMode === "person_consistency") {
+    if (hasInvalidSelectedAsset && !hasReferenceImage && !hasSelectedAsset) {
+      return t("imageWorkbench.errors.invalidSelectedAsset");
+    }
     return hasReferenceImage || hasSelectedAsset ? "" : t("imageWorkbench.errors.noReferenceImage");
   }
   if (targetMode.startsWith("upscale_")) {
+    if (hasInvalidSelectedAsset) {
+      return t("imageWorkbench.errors.invalidSelectedAsset");
+    }
     return hasSelectedAsset ? "" : t("imageWorkbench.errors.noSelectedAsset");
   }
   if (targetMode === "inpaint") {
+    if (hasInvalidSelectedAsset) {
+      return t("imageWorkbench.errors.invalidSelectedAsset");
+    }
     if (!hasSelectedAsset) {
       return t("imageWorkbench.errors.noSelectedAsset");
     }

@@ -22,24 +22,6 @@ export function buildImageWorkbenchHandlers(store: Store) {
     store.selectAsset(asset.id);
   }
 
-  function handleBranchAction(actionKey: string) {
-    if (actionKey === "continue-style") {
-      void store.continueSelectedStyle();
-      return;
-    }
-    if (actionKey === "inpaint") {
-      void store.startInpaintSelectedAsset();
-      return;
-    }
-    if (actionKey === "person") {
-      void store.continueSelectedPerson();
-      return;
-    }
-    if (actionKey === "upscale") {
-      void store.upscaleSelectedAsset(store.canRunUpscale4x ? 4 : 2);
-    }
-  }
-
   function handleModelConfigChange(event: Event) {
     const target = event.target as HTMLSelectElement | null;
     store.selectImageModelConfig(target?.value || "");
@@ -74,10 +56,7 @@ export function buildImageWorkbenchHandlers(store: Store) {
     handleExportSelectedAsset: () => void store.exportSelectedAsset(),
     handleCopyMetaPrompt: () => void store.copySelectedMetaPrompt(),
     handleRegenerateSelectedAsset: () => void store.regenerateSelectedAsset(),
-    handleContinueSelectedPerson: () => void store.continueSelectedPerson(),
-    handleFixSelectedAssetHands: () => store.startFixHandsSelectedAsset(),
-    handleFixSelectedAssetByQuality: () => void store.fixSelectedAssetByQualityIssue(),
-    handleBranchAction,
+    handlePrepareSelectedAssetQualityFix: () => store.prepareSelectedAssetQualityFix(),
     handleModelConfigChange,
   };
 }

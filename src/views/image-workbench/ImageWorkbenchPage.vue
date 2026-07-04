@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
+import { useRoute, useRouter } from "vue-router";
 import {
   Ban,
   BookTemplate,
@@ -10,8 +11,8 @@ import {
   FolderOpen,
   ImagePlus,
   Images,
-  ListChecks,
   Link,
+  Maximize2,
   Play,
   RefreshCcw,
   RotateCcw,
@@ -27,29 +28,32 @@ import { buildImageSizeOption, buildImageSizeOptions } from "../ai/components/im
 import { formatTemplate } from "../../utils";
 import {
   type ImageWorkbenchAssetCard,
+  type ImageWorkbenchAssetShelfView,
   buildAssetBadges,
-  buildAssetLineageSummary,
-  buildCompareStrip,
   buildGallerySections,
-  buildVersionChain,
-  type ImageWorkbenchLibraryFilter,
 } from "./imageWorkbenchReview";
 import { useImageWorkbenchImageFallback } from "./useImageWorkbenchImageFallback";
 import { buildImageWorkbenchHandlers } from "./useImageWorkbenchHandlers";
-import ImageWorkbenchCompareStrip from "./ImageWorkbenchCompareStrip.vue";
 import ImageWorkbenchInspector from "./ImageWorkbenchInspector.vue";
 import ImageWorkbenchLightbox from "./ImageWorkbenchLightbox.vue";
 import ImageWorkbenchMaskEditor from "./ImageWorkbenchMaskEditor.vue";
 import ImageWorkbenchReferenceSourcePicker from "./ImageWorkbenchReferenceSourcePicker.vue";
 import ImageWorkbenchStartPanel from "./ImageWorkbenchStartPanel.vue";
-import ImageWorkbenchTaskLauncher from "./ImageWorkbenchTaskLauncher.vue";
 import ImageWorkbenchTaskPanel from "./ImageWorkbenchTaskPanel.vue";
 import "./ImageWorkbenchPage.css";
 import {
+  buildImageWorkbenchTaskEntries,
+  buildImageWorkbenchTaskGuidance,
+  buildImageWorkbenchTaskPresets,
   getImageWorkbenchTaskPresetConfig,
   type ImageWorkbenchTaskEntryKey,
   type ImageWorkbenchTaskPresetKey,
+  usesImageWorkbenchReferenceEntry,
 } from "./imageWorkbenchTaskLauncher";
+import {
+  buildImageWorkbenchJobReferenceViews,
+  type ImageWorkbenchJobReferenceView,
+} from "./imageWorkbenchReferences";
 import type {
   ImageWorkbenchBackground,
   ImageWorkbenchGenerationQuality,
@@ -62,13 +66,17 @@ import type {
 
 const { t } = useI18n();
 const { confirm } = useConfirm();
+const route = useRoute();
+const router = useRouter();
 const imageWorkbenchStore = useImageWorkbenchStore();
-const galleryTab = ref<"current" | "library">("current");
-const galleryLibraryFilter = ref<ImageWorkbenchLibraryFilter>("recent");
 const templatePickerOpen = ref(false);
-const taskDrawerOpen = ref(false);
-const referencePickMode = ref(false);
+const sceneGuideOpen = ref(false);
+const commandSettingsOpen = ref(false);
+const referenceComposerOpen = ref(false);
+const assetShelfView = ref<ImageWorkbenchAssetShelfView>("recent");
+const assetShelfDialogOpen = ref(false);
 const activeTaskEntry = ref<ImageWorkbenchTaskEntryKey>("create");
+const activeScenePreset = ref<ImageWorkbenchTaskPresetKey | null>(null);
 const promptTextareaRef = ref<HTMLTextAreaElement | null>(null);
 const upscaleScale = ref<2 | 4>(2);
 const { handleImageLoad, handleImageLoadError } = useImageWorkbenchImageFallback();
@@ -77,20 +85,20 @@ const qualityOptions: ImageWorkbenchGenerationQuality[] = ["auto", "low", "mediu
 const outputFormatOptions: ImageWorkbenchOutputFormat[] = ["png", "jpeg", "webp"];
 const backgroundOptions: ImageWorkbenchBackground[] = ["auto", "opaque"];
 const moderationOptions: ImageWorkbenchModeration[] = ["auto", "low"];
-const libraryFilterKeys: ImageWorkbenchLibraryFilter[] = ["recent", "favorite", "person", "style", "delivery"];
 
 const baseSizeOptions = computed(() => buildImageSizeOptions(t));
-const currentJob = computed(() => imageWorkbenchStore.currentJob);
-const libraryJobById = computed(() => {
-  const map = new Map(imageWorkbenchStore.jobs.map((job) => [job.id, job]));
-  if (currentJob.value) {
-    map.set(currentJob.value.id, currentJob.value);
-  }
-  return map;
-});
-const filteredLibraryAssetCards = computed(() =>
-  imageWorkbenchStore.libraryAssetCards.filter((asset) => matchesLibraryFilter(asset, galleryLibraryFilter.value))
+const taskEntries = computed(() => buildImageWorkbenchTaskEntries(t));
+const activeTaskMeta = computed(() =>
+  taskEntries.value.find((item) => item.key === activeTaskEntry.value) || taskEntries.value[0]
 );
+const activeTaskPresets = computed(() => buildImageWorkbenchTaskPresets(activeTaskEntry.value, t));
+const activeScenePresetMeta = computed(() =>
+  activeTaskPresets.value.find((item) => item.key === activeScenePreset.value) || null
+);
+const commandSceneLabel = computed(() =>
+  activeScenePresetMeta.value?.label || activeTaskMeta.value?.title || t("imageWorkbench.tasks.create")
+);
+const currentJob = computed(() => imageWorkbenchStore.currentJob);
 const latestJob = computed(() => imageWorkbenchStore.jobs[0] || null);
 const canReturnToLatestJob = computed(() =>
   Boolean(latestJob.value && latestJob.value.id !== imageWorkbenchStore.selectedJobId)
@@ -99,78 +107,23 @@ const currentJobStatusText = computed(() => {
   const status = currentJob.value?.status;
   return status ? t(`imageWorkbench.jobStatuses.${status}`) : t("imageWorkbench.taskbar.waiting");
 });
-const taskbarProgressLabel = computed(() =>
-  formatTemplate(t("imageWorkbench.taskbar.progressLabel"), {
-    finished: imageWorkbenchStore.jobProgress.finished,
-    total: imageWorkbenchStore.jobProgress.total,
-    percent: imageWorkbenchStore.jobProgress.percent,
-  })
-);
-const taskbarTone = computed(() => {
-  if (imageWorkbenchStore.jobProgress.failed || imageWorkbenchStore.canRetryFailedTasks) {
-    return "failed";
-  }
-  if (imageWorkbenchStore.generating || imageWorkbenchStore.jobProgress.running) {
-    return "running";
-  }
-  if (currentJob.value) {
-    return "done";
-  }
-  return "idle";
-});
-const taskbarStatusLabel = computed(() => {
-  if (taskbarTone.value === "failed") {
-    return t("imageWorkbench.taskbar.statusFailed");
-  }
-  if (taskbarTone.value === "running") {
-    return t("imageWorkbench.taskbar.statusRunning");
-  }
-  return currentJobStatusText.value;
-});
-const taskbarStatusMeta = computed(() => {
-  if (!currentJob.value) {
-    return t("imageWorkbench.taskbar.statusEmpty");
-  }
-  if (!imageWorkbenchStore.jobProgress.total) {
-    return formatTemplate(t("imageWorkbench.taskbar.jobQuantity"), {
-      count: currentJob.value.quantity,
-    });
-  }
-  return formatTemplate(t("imageWorkbench.taskbar.statusMeta"), {
-    progress: taskbarProgressLabel.value,
-    count: currentJob.value.quantity,
-  });
-});
-const visibleAssetCards = computed(() =>
-  galleryTab.value === "current"
-    ? imageWorkbenchStore.currentAssetCards
-    : filteredLibraryAssetCards.value
-);
-const recentAssetCards = computed(() => imageWorkbenchStore.libraryAssetCards.slice(0, 6));
+const visibleAssetCards = computed(() => imageWorkbenchStore.currentAssetCards);
 const showWorkspaceStart = computed(() =>
-  galleryTab.value === "current" && !visibleAssetCards.value.length && !isInpaintWorkspace.value
+  !visibleAssetCards.value.length && !isInpaintWorkspace.value
 );
-const libraryFilterOptions = computed(() => {
-  const counts: Record<ImageWorkbenchLibraryFilter, number> = {
-    recent: imageWorkbenchStore.libraryAssetCards.length,
-    favorite: 0,
-    person: 0,
-    style: 0,
-    delivery: 0,
-  };
-  imageWorkbenchStore.libraryAssetCards.forEach((asset) => {
-    libraryFilterKeys.forEach((key) => {
-      if (key !== "recent" && matchesLibraryFilter(asset, key)) {
-        counts[key] += 1;
-      }
-    });
-  });
-  return libraryFilterKeys.map((key) => ({
-    key,
-    label: t(`imageWorkbench.workspace.libraryFilters.${key}`),
-    count: counts[key],
-  }));
-});
+const showSceneGuide = computed(() =>
+  !isInpaintWorkspace.value && (sceneGuideOpen.value || showWorkspaceStart.value)
+);
+const workspaceHeaderTitle = computed(() =>
+  showSceneGuide.value
+    ? t("imageWorkbench.workspace.creationTitle")
+    : t("imageWorkbench.workspace.current")
+);
+const workspaceHeaderDesc = computed(() =>
+  showSceneGuide.value
+    ? t("imageWorkbench.workspace.creationDesc")
+    : workspaceSummary.value
+);
 const lightboxAssetCards = computed(() => {
   const map = new Map<string, ImageWorkbenchAssetCard>();
   visibleAssetCards.value
@@ -218,55 +171,14 @@ const referenceRoleOptions = computed(() =>
 );
 const gallerySections = computed(() =>
   buildGallerySections({
-    galleryTab: galleryTab.value,
-    libraryFilter: galleryLibraryFilter.value,
+    galleryTab: "current",
     currentAssets: imageWorkbenchStore.currentAssetCards,
-    libraryAssets: filteredLibraryAssetCards.value,
+    libraryAssets: imageWorkbenchStore.libraryAssetCards,
     currentGroups: imageWorkbenchStore.currentGroups,
     currentJob: currentJob.value,
     selectedAssetId: selectedAsset.value?.id || "",
     t,
   })
-);
-const compareStripItems = computed(() =>
-  buildCompareStrip({
-    currentAssets: imageWorkbenchStore.currentAssetCards,
-    libraryAssets: imageWorkbenchStore.libraryAssetCards,
-    selectedAssetId: selectedAsset.value?.id || "",
-  })
-);
-const workspaceLineageItems = computed(() =>
-  buildAssetLineageSummary({
-    selectedAssetId: selectedAsset.value?.id || "",
-    currentAssets: imageWorkbenchStore.currentAssetCards,
-    libraryAssets: imageWorkbenchStore.libraryAssetCards,
-    t,
-  })
-);
-const workspacePathItems = computed(() => {
-  const chain = buildVersionChain({
-    selectedAssetId: selectedAsset.value?.id || "",
-    currentAssets: imageWorkbenchStore.currentAssetCards,
-    libraryAssets: imageWorkbenchStore.libraryAssetCards,
-    t,
-  });
-  if (chain.length) {
-    return chain;
-  }
-  return selectedAssetCard.value
-    ? [
-        {
-          key: `selected-${selectedAssetCard.value.id}`,
-          label: t("imageWorkbench.review.versionSelected"),
-          description: t("imageWorkbench.review.versionSelectedDesc"),
-          asset: selectedAssetCard.value,
-          tone: "selected" as const,
-        },
-      ]
-    : [];
-});
-const showWorkspaceFocus = computed(() =>
-  Boolean(selectedAssetCard.value && workspaceLineageItems.value.length && !referencePickMode.value && !isInpaintWorkspace.value)
 );
 const workspaceSummary = computed(() => {
   if (currentJob.value) {
@@ -274,46 +186,8 @@ const workspaceSummary = computed(() => {
   }
   return t("imageWorkbench.workspace.emptyDesc");
 });
-const workspaceContextTitle = computed(() => {
-  if (galleryTab.value === "library") {
-    return t("imageWorkbench.workspace.contextLibrary");
-  }
-  if (canReturnToLatestJob.value) {
-    return t("imageWorkbench.workspace.contextHistory");
-  }
-  return t("imageWorkbench.workspace.contextCurrent");
-});
-const assetLibraryCountText = computed(() =>
-  formatTemplate(
-    t(
-      imageWorkbenchStore.assetLibraryHasMore
-        ? "imageWorkbench.workspace.libraryLoadedMore"
-        : "imageWorkbench.workspace.libraryLoadedAll"
-    ),
-    {
-      count: imageWorkbenchStore.libraryAssetCards.length,
-    }
-  )
-);
-const workspaceContextMeta = computed(() =>
-  galleryTab.value === "library"
-    ? assetLibraryCountText.value
-    : formatTemplate(t("imageWorkbench.workspace.contextMeta"), {
-        count: visibleAssetCards.value.length,
-        status: currentJobStatusText.value,
-      })
-);
-const workspaceEmptyTitle = computed(() =>
-  galleryTab.value === "library" && imageWorkbenchStore.libraryAssetCards.length
-    ? t("imageWorkbench.workspace.filterEmptyTitle")
-    : t("imageWorkbench.workspace.emptyTitle")
-);
-const workspaceEmptyDesc = computed(() =>
-  galleryTab.value === "library" && imageWorkbenchStore.libraryAssetCards.length
-    ? t("imageWorkbench.workspace.filterEmptyDesc")
-    : t("imageWorkbench.workspace.emptyDesc")
-);
-
+const workspaceEmptyTitle = computed(() => t("imageWorkbench.workspace.emptyTitle"));
+const workspaceEmptyDesc = computed(() => t("imageWorkbench.workspace.emptyDesc"));
 const largeBatchHint = computed(() =>
   formatTemplate(t("imageWorkbench.input.largeBatchHint"), {
     count: imageWorkbenchStore.generationQuantity,
@@ -328,31 +202,44 @@ const referenceLimitLabel = computed(() =>
 const selectedAssetIsReference = computed(() =>
   Boolean(selectedAsset.value && imageWorkbenchStore.referenceAssets.some((asset) => asset.id === selectedAsset.value?.id))
 );
-const referencePickMeta = computed(() =>
-  formatTemplate(t("imageWorkbench.reference.pickModeMeta"), {
-    limit: imageWorkbenchStore.referenceLimit,
-  })
+const currentJobReferenceViews = computed(() => buildCurrentJobReferenceViews());
+const selectedAssetUnavailableReason = computed(() =>
+  selectedAsset.value?.integrityStatus && selectedAsset.value.integrityStatus !== "ok"
+    ? t("imageWorkbench.errors.invalidSelectedAsset")
+    : ""
 );
 const showsOutputCompression = computed(() => ["jpeg", "webp"].includes(imageWorkbenchStore.outputFormat));
 const showsReferenceInput = computed(() => ["reference", "person", "style"].includes(activeTaskEntry.value));
 const showsPromptInput = computed(() =>
   activeTaskEntry.value !== "upscale" &&
-  !(activeTaskEntry.value === "edit" && !selectedAsset.value) &&
-  !(showsReferenceInput.value && !activeTaskGuidanceReady.value)
+  !(activeTaskEntry.value === "edit" && !selectedAsset.value)
 );
 const showsGenerationControls = computed(() =>
-  !["edit", "upscale"].includes(activeTaskEntry.value) &&
-  !(showsReferenceInput.value && !activeTaskGuidanceReady.value)
+  !["edit", "upscale"].includes(activeTaskEntry.value)
 );
 const showsQuantityInput = computed(() => showsGenerationControls.value);
 const showsSizeInput = computed(() => showsGenerationControls.value);
-const promptLabel = computed(() => t(`imageWorkbench.input.promptLabels.${activeTaskEntry.value}`));
 const promptPlaceholder = computed(() => t(`imageWorkbench.input.promptPlaceholders.${activeTaskEntry.value}`));
 const primaryActionLabel = computed(() =>
   imageWorkbenchStore.generating
     ? t("imageWorkbench.toolbar.addToQueue")
     : t(`imageWorkbench.toolbar.primaryActions.${activeTaskEntry.value}`)
 );
+const primaryActionTitle = computed(() => {
+  if (canSubmitCurrentTask.value) {
+    return primaryActionLabel.value;
+  }
+  if (imageWorkbenchStore.imageSizeError) {
+    return imageWorkbenchStore.imageSizeError;
+  }
+  if (modeUnavailableNotice.value) {
+    return modeUnavailableNotice.value;
+  }
+  if (activeTaskGuidance.value) {
+    return activeTaskGuidance.value;
+  }
+  return t("imageWorkbench.errors.promptRequired");
+});
 const upscaleScaleOptions = computed(() => [
   {
     scale: 2 as const,
@@ -377,70 +264,64 @@ const canSubmitCurrentTask = computed(() => {
 });
 const modeUnavailableNotice = computed(() =>
   (activeTaskEntry.value === "upscale" && canSubmitCurrentTask.value) ||
-  (activeTaskEntry.value === "edit" && selectedAsset.value && !imageWorkbenchStore.hasInpaintMask)
+  (
+    activeTaskEntry.value === "edit" &&
+    selectedAsset.value &&
+    !imageWorkbenchStore.hasInpaintMask &&
+    imageWorkbenchStore.canRunInpaint
+  )
     ? ""
     : imageWorkbenchStore.modeUnavailableReason
 );
-const activeTaskGuidance = computed(() => {
-  if (activeTaskEntry.value === "edit") {
-    if (!selectedAsset.value) {
-      return t("imageWorkbench.input.guidance.editNeedImage");
-    }
-    return imageWorkbenchStore.hasInpaintMask
-      ? t("imageWorkbench.input.guidance.editMaskReady")
-      : t("imageWorkbench.input.guidance.editReady");
+const activeTaskGuidanceContext = computed(() => ({
+  activeKey: activeTaskEntry.value,
+  hasSelectedAsset: Boolean(selectedAsset.value),
+  selectedAssetUnavailableReason: selectedAssetUnavailableReason.value,
+  hasReferenceImage: imageWorkbenchStore.hasReferenceImage,
+  canUseSelectedAssetAsReference: imageWorkbenchStore.canUseSelectedAssetAsReference,
+  canRunInpaint: imageWorkbenchStore.canRunInpaint,
+  hasInpaintMask: imageWorkbenchStore.hasInpaintMask,
+  canRunUpscale2x: imageWorkbenchStore.canRunUpscale2x,
+  canRunUpscale4x: imageWorkbenchStore.canRunUpscale4x,
+  t,
+}));
+const activeTaskGuidance = computed(() => buildImageWorkbenchTaskGuidance(activeTaskGuidanceContext.value));
+const shouldShowReferenceComposer = computed(() =>
+  showsReferenceInput.value && referenceComposerOpen.value
+);
+
+function ensureReferenceTaskContext() {
+  if (showsReferenceInput.value) {
+    return;
   }
-  if (activeTaskEntry.value === "upscale") {
-    return selectedAsset.value
-      ? t("imageWorkbench.input.guidance.upscaleReady")
-      : t("imageWorkbench.input.guidance.upscaleNeedImage");
+  activeTaskEntry.value = "reference";
+  activeScenePreset.value = null;
+  imageWorkbenchStore.mode = "img2img";
+}
+
+function handleToggleReferenceComposer() {
+  ensureReferenceTaskContext();
+  referenceComposerOpen.value = !referenceComposerOpen.value;
+  if (referenceComposerOpen.value) {
+    commandSettingsOpen.value = false;
   }
-  if (activeTaskEntry.value === "reference" && !imageWorkbenchStore.hasReferenceImage) {
-    return t("imageWorkbench.input.guidance.referenceNeedImage");
+}
+
+function handleOpenReferenceComposer() {
+  ensureReferenceTaskContext();
+  referenceComposerOpen.value = true;
+  commandSettingsOpen.value = false;
+}
+
+function handleToggleCommandSettings() {
+  commandSettingsOpen.value = !commandSettingsOpen.value;
+  if (commandSettingsOpen.value) {
+    referenceComposerOpen.value = false;
   }
-  if (activeTaskEntry.value === "person" && !imageWorkbenchStore.hasReferenceImage && !selectedAsset.value) {
-    return t("imageWorkbench.input.guidance.personNeedReference");
-  }
-  if (activeTaskEntry.value === "style" && !imageWorkbenchStore.hasReferenceImage && !selectedAsset.value) {
-    return t("imageWorkbench.input.guidance.styleNeedReference");
-  }
-  return "";
-});
-const activeTaskGuidanceReady = computed(() => {
-  if (activeTaskEntry.value === "edit") {
-    return Boolean(selectedAsset.value && imageWorkbenchStore.hasInpaintMask);
-  }
-  if (activeTaskEntry.value === "upscale") {
-    return Boolean(selectedAsset.value);
-  }
-  if (activeTaskEntry.value === "reference") {
-    return imageWorkbenchStore.hasReferenceImage;
-  }
-  if (activeTaskEntry.value === "person" || activeTaskEntry.value === "style") {
-    return Boolean(imageWorkbenchStore.hasReferenceImage || selectedAsset.value);
-  }
-  return false;
-});
+}
 
 function modeLabel(mode: ImageWorkbenchMode | string) {
   return t(`imageWorkbench.modes.${mode}`);
-}
-
-function matchesLibraryFilter(asset: ImageWorkbenchAssetCard, filter: ImageWorkbenchLibraryFilter) {
-  if (filter === "recent") {
-    return true;
-  }
-  if (filter === "favorite") {
-    return asset.favorite;
-  }
-  if (filter === "delivery") {
-    return asset.deliveryStatus === "ready";
-  }
-  const jobMode = libraryJobById.value.get(asset.jobId)?.mode;
-  if (filter === "person") {
-    return jobMode === "person_consistency";
-  }
-  return jobMode === "img2img";
 }
 
 function syncTaskEntryFromMode() {
@@ -467,23 +348,54 @@ function focusPromptInput() {
   void nextTick(() => promptTextareaRef.value?.focus());
 }
 
+function consumeRouteDraftPrompt() {
+  const rawPrompt = route.query.prompt;
+  const routePrompt = Array.isArray(rawPrompt) ? rawPrompt[0] : rawPrompt;
+  const draftPrompt = typeof routePrompt === "string" ? routePrompt.trim() : "";
+  if (!draftPrompt) {
+    return;
+  }
+  activeTaskEntry.value = "create";
+  imageWorkbenchStore.mode = "txt2img";
+  imageWorkbenchStore.closeInpaintEditor();
+  imageWorkbenchStore.prompt = draftPrompt;
+  const nextQuery = { ...route.query };
+  delete nextQuery.prompt;
+  void router.replace({ path: route.path, query: nextQuery });
+  focusPromptInput();
+}
+
 function handleUpscaleScaleSelect(scale: 2 | 4) {
   upscaleScale.value = scale;
   const targetMode: ImageWorkbenchMode = scale === 4 ? "upscale_4x" : "upscale_2x";
   imageWorkbenchStore.mode = targetMode;
-  if (scale === 2 && selectedAsset.value && !imageWorkbenchStore.supportsCurrentProviderMode) {
-    imageWorkbenchStore.mode = "img2img";
-  }
-  imageWorkbenchStore.prompt = t(
-    imageWorkbenchStore.mode === "img2img"
-      ? "imageWorkbench.asset.upscaleRerenderPrompt"
-      : "imageWorkbench.asset.upscaleDefaultPrompt"
-  );
+  imageWorkbenchStore.prompt = t("imageWorkbench.asset.upscaleDefaultPrompt");
+}
+
+function handleNewWorkbenchTask() {
+  activeTaskEntry.value = "create";
+  activeScenePreset.value = null;
+  imageWorkbenchStore.mode = "txt2img";
+  imageWorkbenchStore.clearSelectedAsset();
+  sceneGuideOpen.value = true;
+  referenceComposerOpen.value = false;
+  commandSettingsOpen.value = false;
+  void nextTick(() => {
+    if (!showWorkspaceStart.value) {
+      focusPromptInput();
+    }
+  });
+}
+
+function handleSceneTaskSelect(key: ImageWorkbenchTaskEntryKey) {
+  handleTaskEntrySelect(key);
+  sceneGuideOpen.value = true;
 }
 
 function handleTaskEntrySelect(key: ImageWorkbenchTaskEntryKey) {
   activeTaskEntry.value = key;
-  referencePickMode.value = false;
+  activeScenePreset.value = null;
+  referenceComposerOpen.value = usesImageWorkbenchReferenceEntry(key) && !imageWorkbenchStore.hasReferenceImage;
   if (key !== "edit") {
     imageWorkbenchStore.closeInpaintEditor();
   }
@@ -494,14 +406,25 @@ function handleTaskEntrySelect(key: ImageWorkbenchTaskEntryKey) {
   }
   if (key === "reference") {
     imageWorkbenchStore.mode = "img2img";
-    imageWorkbenchStore.notice = t("imageWorkbench.tasks.referenceNotice");
+    const usedSelectedReference = ensureSelectedAssetReference();
+    applyDefaultReferenceRoles(defaultReferenceRoleForTask(key));
+    if (usedSelectedReference) {
+      referenceComposerOpen.value = false;
+    }
+    if (!usedSelectedReference) {
+      imageWorkbenchStore.notice = t("imageWorkbench.tasks.referenceNotice");
+    }
     focusPromptInput();
     return;
   }
   if (key === "edit") {
     imageWorkbenchStore.mode = "inpaint";
-    if (selectedAsset.value) {
+    if (imageWorkbenchStore.canRunInpaint) {
       imageWorkbenchStore.startInpaintSelectedAsset();
+    } else if (selectedAssetUnavailableReason.value) {
+      imageWorkbenchStore.notice = selectedAssetUnavailableReason.value;
+    } else if (selectedAsset.value) {
+      imageWorkbenchStore.notice = t("imageWorkbench.errors.inpaintDeferred");
     } else {
       imageWorkbenchStore.notice = t("imageWorkbench.tasks.needImageNotice");
     }
@@ -509,43 +432,47 @@ function handleTaskEntrySelect(key: ImageWorkbenchTaskEntryKey) {
   }
   if (key === "upscale") {
     handleUpscaleScaleSelect(imageWorkbenchStore.canRunUpscale4x ? 4 : 2);
-    imageWorkbenchStore.notice = selectedAsset.value
+    imageWorkbenchStore.notice = selectedAssetUnavailableReason.value ||
+      (selectedAsset.value
       ? t("imageWorkbench.tasks.upscaleNotice")
-      : t("imageWorkbench.tasks.needImageNotice");
+      : t("imageWorkbench.tasks.needImageNotice"));
     return;
   }
   if (key === "person") {
     imageWorkbenchStore.mode = "person_consistency";
+    const usedSelectedReference = ensureSelectedAssetReference();
+    applyDefaultReferenceRoles(defaultReferenceRoleForTask(key));
+    if (usedSelectedReference) {
+      referenceComposerOpen.value = false;
+    }
     imageWorkbenchStore.prompt = imageWorkbenchStore.prompt.trim() || t("imageWorkbench.asset.personDefaultPrompt");
-    imageWorkbenchStore.notice = imageWorkbenchStore.hasReferenceImage || selectedAsset.value
+    imageWorkbenchStore.notice = selectedAssetUnavailableReason.value ||
+      (usedSelectedReference || imageWorkbenchStore.hasReferenceImage
       ? t("imageWorkbench.tasks.personNotice")
-      : t("imageWorkbench.tasks.needReferenceNotice");
+      : t("imageWorkbench.tasks.needReferenceNotice"));
     focusPromptInput();
     return;
   }
   imageWorkbenchStore.mode = "img2img";
   if (imageWorkbenchStore.canUseSelectedAssetAsReference) {
-    handleUseSelectedAssetAsReference();
+    if (handleUseSelectedAssetAsReference()) {
+      applyDefaultReferenceRoles(defaultReferenceRoleForTask(key));
+      referenceComposerOpen.value = false;
+    }
   }
   imageWorkbenchStore.prompt = imageWorkbenchStore.prompt.trim() || t("imageWorkbench.asset.styleDefaultPrompt");
-  imageWorkbenchStore.notice = imageWorkbenchStore.hasReferenceImage || selectedAsset.value
+  applyDefaultReferenceRoles(defaultReferenceRoleForTask(key));
+  imageWorkbenchStore.notice = selectedAssetUnavailableReason.value ||
+    (imageWorkbenchStore.hasReferenceImage
     ? t("imageWorkbench.tasks.styleNotice")
-    : t("imageWorkbench.tasks.needReferenceNotice");
+    : t("imageWorkbench.tasks.needReferenceNotice"));
   focusPromptInput();
 }
 
-function appendPromptSegment(current: string, segment: string) {
-  const cleanCurrent = current.trim();
-  const cleanSegment = segment.trim();
-  if (!cleanCurrent) {
-    return cleanSegment;
-  }
-  if (!cleanSegment) {
-    return cleanCurrent;
-  }
-  return /[，。；、,.;\s]$/u.test(cleanCurrent)
-    ? `${cleanCurrent}${cleanSegment}`
-    : `${cleanCurrent}，${cleanSegment}`;
+function ensureSelectedAssetReference() {
+  return !imageWorkbenchStore.hasReferenceImage &&
+    imageWorkbenchStore.canUseSelectedAssetAsReference &&
+    handleUseSelectedAssetAsReference();
 }
 
 function handleTaskPresetApply(key: ImageWorkbenchTaskPresetKey) {
@@ -553,9 +480,11 @@ function handleTaskPresetApply(key: ImageWorkbenchTaskPresetKey) {
   if (!preset) {
     return;
   }
-  const currentPrompt = imageWorkbenchStore.prompt.trim();
   handleTaskEntrySelect(preset.entryKey);
-  imageWorkbenchStore.prompt = appendPromptSegment(currentPrompt, t(preset.promptKey));
+  activeScenePreset.value = key;
+  sceneGuideOpen.value = false;
+  imageWorkbenchStore.prompt = t(preset.promptKey);
+  imageWorkbenchStore.outputQuality = "high";
   focusPromptInput();
 }
 
@@ -571,11 +500,46 @@ function referenceRoleLabel(role: ImageWorkbenchReferenceRole | undefined, index
   return t(`imageWorkbench.reference.roles.${normalizeReferenceRole(role, index)}`);
 }
 
+function defaultReferenceRoleForTask(key = activeTaskEntry.value): ImageWorkbenchReferenceRole {
+  if (key === "person") {
+    return "person";
+  }
+  if (key === "style") {
+    return "style";
+  }
+  return "scene";
+}
+
+function applyDefaultReferenceRole(keys: string | string[], role = defaultReferenceRoleForTask()) {
+  const targetKeys = Array.isArray(keys) ? keys : [keys];
+  targetKeys.forEach((key) => {
+    if (key) {
+      imageWorkbenchStore.setReferenceRole(key, role);
+    }
+  });
+}
+
+function applyDefaultReferenceRoles(role = defaultReferenceRoleForTask()) {
+  imageWorkbenchStore.referenceItems.forEach((item) => {
+    applyDefaultReferenceRole(item.key, role);
+  });
+}
+
 function referencePromptToken(index: number) {
   const role = normalizeReferenceRole(imageWorkbenchStore.referenceItems[index]?.role, index);
   return formatTemplate(t("imageWorkbench.reference.promptToken"), {
     index: index + 1,
     role: referenceRoleLabel(role, index),
+  });
+}
+
+function buildCurrentJobReferenceViews(): ImageWorkbenchJobReferenceView[] {
+  return buildImageWorkbenchJobReferenceViews({
+    job: currentJob.value,
+    currentAssets: imageWorkbenchStore.currentAssetCards,
+    libraryAssets: imageWorkbenchStore.libraryAssetCards,
+    referenceRoleLabel,
+    resolveDisplayUrl: imageWorkbenchStore.resolveReferenceDisplayUrl,
   });
 }
 
@@ -636,8 +600,13 @@ function handleApplyTemplateFromPicker(template: ImageWorkbenchTemplate) {
 
 function handleInspectorTaskEntryChange(key: ImageWorkbenchTaskEntryKey) {
   activeTaskEntry.value = key;
+  activeScenePreset.value = null;
+  sceneGuideOpen.value = false;
   if (key === "upscale") {
     upscaleScale.value = imageWorkbenchStore.mode === "upscale_4x" ? 4 : 2;
+  }
+  if (key === "reference" || key === "style" || key === "person") {
+    focusPromptInput();
   }
 }
 
@@ -654,8 +623,8 @@ async function handleSaveTemplateFromPicker() {
 }
 
 async function handleGenerate() {
+  sceneGuideOpen.value = false;
   if (activeTaskEntry.value === "upscale") {
-    taskDrawerOpen.value = true;
     await imageWorkbenchStore.upscaleSelectedAsset(upscaleScale.value);
     return;
   }
@@ -672,7 +641,6 @@ async function handleGenerate() {
       return;
     }
   }
-  taskDrawerOpen.value = true;
   await imageWorkbenchStore.runTxt2imgBatch();
 }
 
@@ -712,65 +680,123 @@ const {
   handleApplyTemplate,
   handleDeleteTemplate,
   handleImportGeneratedAssets,
-  handleSelectReferenceImage,
   handleUseSelectedAssetAsReference,
-  handleToggleAssetReference,
   handleRemoveReferenceAsset,
   handleRemoveUploadedReferenceImage,
-  handleClearReferenceImage,
   handleRefresh,
   handleExportJob,
-  handleContinueSelectedPerson,
   handleModelConfigChange,
 } = buildImageWorkbenchHandlers(imageWorkbenchStore);
 
-async function handleSelectAssetAndShowDetails(asset: ImageWorkbenchAssetCard) {
-  if (referencePickMode.value) {
-    imageWorkbenchStore.selectAsset(asset.id);
-    handleToggleAssetReference(asset.id);
+async function handleSelectReferenceImageFromComposer() {
+  const selectedPath = await imageWorkbenchStore.selectReferenceImage();
+  if (!selectedPath) {
     return;
   }
+  imageWorkbenchStore.mode = activeTaskEntry.value === "person" ? "person_consistency" : "img2img";
+  applyDefaultReferenceRole("uploaded");
+  referenceComposerOpen.value = false;
+}
+
+async function handleSelectAssetAndShowDetails(asset: ImageWorkbenchAssetCard) {
   await handleSelectReviewAsset(asset);
+  if (usesImageWorkbenchReferenceEntry(activeTaskEntry.value) && !imageWorkbenchStore.hasReferenceImage) {
+    if (handleUseSelectedAssetAsReference()) {
+      applyDefaultReferenceRole(asset.id);
+    }
+  }
+}
+
+async function handleGalleryAssetClick(asset: ImageWorkbenchAssetCard) {
+  if (asset.id === imageWorkbenchStore.selectedAssetId && !isInpaintWorkspace.value) {
+    return;
+  }
+  await handleSelectAssetAndShowDetails(asset);
+}
+
+function handleClearSelectedAsset() {
+  sceneGuideOpen.value = false;
+  imageWorkbenchStore.clearSelectedAsset();
+}
+
+function handleCanvasBackgroundClick() {
+  if (selectedAsset.value && !isInpaintWorkspace.value) {
+    handleClearSelectedAsset();
+  }
+}
+
+function handleWorkbenchKeydown(event: KeyboardEvent) {
+  if (event.key === "Escape" && selectedAsset.value && !isInpaintWorkspace.value) {
+    handleClearSelectedAsset();
+  }
 }
 
 function handleUseSelectedReference() {
-  handleUseSelectedAssetAsReference();
+  if (handleUseSelectedAssetAsReference()) {
+    applyDefaultReferenceRoles();
+  }
+  referenceComposerOpen.value = false;
+}
+
+function handleToggleReferenceFromShelf(asset: ImageWorkbenchAssetCard) {
+  if (asset.integrityStatus && asset.integrityStatus !== "ok") {
+    imageWorkbenchStore.notice = t("imageWorkbench.errors.invalidReferenceAsset");
+    return;
+  }
+  const currentIds = imageWorkbenchStore.referenceAssets.map((referenceAsset) => referenceAsset.id);
+  const isSelected = currentIds.includes(asset.id);
+  const nextIds = isSelected
+    ? currentIds.filter((assetId) => assetId !== asset.id)
+    : [...currentIds, asset.id];
+  if (!imageWorkbenchStore.setAssetReferences(nextIds)) {
+    return;
+  }
+  if (!isSelected) {
+    const nextEntry = usesImageWorkbenchReferenceEntry(activeTaskEntry.value) ? activeTaskEntry.value : "reference";
+    activeTaskEntry.value = nextEntry;
+    activeScenePreset.value = null;
+    imageWorkbenchStore.mode = nextEntry === "person" ? "person_consistency" : "img2img";
+    imageWorkbenchStore.notice = t("imageWorkbench.reference.assetSelectedNotice");
+    referenceComposerOpen.value = false;
+    applyDefaultReferenceRole(asset.id, defaultReferenceRoleForTask(nextEntry));
+    focusPromptInput();
+    return;
+  }
+  imageWorkbenchStore.notice = t("imageWorkbench.reference.assetRemovedNotice");
+}
+
+function handlePrepareTaskEntry(key: ImageWorkbenchTaskEntryKey) {
+  handleTaskEntrySelect(key);
 }
 
 function handlePickReferenceFromLibrary() {
-  galleryTab.value = "library";
-  referencePickMode.value = true;
+  assetShelfView.value = "library";
+  assetShelfDialogOpen.value = true;
+  sceneGuideOpen.value = false;
   imageWorkbenchStore.notice = t("imageWorkbench.reference.pickFromLibraryNotice");
-}
-
-function handleCancelReferencePick() {
-  referencePickMode.value = false;
-  if (imageWorkbenchStore.notice === t("imageWorkbench.reference.pickFromLibraryNotice")) {
-    imageWorkbenchStore.notice = "";
-  }
 }
 
 async function handleReturnToLatestJob() {
   if (!latestJob.value) {
     return;
   }
-  galleryTab.value = "current";
   await imageWorkbenchStore.selectJob(latestJob.value.id);
-  taskDrawerOpen.value = imageWorkbenchStore.generating;
+  handleClearSelectedAsset();
 }
 
-function handleRetryAndShowTasks() {
-  taskDrawerOpen.value = true;
+function handleRetryCurrentJob() {
   handleRetry();
 }
 
-async function handleLoadMoreAssetLibrary() {
-  await imageWorkbenchStore.loadMoreAssetLibrary();
-}
-
 onMounted(async () => {
+  window.addEventListener("keydown", handleWorkbenchKeydown);
   await imageWorkbenchStore.loadInitialState();
   syncTaskEntryFromMode();
+  consumeRouteDraftPrompt();
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener("keydown", handleWorkbenchKeydown);
 });
 </script>
 
@@ -781,304 +807,41 @@ onMounted(async () => {
     </section>
     <section class="image-workbench-layout" :class="{ 'is-inpaint-workspace': isInpaintWorkspace }">
       <aside class="image-workbench-panel image-workbench-panel--left">
-        <section class="image-workbench-section">
-          <div class="image-workbench-section__head">
+        <section class="image-workbench-rail">
+          <button class="image-workbench-new-task" type="button" @click="handleNewWorkbenchTask">
             <ImagePlus class="h-4 w-4" />
-            <span>{{ t("imageWorkbench.input.title") }}</span>
-          </div>
-          <div class="image-workbench-form">
-            <ImageWorkbenchTaskLauncher
-              :active-key="activeTaskEntry"
-              @select="handleTaskEntrySelect"
-              @apply-preset="handleTaskPresetApply"
-            />
-            <div v-if="imageWorkbenchStore.isModeDeferred" class="image-workbench-notice">
-              {{ t("imageWorkbench.errors.modeDeferred") }}
-            </div>
-            <div
-              v-else-if="activeTaskGuidance && !activeTaskGuidanceReady"
-              class="image-workbench-task-guidance"
-            >
-              {{ activeTaskGuidance }}
-            </div>
-            <div v-else-if="modeUnavailableNotice" class="image-workbench-notice">
-              {{ modeUnavailableNotice }}
-            </div>
-            <div v-else-if="imageWorkbenchStore.imageModeProtocolNotice" class="image-workbench-protocol-note">
-              {{ imageWorkbenchStore.imageModeProtocolNotice }}
-            </div>
-            <div
-              v-if="activeTaskGuidance && activeTaskGuidanceReady"
-              class="image-workbench-task-guidance"
-              :class="{ 'is-ready': activeTaskGuidanceReady }"
-            >
-              {{ activeTaskGuidance }}
-            </div>
-            <section v-if="activeTaskEntry === 'upscale'" class="image-workbench-upscale-panel">
-              <div class="image-workbench-upscale-panel__head">
-                <span>{{ t("imageWorkbench.input.upscaleTitle") }}</span>
-                <small>{{ selectedAssetNativeSize || t("imageWorkbench.review.noSelection") }}</small>
-              </div>
-              <div class="image-workbench-upscale-options" role="group" :aria-label="t('imageWorkbench.input.upscaleTitle')">
-                <button
-                  v-for="option in upscaleScaleOptions"
-                  :key="option.scale"
-                  type="button"
-                  :class="{ 'is-active': upscaleScale === option.scale }"
-                  :disabled="option.disabled"
-                  @click="handleUpscaleScaleSelect(option.scale)"
-                >
-                  <strong>{{ option.label }}</strong>
-                  <small>{{ option.description }}</small>
-                </button>
-              </div>
-            </section>
-            <section v-if="showsReferenceInput" class="image-workbench-reference">
-              <div class="image-workbench-reference__head">
-                <div class="image-workbench-reference__title">
-                  <span>{{ t("imageWorkbench.reference.title") }}</span>
-                  <small>{{ referenceLimitLabel }}</small>
-                </div>
-              </div>
-              <ImageWorkbenchReferenceSourcePicker
-                :reference-limit-reached="imageWorkbenchStore.referenceLimitReached"
-                :has-uploaded-reference="Boolean(imageWorkbenchStore.referenceImagePath)"
-                :has-asset-reference="Boolean(imageWorkbenchStore.referenceAssets.length)"
-                :can-use-selected-asset="imageWorkbenchStore.canUseSelectedAssetAsReference"
-                :selected-asset-is-reference="selectedAssetIsReference"
-                @upload="handleSelectReferenceImage"
-                @open-library="handlePickReferenceFromLibrary"
-                @use-selected="handleUseSelectedReference"
-              />
-              <div v-if="imageWorkbenchStore.hasReferenceImage" class="image-workbench-reference-list">
-                <div
-                  v-for="(item, index) in imageWorkbenchStore.referenceItems"
-                  :key="item.key"
-                  class="image-workbench-reference-card"
-                >
-                  <img
-                    :key="item.displayUrl"
-                    :src="item.displayUrl"
-                    alt=""
-                    @load="handleImageLoad"
-                    @error="handleImageLoadError($event, item.sourcePath)"
-                  />
-                  <div>
-                    <strong>
-                      {{ t("imageWorkbench.reference.current") }} {{ index + 1 }}
-                      · {{ referenceRoleLabel(item.role, index) }}
-                    </strong>
-                    <small>{{ item.label }}</small>
-                  </div>
-                  <div class="image-workbench-reference-card__actions">
-                    <button
-                      type="button"
-                      @click="item.isUploaded ? handleRemoveUploadedReferenceImage() : handleRemoveReferenceAsset(item.assetId)"
-                    >
-                      {{ t("imageWorkbench.reference.removeOne") }}
-                    </button>
-                  </div>
-                </div>
-              </div>
-              <details v-if="imageWorkbenchStore.hasReferenceImage" class="image-workbench-reference-settings">
-                <summary>
-                  <span>{{ t("imageWorkbench.reference.settings") }}</span>
-                  <small>{{ referenceLimitLabel }}</small>
-                </summary>
-                <div class="image-workbench-reference-settings__body">
-                  <div class="image-workbench-reference-tokens">
-                    <button
-                      v-for="(item, index) in imageWorkbenchStore.referenceItems"
-                      :key="`token-${item.key}`"
-                      type="button"
-                      @click="insertReferencePrompt(index)"
-                    >
-                      <Link class="h-3.5 w-3.5" />
-                      {{ referencePromptToken(index) }}
-                    </button>
-                  </div>
-                  <div class="image-workbench-reference-role-list">
-                    <label
-                      v-for="(item, index) in imageWorkbenchStore.referenceItems"
-                      :key="`role-${item.key}`"
-                    >
-                      <span>{{ t("imageWorkbench.reference.current") }} {{ index + 1 }}</span>
-                      <select
-                        class="image-workbench-reference-role-select"
-                        :value="normalizeReferenceRole(item.role, index)"
-                        @change="handleReferenceRoleChange(item.key, $event)"
-                      >
-                        <option
-                          v-for="option in referenceRoleOptions"
-                          :key="option.role"
-                          :value="option.role"
-                        >
-                          {{ option.label }}
-                        </option>
-                      </select>
-                    </label>
-                  </div>
-                </div>
-              </details>
-              <div v-if="imageWorkbenchStore.hasReferenceImage" class="image-workbench-reference-actions">
-                <button type="button" @click="handleContinueSelectedPerson"><Sparkles class="h-3.5 w-3.5" />{{ t("imageWorkbench.reference.keepPerson") }}</button>
-                <button type="button" @click="handleClearReferenceImage">{{ t("imageWorkbench.reference.clear") }}</button>
-              </div>
-            </section>
-            <label v-if="showsPromptInput">
-              <span>{{ promptLabel }}</span>
-              <textarea
-                ref="promptTextareaRef"
-                v-model="imageWorkbenchStore.prompt"
-                :placeholder="promptPlaceholder"
-              ></textarea>
-            </label>
-            <div v-if="showsQuantityInput || showsSizeInput" class="image-workbench-form__grid">
-              <label v-if="showsQuantityInput">
-                <span>{{ t("imageWorkbench.input.quantity") }}</span>
-                <input v-model.number="imageWorkbenchStore.quantity" type="number" min="1" />
-                <small v-if="imageWorkbenchStore.shouldConfirmLargeGeneration" class="image-workbench-large-batch-hint">
-                  {{ largeBatchHint }}
-                </small>
-              </label>
-              <label v-if="showsSizeInput" class="image-workbench-size-field">
-                <span>{{ t("imageWorkbench.input.size") }}</span>
-                <select v-model="imageWorkbenchStore.size">
-                  <option v-for="item in sizeOptions" :key="item.value" :value="item.value">
-                    {{ item.selectedLabel }} · {{ item.value }}
-                  </option>
-                </select>
-                <input
-                  v-model.trim="imageWorkbenchStore.size"
-                  type="text"
-                  :placeholder="t('imageWorkbench.input.customSizePlaceholder')"
-                />
-                <small v-if="imageWorkbenchStore.imageSizeError" class="image-workbench-size-field__error">
-                  {{ imageWorkbenchStore.imageSizeError }}
-                </small>
-              </label>
-            </div>
-            <div class="image-workbench-form-actions">
-              <button class="image-workbench-action" type="button" :disabled="!canSubmitCurrentTask" @click="handleGenerate"><Play class="h-3.5 w-3.5" />{{ primaryActionLabel }}</button>
-              <button class="image-workbench-secondary image-workbench-secondary--danger" type="button" :disabled="!imageWorkbenchStore.canCancelCurrentJob" @click="handleCancel"><Ban class="h-3.5 w-3.5" />{{ t("imageWorkbench.toolbar.cancel") }}</button>
-            </div>
-            <details class="image-workbench-advanced">
-              <summary>
-                <span>{{ t("imageWorkbench.input.advanced") }}</span>
-                <small>{{ modeLabel(imageWorkbenchStore.mode) }} · {{ imageWorkbenchStore.activeImageModelName }}</small>
-                <ChevronDown class="h-3.5 w-3.5" />
-              </summary>
-              <div class="image-workbench-advanced__body">
-                <label>
-                  <span>{{ t("imageWorkbench.input.model") }}</span>
-                  <select :value="imageWorkbenchStore.imageModelConfigId" @change="handleModelConfigChange">
-                    <option
-                      v-for="item in imageWorkbenchStore.imageModelConfigOptions"
-                      :key="item.value"
-                      :value="item.value"
-                      :disabled="item.disabled"
-                    >
-                      {{ item.text }}
-                    </option>
-                  </select>
-                  <small class="image-workbench-model-hint">
-                    {{ imageWorkbenchStore.activeImageModelName }}
-                  </small>
-                </label>
-                <label>
-                  <span>{{ t("imageWorkbench.input.negativePrompt") }}</span>
-                  <input v-model="imageWorkbenchStore.negativePrompt" :placeholder="t('imageWorkbench.input.negativePlaceholder')" />
-                </label>
-                <div class="image-workbench-form__grid">
-                  <label>
-                    <span>{{ t("imageWorkbench.input.quality") }}</span>
-                    <select v-model="imageWorkbenchStore.outputQuality">
-                      <option v-for="item in qualityOptions" :key="item" :value="item">
-                        {{ t(`imageWorkbench.output.quality.${item}`) }}
-                      </option>
-                    </select>
-                  </label>
-                  <label>
-                    <span>{{ t("imageWorkbench.input.outputFormat") }}</span>
-                    <select v-model="imageWorkbenchStore.outputFormat">
-                      <option v-for="item in outputFormatOptions" :key="item" :value="item">
-                        {{ t(`imageWorkbench.output.format.${item}`) }}
-                      </option>
-                    </select>
-                  </label>
-                  <label v-if="showsOutputCompression">
-                    <span>{{ t("imageWorkbench.input.outputCompression") }}</span>
-                    <input v-model.number="imageWorkbenchStore.outputCompression" type="number" min="0" max="100" />
-                  </label>
-                  <label>
-                    <span>{{ t("imageWorkbench.input.background") }}</span>
-                    <select v-model="imageWorkbenchStore.outputBackground">
-                      <option v-for="item in backgroundOptions" :key="item" :value="item">
-                        {{ t(`imageWorkbench.output.background.${item}`) }}
-                      </option>
-                    </select>
-                  </label>
-                  <label>
-                    <span>{{ t("imageWorkbench.input.moderation") }}</span>
-                    <select v-model="imageWorkbenchStore.outputModeration">
-                      <option v-for="item in moderationOptions" :key="item" :value="item">
-                        {{ t(`imageWorkbench.output.moderation.${item}`) }}
-                      </option>
-                    </select>
-                  </label>
-                </div>
-                <div class="image-workbench-advanced__actions">
-                  <button class="image-workbench-secondary" type="button" @click="templatePickerOpen = !templatePickerOpen"><BookTemplate class="h-3.5 w-3.5" />{{ t("imageWorkbench.template.quickOpen") }}</button>
-                  <button class="image-workbench-secondary" type="button" :disabled="imageWorkbenchStore.loading" @click="handleImportGeneratedAssets"><FolderOpen class="h-3.5 w-3.5" />{{ t("imageWorkbench.assetImport.button") }}</button>
-                  <button class="image-workbench-secondary" type="button" @click="handleRefresh"><RefreshCcw class="h-3.5 w-3.5" />{{ t("imageWorkbench.toolbar.refresh") }}</button>
-                  <button class="image-workbench-secondary" type="button" :disabled="!imageWorkbenchStore.canRetryFailedTasks" @click="handleRetry"><RotateCcw class="h-3.5 w-3.5" />{{ t("imageWorkbench.toolbar.retry") }}</button>
-                  <button class="image-workbench-secondary image-workbench-secondary--danger" type="button" :disabled="!imageWorkbenchStore.currentJob" @click="handleDeleteJob"><Trash2 class="h-3.5 w-3.5" />{{ t("imageWorkbench.toolbar.deleteJob") }}</button>
-                  <button class="image-workbench-secondary" type="button" :disabled="!imageWorkbenchStore.canCleanupDeletedAssets" @click="handleCleanupDeletedAssets"><Eraser class="h-3.5 w-3.5" />{{ t("imageWorkbench.assetCleanup.button") }}</button>
-                  <button class="image-workbench-secondary" type="button" :disabled="imageWorkbenchStore.loading" @click="handleCleanupInvalidAssets"><Eraser class="h-3.5 w-3.5" />{{ t("imageWorkbench.assetCleanup.invalidButton") }}</button>
-                </div>
-                <div v-if="templatePickerOpen" class="image-workbench-template-popover">
-                  <div class="image-workbench-template-save">
-                    <input v-model="imageWorkbenchStore.templateDraftName" :placeholder="t('imageWorkbench.template.namePlaceholder')" />
-                    <button type="button" :disabled="!canSaveTemplate" @click="handleSaveTemplateFromPicker">{{ t("imageWorkbench.template.save") }}</button>
-                  </div>
-                  <div class="image-workbench-template-list">
-                    <button v-for="template in imageWorkbenchStore.templates" :key="template.id" type="button" class="image-workbench-template-item" :title="template.name" @click="handleApplyTemplateFromPicker(template)">
-                      <span>
-                        <strong>{{ template.name }}</strong>
-                        <small>{{ modeLabel(template.mode) }}</small>
-                      </span>
-                      <Trash2 v-if="!template.isSystem" class="h-3.5 w-3.5" @click.stop="handleDeleteTemplate(template)" />
-                    </button>
-                    <div v-if="!imageWorkbenchStore.templates.length" class="image-workbench-mini-empty">
-                      {{ t("imageWorkbench.template.empty") }}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </details>
-          </div>
+            <span>
+              <strong>{{ t("imageWorkbench.workspace.newTask") }}</strong>
+              <small>{{ t("imageWorkbench.workspace.newTaskDesc") }}</small>
+            </span>
+          </button>
+          <ImageWorkbenchTaskPanel />
         </section>
-
       </aside>
 
       <section class="image-workbench-main">
-        <ImageWorkbenchCompareStrip
-          :items="compareStripItems"
-          @select-asset="handleSelectAssetAndShowDetails"
-          @preview="openAssetPreview"
-        />
-
-        <section class="image-workbench-panel image-workbench-panel--gallery">
+        <section
+          class="image-workbench-panel image-workbench-panel--gallery"
+          @click.self="handleCanvasBackgroundClick"
+        >
           <div class="image-workbench-gallery-head">
             <div class="image-workbench-gallery-title">
               <Images class="h-4 w-4" />
               <span>
-                <strong>{{ t("imageWorkbench.workspace.title") }}</strong>
-                <small>{{ workspaceSummary }}</small>
+                <strong>{{ workspaceHeaderTitle }}</strong>
+                <small>{{ workspaceHeaderDesc }}</small>
               </span>
             </div>
-            <div class="image-workbench-gallery-tools">
-              <button v-if="imageWorkbenchStore.canRetryFailedTasks" class="image-workbench-secondary" type="button" @click="handleRetryAndShowTasks">
+            <div v-if="!showSceneGuide" class="image-workbench-gallery-tools">
+              <button v-if="canReturnToLatestJob && latestJob" class="image-workbench-secondary" type="button" @click="handleReturnToLatestJob">
+                <Clock3 class="h-3.5 w-3.5" />
+                {{ t("imageWorkbench.workspace.returnLatest") }}
+              </button>
+              <button v-if="selectedAsset && !isInpaintWorkspace" class="image-workbench-secondary" type="button" @click="handleClearSelectedAsset">
+                <X class="h-3.5 w-3.5" />
+                {{ t("imageWorkbench.review.clearSelection") }}
+              </button>
+              <button v-if="imageWorkbenchStore.canRetryFailedTasks" class="image-workbench-secondary" type="button" @click="handleRetryCurrentJob">
                 <RotateCcw class="h-3.5 w-3.5" />
                 {{ t("imageWorkbench.toolbar.retry") }}
               </button>
@@ -1086,85 +849,37 @@ onMounted(async () => {
                 <Download class="h-3.5 w-3.5" />
                 {{ t("imageWorkbench.taskbar.exportAll") }}
               </button>
-              <div class="image-workbench-tabs">
-                <button type="button" :class="{ 'is-active': galleryTab === 'current' }" @click="galleryTab = 'current'">
-                  {{ t("imageWorkbench.workspace.current") }} {{ imageWorkbenchStore.currentAssetCards.length }}
-                </button>
-                <button type="button" :class="{ 'is-active': galleryTab === 'library' }" @click="galleryTab = 'library'">
-                  {{ t("imageWorkbench.workspace.library") }} {{ imageWorkbenchStore.libraryAssetCards.length }}{{ imageWorkbenchStore.assetLibraryHasMore ? "+" : "" }}
-                </button>
-              </div>
             </div>
           </div>
-          <div class="image-workbench-workspace-context">
-            <span>{{ referencePickMode ? t("imageWorkbench.reference.pickModeTitle") : workspaceContextTitle }}</span>
-            <strong>{{ referencePickMode ? referencePickMeta : workspaceContextMeta }}</strong>
-            <button v-if="referencePickMode" type="button" @click="handleCancelReferencePick">
-              <Ban class="h-3.5 w-3.5" />
-              {{ t("imageWorkbench.reference.pickDone") }}
-            </button>
-            <button v-if="canReturnToLatestJob && latestJob" type="button" @click="handleReturnToLatestJob">
-              <Clock3 class="h-3.5 w-3.5" />
-              {{ t("imageWorkbench.workspace.returnLatest") }}
-            </button>
-            <button v-if="imageWorkbenchStore.generating && !taskDrawerOpen" type="button" @click="taskDrawerOpen = true">
-              <ListChecks class="h-3.5 w-3.5" />
-              {{ t("imageWorkbench.workspace.viewTasks") }}
-            </button>
-          </div>
-          <div
-            v-if="galleryTab === 'library'"
-            class="image-workbench-library-filters"
-            role="group"
-            :aria-label="t('imageWorkbench.workspace.libraryFilterAria')"
-          >
-            <button
-              v-for="item in libraryFilterOptions"
-              :key="item.key"
-              type="button"
-              :class="{ 'is-active': galleryLibraryFilter === item.key }"
-              @click="galleryLibraryFilter = item.key"
+          <div v-if="currentJob && !showSceneGuide" class="image-workbench-job-context">
+            <div
+              class="image-workbench-job-context__prompt"
+              :title="currentJob.prompt || t('imageWorkbench.review.emptyPrompt')"
             >
-              <span>{{ item.label }}</span>
-              <small>{{ item.count }}</small>
-            </button>
-          </div>
-          <div v-if="showWorkspaceFocus" class="image-workbench-asset-focus">
-            <div class="image-workbench-asset-focus__head">
-              <span>{{ t("imageWorkbench.workspace.focusTitle") }}</span>
-              <strong>{{ selectedAssetNativeSize || t("imageWorkbench.review.noSelection") }}</strong>
+              <span>{{ t("imageWorkbench.workspace.jobPrompt") }}</span>
+              <strong>{{ currentJob.prompt || t("imageWorkbench.review.emptyPrompt") }}</strong>
             </div>
-            <div class="image-workbench-asset-focus__stats">
-              <span
-                v-for="item in workspaceLineageItems"
-                :key="item.key"
-                class="image-workbench-asset-focus__stat"
-                :class="`is-${item.tone}`"
-              >
-                <small>{{ item.label }}</small>
-                <strong>{{ item.value }}</strong>
-              </span>
-            </div>
-            <div class="image-workbench-asset-path" :aria-label="t('imageWorkbench.workspace.focusPath')">
+            <div v-if="currentJobReferenceViews.length" class="image-workbench-job-context__refs">
+              <span>{{ t("imageWorkbench.workspace.jobReferences") }}</span>
               <button
-                v-for="item in workspacePathItems"
-                :key="item.key"
+                v-for="reference in currentJobReferenceViews"
+                :key="reference.key"
                 type="button"
-                class="image-workbench-asset-path__item"
-                :class="[`is-${item.tone}`, { 'is-active': item.asset.id === imageWorkbenchStore.selectedAssetId }]"
-                @click="handleSelectAssetAndShowDetails(item.asset)"
+                :class="{ 'is-missing': !reference.asset }"
+                :disabled="!reference.asset"
+                :title="reference.sourcePath || reference.label"
+                @click="openAssetPreview(reference.asset)"
               >
                 <img
-                  :key="`${item.asset.id}:${item.asset.displayUrl}`"
-                  :src="item.asset.displayUrl"
+                  v-if="reference.displayUrl"
+                  :key="reference.displayUrl"
+                  :src="reference.displayUrl"
                   alt=""
                   @load="handleImageLoad"
-                  @error="handleImageLoadError($event, item.asset.filePath)"
+                  @error="handleImageLoadError($event, reference.sourcePath)"
                 />
-                <span>
-                  <strong>{{ item.label }}</strong>
-                  <small>{{ item.description }}</small>
-                </span>
+                <ImagePlus v-else class="h-3.5 w-3.5" />
+                <small>{{ reference.label }}</small>
               </button>
             </div>
           </div>
@@ -1177,7 +892,17 @@ onMounted(async () => {
             @save="imageWorkbenchStore.saveInpaintMaskDraft"
             @clear="imageWorkbenchStore.clearInpaintMask"
           />
-          <div v-else-if="visibleAssetCards.length" class="image-workbench-gallery-sections">
+          <ImageWorkbenchStartPanel
+            v-else-if="showSceneGuide"
+            :active-key="activeTaskEntry"
+            @select-task="handleSceneTaskSelect"
+            @apply-preset="handleTaskPresetApply"
+          />
+          <div
+            v-else-if="visibleAssetCards.length"
+            class="image-workbench-gallery-sections"
+            @click.self="handleCanvasBackgroundClick"
+          >
             <section
               v-for="section in gallerySections"
               :key="section.key"
@@ -1201,138 +926,450 @@ onMounted(async () => {
                 <span>{{ section.items.length }}</span>
               </div>
               <div class="image-workbench-grid">
-                <button
+                <article
                   v-for="asset in section.items"
                   :key="asset.id"
-                  type="button"
                   class="image-workbench-asset-card"
                   :class="{
                     'is-active': asset.id === imageWorkbenchStore.selectedAssetId,
-                    'is-reference-pick': referencePickMode,
-                    'is-reference-selected': referencePickMode && imageWorkbenchStore.isAssetReferenceSelected(asset.id),
                   }"
-                  @click="handleSelectAssetAndShowDetails(asset)"
                 >
-                  <img
-                    :key="`${asset.id}:${asset.displayUrl}`"
-                    :src="asset.displayUrl"
-                    alt=""
+                  <button
+                    type="button"
+                    class="image-workbench-asset-card__select"
+                    :title="asset.filePath"
+                    @click="handleGalleryAssetClick(asset)"
+                  >
+                    <img
+                      :key="`${asset.id}:${asset.displayUrl}`"
+                      :src="asset.displayUrl"
+                      alt=""
+                      @load="handleImageLoad"
+                      @error="handleImageLoadError($event, asset.filePath)"
+                    />
+                    <div class="image-workbench-asset-card__badges">
+                      <span
+                        v-for="badge in assetBadges(asset)"
+                        :key="badge.key"
+                        class="image-workbench-asset-card__badge"
+                        :class="`is-${badge.tone}`"
+                      >
+                        {{ badge.label }}
+                      </span>
+                    </div>
+                    <span class="image-workbench-asset-card__meta">
+                      <Star v-if="asset.favorite" class="h-3.5 w-3.5" />
+                      {{ asset.width || "-" }}x{{ asset.height || "-" }}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    class="image-workbench-asset-card__preview"
                     :title="t('imageWorkbench.asset.openPreview')"
-                    @load="handleImageLoad"
-                    @click.stop="referencePickMode ? handleSelectAssetAndShowDetails(asset) : handleOpenAssetPreview(asset)"
-                    @error="handleImageLoadError($event, asset.filePath)"
-                  />
-                  <div class="image-workbench-asset-card__badges">
-                    <span
-                      v-if="referencePickMode"
-                      class="image-workbench-asset-card__badge is-primary"
-                      :class="{ 'is-success': imageWorkbenchStore.isAssetReferenceSelected(asset.id) }"
-                    >
-                      {{
-                        imageWorkbenchStore.isAssetReferenceSelected(asset.id)
-                          ? t("imageWorkbench.reference.selected")
-                          : t("imageWorkbench.reference.pickTarget")
-                      }}
-                    </span>
-                    <span
-                      v-for="badge in assetBadges(asset)"
-                      :key="badge.key"
-                      class="image-workbench-asset-card__badge"
-                      :class="`is-${badge.tone}`"
-                    >
-                      {{ badge.label }}
-                    </span>
-                  </div>
-                  <span class="image-workbench-asset-card__meta">
-                    <Star v-if="asset.favorite" class="h-3.5 w-3.5" />
-                    {{ asset.width || "-" }}x{{ asset.height || "-" }}
-                  </span>
-                </button>
+                    :aria-label="t('imageWorkbench.asset.openPreview')"
+                    @click.stop="handleOpenAssetPreview(asset)"
+                  >
+                    <Maximize2 class="h-3.5 w-3.5" />
+                  </button>
+                </article>
               </div>
             </section>
-            <div v-if="galleryTab === 'library'" class="image-workbench-library-footer">
-              <button
-                v-if="imageWorkbenchStore.assetLibraryHasMore"
-                type="button"
-                class="image-workbench-secondary"
-                :disabled="imageWorkbenchStore.assetLibraryLoadingMore"
-                @click="handleLoadMoreAssetLibrary"
-              >
-                <ChevronDown class="h-3.5 w-3.5" />
-                {{
-                  imageWorkbenchStore.assetLibraryLoadingMore
-                    ? t("imageWorkbench.workspace.loadingMore")
-                    : t("imageWorkbench.workspace.loadMoreLibrary")
-                }}
-              </button>
-              <span v-else>{{ t("imageWorkbench.workspace.libraryAllLoaded") }}</span>
-            </div>
           </div>
-          <ImageWorkbenchStartPanel
-            v-else-if="showWorkspaceStart"
-            :active-key="activeTaskEntry"
-            :prompt-placeholder="promptPlaceholder"
-            :recent-assets="recentAssetCards"
-            @start-task="handleTaskEntrySelect(activeTaskEntry)"
-            @select-task="handleTaskEntrySelect"
-            @select-asset="handleSelectAssetAndShowDetails"
-          />
           <div v-else class="image-workbench-empty">
             <Images class="h-10 w-10" />
             <strong>{{ workspaceEmptyTitle }}</strong>
             <span>{{ workspaceEmptyDesc }}</span>
           </div>
         </section>
+
+        <section class="image-workbench-command-bar">
+          <div class="image-workbench-command-bar__tools">
+            <button
+              class="image-workbench-command-chip is-primary"
+              type="button"
+              @click="sceneGuideOpen = !sceneGuideOpen"
+            >
+              <Sparkles class="h-3.5 w-3.5" />
+              <span>{{ commandSceneLabel }}</span>
+              <ChevronDown class="h-3.5 w-3.5" />
+            </button>
+            <div v-if="showsReferenceInput" class="image-workbench-command-reference-control">
+              <div
+                v-if="imageWorkbenchStore.hasReferenceImage"
+                class="image-workbench-command-reference-strip"
+                :aria-label="t('imageWorkbench.reference.current')"
+              >
+                <div class="image-workbench-command-reference-strip__items">
+                  <div
+                    v-for="(item, index) in imageWorkbenchStore.referenceItems"
+                    :key="item.key"
+                    class="image-workbench-command-reference-token"
+                  >
+                    <button
+                      type="button"
+                      class="image-workbench-command-reference-token__main"
+                      :title="item.label"
+                      @click="insertReferencePrompt(index)"
+                    >
+                      <img
+                        :key="item.displayUrl"
+                        :src="item.displayUrl"
+                        alt=""
+                        @load="handleImageLoad"
+                        @error="handleImageLoadError($event, item.sourcePath)"
+                      />
+                    </button>
+                    <select
+                      class="image-workbench-command-reference-token__role"
+                      :value="normalizeReferenceRole(item.role, index)"
+                      :title="t('imageWorkbench.reference.settings')"
+                      @click.stop
+                      @change="handleReferenceRoleChange(item.key, $event)"
+                    >
+                      <option
+                        v-for="option in referenceRoleOptions"
+                        :key="option.role"
+                        :value="option.role"
+                      >
+                        {{ option.label }}
+                      </option>
+                    </select>
+                    <button
+                      type="button"
+                      class="image-workbench-command-reference-token__remove"
+                      :aria-label="t('imageWorkbench.reference.removeOne')"
+                      @click.stop="item.isUploaded ? handleRemoveUploadedReferenceImage() : handleRemoveReferenceAsset(item.assetId)"
+                    >
+                      <X class="h-3 w-3" />
+                    </button>
+                  </div>
+                  <button
+                    v-if="!imageWorkbenchStore.referenceLimitReached"
+                    type="button"
+                    class="image-workbench-command-reference-add"
+                    :title="t('imageWorkbench.reference.title')"
+                    @click="handleOpenReferenceComposer"
+                  >
+                    <ImagePlus class="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              </div>
+              <button
+                v-else
+                type="button"
+                class="image-workbench-command-reference-empty"
+                :class="{ 'is-open': referenceComposerOpen }"
+                @click="handleToggleReferenceComposer"
+              >
+                <ImagePlus class="h-3.5 w-3.5" />
+                <span>{{ t("imageWorkbench.reference.pickModeTitle") }}</span>
+              </button>
+            </div>
+            <label v-if="showsSizeInput" class="image-workbench-command-select">
+              <span>{{ t("imageWorkbench.input.size") }}</span>
+              <select v-model="imageWorkbenchStore.size">
+                <option v-for="item in sizeOptions" :key="item.value" :value="item.value">
+                  {{ item.selectedLabel }} · {{ item.value }}
+                </option>
+              </select>
+            </label>
+            <label v-if="showsQuantityInput" class="image-workbench-command-number">
+              <span>{{ t("imageWorkbench.input.quantity") }}</span>
+              <input v-model.number="imageWorkbenchStore.quantity" type="number" min="1" />
+            </label>
+            <button
+              class="image-workbench-command-chip"
+              type="button"
+              :class="{ 'is-active': commandSettingsOpen }"
+              @click="handleToggleCommandSettings"
+            >
+              <ChevronDown class="h-3.5 w-3.5" />
+              <span>{{ t("imageWorkbench.input.advanced") }}</span>
+            </button>
+          </div>
+
+          <div
+            v-if="imageWorkbenchStore.isModeDeferred"
+            class="image-workbench-command-alerts"
+          >
+            <div class="image-workbench-notice">
+              {{ t("imageWorkbench.errors.modeDeferred") }}
+            </div>
+          </div>
+
+          <section v-if="activeTaskEntry === 'upscale'" class="image-workbench-upscale-panel">
+            <div class="image-workbench-upscale-panel__head">
+              <span>{{ t("imageWorkbench.input.upscaleTitle") }}</span>
+              <small>{{ selectedAssetNativeSize || t("imageWorkbench.review.noSelection") }}</small>
+            </div>
+            <div class="image-workbench-upscale-options" role="group" :aria-label="t('imageWorkbench.input.upscaleTitle')">
+              <button
+                v-for="option in upscaleScaleOptions"
+                :key="option.scale"
+                type="button"
+                :class="{ 'is-active': upscaleScale === option.scale }"
+                :disabled="option.disabled"
+                @click="handleUpscaleScaleSelect(option.scale)"
+              >
+                <strong>{{ option.label }}</strong>
+                <small>{{ option.description }}</small>
+              </button>
+            </div>
+          </section>
+
+          <section v-if="shouldShowReferenceComposer" class="image-workbench-command-popover image-workbench-command-reference">
+            <ImageWorkbenchReferenceSourcePicker
+              :reference-limit-reached="imageWorkbenchStore.referenceLimitReached"
+              :has-uploaded-reference="Boolean(imageWorkbenchStore.referenceImagePath)"
+              :has-asset-reference="Boolean(imageWorkbenchStore.referenceAssets.length)"
+              :can-use-selected-asset="imageWorkbenchStore.canUseSelectedAssetAsReference"
+              :selected-asset-is-reference="selectedAssetIsReference"
+              @upload="handleSelectReferenceImageFromComposer"
+              @open-library="handlePickReferenceFromLibrary"
+              @use-selected="handleUseSelectedReference"
+            />
+          </section>
+
+          <div class="image-workbench-command-input-row">
+            <div
+              v-if="showsPromptInput"
+              class="image-workbench-command-prompt"
+              :class="{
+                'has-reference': imageWorkbenchStore.hasReferenceImage,
+                'has-reference-context': showsReferenceInput,
+              }"
+            >
+              <textarea
+                ref="promptTextareaRef"
+                v-model="imageWorkbenchStore.prompt"
+                :placeholder="promptPlaceholder"
+              ></textarea>
+            </div>
+            <div v-else class="image-workbench-command-readiness">
+              <strong>{{ activeTaskMeta?.title }}</strong>
+              <small>{{ primaryActionTitle }}</small>
+            </div>
+            <div class="image-workbench-command-actions">
+              <button
+                class="image-workbench-action image-workbench-command-primary"
+                type="button"
+                :disabled="!canSubmitCurrentTask"
+                :title="primaryActionTitle"
+                :aria-label="primaryActionTitle"
+                @click="handleGenerate"
+              >
+                <Play class="h-3.5 w-3.5" />
+                {{ primaryActionLabel }}
+              </button>
+              <button
+                v-if="imageWorkbenchStore.canCancelCurrentJob"
+                class="image-workbench-secondary image-workbench-secondary--danger"
+                type="button"
+                @click="handleCancel"
+              >
+                <Ban class="h-3.5 w-3.5" />
+                {{ t("imageWorkbench.toolbar.cancel") }}
+              </button>
+            </div>
+          </div>
+
+          <section v-if="commandSettingsOpen" class="image-workbench-command-popover image-workbench-command-settings">
+            <label>
+              <span>{{ t("imageWorkbench.input.model") }}</span>
+              <select :value="imageWorkbenchStore.imageModelConfigId" @change="handleModelConfigChange">
+                <option
+                  v-for="item in imageWorkbenchStore.imageModelConfigOptions"
+                  :key="item.value"
+                  :value="item.value"
+                  :disabled="item.disabled"
+                >
+                  {{ item.text }}
+                </option>
+              </select>
+              <small class="image-workbench-model-hint">
+                {{ imageWorkbenchStore.activeImageModelName }}
+              </small>
+            </label>
+            <div
+              v-if="imageWorkbenchStore.imageModeProtocolNotice"
+              class="image-workbench-protocol-note image-workbench-protocol-note--advanced"
+            >
+              {{ imageWorkbenchStore.imageModeProtocolNotice }}
+            </div>
+            <label v-if="showsSizeInput" class="image-workbench-size-field">
+              <span>{{ t("imageWorkbench.input.size") }}</span>
+              <input
+                v-model.trim="imageWorkbenchStore.size"
+                type="text"
+                :placeholder="t('imageWorkbench.input.customSizePlaceholder')"
+              />
+              <small v-if="imageWorkbenchStore.imageSizeError" class="image-workbench-size-field__error">
+                {{ imageWorkbenchStore.imageSizeError }}
+              </small>
+            </label>
+            <details v-if="imageWorkbenchStore.hasReferenceImage" class="image-workbench-reference-settings">
+              <summary>
+                <span>{{ t("imageWorkbench.reference.settings") }}</span>
+                <small>{{ referenceLimitLabel }}</small>
+              </summary>
+              <div class="image-workbench-reference-settings__body">
+                <div class="image-workbench-reference-tokens">
+                  <button
+                    v-for="(item, index) in imageWorkbenchStore.referenceItems"
+                    :key="`token-${item.key}`"
+                    type="button"
+                    @click="insertReferencePrompt(index)"
+                  >
+                    <Link class="h-3.5 w-3.5" />
+                    {{ referencePromptToken(index) }}
+                  </button>
+                </div>
+                <div class="image-workbench-reference-role-list">
+                  <label
+                    v-for="(item, index) in imageWorkbenchStore.referenceItems"
+                    :key="`role-${item.key}`"
+                  >
+                    <span>{{ t("imageWorkbench.reference.current") }} {{ index + 1 }}</span>
+                    <select
+                      class="image-workbench-reference-role-select"
+                      :value="normalizeReferenceRole(item.role, index)"
+                      @change="handleReferenceRoleChange(item.key, $event)"
+                    >
+                      <option
+                        v-for="option in referenceRoleOptions"
+                        :key="option.role"
+                        :value="option.role"
+                      >
+                        {{ option.label }}
+                      </option>
+                    </select>
+                  </label>
+                </div>
+              </div>
+            </details>
+            <label>
+              <span>{{ t("imageWorkbench.input.negativePrompt") }}</span>
+              <input v-model="imageWorkbenchStore.negativePrompt" :placeholder="t('imageWorkbench.input.negativePlaceholder')" />
+            </label>
+            <div class="image-workbench-form__grid">
+              <label>
+                <span>{{ t("imageWorkbench.input.quality") }}</span>
+                <select v-model="imageWorkbenchStore.outputQuality">
+                  <option v-for="item in qualityOptions" :key="item" :value="item">
+                    {{ t(`imageWorkbench.output.quality.${item}`) }}
+                  </option>
+                </select>
+              </label>
+              <label>
+                <span>{{ t("imageWorkbench.input.outputFormat") }}</span>
+                <select v-model="imageWorkbenchStore.outputFormat">
+                  <option v-for="item in outputFormatOptions" :key="item" :value="item">
+                    {{ t(`imageWorkbench.output.format.${item}`) }}
+                  </option>
+                </select>
+              </label>
+              <label v-if="showsOutputCompression">
+                <span>{{ t("imageWorkbench.input.outputCompression") }}</span>
+                <input v-model.number="imageWorkbenchStore.outputCompression" type="number" min="0" max="100" />
+              </label>
+              <label>
+                <span>{{ t("imageWorkbench.input.background") }}</span>
+                <select v-model="imageWorkbenchStore.outputBackground">
+                  <option v-for="item in backgroundOptions" :key="item" :value="item">
+                    {{ t(`imageWorkbench.output.background.${item}`) }}
+                  </option>
+                </select>
+              </label>
+              <label>
+                <span>{{ t("imageWorkbench.input.moderation") }}</span>
+                <select v-model="imageWorkbenchStore.outputModeration">
+                  <option v-for="item in moderationOptions" :key="item" :value="item">
+                    {{ t(`imageWorkbench.output.moderation.${item}`) }}
+                  </option>
+                </select>
+              </label>
+            </div>
+            <small v-if="imageWorkbenchStore.shouldConfirmLargeGeneration" class="image-workbench-large-batch-hint">
+              {{ largeBatchHint }}
+            </small>
+            <details class="image-workbench-advanced-management">
+              <summary>{{ t("imageWorkbench.input.management") }}</summary>
+              <div class="image-workbench-advanced__actions">
+                <button class="image-workbench-secondary" type="button" @click="templatePickerOpen = !templatePickerOpen">
+                  <BookTemplate class="h-3.5 w-3.5" />
+                  {{ t("imageWorkbench.template.quickOpen") }}
+                </button>
+                <button class="image-workbench-secondary" type="button" :disabled="imageWorkbenchStore.loading" @click="handleImportGeneratedAssets">
+                  <FolderOpen class="h-3.5 w-3.5" />
+                  {{ t("imageWorkbench.assetImport.button") }}
+                </button>
+                <button class="image-workbench-secondary" type="button" @click="handleRefresh">
+                  <RefreshCcw class="h-3.5 w-3.5" />
+                  {{ t("imageWorkbench.toolbar.refresh") }}
+                </button>
+                <button class="image-workbench-secondary" type="button" :disabled="!imageWorkbenchStore.canRetryFailedTasks" @click="handleRetry">
+                  <RotateCcw class="h-3.5 w-3.5" />
+                  {{ t("imageWorkbench.toolbar.retry") }}
+                </button>
+                <button class="image-workbench-secondary image-workbench-secondary--danger" type="button" :disabled="!imageWorkbenchStore.currentJob" @click="handleDeleteJob">
+                  <Trash2 class="h-3.5 w-3.5" />
+                  {{ t("imageWorkbench.toolbar.deleteJob") }}
+                </button>
+                <button class="image-workbench-secondary" type="button" :disabled="!imageWorkbenchStore.canCleanupDeletedAssets" @click="handleCleanupDeletedAssets">
+                  <Eraser class="h-3.5 w-3.5" />
+                  {{ t("imageWorkbench.assetCleanup.button") }}
+                </button>
+                <button class="image-workbench-secondary" type="button" :disabled="imageWorkbenchStore.loading" @click="handleCleanupInvalidAssets">
+                  <Eraser class="h-3.5 w-3.5" />
+                  {{ t("imageWorkbench.assetCleanup.invalidButton") }}
+                </button>
+              </div>
+              <div v-if="templatePickerOpen" class="image-workbench-template-popover">
+                <div class="image-workbench-template-save">
+                  <input v-model="imageWorkbenchStore.templateDraftName" :placeholder="t('imageWorkbench.template.namePlaceholder')" />
+                  <button type="button" :disabled="!canSaveTemplate" @click="handleSaveTemplateFromPicker">
+                    {{ t("imageWorkbench.template.save") }}
+                  </button>
+                </div>
+                <div class="image-workbench-template-list">
+                  <button
+                    v-for="template in imageWorkbenchStore.templates"
+                    :key="template.id"
+                    type="button"
+                    class="image-workbench-template-item"
+                    :title="template.name"
+                    @click="handleApplyTemplateFromPicker(template)"
+                  >
+                    <span>
+                      <strong>{{ template.name }}</strong>
+                      <small>{{ modeLabel(template.mode) }}</small>
+                    </span>
+                    <Trash2 v-if="!template.isSystem" class="h-3.5 w-3.5" @click.stop="handleDeleteTemplate(template)" />
+                  </button>
+                  <div v-if="!imageWorkbenchStore.templates.length" class="image-workbench-mini-empty">
+                    {{ t("imageWorkbench.template.empty") }}
+                  </div>
+                </div>
+              </div>
+            </details>
+          </section>
+        </section>
       </section>
 
       <aside class="image-workbench-right-rail">
         <ImageWorkbenchInspector
+          :asset-shelf-view="assetShelfView"
+          :asset-shelf-dialog-open="assetShelfDialogOpen"
           @preview="openAssetPreview"
-          @show-tasks="taskDrawerOpen = true"
+          @toggle-reference="handleToggleReferenceFromShelf"
+          @update:asset-shelf-view="assetShelfView = $event"
+          @update:asset-shelf-dialog-open="assetShelfDialogOpen = $event"
           @sync-task-entry="handleInspectorTaskEntrySync"
           @task-entry-change="handleInspectorTaskEntryChange"
+          @prepare-task-entry="handlePrepareTaskEntry"
         />
       </aside>
     </section>
-
-    <section class="image-workbench-task-status" :class="`is-${taskbarTone}`">
-      <div class="image-workbench-task-status__main">
-        <ListChecks class="h-4 w-4" />
-        <span>
-          <strong>{{ taskbarStatusLabel }}</strong>
-          <small>{{ taskbarStatusMeta }}</small>
-        </span>
-      </div>
-      <div class="image-workbench-task-status__progress" aria-hidden="true">
-        <i :style="{ width: `${imageWorkbenchStore.jobProgress.percent}%` }"></i>
-      </div>
-      <button type="button" class="image-workbench-secondary" @click="taskDrawerOpen = true">
-        <ListChecks class="h-3.5 w-3.5" />
-        {{ t("imageWorkbench.workspace.viewTasks") }}
-      </button>
-    </section>
-
-    <div
-      v-if="taskDrawerOpen"
-      class="image-workbench-task-drawer"
-      role="dialog"
-      aria-modal="true"
-      :aria-label="t('imageWorkbench.taskbar.title')"
-      @click.self="taskDrawerOpen = false"
-    >
-      <aside class="image-workbench-task-drawer__panel">
-        <div class="image-workbench-task-drawer__head">
-          <span>
-            <strong>{{ t("imageWorkbench.taskbar.title") }}</strong>
-            <small>{{ taskbarStatusMeta }}</small>
-          </span>
-          <button type="button" :aria-label="t('common.close')" @click="taskDrawerOpen = false">
-            <X class="h-4 w-4" />
-          </button>
-        </div>
-        <ImageWorkbenchTaskPanel />
-      </aside>
-    </div>
 
     <ImageWorkbenchLightbox
       :asset="previewAsset"
