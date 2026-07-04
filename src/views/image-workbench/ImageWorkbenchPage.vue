@@ -68,6 +68,7 @@ const sidePanel = ref<"tasks" | "details">("details");
 const referencePickMode = ref(false);
 const activeTaskEntry = ref<ImageWorkbenchTaskEntryKey>("create");
 const promptTextareaRef = ref<HTMLTextAreaElement | null>(null);
+const upscaleScale = ref<2 | 4>(2);
 const { handleImageLoad, handleImageLoadError } = useImageWorkbenchImageFallback();
 
 const modeOptions: ImageWorkbenchMode[] = [
@@ -291,7 +292,36 @@ const referencePickMeta = computed(() =>
 );
 const showsOutputCompression = computed(() => ["jpeg", "webp"].includes(imageWorkbenchStore.outputFormat));
 const showsReferenceInput = computed(() => ["reference", "person", "style"].includes(activeTaskEntry.value));
+const showsPromptInput = computed(() => activeTaskEntry.value !== "upscale");
 const showsQuantityInput = computed(() => activeTaskEntry.value !== "upscale");
+const showsSizeInput = computed(() => activeTaskEntry.value !== "upscale");
+const upscaleScaleOptions = computed(() => [
+  {
+    scale: 2 as const,
+    label: t("imageWorkbench.input.upscale2x"),
+    description: t("imageWorkbench.input.upscale2xDesc"),
+    disabled: !selectedAsset.value || !imageWorkbenchStore.canRunUpscale2x,
+  },
+  {
+    scale: 4 as const,
+    label: t("imageWorkbench.input.upscale4x"),
+    description: t("imageWorkbench.input.upscale4xDesc"),
+    disabled: !selectedAsset.value || !imageWorkbenchStore.canRunUpscale4x,
+  },
+]);
+const canSubmitCurrentTask = computed(() => {
+  if (activeTaskEntry.value !== "upscale") {
+    return imageWorkbenchStore.canGenerate;
+  }
+  return upscaleScale.value === 4
+    ? imageWorkbenchStore.canRunUpscale4x
+    : imageWorkbenchStore.canRunUpscale2x;
+});
+const modeUnavailableNotice = computed(() =>
+  activeTaskEntry.value === "upscale" && canSubmitCurrentTask.value
+    ? ""
+    : imageWorkbenchStore.modeUnavailableReason
+);
 const activeTaskGuidance = computed(() => {
   if (activeTaskEntry.value === "edit") {
     return selectedAsset.value
@@ -372,6 +402,20 @@ function focusPromptInput() {
   void nextTick(() => promptTextareaRef.value?.focus());
 }
 
+function handleUpscaleScaleSelect(scale: 2 | 4) {
+  upscaleScale.value = scale;
+  const targetMode: ImageWorkbenchMode = scale === 4 ? "upscale_4x" : "upscale_2x";
+  imageWorkbenchStore.mode = targetMode;
+  if (scale === 2 && selectedAsset.value && !imageWorkbenchStore.supportsCurrentProviderMode) {
+    imageWorkbenchStore.mode = "img2img";
+  }
+  imageWorkbenchStore.prompt = t(
+    imageWorkbenchStore.mode === "img2img"
+      ? "imageWorkbench.asset.upscaleRerenderPrompt"
+      : "imageWorkbench.asset.upscaleDefaultPrompt"
+  );
+}
+
 function handleTaskEntrySelect(key: ImageWorkbenchTaskEntryKey) {
   activeTaskEntry.value = key;
   referencePickMode.value = false;
@@ -399,8 +443,7 @@ function handleTaskEntrySelect(key: ImageWorkbenchTaskEntryKey) {
     return;
   }
   if (key === "upscale") {
-    imageWorkbenchStore.mode = imageWorkbenchStore.canRunUpscale4x ? "upscale_4x" : "upscale_2x";
-    imageWorkbenchStore.prompt = imageWorkbenchStore.prompt.trim() || t("imageWorkbench.asset.upscaleDefaultPrompt");
+    handleUpscaleScaleSelect(imageWorkbenchStore.canRunUpscale4x ? 4 : 2);
     imageWorkbenchStore.notice = selectedAsset.value
       ? t("imageWorkbench.tasks.upscaleNotice")
       : t("imageWorkbench.tasks.needImageNotice");
@@ -536,6 +579,10 @@ async function handleSaveTemplateFromPicker() {
 
 async function handleGenerate() {
   sidePanel.value = "tasks";
+  if (activeTaskEntry.value === "upscale") {
+    await imageWorkbenchStore.upscaleSelectedAsset(upscaleScale.value);
+    return;
+  }
   if (imageWorkbenchStore.shouldConfirmLargeGeneration) {
     const ok = await confirm({
       title: t("imageWorkbench.input.largeBatchConfirmTitle"),
@@ -674,20 +721,45 @@ onMounted(async () => {
             <div v-if="imageWorkbenchStore.isModeDeferred" class="image-workbench-notice">
               {{ t("imageWorkbench.errors.modeDeferred") }}
             </div>
-            <div v-else-if="imageWorkbenchStore.modeUnavailableReason" class="image-workbench-notice">
-              {{ imageWorkbenchStore.modeUnavailableReason }}
+            <div
+              v-else-if="activeTaskGuidance && !activeTaskGuidanceReady"
+              class="image-workbench-task-guidance"
+            >
+              {{ activeTaskGuidance }}
+            </div>
+            <div v-else-if="modeUnavailableNotice" class="image-workbench-notice">
+              {{ modeUnavailableNotice }}
             </div>
             <div v-else-if="imageWorkbenchStore.imageModeProtocolNotice" class="image-workbench-protocol-note">
               {{ imageWorkbenchStore.imageModeProtocolNotice }}
             </div>
             <div
-              v-if="activeTaskGuidance"
+              v-if="activeTaskGuidance && activeTaskGuidanceReady"
               class="image-workbench-task-guidance"
               :class="{ 'is-ready': activeTaskGuidanceReady }"
             >
               {{ activeTaskGuidance }}
             </div>
-            <label>
+            <section v-if="activeTaskEntry === 'upscale'" class="image-workbench-upscale-panel">
+              <div class="image-workbench-upscale-panel__head">
+                <span>{{ t("imageWorkbench.input.upscaleTitle") }}</span>
+                <small>{{ selectedAssetNativeSize || t("imageWorkbench.review.noSelection") }}</small>
+              </div>
+              <div class="image-workbench-upscale-options" role="group" :aria-label="t('imageWorkbench.input.upscaleTitle')">
+                <button
+                  v-for="option in upscaleScaleOptions"
+                  :key="option.scale"
+                  type="button"
+                  :class="{ 'is-active': upscaleScale === option.scale }"
+                  :disabled="option.disabled"
+                  @click="handleUpscaleScaleSelect(option.scale)"
+                >
+                  <strong>{{ option.label }}</strong>
+                  <small>{{ option.description }}</small>
+                </button>
+              </div>
+            </section>
+            <label v-if="showsPromptInput">
               <span>{{ t("imageWorkbench.input.prompt") }}</span>
               <textarea
                 ref="promptTextareaRef"
@@ -787,7 +859,7 @@ onMounted(async () => {
                 <button type="button" @click="handleClearReferenceImage">{{ t("imageWorkbench.reference.clear") }}</button>
               </div>
             </section>
-            <div class="image-workbench-form__grid">
+            <div v-if="showsQuantityInput || showsSizeInput" class="image-workbench-form__grid">
               <label v-if="showsQuantityInput">
                 <span>{{ t("imageWorkbench.input.quantity") }}</span>
                 <input v-model.number="imageWorkbenchStore.quantity" type="number" min="1" />
@@ -795,7 +867,7 @@ onMounted(async () => {
                   {{ largeBatchHint }}
                 </small>
               </label>
-              <label class="image-workbench-size-field">
+              <label v-if="showsSizeInput" class="image-workbench-size-field">
                 <span>{{ t("imageWorkbench.input.size") }}</span>
                 <select v-model="imageWorkbenchStore.size">
                   <option v-for="item in sizeOptions" :key="item.value" :value="item.value">
@@ -813,7 +885,7 @@ onMounted(async () => {
               </label>
             </div>
             <div class="image-workbench-form-actions">
-              <button class="image-workbench-action" type="button" :disabled="!imageWorkbenchStore.canGenerate" @click="handleGenerate"><Play class="h-3.5 w-3.5" />{{ imageWorkbenchStore.generating ? t("imageWorkbench.toolbar.addToQueue") : t("imageWorkbench.toolbar.generate") }}</button>
+              <button class="image-workbench-action" type="button" :disabled="!canSubmitCurrentTask" @click="handleGenerate"><Play class="h-3.5 w-3.5" />{{ imageWorkbenchStore.generating ? t("imageWorkbench.toolbar.addToQueue") : t("imageWorkbench.toolbar.generate") }}</button>
               <button class="image-workbench-secondary image-workbench-secondary--danger" type="button" :disabled="!imageWorkbenchStore.canCancelCurrentJob" @click="handleCancel"><Ban class="h-3.5 w-3.5" />{{ t("imageWorkbench.toolbar.cancel") }}</button>
             </div>
             <details class="image-workbench-advanced">
