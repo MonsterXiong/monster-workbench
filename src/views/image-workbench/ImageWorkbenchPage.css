@@ -942,6 +942,88 @@
   @apply inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-slate-100 px-2 text-[10px] font-black text-slate-500 dark:bg-slate-900 dark:text-slate-300;
 }
 
+.image-workbench-start {
+  @apply grid min-h-0 flex-1 gap-3 overflow-y-auto p-3;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 0.78fr);
+  grid-template-areas:
+    "primary recent"
+    "tasks recent";
+}
+
+.image-workbench-start-card {
+  @apply min-w-0 rounded-md border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-900/40;
+}
+
+.image-workbench-start-card--primary {
+  grid-area: primary;
+  @apply flex items-center justify-between gap-3 border-primary/30 bg-primary/5 dark:bg-primary/10;
+}
+
+.image-workbench-start-card--recent {
+  grid-area: recent;
+}
+
+.image-workbench-start > .image-workbench-start-card:not(.image-workbench-start-card--primary):not(.image-workbench-start-card--recent) {
+  grid-area: tasks;
+}
+
+.image-workbench-start-card__head {
+  @apply flex min-w-0 items-start gap-2;
+}
+
+.image-workbench-start-card__head > svg {
+  @apply mt-0.5 shrink-0 text-primary;
+}
+
+.image-workbench-start-card__head span {
+  @apply min-w-0;
+}
+
+.image-workbench-start-card__head strong {
+  @apply block truncate text-sm font-black text-slate-800 dark:text-slate-100;
+}
+
+.image-workbench-start-card__head small {
+  @apply mt-1 line-clamp-2 text-[11px] font-semibold leading-4 text-slate-500 dark:text-slate-400;
+}
+
+.image-workbench-start-task-grid {
+  @apply mt-3 grid gap-2;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.image-workbench-start-task-grid button {
+  @apply flex h-9 min-w-0 items-center gap-2 rounded-md border border-slate-200 bg-white px-2 text-left text-xs font-black text-slate-600 transition hover:border-primary/40 hover:bg-slate-50 hover:text-primary dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:bg-slate-900;
+}
+
+.image-workbench-start-task-grid button.is-active {
+  @apply border-primary bg-primary text-white hover:bg-primary/90;
+}
+
+.image-workbench-start-task-grid button svg {
+  @apply shrink-0;
+}
+
+.image-workbench-start-task-grid button span {
+  @apply min-w-0 truncate;
+}
+
+.image-workbench-start-recent-grid {
+  @apply mt-3 grid grid-cols-2 gap-2;
+}
+
+.image-workbench-start-recent-grid button {
+  @apply aspect-square overflow-hidden rounded-md border border-slate-200 bg-slate-100 transition hover:border-primary/50 dark:border-slate-700 dark:bg-slate-950;
+}
+
+.image-workbench-start-recent-grid img {
+  @apply h-full w-full object-cover;
+}
+
+.image-workbench-start-empty {
+  @apply mt-3 grid min-h-32 place-items-center rounded-md border border-dashed border-slate-200 px-3 text-center text-xs font-semibold leading-5 text-slate-400 dark:border-slate-700 dark:text-slate-500;
+}
+
 .image-workbench-library-footer {
   @apply flex shrink-0 items-center justify-center border-t border-slate-100 pt-3 text-xs font-bold text-slate-400 dark:border-slate-800 dark:text-slate-500;
 }
@@ -1616,6 +1698,14 @@
     grid-template-columns: 1fr;
   }
 
+  .image-workbench-start {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "primary"
+      "tasks"
+      "recent";
+  }
+
   .image-workbench-mask-preview-panel {
     @apply min-h-0;
   }
@@ -1655,6 +1745,15 @@
   }
 
   .image-workbench-before-after {
+    grid-template-columns: 1fr;
+  }
+
+  .image-workbench-start-card--primary {
+    @apply flex-col items-stretch;
+  }
+
+  .image-workbench-start-task-grid,
+  .image-workbench-start-recent-grid {
     grid-template-columns: 1fr;
   }
 

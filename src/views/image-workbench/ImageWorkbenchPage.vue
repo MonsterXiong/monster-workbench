@@ -40,6 +40,7 @@ import ImageWorkbenchCompareStrip from "./ImageWorkbenchCompareStrip.vue";
 import ImageWorkbenchInspector from "./ImageWorkbenchInspector.vue";
 import ImageWorkbenchLightbox from "./ImageWorkbenchLightbox.vue";
 import ImageWorkbenchMaskEditor from "./ImageWorkbenchMaskEditor.vue";
+import ImageWorkbenchStartPanel from "./ImageWorkbenchStartPanel.vue";
 import ImageWorkbenchTaskLauncher from "./ImageWorkbenchTaskLauncher.vue";
 import ImageWorkbenchTaskPanel from "./ImageWorkbenchTaskPanel.vue";
 import "./ImageWorkbenchPage.css";
@@ -143,6 +144,10 @@ const visibleAssetCards = computed(() =>
   galleryTab.value === "current"
     ? imageWorkbenchStore.currentAssetCards
     : filteredLibraryAssetCards.value
+);
+const recentAssetCards = computed(() => imageWorkbenchStore.libraryAssetCards.slice(0, 6));
+const showWorkspaceStart = computed(() =>
+  galleryTab.value === "current" && !visibleAssetCards.value.length && !isInpaintWorkspace.value
 );
 const libraryFilterOptions = computed(() => {
   const counts: Record<ImageWorkbenchLibraryFilter, number> = {
@@ -1271,6 +1276,15 @@ onMounted(async () => {
               <span v-else>{{ t("imageWorkbench.workspace.libraryAllLoaded") }}</span>
             </div>
           </div>
+          <ImageWorkbenchStartPanel
+            v-else-if="showWorkspaceStart"
+            :active-key="activeTaskEntry"
+            :prompt-placeholder="promptPlaceholder"
+            :recent-assets="recentAssetCards"
+            @start-task="handleTaskEntrySelect(activeTaskEntry)"
+            @select-task="handleTaskEntrySelect"
+            @select-asset="handleSelectAssetAndShowDetails"
+          />
           <div v-else class="image-workbench-empty">
             <Images class="h-10 w-10" />
             <strong>{{ workspaceEmptyTitle }}</strong>
