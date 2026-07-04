@@ -113,7 +113,7 @@ async function handleResetApp() {
 </script>
 
 <template>
-  <div class="flex flex-col h-full bg-white dark:bg-slate-900 rounded-3xl p-5 border border-slate-200 dark:border-slate-800 shadow-sm min-h-0">
+  <div class="workbench-page-shell">
     <!-- 顶栏标题 -->
     <div class="flex items-center gap-2.5 border-b border-slate-100 dark:border-slate-800 pb-5 shrink-0">
       <div class="h-9 w-9 bg-primary/10 text-primary rounded-2xl flex items-center justify-center shadow-inner">

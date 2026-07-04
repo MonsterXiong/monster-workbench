@@ -1,52 +1,35 @@
 .workspace-page {
-  @apply relative flex h-full flex-col gap-5 overflow-y-auto pb-5;
+  @apply relative gap-5;
 }
 
-.workspace-hero {
-  @apply grid gap-5 overflow-hidden border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900;
-  grid-template-columns: minmax(0, 1.4fr) minmax(320px, 0.9fr);
+.workspace-overview {
+  @apply flex shrink-0 flex-wrap items-center justify-between gap-4 border-b border-slate-100 pb-5 dark:border-slate-800;
 }
 
 .workspace-badge,
-.workspace-block__eyebrow,
-.workspace-hero__eyebrow {
+.workspace-block__eyebrow {
   @apply inline-flex w-fit items-center rounded-full bg-primary/10 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-primary;
 }
 
-.workspace-hero__copy {
-  @apply flex min-w-0 flex-col gap-3;
+.workspace-overview__copy {
+  @apply min-w-0 flex-1;
 }
 
-.workspace-hero__copy h1 {
-  @apply text-[28px] font-black tracking-tight text-slate-900 dark:text-slate-100;
+.workspace-overview__copy h1 {
+  @apply mt-2 text-xl font-black text-slate-900 dark:text-slate-100;
 }
 
-.workspace-hero__copy p {
-  @apply max-w-2xl text-sm font-medium leading-6 text-slate-500 dark:text-slate-400;
+.workspace-overview__copy p {
+  @apply mt-1 max-w-2xl text-sm font-medium leading-6 text-slate-500 dark:text-slate-400;
 }
 
-.workspace-hero__actions {
-  @apply flex flex-wrap gap-2 pt-2;
+.workspace-overview__side {
+  @apply flex shrink-0 flex-col items-end gap-3;
 }
 
-.workspace-hero__summary {
-  @apply flex min-h-full flex-col gap-4 rounded-[24px] border border-slate-200 bg-slate-50/80 p-4 dark:border-slate-800 dark:bg-slate-950/70;
-}
-
-.workspace-hero__panel {
-  @apply rounded-[20px] border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900;
-}
-
-.workspace-hero__panel strong {
-  @apply mt-2 block text-lg font-black text-slate-900 dark:text-slate-100;
-}
-
-.workspace-hero__panel p {
-  @apply mt-2 text-xs font-semibold leading-5 text-slate-500 dark:text-slate-400;
-}
-
-.workspace-hero__pill-group {
-  @apply flex flex-wrap gap-2;
+.workspace-overview__actions,
+.workspace-overview__signals {
+  @apply flex flex-wrap justify-end gap-2;
 }
 
 .workspace-pill {
@@ -242,7 +225,6 @@
 }
 
 @media (max-width: 1240px) {
-  .workspace-hero,
   .workspace-grid,
   .workspace-grid--lower {
     grid-template-columns: 1fr;
@@ -258,13 +240,25 @@
     @apply gap-4;
   }
 
-  .workspace-hero,
   .workspace-block {
     @apply rounded-2xl p-4;
   }
 
-  .workspace-hero__copy h1 {
-    @apply text-2xl;
+  .workspace-overview {
+    @apply items-start;
+  }
+
+  .workspace-overview__copy h1 {
+    @apply text-lg;
+  }
+
+  .workspace-overview__side {
+    @apply w-full items-start;
+  }
+
+  .workspace-overview__actions,
+  .workspace-overview__signals {
+    @apply justify-start;
   }
 
   .workspace-stats,

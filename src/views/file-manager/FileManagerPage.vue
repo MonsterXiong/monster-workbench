@@ -159,7 +159,7 @@ async function handleWebDrop(e: DragEvent) {
 
 <template>
   <div
-    class="flex flex-col h-full min-h-0 bg-white dark:bg-slate-900 rounded-3xl p-5 border border-slate-200 dark:border-slate-800 shadow-sm relative"
+    class="workbench-page-shell relative"
     @dragover.prevent="handleWebDragOver"
     @dragenter.prevent="handleWebDragEnter"
     @dragleave.prevent="handleWebDragLeave"

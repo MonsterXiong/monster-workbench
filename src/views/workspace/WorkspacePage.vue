@@ -232,13 +232,16 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="workspace-page">
-    <section class="workspace-hero workbench-card">
-      <div class="workspace-hero__copy">
+  <div class="workspace-page workbench-page-shell workbench-page-shell--scroll">
+    <section class="workspace-overview">
+      <div class="workspace-overview__copy">
         <span class="workspace-badge">{{ t("workspace.kicker") }}</span>
         <h1>{{ t("workspace.title") }}</h1>
         <p>{{ t("workspace.welcome") }}</p>
-        <div class="workspace-hero__actions">
+      </div>
+
+      <div class="workspace-overview__side">
+        <div class="workspace-overview__actions">
           <BaseButton type="primary" size="sm" @click="openRoute('/image-workbench')">
             <template #icon><Sparkles class="h-3.5 w-3.5" /></template>
             {{ t("workspace.primaryAction") }}
@@ -248,15 +251,7 @@ onMounted(() => {
             {{ t("workspace.secondaryAction") }}
           </BaseButton>
         </div>
-      </div>
-
-      <div class="workspace-hero__summary">
-        <div class="workspace-hero__panel">
-          <span class="workspace-hero__eyebrow">{{ t("workspace.summaryTitle") }}</span>
-          <strong>{{ t("workspace.summaryHeadline") }}</strong>
-          <p>{{ t("workspace.summaryBody") }}</p>
-        </div>
-        <div class="workspace-hero__pill-group">
+        <div class="workspace-overview__signals">
           <span class="workspace-pill">
             <LoaderCircle class="h-3.5 w-3.5" :class="{ 'animate-spin': runningTasks.length > 0 }" />
             {{ formatTemplate(t("workspace.summaryRunning"), { count: runningTasks.length }) }}

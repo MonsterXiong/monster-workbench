@@ -88,6 +88,14 @@ body {
   transform: translateY(-1.5px);
 }
 
+.workbench-page-shell {
+  @apply flex h-full min-h-0 w-full flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white p-5 text-slate-900 shadow-sm dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100;
+}
+
+.workbench-page-shell--scroll {
+  @apply overflow-y-auto;
+}
+
 /* 桌面工具通用面板、分隔线、拉伸手柄与状态徽标 */
 .workbench-panel {
   background-color: #ffffff;
@@ -372,6 +380,12 @@ html.dark .workbench-resizer-y::before {
   background-color: #475569;
 }
 
+@media (max-width: 720px) {
+  .workbench-page-shell {
+    @apply min-w-[360px] rounded-2xl p-3;
+  }
+}
+
 .workbench-btn {
   border-radius: 9999px;
   padding: 0.625rem 1.25rem;
@@ -402,5 +416,3 @@ html.dark .workbench-resizer-y::before {
 .no-scrollbar::-webkit-scrollbar {
   display: none; /* Chrome, Safari and Opera */
 }
-
-

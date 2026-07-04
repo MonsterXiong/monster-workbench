@@ -45,7 +45,7 @@ function handleCopy(text: string) {
 </script>
 
 <template>
-  <div class="flex flex-col h-full space-y-4 min-h-0">
+  <div class="workbench-page-shell gap-4">
     <!-- 顶部 10 个 Tab 切换组，使用 BaseTab 支持横向滑动 -->
     <div class="tool-tab-scroll-wrapper no-scrollbar shrink-0">
       <BaseTab v-model="activeTab" :tabs="toolTabs" variant="pills" />

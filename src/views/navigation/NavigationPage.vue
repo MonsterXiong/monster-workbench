@@ -393,7 +393,7 @@ function changePage(newPage: number) {
 </script>
 
 <template>
-  <div class="flex flex-col h-full min-h-0 bg-white dark:bg-slate-900 rounded-3xl p-5 border border-slate-200 dark:border-slate-800 shadow-sm relative">
+  <div class="navigation-page workbench-page-shell relative">
     <!-- 顶部控制栏 + 分类筛选 -->
     <NavigationToolbar
       :is-batch-mode="isBatchMode"

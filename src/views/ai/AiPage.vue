@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { Bot, Image, MessageSquareText, Puzzle, ScrollText, SlidersHorizontal } from "lucide-vue-next";
+import { Image, MessageSquareText, Puzzle, ScrollText, SlidersHorizontal } from "lucide-vue-next";
 import { useI18n } from "../../composables/useI18n";
 import { useToast } from "../../composables/useToast";
 import { useAiStore } from "../../stores/ai";
@@ -69,17 +69,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <main class="ai-page">
-    <header class="ai-page__header">
-      <div class="ai-page__mark">
-        <Bot class="h-5 w-5" />
-      </div>
-      <div class="min-w-0">
-        <h2>{{ t("aiPage.title") }}</h2>
-        <p>{{ t("aiPage.subtitle") }}</p>
-      </div>
-    </header>
-
+  <main class="ai-page workbench-page-shell">
     <section class="ai-page__body">
       <aside class="ai-page__tabs">
         <button
@@ -119,28 +109,8 @@ onMounted(() => {
 </template>
 
 <style scoped>
-.ai-page {
-  @apply flex h-full min-h-0 flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white p-5 text-slate-900 shadow-sm dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100;
-}
-
-.ai-page__header {
-  @apply flex shrink-0 items-center gap-3 border-b border-slate-100 pb-5 dark:border-slate-800;
-}
-
-.ai-page__mark {
-  @apply flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-primary text-white shadow-sm;
-}
-
-.ai-page__header h2 {
-  @apply truncate text-sm font-black tracking-wide text-slate-900 dark:text-slate-100;
-}
-
-.ai-page__header p {
-  @apply mt-1 line-clamp-1 text-xs font-medium text-slate-500 dark:text-slate-400;
-}
-
 .ai-page__body {
-  @apply flex min-h-0 flex-1 gap-5 overflow-hidden pt-5;
+  @apply flex min-h-0 flex-1 gap-5 overflow-hidden;
 }
 
 .ai-page__tabs {
@@ -164,24 +134,8 @@ onMounted(() => {
 }
 
 @media (max-width: 1400px) {
-  .ai-page {
-    @apply rounded-2xl p-3;
-  }
-
-  .ai-page__header {
-    @apply gap-2 pb-3;
-  }
-
-  .ai-page__mark {
-    @apply h-9 w-9 rounded-xl;
-  }
-
-  .ai-page__header p {
-    @apply hidden;
-  }
-
   .ai-page__body {
-    @apply flex-col gap-2 overflow-hidden pt-2;
+    @apply flex-col gap-2 overflow-hidden;
   }
 
   .ai-page__tabs {
@@ -203,18 +157,6 @@ onMounted(() => {
 }
 
 @media (max-width: 720px) {
-  .ai-page {
-    @apply p-3;
-  }
-
-  .ai-page__mark {
-    @apply h-9 w-9 rounded-xl;
-  }
-
-  .ai-page__header p {
-    @apply hidden;
-  }
-
   .ai-tab {
     @apply h-8 px-2.5 text-[11px];
   }

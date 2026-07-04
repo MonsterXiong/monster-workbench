@@ -144,7 +144,7 @@ const copyStackCode = async () => {
 </script>
 
 <template>
-  <div class="flex flex-col h-full bg-white dark:bg-slate-900 rounded-3xl p-5 border border-slate-200 dark:border-slate-800 shadow-sm min-h-0 select-none">
+  <div class="workbench-page-shell select-none">
     <!-- 顶部状态栏 -->
     <div class="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-5 shrink-0">
       <div class="flex items-center gap-3">
