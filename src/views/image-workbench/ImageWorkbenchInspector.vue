@@ -365,6 +365,23 @@ function isImmediateGenerationBranch(actionKey: string) {
             <Star class="h-3.5 w-3.5" />
             {{ selectedAsset.favorite ? t("imageWorkbench.asset.unfavorite") : t("imageWorkbench.asset.favorite") }}
           </button>
+          <button type="button" :disabled="!imageWorkbenchStore.canExportSelectedAsset" @click="handleExportSelectedAsset">
+            <Download class="h-3.5 w-3.5" />
+            {{ t("imageWorkbench.asset.exportAsset") }}
+          </button>
+        </div>
+        <details class="image-workbench-delivery-more">
+          <summary>{{ t("imageWorkbench.asset.moreDelivery") }}</summary>
+          <div class="image-workbench-inspector-actions">
+            <button type="button" @click="handleOpenAssetLocation">
+              <FolderOpen class="h-3.5 w-3.5" />
+              {{ t("imageWorkbench.asset.openLocation") }}
+            </button>
+            <button type="button" @click="handleCopyMetaPrompt">
+              <Copy class="h-3.5 w-3.5" />
+              {{ t("imageWorkbench.asset.copyMetaPrompt") }}
+            </button>
+          </div>
           <div class="image-workbench-rating-control" role="group" :aria-label="t('imageWorkbench.asset.rating')">
             <span>{{ t("imageWorkbench.asset.rating") }}</span>
             <div>
@@ -384,19 +401,7 @@ function isImmediateGenerationBranch(actionKey: string) {
               </button>
             </div>
           </div>
-          <button type="button" :disabled="!imageWorkbenchStore.canExportSelectedAsset" @click="handleExportSelectedAsset">
-            <Download class="h-3.5 w-3.5" />
-            {{ t("imageWorkbench.asset.exportAsset") }}
-          </button>
-          <button type="button" @click="handleOpenAssetLocation">
-            <FolderOpen class="h-3.5 w-3.5" />
-            {{ t("imageWorkbench.asset.openLocation") }}
-          </button>
-          <button type="button" @click="handleCopyMetaPrompt">
-            <Copy class="h-3.5 w-3.5" />
-            {{ t("imageWorkbench.asset.copyMetaPrompt") }}
-          </button>
-        </div>
+        </details>
       </div>
 
       <details class="image-workbench-inspector-foldout">

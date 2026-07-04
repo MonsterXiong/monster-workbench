@@ -414,6 +414,7 @@ export default {
     closePreview: "Close",
     openLocation: "Open location",
     exportAsset: "Export image",
+    moreDelivery: "More",
     reusePrompt: "Use description",
     copyMetaPrompt: "Copy description",
     regenerate: "Regenerate",

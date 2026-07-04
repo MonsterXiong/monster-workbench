@@ -414,6 +414,7 @@ export default {
     closePreview: "关闭",
     openLocation: "打开位置",
     exportAsset: "导出图片",
+    moreDelivery: "更多整理",
     reusePrompt: "套用描述",
     copyMetaPrompt: "复制描述",
     regenerate: "重新生成",
