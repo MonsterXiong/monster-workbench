@@ -1250,6 +1250,7 @@ onMounted(async () => {
         <ImageWorkbenchInspector
           v-else
           @preview="openAssetPreview"
+          @show-tasks="sidePanel = 'tasks'"
           @sync-task-entry="handleInspectorTaskEntrySync"
           @task-entry-change="handleInspectorTaskEntryChange"
         />

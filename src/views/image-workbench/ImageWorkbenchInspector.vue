@@ -39,6 +39,7 @@ const qualityIssueKeys: ImageWorkbenchQualityIssue[] = ["hands", "identity", "pr
 const { handleImageLoad, handleImageLoadError } = useImageWorkbenchImageFallback();
 const emit = defineEmits<{
   (event: "preview", asset: ImageWorkbenchAssetCard | null): void;
+  (event: "show-tasks"): void;
   (event: "sync-task-entry"): void;
   (event: "task-entry-change", key: ImageWorkbenchTaskEntryKey): void;
 }>();
@@ -238,6 +239,7 @@ function handleReuseDescriptionClick() {
 function handleRegenerateClick() {
   handleRegenerateSelectedAsset();
   emit("task-entry-change", "create");
+  emit("show-tasks");
 }
 
 function handleBranchActionClick(actionKey: string) {
@@ -246,6 +248,9 @@ function handleBranchActionClick(actionKey: string) {
   if (taskEntry) {
     emit("task-entry-change", taskEntry);
   }
+  if (isImmediateGenerationBranch(actionKey)) {
+    emit("show-tasks");
+  }
 }
 
 function handleQualityFixClick() {
@@ -253,6 +258,9 @@ function handleQualityFixClick() {
   handleFixSelectedAssetByQuality();
   if (issue) {
     emit("task-entry-change", issue === "identity" ? "person" : "edit");
+    if (issue === "identity") {
+      emit("show-tasks");
+    }
   }
 }
 
@@ -270,6 +278,10 @@ function branchActionTaskEntry(actionKey: string): ImageWorkbenchTaskEntryKey | 
     return "upscale";
   }
   return "";
+}
+
+function isImmediateGenerationBranch(actionKey: string) {
+  return ["continue-style", "person", "upscale"].includes(actionKey);
 }
 </script>
 
