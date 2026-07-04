@@ -682,12 +682,9 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
 
         DbNavInfra::init_navigation_db(&db_dir).expect("db should initialize");
-        DbNavInfra::add_navigation(&db_dir, nav_item("A", "https://a.test", None))
-            .expect("seed A");
-        DbNavInfra::add_navigation(&db_dir, nav_item("B", "https://b.test", None))
-            .expect("seed B");
-        DbNavInfra::add_navigation(&db_dir, nav_item("C", "https://c.test", None))
-            .expect("seed C");
+        DbNavInfra::add_navigation(&db_dir, nav_item("A", "https://a.test", None)).expect("seed A");
+        DbNavInfra::add_navigation(&db_dir, nav_item("B", "https://b.test", None)).expect("seed B");
+        DbNavInfra::add_navigation(&db_dir, nav_item("C", "https://c.test", None)).expect("seed C");
 
         let mut items = DbNavInfra::get_all_navigation_list(&db_dir).expect("load");
         // 给前两条标 is_hot=1 + 补描述，第三条不动来确保 batch 不影响未传入的记录
@@ -721,8 +718,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
 
         DbNavInfra::init_navigation_db(&db_dir).expect("db should initialize");
-        DbNavInfra::add_navigation(&db_dir, nav_item("A", "https://a.test", None))
-            .expect("seed A");
+        DbNavInfra::add_navigation(&db_dir, nav_item("A", "https://a.test", None)).expect("seed A");
 
         // 空数组直接 Ok 返回
         DbNavInfra::batch_update_navigation(&db_dir, vec![]).expect("empty batch");
