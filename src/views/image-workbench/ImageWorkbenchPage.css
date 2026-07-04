@@ -86,6 +86,40 @@
   @apply space-y-3;
 }
 
+.image-workbench-task-launcher {
+  @apply grid gap-2;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.image-workbench-task-entry {
+  @apply flex min-h-16 min-w-0 items-start gap-2 rounded-md border border-slate-200 bg-white p-2 text-left transition hover:border-primary/40 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-900;
+}
+
+.image-workbench-task-entry > svg {
+  @apply mt-0.5 shrink-0 text-slate-400;
+}
+
+.image-workbench-task-entry span {
+  @apply min-w-0;
+}
+
+.image-workbench-task-entry strong {
+  @apply block truncate text-xs font-black text-slate-700 dark:text-slate-200;
+}
+
+.image-workbench-task-entry small {
+  @apply mt-0.5 line-clamp-2 text-[11px] font-semibold leading-4 text-slate-500 dark:text-slate-400;
+}
+
+.image-workbench-task-entry.is-active {
+  @apply border-primary bg-primary/5 ring-2 ring-primary/10 dark:bg-primary/10;
+}
+
+.image-workbench-task-entry.is-active > svg,
+.image-workbench-task-entry.is-active strong {
+  @apply text-primary;
+}
+
 .image-workbench-form label {
   @apply block space-y-1.5;
 }
@@ -136,6 +170,47 @@
 
 .image-workbench-form-actions .image-workbench-action {
   @apply h-9;
+}
+
+.image-workbench-advanced {
+  @apply overflow-hidden rounded-md border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950;
+}
+
+.image-workbench-advanced summary {
+  @apply flex cursor-pointer list-none items-center gap-2 px-3 py-2;
+}
+
+.image-workbench-advanced summary::-webkit-details-marker {
+  display: none;
+}
+
+.image-workbench-advanced summary > span {
+  @apply shrink-0 text-xs font-black text-slate-700 dark:text-slate-200;
+}
+
+.image-workbench-advanced summary > small {
+  @apply min-w-0 flex-1 truncate text-[11px] font-semibold text-slate-400 dark:text-slate-500;
+}
+
+.image-workbench-advanced summary > svg {
+  @apply shrink-0 text-slate-400 transition;
+}
+
+.image-workbench-advanced[open] summary > svg {
+  @apply rotate-180;
+}
+
+.image-workbench-advanced__body {
+  @apply grid gap-3 border-t border-slate-100 p-3 dark:border-slate-800;
+}
+
+.image-workbench-advanced__actions {
+  @apply grid gap-2;
+  grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
+}
+
+.image-workbench-advanced__actions > .image-workbench-secondary {
+  @apply h-auto min-h-8 whitespace-normal px-2 py-1.5 text-center leading-4;
 }
 
 .image-workbench-reference {
@@ -1306,6 +1381,8 @@
 
 @media (max-width: 560px) {
   .image-workbench-form-actions,
+  .image-workbench-task-launcher,
+  .image-workbench-advanced__actions,
   .image-workbench-form__grid {
     grid-template-columns: 1fr;
   }

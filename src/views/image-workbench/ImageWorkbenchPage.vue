@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref } from "vue";
+import { computed, markRaw, nextTick, onMounted, ref, type Component } from "vue";
 import {
   Ban,
   BookTemplate,
@@ -51,6 +51,8 @@ import type {
   ImageWorkbenchTemplate,
 } from "../../types/image-workbench";
 
+type ImageWorkbenchTaskEntryKey = "create" | "reference" | "edit" | "upscale" | "person" | "style";
+
 const { t } = useI18n();
 const { confirm } = useConfirm();
 const imageWorkbenchStore = useImageWorkbenchStore();
@@ -58,6 +60,7 @@ const galleryTab = ref<"current" | "library">("current");
 const templatePickerOpen = ref(false);
 const sidePanel = ref<"tasks" | "details">("tasks");
 const referencePickMode = ref(false);
+const activeTaskEntry = ref<ImageWorkbenchTaskEntryKey>("create");
 const promptTextareaRef = ref<HTMLTextAreaElement | null>(null);
 const { handleImageLoad, handleImageLoadError } = useImageWorkbenchImageFallback();
 
@@ -73,6 +76,14 @@ const qualityOptions: ImageWorkbenchGenerationQuality[] = ["auto", "low", "mediu
 const outputFormatOptions: ImageWorkbenchOutputFormat[] = ["png", "jpeg", "webp"];
 const backgroundOptions: ImageWorkbenchBackground[] = ["auto", "opaque"];
 const moderationOptions: ImageWorkbenchModeration[] = ["auto", "low"];
+const taskEntryIcons = {
+  create: markRaw(ImagePlus),
+  reference: markRaw(Images),
+  edit: markRaw(Eraser),
+  upscale: markRaw(Star),
+  person: markRaw(Sparkles),
+  style: markRaw(BookTemplate),
+};
 
 const baseSizeOptions = computed(() => buildImageSizeOptions(t));
 const currentJob = computed(() => imageWorkbenchStore.currentJob);
@@ -238,9 +249,132 @@ const referencePickMeta = computed(() =>
   })
 );
 const showsOutputCompression = computed(() => ["jpeg", "webp"].includes(imageWorkbenchStore.outputFormat));
+const taskEntries = computed(() =>
+  ([
+    {
+      key: "create",
+      icon: taskEntryIcons.create,
+      title: t("imageWorkbench.tasks.create"),
+      description: t("imageWorkbench.tasks.createDesc"),
+    },
+    {
+      key: "reference",
+      icon: taskEntryIcons.reference,
+      title: t("imageWorkbench.tasks.reference"),
+      description: t("imageWorkbench.tasks.referenceDesc"),
+    },
+    {
+      key: "edit",
+      icon: taskEntryIcons.edit,
+      title: t("imageWorkbench.tasks.edit"),
+      description: t("imageWorkbench.tasks.editDesc"),
+    },
+    {
+      key: "upscale",
+      icon: taskEntryIcons.upscale,
+      title: t("imageWorkbench.tasks.upscale"),
+      description: t("imageWorkbench.tasks.upscaleDesc"),
+    },
+    {
+      key: "person",
+      icon: taskEntryIcons.person,
+      title: t("imageWorkbench.tasks.person"),
+      description: t("imageWorkbench.tasks.personDesc"),
+    },
+    {
+      key: "style",
+      icon: taskEntryIcons.style,
+      title: t("imageWorkbench.tasks.style"),
+      description: t("imageWorkbench.tasks.styleDesc"),
+    },
+  ] satisfies Array<{
+    key: ImageWorkbenchTaskEntryKey;
+    icon: Component;
+    title: string;
+    description: string;
+  }>)
+);
 
 function modeLabel(mode: ImageWorkbenchMode | string) {
   return t(`imageWorkbench.modes.${mode}`);
+}
+
+function syncTaskEntryFromMode() {
+  if (imageWorkbenchStore.mode === "txt2img") {
+    activeTaskEntry.value = "create";
+    return;
+  }
+  if (imageWorkbenchStore.mode === "inpaint") {
+    activeTaskEntry.value = "edit";
+    return;
+  }
+  if (imageWorkbenchStore.mode === "person_consistency") {
+    activeTaskEntry.value = "person";
+    return;
+  }
+  if (imageWorkbenchStore.mode.startsWith("upscale_")) {
+    activeTaskEntry.value = "upscale";
+    return;
+  }
+  activeTaskEntry.value = imageWorkbenchStore.hasReferenceImage ? "reference" : "style";
+}
+
+function focusPromptInput() {
+  void nextTick(() => promptTextareaRef.value?.focus());
+}
+
+function handleTaskEntrySelect(key: ImageWorkbenchTaskEntryKey) {
+  activeTaskEntry.value = key;
+  referencePickMode.value = false;
+  if (key !== "edit") {
+    imageWorkbenchStore.closeInpaintEditor();
+  }
+  if (key === "create") {
+    imageWorkbenchStore.mode = "txt2img";
+    focusPromptInput();
+    return;
+  }
+  if (key === "reference") {
+    imageWorkbenchStore.mode = "img2img";
+    imageWorkbenchStore.notice = t("imageWorkbench.tasks.referenceNotice");
+    focusPromptInput();
+    return;
+  }
+  if (key === "edit") {
+    imageWorkbenchStore.mode = "inpaint";
+    if (selectedAsset.value) {
+      imageWorkbenchStore.startInpaintSelectedAsset();
+    } else {
+      imageWorkbenchStore.notice = t("imageWorkbench.tasks.needImageNotice");
+    }
+    return;
+  }
+  if (key === "upscale") {
+    imageWorkbenchStore.mode = imageWorkbenchStore.canRunUpscale4x ? "upscale_4x" : "upscale_2x";
+    imageWorkbenchStore.prompt = imageWorkbenchStore.prompt.trim() || t("imageWorkbench.asset.upscaleDefaultPrompt");
+    imageWorkbenchStore.notice = selectedAsset.value
+      ? t("imageWorkbench.tasks.upscaleNotice")
+      : t("imageWorkbench.tasks.needImageNotice");
+    return;
+  }
+  if (key === "person") {
+    imageWorkbenchStore.mode = "person_consistency";
+    imageWorkbenchStore.prompt = imageWorkbenchStore.prompt.trim() || t("imageWorkbench.asset.personDefaultPrompt");
+    imageWorkbenchStore.notice = imageWorkbenchStore.hasReferenceImage || selectedAsset.value
+      ? t("imageWorkbench.tasks.personNotice")
+      : t("imageWorkbench.tasks.needReferenceNotice");
+    focusPromptInput();
+    return;
+  }
+  imageWorkbenchStore.mode = "img2img";
+  if (imageWorkbenchStore.canUseSelectedAssetAsReference) {
+    handleUseSelectedAssetAsReference();
+  }
+  imageWorkbenchStore.prompt = imageWorkbenchStore.prompt.trim() || t("imageWorkbench.asset.styleDefaultPrompt");
+  imageWorkbenchStore.notice = imageWorkbenchStore.hasReferenceImage || selectedAsset.value
+    ? t("imageWorkbench.tasks.styleNotice")
+    : t("imageWorkbench.tasks.needReferenceNotice");
+  focusPromptInput();
 }
 
 function referenceRoleKey(index: number): ImageWorkbenchReferenceRole {
@@ -289,6 +423,7 @@ function insertReferencePrompt(index: number) {
 }
 
 function handleModeChange() {
+  syncTaskEntryFromMode();
   if (imageWorkbenchStore.mode === "inpaint" && selectedAsset.value) {
     imageWorkbenchStore.startInpaintSelectedAsset();
     return;
@@ -438,8 +573,9 @@ async function handleLoadMoreAssetLibrary() {
   await imageWorkbenchStore.loadMoreAssetLibrary();
 }
 
-onMounted(() => {
-  void imageWorkbenchStore.loadInitialState();
+onMounted(async () => {
+  await imageWorkbenchStore.loadInitialState();
+  syncTaskEntryFromMode();
 });
 </script>
 
@@ -456,14 +592,22 @@ onMounted(() => {
             <span>{{ t("imageWorkbench.input.title") }}</span>
           </div>
           <div class="image-workbench-form">
-            <label>
-              <span>{{ t("imageWorkbench.input.mode") }}</span>
-              <select v-model="imageWorkbenchStore.mode" @change="handleModeChange">
-                <option v-for="item in modeOptions" :key="item" :value="item">
-                  {{ modeLabel(item) }}
-                </option>
-              </select>
-            </label>
+            <section class="image-workbench-task-launcher">
+              <button
+                v-for="entry in taskEntries"
+                :key="entry.key"
+                type="button"
+                class="image-workbench-task-entry"
+                :class="{ 'is-active': activeTaskEntry === entry.key }"
+                @click="handleTaskEntrySelect(entry.key)"
+              >
+                <component :is="entry.icon" class="h-3.5 w-3.5" />
+                <span>
+                  <strong>{{ entry.title }}</strong>
+                  <small>{{ entry.description }}</small>
+                </span>
+              </button>
+            </section>
             <div v-if="imageWorkbenchStore.isModeDeferred" class="image-workbench-notice">
               {{ t("imageWorkbench.errors.modeDeferred") }}
             </div>
@@ -602,91 +746,108 @@ onMounted(() => {
                 </small>
               </label>
             </div>
-            <label>
-              <span>{{ t("imageWorkbench.input.model") }}</span>
-              <select :value="imageWorkbenchStore.imageModelConfigId" @change="handleModelConfigChange">
-                <option
-                  v-for="item in imageWorkbenchStore.imageModelConfigOptions"
-                  :key="item.value"
-                  :value="item.value"
-                  :disabled="item.disabled"
-                >
-                  {{ item.text }}
-                </option>
-              </select>
-              <small class="image-workbench-model-hint">
-                {{ imageWorkbenchStore.activeImageModelName }}
-              </small>
-            </label>
-            <div class="image-workbench-form__grid">
-              <label>
-                <span>{{ t("imageWorkbench.input.quality") }}</span>
-                <select v-model="imageWorkbenchStore.outputQuality">
-                  <option v-for="item in qualityOptions" :key="item" :value="item">
-                    {{ t(`imageWorkbench.output.quality.${item}`) }}
-                  </option>
-                </select>
-              </label>
-              <label>
-                <span>{{ t("imageWorkbench.input.outputFormat") }}</span>
-                <select v-model="imageWorkbenchStore.outputFormat">
-                  <option v-for="item in outputFormatOptions" :key="item" :value="item">
-                    {{ t(`imageWorkbench.output.format.${item}`) }}
-                  </option>
-                </select>
-              </label>
-              <label v-if="showsOutputCompression">
-                <span>{{ t("imageWorkbench.input.outputCompression") }}</span>
-                <input v-model.number="imageWorkbenchStore.outputCompression" type="number" min="0" max="100" />
-              </label>
-              <label>
-                <span>{{ t("imageWorkbench.input.background") }}</span>
-                <select v-model="imageWorkbenchStore.outputBackground">
-                  <option v-for="item in backgroundOptions" :key="item" :value="item">
-                    {{ t(`imageWorkbench.output.background.${item}`) }}
-                  </option>
-                </select>
-              </label>
-              <label>
-                <span>{{ t("imageWorkbench.input.moderation") }}</span>
-                <select v-model="imageWorkbenchStore.outputModeration">
-                  <option v-for="item in moderationOptions" :key="item" :value="item">
-                    {{ t(`imageWorkbench.output.moderation.${item}`) }}
-                  </option>
-                </select>
-              </label>
-            </div>
             <div class="image-workbench-form-actions">
               <button class="image-workbench-action" type="button" :disabled="!imageWorkbenchStore.canGenerate" @click="handleGenerate"><Play class="h-3.5 w-3.5" />{{ imageWorkbenchStore.generating ? t("imageWorkbench.toolbar.addToQueue") : t("imageWorkbench.toolbar.generate") }}</button>
               <button class="image-workbench-secondary image-workbench-secondary--danger" type="button" :disabled="!imageWorkbenchStore.canCancelCurrentJob" @click="handleCancel"><Ban class="h-3.5 w-3.5" />{{ t("imageWorkbench.toolbar.cancel") }}</button>
             </div>
-            <div class="image-workbench-form__grid">
-              <button class="image-workbench-secondary" type="button" @click="templatePickerOpen = !templatePickerOpen"><BookTemplate class="h-3.5 w-3.5" />{{ t("imageWorkbench.template.quickOpen") }}</button>
-              <button class="image-workbench-secondary" type="button" :disabled="imageWorkbenchStore.loading" @click="handleImportGeneratedAssets"><FolderOpen class="h-3.5 w-3.5" />{{ t("imageWorkbench.assetImport.button") }}</button>
-              <button class="image-workbench-secondary" type="button" @click="handleRefresh"><RefreshCcw class="h-3.5 w-3.5" />{{ t("imageWorkbench.toolbar.refresh") }}</button>
-              <button class="image-workbench-secondary" type="button" :disabled="!imageWorkbenchStore.canRetryFailedTasks" @click="handleRetry"><RotateCcw class="h-3.5 w-3.5" />{{ t("imageWorkbench.toolbar.retry") }}</button>
-              <button class="image-workbench-secondary image-workbench-secondary--danger" type="button" :disabled="!imageWorkbenchStore.currentJob" @click="handleDeleteJob"><Trash2 class="h-3.5 w-3.5" />{{ t("imageWorkbench.toolbar.deleteJob") }}</button>
-              <button class="image-workbench-secondary" type="button" :disabled="!imageWorkbenchStore.canCleanupDeletedAssets" @click="handleCleanupDeletedAssets"><Eraser class="h-3.5 w-3.5" />{{ t("imageWorkbench.assetCleanup.button") }}</button>
-              <button class="image-workbench-secondary" type="button" :disabled="imageWorkbenchStore.loading" @click="handleCleanupInvalidAssets"><Eraser class="h-3.5 w-3.5" />{{ t("imageWorkbench.assetCleanup.invalidButton") }}</button>
-            </div>
-            <div v-if="templatePickerOpen" class="image-workbench-template-popover">
-              <div class="image-workbench-template-save">
-                <input v-model="imageWorkbenchStore.templateDraftName" :placeholder="t('imageWorkbench.template.namePlaceholder')" />
-                <button type="button" :disabled="!canSaveTemplate" @click="handleSaveTemplateFromPicker">{{ t("imageWorkbench.template.save") }}</button>
-              </div>
-              <div class="image-workbench-template-list">
-                <button v-for="template in imageWorkbenchStore.templates" :key="template.id" type="button" class="image-workbench-template-item" :title="template.name" @click="handleApplyTemplateFromPicker(template)">
-                  <span>
-                    <strong>{{ template.name }}</strong>
-                    <small>{{ modeLabel(template.mode) }}</small>
-                  </span>
-                  <Trash2 v-if="!template.isSystem" class="h-3.5 w-3.5" @click.stop="handleDeleteTemplate(template)" />
-                </button>
-                <div v-if="!imageWorkbenchStore.templates.length" class="image-workbench-mini-empty">
-                  {{ t("imageWorkbench.template.empty") }}
+            <details class="image-workbench-advanced">
+              <summary>
+                <span>{{ t("imageWorkbench.input.advanced") }}</span>
+                <small>{{ modeLabel(imageWorkbenchStore.mode) }} · {{ imageWorkbenchStore.activeImageModelName }}</small>
+                <ChevronDown class="h-3.5 w-3.5" />
+              </summary>
+              <div class="image-workbench-advanced__body">
+                <label>
+                  <span>{{ t("imageWorkbench.input.mode") }}</span>
+                  <select v-model="imageWorkbenchStore.mode" @change="handleModeChange">
+                    <option v-for="item in modeOptions" :key="item" :value="item">
+                      {{ modeLabel(item) }}
+                    </option>
+                  </select>
+                </label>
+                <label>
+                  <span>{{ t("imageWorkbench.input.model") }}</span>
+                  <select :value="imageWorkbenchStore.imageModelConfigId" @change="handleModelConfigChange">
+                    <option
+                      v-for="item in imageWorkbenchStore.imageModelConfigOptions"
+                      :key="item.value"
+                      :value="item.value"
+                      :disabled="item.disabled"
+                    >
+                      {{ item.text }}
+                    </option>
+                  </select>
+                  <small class="image-workbench-model-hint">
+                    {{ imageWorkbenchStore.activeImageModelName }}
+                  </small>
+                </label>
+                <div class="image-workbench-form__grid">
+                  <label>
+                    <span>{{ t("imageWorkbench.input.quality") }}</span>
+                    <select v-model="imageWorkbenchStore.outputQuality">
+                      <option v-for="item in qualityOptions" :key="item" :value="item">
+                        {{ t(`imageWorkbench.output.quality.${item}`) }}
+                      </option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>{{ t("imageWorkbench.input.outputFormat") }}</span>
+                    <select v-model="imageWorkbenchStore.outputFormat">
+                      <option v-for="item in outputFormatOptions" :key="item" :value="item">
+                        {{ t(`imageWorkbench.output.format.${item}`) }}
+                      </option>
+                    </select>
+                  </label>
+                  <label v-if="showsOutputCompression">
+                    <span>{{ t("imageWorkbench.input.outputCompression") }}</span>
+                    <input v-model.number="imageWorkbenchStore.outputCompression" type="number" min="0" max="100" />
+                  </label>
+                  <label>
+                    <span>{{ t("imageWorkbench.input.background") }}</span>
+                    <select v-model="imageWorkbenchStore.outputBackground">
+                      <option v-for="item in backgroundOptions" :key="item" :value="item">
+                        {{ t(`imageWorkbench.output.background.${item}`) }}
+                      </option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>{{ t("imageWorkbench.input.moderation") }}</span>
+                    <select v-model="imageWorkbenchStore.outputModeration">
+                      <option v-for="item in moderationOptions" :key="item" :value="item">
+                        {{ t(`imageWorkbench.output.moderation.${item}`) }}
+                      </option>
+                    </select>
+                  </label>
+                </div>
+                <div class="image-workbench-advanced__actions">
+                  <button class="image-workbench-secondary" type="button" @click="templatePickerOpen = !templatePickerOpen"><BookTemplate class="h-3.5 w-3.5" />{{ t("imageWorkbench.template.quickOpen") }}</button>
+                  <button class="image-workbench-secondary" type="button" :disabled="imageWorkbenchStore.loading" @click="handleImportGeneratedAssets"><FolderOpen class="h-3.5 w-3.5" />{{ t("imageWorkbench.assetImport.button") }}</button>
+                  <button class="image-workbench-secondary" type="button" @click="handleRefresh"><RefreshCcw class="h-3.5 w-3.5" />{{ t("imageWorkbench.toolbar.refresh") }}</button>
+                  <button class="image-workbench-secondary" type="button" :disabled="!imageWorkbenchStore.canRetryFailedTasks" @click="handleRetry"><RotateCcw class="h-3.5 w-3.5" />{{ t("imageWorkbench.toolbar.retry") }}</button>
+                  <button class="image-workbench-secondary image-workbench-secondary--danger" type="button" :disabled="!imageWorkbenchStore.currentJob" @click="handleDeleteJob"><Trash2 class="h-3.5 w-3.5" />{{ t("imageWorkbench.toolbar.deleteJob") }}</button>
+                  <button class="image-workbench-secondary" type="button" :disabled="!imageWorkbenchStore.canCleanupDeletedAssets" @click="handleCleanupDeletedAssets"><Eraser class="h-3.5 w-3.5" />{{ t("imageWorkbench.assetCleanup.button") }}</button>
+                  <button class="image-workbench-secondary" type="button" :disabled="imageWorkbenchStore.loading" @click="handleCleanupInvalidAssets"><Eraser class="h-3.5 w-3.5" />{{ t("imageWorkbench.assetCleanup.invalidButton") }}</button>
+                </div>
+                <div v-if="templatePickerOpen" class="image-workbench-template-popover">
+                  <div class="image-workbench-template-save">
+                    <input v-model="imageWorkbenchStore.templateDraftName" :placeholder="t('imageWorkbench.template.namePlaceholder')" />
+                    <button type="button" :disabled="!canSaveTemplate" @click="handleSaveTemplateFromPicker">{{ t("imageWorkbench.template.save") }}</button>
+                  </div>
+                  <div class="image-workbench-template-list">
+                    <button v-for="template in imageWorkbenchStore.templates" :key="template.id" type="button" class="image-workbench-template-item" :title="template.name" @click="handleApplyTemplateFromPicker(template)">
+                      <span>
+                        <strong>{{ template.name }}</strong>
+                        <small>{{ modeLabel(template.mode) }}</small>
+                      </span>
+                      <Trash2 v-if="!template.isSystem" class="h-3.5 w-3.5" @click.stop="handleDeleteTemplate(template)" />
+                    </button>
+                    <div v-if="!imageWorkbenchStore.templates.length" class="image-workbench-mini-empty">
+                      {{ t("imageWorkbench.template.empty") }}
+                    </div>
+                  </div>
                 </div>
               </div>
-            </div>
+            </details>
           </div>
         </section>
 
