@@ -38,15 +38,21 @@ const taskPresets = computed(() => buildImageWorkbenchTaskPresets(props.activeKe
         <small>{{ entry.description }}</small>
       </span>
     </button>
-    <div v-if="taskPresets.length" class="image-workbench-task-presets">
-      <button
-        v-for="preset in taskPresets"
-        :key="preset.key"
-        type="button"
-        @click="emit('applyPreset', preset.key)"
-      >
-        {{ preset.label }}
-      </button>
-    </div>
+    <details v-if="taskPresets.length" class="image-workbench-task-presets">
+      <summary>
+        <span>{{ t("imageWorkbench.tasks.presetsTitle") }}</span>
+        <small>{{ taskPresets.length }}</small>
+      </summary>
+      <div>
+        <button
+          v-for="preset in taskPresets"
+          :key="preset.key"
+          type="button"
+          @click="emit('applyPreset', preset.key)"
+        >
+          {{ preset.label }}
+        </button>
+      </div>
+    </details>
   </section>
 </template>

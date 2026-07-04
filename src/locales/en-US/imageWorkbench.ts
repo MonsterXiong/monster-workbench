@@ -95,6 +95,7 @@ export default {
     personDesc: "Pose and closeups",
     style: "Style transfer",
     styleDesc: "Anime and posters",
+    presetsTitle: "Scenes",
     referenceNotice: "Reference image generation is ready. Upload or pick an image from the library.",
     needImageNotice: "Select an image in the gallery first.",
     upscaleNotice: "Improve clarity is ready. Pick a scale, then generate.",

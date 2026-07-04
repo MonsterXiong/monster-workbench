@@ -95,6 +95,7 @@ export default {
     personDesc: "表情姿势特写",
     style: "风格转换",
     styleDesc: "动漫化和海报",
+    presetsTitle: "场景",
     referenceNotice: "已切到参考图生成。上传或从图库选择参考图。",
     needImageNotice: "先在中间图库选中一张图。",
     upscaleNotice: "已准备提高清晰度，选择倍数后生成。",
