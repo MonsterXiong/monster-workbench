@@ -30,6 +30,7 @@ import type {
   ImageWorkbenchAsset,
   ImageWorkbenchQualityIssue,
 } from "../../types/image-workbench";
+import type { ImageWorkbenchTaskEntryKey } from "./imageWorkbenchTaskLauncher";
 
 const { t } = useI18n();
 const imageWorkbenchStore = useImageWorkbenchStore();
@@ -38,6 +39,8 @@ const qualityIssueKeys: ImageWorkbenchQualityIssue[] = ["hands", "identity", "pr
 const { handleImageLoad, handleImageLoadError } = useImageWorkbenchImageFallback();
 const emit = defineEmits<{
   (event: "preview", asset: ImageWorkbenchAssetCard | null): void;
+  (event: "sync-task-entry"): void;
+  (event: "task-entry-change", key: ImageWorkbenchTaskEntryKey): void;
 }>();
 
 const selectedAsset = computed(() => imageWorkbenchStore.selectedAsset);
@@ -221,6 +224,53 @@ function isQualityIssueActive(issue: ImageWorkbenchQualityIssue) {
 function openAssetPreview(asset: ImageWorkbenchAssetCard | null) {
   emit("preview", asset);
 }
+
+function handleUseSelectedAsReferenceClick() {
+  handleUseSelectedAssetAsReference();
+  emit("task-entry-change", "reference");
+}
+
+function handleReuseDescriptionClick() {
+  imageWorkbenchStore.reuseSelectedAssetPrompt();
+  emit("sync-task-entry");
+}
+
+function handleRegenerateClick() {
+  handleRegenerateSelectedAsset();
+  emit("task-entry-change", "create");
+}
+
+function handleBranchActionClick(actionKey: string) {
+  handleBranchAction(actionKey);
+  const taskEntry = branchActionTaskEntry(actionKey);
+  if (taskEntry) {
+    emit("task-entry-change", taskEntry);
+  }
+}
+
+function handleQualityFixClick() {
+  const issue = imageWorkbenchStore.selectedAssetPrimaryQualityIssue;
+  handleFixSelectedAssetByQuality();
+  if (issue) {
+    emit("task-entry-change", issue === "identity" ? "person" : "edit");
+  }
+}
+
+function branchActionTaskEntry(actionKey: string): ImageWorkbenchTaskEntryKey | "" {
+  if (actionKey === "continue-style") {
+    return "style";
+  }
+  if (actionKey === "inpaint") {
+    return "edit";
+  }
+  if (actionKey === "person") {
+    return "person";
+  }
+  if (actionKey === "upscale") {
+    return "upscale";
+  }
+  return "";
+}
 </script>
 
 <template>
@@ -268,7 +318,7 @@ function openAssetPreview(asset: ImageWorkbenchAssetCard | null) {
             :class="{ 'is-disabled': action.disabled }"
             :disabled="action.disabled"
             :title="action.disabledReason || action.description"
-            @click="handleBranchAction(action.key)"
+            @click="handleBranchActionClick(action.key)"
           >
             <span>
               <strong>{{ action.title }}</strong>
@@ -281,16 +331,16 @@ function openAssetPreview(asset: ImageWorkbenchAssetCard | null) {
           <button
             type="button"
             :disabled="!imageWorkbenchStore.canUseSelectedAssetAsReference"
-            @click="handleUseSelectedAssetAsReference"
+            @click="handleUseSelectedAsReferenceClick"
           >
             <ImagePlus class="h-3.5 w-3.5" />
             {{ t("imageWorkbench.reference.useSelected") }}
           </button>
-          <button type="button" @click="imageWorkbenchStore.reuseSelectedAssetPrompt()">
+          <button type="button" @click="handleReuseDescriptionClick">
             <RotateCcw class="h-3.5 w-3.5" />
             {{ t("imageWorkbench.asset.reusePrompt") }}
           </button>
-          <button type="button" @click="handleRegenerateSelectedAsset">
+          <button type="button" @click="handleRegenerateClick">
             <RefreshCcw class="h-3.5 w-3.5" />
             {{ t("imageWorkbench.asset.regenerate") }}
           </button>
@@ -358,7 +408,7 @@ function openAssetPreview(asset: ImageWorkbenchAssetCard | null) {
               class="image-workbench-quality-fix"
               :disabled="!imageWorkbenchStore.canFixSelectedAssetByQuality"
               :title="qualityFixHint"
-              @click="handleFixSelectedAssetByQuality"
+              @click="handleQualityFixClick"
             >
               <Sparkles class="h-3.5 w-3.5" />
               {{ t("imageWorkbench.quality.fixAction") }}

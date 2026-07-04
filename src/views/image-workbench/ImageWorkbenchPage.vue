@@ -579,6 +579,20 @@ function handleApplyTemplateFromPicker(template: ImageWorkbenchTemplate) {
   templatePickerOpen.value = false;
 }
 
+function handleInspectorTaskEntryChange(key: ImageWorkbenchTaskEntryKey) {
+  activeTaskEntry.value = key;
+  if (key === "upscale") {
+    upscaleScale.value = imageWorkbenchStore.mode === "upscale_4x" ? 4 : 2;
+  }
+}
+
+function handleInspectorTaskEntrySync() {
+  syncTaskEntryFromMode();
+  if (activeTaskEntry.value === "upscale") {
+    upscaleScale.value = imageWorkbenchStore.mode === "upscale_4x" ? 4 : 2;
+  }
+}
+
 async function handleSaveTemplateFromPicker() {
   await imageWorkbenchStore.saveCurrentTemplate();
   templatePickerOpen.value = false;
@@ -1233,7 +1247,12 @@ onMounted(async () => {
           </button>
         </div>
         <ImageWorkbenchTaskPanel v-if="sidePanel === 'tasks'" />
-        <ImageWorkbenchInspector v-else @preview="openAssetPreview" />
+        <ImageWorkbenchInspector
+          v-else
+          @preview="openAssetPreview"
+          @sync-task-entry="handleInspectorTaskEntrySync"
+          @task-entry-change="handleInspectorTaskEntryChange"
+        />
       </aside>
     </section>
 
