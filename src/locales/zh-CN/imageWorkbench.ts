@@ -41,6 +41,15 @@ export default {
     largeBatchConfirmTitle: "确认生成这么多图片？",
     largeBatchConfirmMessage: "本次会创建 {count} 个生成任务。请确认模型费用、等待时间和磁盘空间都可以接受。",
     largeBatchConfirmAction: "继续生成",
+    guidance: {
+      editNeedImage: "先在中间选图，再涂抹要修改的区域。",
+      editReady: "去中间涂抹要修改的区域。",
+      upscaleNeedImage: "先在中间选图，再提高清晰度。",
+      upscaleReady: "将基于选中图提高清晰度。",
+      referenceNeedImage: "上传参考图，或从图库选图。",
+      personNeedReference: "上传人物参考图，或选中一张人物图。",
+      styleNeedReference: "上传风格参考图，或选中一张图。",
+    },
   },
   tasks: {
     create: "生成图片",

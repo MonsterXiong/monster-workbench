@@ -245,6 +245,42 @@ const referencePickMeta = computed(() =>
   })
 );
 const showsOutputCompression = computed(() => ["jpeg", "webp"].includes(imageWorkbenchStore.outputFormat));
+const showsReferenceInput = computed(() => ["reference", "person", "style"].includes(activeTaskEntry.value));
+const showsQuantityInput = computed(() => activeTaskEntry.value !== "upscale");
+const activeTaskGuidance = computed(() => {
+  if (activeTaskEntry.value === "edit") {
+    return selectedAsset.value
+      ? t("imageWorkbench.input.guidance.editReady")
+      : t("imageWorkbench.input.guidance.editNeedImage");
+  }
+  if (activeTaskEntry.value === "upscale") {
+    return selectedAsset.value
+      ? t("imageWorkbench.input.guidance.upscaleReady")
+      : t("imageWorkbench.input.guidance.upscaleNeedImage");
+  }
+  if (activeTaskEntry.value === "reference" && !imageWorkbenchStore.hasReferenceImage) {
+    return t("imageWorkbench.input.guidance.referenceNeedImage");
+  }
+  if (activeTaskEntry.value === "person" && !imageWorkbenchStore.hasReferenceImage && !selectedAsset.value) {
+    return t("imageWorkbench.input.guidance.personNeedReference");
+  }
+  if (activeTaskEntry.value === "style" && !imageWorkbenchStore.hasReferenceImage && !selectedAsset.value) {
+    return t("imageWorkbench.input.guidance.styleNeedReference");
+  }
+  return "";
+});
+const activeTaskGuidanceReady = computed(() => {
+  if (activeTaskEntry.value === "edit" || activeTaskEntry.value === "upscale") {
+    return Boolean(selectedAsset.value);
+  }
+  if (activeTaskEntry.value === "reference") {
+    return imageWorkbenchStore.hasReferenceImage;
+  }
+  if (activeTaskEntry.value === "person" || activeTaskEntry.value === "style") {
+    return Boolean(imageWorkbenchStore.hasReferenceImage || selectedAsset.value);
+  }
+  return false;
+});
 
 function modeLabel(mode: ImageWorkbenchMode | string) {
   return t(`imageWorkbench.modes.${mode}`);
@@ -582,6 +618,13 @@ onMounted(async () => {
             <div v-else-if="imageWorkbenchStore.imageModeProtocolNotice" class="image-workbench-protocol-note">
               {{ imageWorkbenchStore.imageModeProtocolNotice }}
             </div>
+            <div
+              v-if="activeTaskGuidance"
+              class="image-workbench-task-guidance"
+              :class="{ 'is-ready': activeTaskGuidanceReady }"
+            >
+              {{ activeTaskGuidance }}
+            </div>
             <label>
               <span>{{ t("imageWorkbench.input.prompt") }}</span>
               <textarea
@@ -590,7 +633,7 @@ onMounted(async () => {
                 :placeholder="t('imageWorkbench.input.promptPlaceholder')"
               ></textarea>
             </label>
-            <div v-if="imageWorkbenchStore.hasReferenceImage" class="image-workbench-reference-tokens">
+            <div v-if="showsReferenceInput && imageWorkbenchStore.hasReferenceImage" class="image-workbench-reference-tokens">
               <button
                 v-for="(item, index) in imageWorkbenchStore.referenceItems"
                 :key="`token-${item.key}`"
@@ -601,7 +644,7 @@ onMounted(async () => {
                 {{ referencePromptToken(index) }}
               </button>
             </div>
-            <section class="image-workbench-reference">
+            <section v-if="showsReferenceInput" class="image-workbench-reference">
               <div class="image-workbench-reference__head">
                 <div class="image-workbench-reference__title">
                   <span>{{ t("imageWorkbench.reference.title") }}</span>
@@ -683,7 +726,7 @@ onMounted(async () => {
               </div>
             </section>
             <div class="image-workbench-form__grid">
-              <label>
+              <label v-if="showsQuantityInput">
                 <span>{{ t("imageWorkbench.input.quantity") }}</span>
                 <input v-model.number="imageWorkbenchStore.quantity" type="number" min="1" />
                 <small v-if="imageWorkbenchStore.shouldConfirmLargeGeneration" class="image-workbench-large-batch-hint">

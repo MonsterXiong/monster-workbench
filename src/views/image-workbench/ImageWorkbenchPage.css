@@ -160,6 +160,14 @@
   @apply inline-flex h-7 items-center gap-1 rounded-md border border-sky-200 bg-sky-50 px-2 text-[11px] font-bold text-sky-700 transition hover:bg-sky-100 dark:border-sky-900/70 dark:bg-sky-950/40 dark:text-sky-300 dark:hover:bg-sky-900/60;
 }
 
+.image-workbench-task-guidance {
+  @apply rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-xs font-bold leading-5 text-sky-700 dark:border-sky-900/60 dark:bg-sky-950/40 dark:text-sky-300;
+}
+
+.image-workbench-task-guidance.is-ready {
+  @apply border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-300;
+}
+
 .image-workbench-form__grid {
   @apply grid gap-2;
   grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));

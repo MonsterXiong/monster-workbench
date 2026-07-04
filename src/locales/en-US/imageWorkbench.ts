@@ -41,6 +41,15 @@ export default {
     largeBatchConfirmTitle: "Generate this many images?",
     largeBatchConfirmMessage: "This run will create {count} generation tasks. Confirm that cost, wait time, and disk space are acceptable.",
     largeBatchConfirmAction: "Continue",
+    guidance: {
+      editNeedImage: "Pick an image in the center, then paint the area to edit.",
+      editReady: "Paint the area to edit in the center.",
+      upscaleNeedImage: "Pick an image in the center, then improve clarity.",
+      upscaleReady: "Clarity will be improved from the selected image.",
+      referenceNeedImage: "Upload a reference or pick one from the gallery.",
+      personNeedReference: "Upload a person reference or pick a person image.",
+      styleNeedReference: "Upload a style reference or pick an image.",
+    },
   },
   tasks: {
     create: "Generate image",
