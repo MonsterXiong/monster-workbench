@@ -95,10 +95,19 @@ async function selectAndUploadFile(): Promise<boolean> {
 }
 
 async function selectAndUploadImage(): Promise<string | null> {
-  const selected = await systemService.selectFile();
+  const selected = await systemService.openFileDialog({
+    filters: [
+      {
+        name: "Images",
+        extensions: ["png", "jpg", "jpeg", "webp"],
+      },
+    ],
+  });
   if (!selected) return null;
+  const selectedPath = Array.isArray(selected) ? selected[0] : selected;
+  if (!selectedPath) return null;
 
-  return systemService.uploadFile(selected, "image");
+  return systemService.uploadFile(selectedPath, "image");
 }
 
 function buildPreviewUrl(appDataPath: string, relPath: string): string {

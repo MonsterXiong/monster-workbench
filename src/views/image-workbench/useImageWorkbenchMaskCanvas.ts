@@ -1,4 +1,13 @@
-import { nextTick, onBeforeUnmount, onMounted, ref, watch, type Ref } from "vue";
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  watch,
+  type ComputedRef,
+  type Ref,
+} from "vue";
 import type { ImageWorkbenchMaskStroke } from "../../types/image-workbench";
 
 export interface UseImageWorkbenchMaskCanvasOptions {
@@ -16,13 +25,27 @@ export interface UseImageWorkbenchMaskCanvasResult {
   maskCanvasRef: Ref<HTMLCanvasElement | null>;
   maskTool: Ref<"paint" | "erase">;
   maskBrushSize: Ref<number>;
+  maskZoom: Ref<number>;
+  maskZoomPercent: ComputedRef<number>;
+  maskCanvasSize: Ref<{ width: number; height: number } | null>;
+  maskFocusPoint: Ref<{ x: number; y: number } | null>;
+  maskPreviewDataUrl: Ref<string>;
   inpaintMaskStrokes: Ref<ImageWorkbenchMaskStroke[]>;
   canSaveInpaintMask: Ref<boolean>;
+  canUndoMask: ComputedRef<boolean>;
+  canRedoMask: ComputedRef<boolean>;
+  canZoomInMask: ComputedRef<boolean>;
+  canZoomOutMask: ComputedRef<boolean>;
   syncMaskCanvasSize(): void;
   handleMaskPointerDown(event: PointerEvent): void;
   handleMaskPointerMove(event: PointerEvent): void;
   finishMaskStroke(event: PointerEvent): void;
+  undoMaskStroke(): void;
+  redoMaskStroke(): void;
   resetInpaintMask(): void;
+  zoomInMask(): void;
+  zoomOutMask(): void;
+  resetMaskView(): void;
   handleMaskImageLoad(): void;
   handleSaveInpaintMask(): void;
 }
@@ -38,8 +61,20 @@ export function useImageWorkbenchMaskCanvas(
   const maskCanvasRef = ref<HTMLCanvasElement | null>(null);
   const maskTool = ref<"paint" | "erase">("paint");
   const maskBrushSize = ref(32);
+  const maskZoom = ref(1);
+  const maskCanvasSize = ref<{ width: number; height: number } | null>(null);
+  const maskFocusPoint = ref<{ x: number; y: number } | null>(null);
+  const maskPreviewDataUrl = ref("");
   const inpaintMaskStrokes = ref<ImageWorkbenchMaskStroke[]>([]);
+  const redoMaskStrokes = ref<ImageWorkbenchMaskStroke[]>([]);
   let activeMaskStroke: ImageWorkbenchMaskStroke | null = null;
+  let currentCanvasSize: { width: number; height: number } | null = null;
+
+  const maskZoomPercent = computed(() => Math.round(maskZoom.value * 100));
+  const canUndoMask = computed(() => inpaintMaskStrokes.value.length > 0);
+  const canRedoMask = computed(() => redoMaskStrokes.value.length > 0);
+  const canZoomInMask = computed(() => maskZoom.value < 4);
+  const canZoomOutMask = computed(() => maskZoom.value > 1);
 
   const canSaveInpaintMask = ref(false);
   const recomputeCanSave = () => {
@@ -49,6 +84,22 @@ export function useImageWorkbenchMaskCanvas(
   };
   watch([inpaintMaskStrokes, options.isActive], recomputeCanSave, { immediate: true, deep: true });
 
+  function scaleStrokes(
+    strokes: ImageWorkbenchMaskStroke[],
+    scaleX: number,
+    scaleY: number
+  ): ImageWorkbenchMaskStroke[] {
+    const brushScale = (scaleX + scaleY) / 2;
+    return strokes.map((stroke) => ({
+      ...stroke,
+      brushSize: Math.min(160, Math.max(1, stroke.brushSize * brushScale)),
+      points: stroke.points.map((point) => ({
+        x: point.x * scaleX,
+        y: point.y * scaleY,
+      })),
+    }));
+  }
+
   function syncMaskCanvasSize() {
     const canvas = maskCanvasRef.value;
     if (!canvas) return;
@@ -56,9 +107,20 @@ export function useImageWorkbenchMaskCanvas(
     const width = Math.max(16, Math.round(rect.width));
     const height = Math.max(16, Math.round(rect.height));
     if (canvas.width !== width || canvas.height !== height) {
+      if (currentCanvasSize) {
+        const scaleX = width / currentCanvasSize.width;
+        const scaleY = height / currentCanvasSize.height;
+        inpaintMaskStrokes.value = scaleStrokes(inpaintMaskStrokes.value, scaleX, scaleY);
+        redoMaskStrokes.value = scaleStrokes(redoMaskStrokes.value, scaleX, scaleY);
+      }
       canvas.width = width;
       canvas.height = height;
+      currentCanvasSize = { width, height };
+      maskCanvasSize.value = currentCanvasSize;
       replayMaskCanvas();
+    } else if (!currentCanvasSize) {
+      currentCanvasSize = { width, height };
+      maskCanvasSize.value = currentCanvasSize;
     }
   }
 
@@ -103,6 +165,16 @@ export function useImageWorkbenchMaskCanvas(
     if (!canvas || !ctx) return;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     inpaintMaskStrokes.value.forEach((stroke) => drawMaskStroke(stroke));
+    updateMaskPreview();
+  }
+
+  function updateMaskPreview() {
+    const canvas = maskCanvasRef.value;
+    if (!canvas || !inpaintMaskStrokes.value.some((stroke) => stroke.points.length >= 2)) {
+      maskPreviewDataUrl.value = "";
+      return;
+    }
+    maskPreviewDataUrl.value = canvas.toDataURL("image/png");
   }
 
   function handleMaskPointerDown(event: PointerEvent) {
@@ -110,8 +182,10 @@ export function useImageWorkbenchMaskCanvas(
     syncMaskCanvasSize();
     const point = getMaskCanvasPoint(event);
     if (!point) return;
+    maskFocusPoint.value = point;
     event.preventDefault();
     options.onClearStoreMask();
+    redoMaskStrokes.value = [];
     const canvas = maskCanvasRef.value;
     canvas?.setPointerCapture(event.pointerId);
     activeMaskStroke = {
@@ -126,6 +200,7 @@ export function useImageWorkbenchMaskCanvas(
     if (!activeMaskStroke) return;
     const point = getMaskCanvasPoint(event);
     if (!point) return;
+    maskFocusPoint.value = point;
     event.preventDefault();
     const fromIndex = activeMaskStroke.points.length - 1;
     activeMaskStroke.points.push(point);
@@ -145,13 +220,54 @@ export function useImageWorkbenchMaskCanvas(
       inpaintMaskStrokes.value = [...inpaintMaskStrokes.value];
     }
     activeMaskStroke = null;
+    updateMaskPreview();
+  }
+
+  function undoMaskStroke() {
+    if (activeMaskStroke) return;
+    const nextStrokes = [...inpaintMaskStrokes.value];
+    const stroke = nextStrokes.pop();
+    if (!stroke) return;
+    inpaintMaskStrokes.value = nextStrokes;
+    redoMaskStrokes.value = [...redoMaskStrokes.value, stroke];
+    options.onClearStoreMask();
+    replayMaskCanvas();
+  }
+
+  function redoMaskStroke() {
+    if (activeMaskStroke) return;
+    const nextRedoStrokes = [...redoMaskStrokes.value];
+    const stroke = nextRedoStrokes.pop();
+    if (!stroke) return;
+    redoMaskStrokes.value = nextRedoStrokes;
+    inpaintMaskStrokes.value = [...inpaintMaskStrokes.value, stroke];
+    options.onClearStoreMask();
+    replayMaskCanvas();
   }
 
   function resetInpaintMask() {
     activeMaskStroke = null;
     inpaintMaskStrokes.value = [];
+    redoMaskStrokes.value = [];
+    maskFocusPoint.value = null;
     options.onClearStoreMask();
     replayMaskCanvas();
+  }
+
+  function setMaskZoom(value: number) {
+    maskZoom.value = Math.min(4, Math.max(1, value));
+  }
+
+  function zoomInMask() {
+    setMaskZoom(maskZoom.value + 0.25);
+  }
+
+  function zoomOutMask() {
+    setMaskZoom(maskZoom.value - 0.25);
+  }
+
+  function resetMaskView() {
+    setMaskZoom(1);
   }
 
   function handleMaskImageLoad() {
@@ -175,6 +291,10 @@ export function useImageWorkbenchMaskCanvas(
     }
   });
 
+  watch(maskZoom, () => {
+    void nextTick(() => syncMaskCanvasSize());
+  });
+
   onMounted(() => {
     window.addEventListener("resize", syncMaskCanvasSize);
   });
@@ -187,13 +307,27 @@ export function useImageWorkbenchMaskCanvas(
     maskCanvasRef,
     maskTool,
     maskBrushSize,
+    maskZoom,
+    maskZoomPercent,
     inpaintMaskStrokes,
+    maskCanvasSize,
+    maskFocusPoint,
+    maskPreviewDataUrl,
     canSaveInpaintMask,
+    canUndoMask,
+    canRedoMask,
+    canZoomInMask,
+    canZoomOutMask,
     syncMaskCanvasSize,
     handleMaskPointerDown,
     handleMaskPointerMove,
     finishMaskStroke,
+    undoMaskStroke,
+    redoMaskStroke,
     resetInpaintMask,
+    zoomInMask,
+    zoomOutMask,
+    resetMaskView,
     handleMaskImageLoad,
     handleSaveInpaintMask,
   };

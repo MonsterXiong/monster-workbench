@@ -1,4 +1,4 @@
-import type { ImageWorkbenchJob, ImageWorkbenchMetadata, ImageWorkbenchModelRun, ImageWorkbenchTask } from "../../types/image-workbench";
+import type { ImageWorkbenchGroup, ImageWorkbenchJob, ImageWorkbenchMetadata, ImageWorkbenchModelRun } from "../../types/image-workbench";
 import { toAssetCard } from "../../stores/image-workbench-helpers";
 
 export type ImageWorkbenchAssetCard = ReturnType<typeof toAssetCard>;
@@ -7,6 +7,7 @@ export type ImageWorkbenchGallerySection = {
   key: string;
   title: string;
   description: string;
+  selected?: boolean;
   highlights?: Array<{
     key: string;
     label: string;
@@ -17,7 +18,7 @@ export type ImageWorkbenchGallerySection = {
 export type ImageWorkbenchAssetBadge = {
   key: string;
   label: string;
-  tone: "primary" | "warning" | "neutral" | "source" | "success";
+  tone: "primary" | "warning" | "neutral" | "source" | "success" | "danger";
 };
 
 export type ImageWorkbenchRelatedAssetGroup = {
@@ -35,9 +36,30 @@ export type ImageWorkbenchVersionChainItem = {
   tone: "source" | "selected" | "branch";
 };
 
+export type ImageWorkbenchLineageSummaryItem = {
+  key: string;
+  label: string;
+  value: string;
+  tone: "primary" | "success" | "neutral" | "warning";
+};
+
+export type ImageWorkbenchAssetRelationContext = {
+  selectedAsset: ImageWorkbenchAssetCard | null;
+  directSourceAsset: ImageWorkbenchAssetCard | null;
+  rootAsset: ImageWorkbenchAssetCard | null;
+  compareSourceAsset: ImageWorkbenchAssetCard | null;
+  groupAssets: ImageWorkbenchAssetCard[];
+  chainAssets: ImageWorkbenchAssetCard[];
+  branchAssets: ImageWorkbenchAssetCard[];
+  deliveryReady: boolean;
+  groupCount: number;
+  chainCount: number;
+  branchCount: number;
+};
+
 export type ImageWorkbenchCompareItem = {
   asset: ImageWorkbenchAssetCard;
-  role: "selected" | "candidate";
+  role: "source" | "selected" | "candidate";
 };
 
 export type ImageWorkbenchBranchAction = {
@@ -49,70 +71,57 @@ export type ImageWorkbenchBranchAction = {
   disabledReason?: string;
 };
 
-export function buildTaskStatusSummary(tasks: ImageWorkbenchTask[]) {
-  const total = tasks.length;
-  const finished = tasks.filter((task) => task.status === "succeeded").length;
-  const running = tasks.filter((task) => ["queued", "running", "validating", "retrying"].includes(task.status)).length;
-  const failed = tasks.filter((task) => task.status === "failed").length;
-  return { total, finished, running, failed };
-}
-
 export function buildGallerySections(options: {
   galleryTab: "current" | "library";
-  jobs: ImageWorkbenchJob[];
   currentAssets: ImageWorkbenchAssetCard[];
   libraryAssets: ImageWorkbenchAssetCard[];
+  currentGroups?: ImageWorkbenchGroup[];
   currentJob: ImageWorkbenchJob | null;
   selectedAssetId: string;
   t: (key: string) => string;
 }) {
-  const { galleryTab, jobs, currentAssets, libraryAssets, currentJob, selectedAssetId, t } = options;
+  const { galleryTab, currentAssets, libraryAssets, currentGroups = [], currentJob, selectedAssetId, t } = options;
 
   if (galleryTab === "current") {
-    const orderedCurrentAssets = sortAssetsForReview(currentAssets, selectedAssetId);
-    return currentAssets.length
-      ? [
-          {
-            key: "current-batch",
-            title: t("imageWorkbench.gallerySections.currentTitle"),
-            description: currentJob
-              ? `${t(`imageWorkbench.jobStatuses.${currentJob.status}`)} · ${currentAssets.length}`
-              : t("imageWorkbench.gallerySections.currentDesc"),
-            items: orderedCurrentAssets,
-          },
-        ]
-      : [];
+    return buildCurrentGroupSections({ currentAssets, currentGroups, currentJob, selectedAssetId, t });
   }
 
+  const focusedIds = new Set<string>();
+  const selectedLibraryAsset = libraryAssets.find((asset) => asset.id === selectedAssetId);
   const favorites = libraryAssets.filter((asset) => asset.favorite);
   const recent = libraryAssets.filter((asset) => !asset.favorite);
   const sections: ImageWorkbenchGallerySection[] = [];
+
+  if (selectedLibraryAsset) {
+    const focusedItems = sortAssetsForReview(
+      dedupeAssets([
+        selectedLibraryAsset,
+        ...buildSameGroupAssets(libraryAssets, selectedAssetId, selectedLibraryAsset.jobId),
+      ]),
+      selectedAssetId
+    ).slice(0, 6);
+    focusedItems.forEach((asset) => focusedIds.add(asset.id));
+    sections.push({
+      key: "selected-library-context",
+      title: t("imageWorkbench.gallerySections.selectedTitle"),
+      description: t("imageWorkbench.gallerySections.selectedDesc"),
+      selected: true,
+      highlights: [
+        {
+          key: "selected",
+          label: t("imageWorkbench.gallerySections.currentGroup"),
+        },
+      ],
+      items: focusedItems,
+    });
+  }
+
   const deliveryAssetIds = new Set(
-    libraryAssets
-      .filter((asset) =>
-        resolveDeliveryCandidate({
-          asset,
-          jobs,
-          currentAssets,
-          libraryAssets,
-        })
-      )
-      .map((asset) => asset.id)
-  );
-  const chainAssetIds = new Set(
-    buildLineageFamilyAssets({
-      selectedAssetId,
-      jobs,
-      currentAssets,
-      libraryAssets,
-    }).map((asset) => asset.id)
+    libraryAssets.filter((asset) => isDeliveryReady(asset) && !focusedIds.has(asset.id)).map((asset) => asset.id)
   );
 
   if (deliveryAssetIds.size) {
-    const deliveryItems = sortAssetsForReview(
-      libraryAssets.filter((asset) => deliveryAssetIds.has(asset.id)),
-      selectedAssetId
-    );
+    const deliveryItems = libraryAssets.filter((asset) => deliveryAssetIds.has(asset.id));
     sections.push({
       key: "delivery",
       title: t("imageWorkbench.gallerySections.deliveryTitle"),
@@ -127,42 +136,23 @@ export function buildGallerySections(options: {
     });
   }
 
-  if (chainAssetIds.size > 1) {
-    const chainItems = sortAssetsForReview(
-      libraryAssets.filter((asset) => chainAssetIds.has(asset.id) && !deliveryAssetIds.has(asset.id)),
-      selectedAssetId
-    );
-    sections.push({
-      key: "current-chain",
-      title: t("imageWorkbench.gallerySections.currentChainTitle"),
-      description: t("imageWorkbench.gallerySections.currentChainDesc"),
-      highlights: buildGallerySectionHighlights({
-        items: chainItems,
-        selectedAssetId,
-        jobs,
-        currentAssets,
-        libraryAssets,
-        t,
-      }),
-      items: chainItems,
-    });
-  }
-
   if (favorites.length) {
+    const favoriteItems = favorites.filter((asset) => !deliveryAssetIds.has(asset.id) && !focusedIds.has(asset.id));
     sections.push({
       key: "favorites",
       title: t("imageWorkbench.gallerySections.favoriteTitle"),
       description: t("imageWorkbench.gallerySections.favoriteDesc"),
-      items: favorites.filter((asset) => !chainAssetIds.has(asset.id) && !deliveryAssetIds.has(asset.id)),
+      items: favoriteItems,
     });
   }
 
   if (recent.length) {
+    const recentItems = recent.filter((asset) => !deliveryAssetIds.has(asset.id) && !focusedIds.has(asset.id));
     sections.push({
       key: "recent",
       title: t("imageWorkbench.gallerySections.libraryTitle"),
       description: t("imageWorkbench.gallerySections.libraryDesc"),
-      items: recent.filter((asset) => !chainAssetIds.has(asset.id) && !deliveryAssetIds.has(asset.id)),
+      items: recentItems,
     });
   }
 
@@ -175,6 +165,7 @@ export function buildSelectionContextItems(options: {
   t: (key: string) => string;
 }) {
   const { selectedMetadata, selectedModelRun, t } = options;
+  const referenceRoleSummary = buildReferenceRoleSummary(selectedMetadata?.personContextJson, t);
   const items = [
     {
       key: "mode",
@@ -191,9 +182,52 @@ export function buildSelectionContextItems(options: {
       label: t("imageWorkbench.review.contextModel"),
       value: selectedMetadata?.model || selectedModelRun?.model || "",
     },
+    {
+      key: "reference-roles",
+      label: t("imageWorkbench.review.contextReferenceRoles"),
+      value: referenceRoleSummary,
+    },
   ];
 
   return items.filter((item) => Boolean(item.value));
+}
+
+function buildReferenceRoleSummary(rawContext: string | null | undefined, t: (key: string) => string) {
+  const roles = parseReferenceRoles(rawContext);
+  if (!roles.length) {
+    return "";
+  }
+  return roles
+    .map((item) => `${item.index} ${t(`imageWorkbench.reference.roles.${item.role}`)}`)
+    .join(" · ");
+}
+
+function parseReferenceRoles(rawContext: string | null | undefined): Array<{ index: number; role: string }> {
+  if (!rawContext) {
+    return [];
+  }
+  try {
+    const parsed = JSON.parse(rawContext) as { referenceRoles?: unknown };
+    if (!Array.isArray(parsed.referenceRoles)) {
+      return [];
+    }
+    return parsed.referenceRoles
+      .map((item, fallbackIndex) => {
+        const record = item && typeof item === "object" ? (item as Record<string, unknown>) : {};
+        const role = String(record.role || "").trim();
+        if (!["person", "prop", "scene", "style"].includes(role)) {
+          return null;
+        }
+        const index = Number(record.index);
+        return {
+          index: Number.isFinite(index) && index > 0 ? Math.round(index) : fallbackIndex + 1,
+          role,
+        };
+      })
+      .filter((item): item is { index: number; role: string } => Boolean(item));
+  } catch {
+    return [];
+  }
 }
 
 export function buildRelatedAssetGroups(options: {
@@ -208,97 +242,274 @@ export function buildRelatedAssetGroups(options: {
     return [] as ImageWorkbenchRelatedAssetGroup[];
   }
 
-  const sameSeries = currentAssets
-    .concat(libraryAssets)
-    .filter((asset) => asset.jobId === selectedJobId && asset.id !== selectedAssetId);
+  const sameSeries = sortAssetsForReview(
+    buildSameGroupAssets(dedupeAssets(currentAssets.concat(libraryAssets)), selectedAssetId, selectedJobId),
+    selectedAssetId
+  ).slice(0, 4);
 
   if (!sameSeries.length) {
     return [] as ImageWorkbenchRelatedAssetGroup[];
   }
 
-  const favorited = sameSeries.filter((asset) => asset.favorite);
-  const variations = sameSeries.filter((asset) => !asset.favorite);
-  const groups: ImageWorkbenchRelatedAssetGroup[] = [];
-
-  if (variations.length) {
-    groups.push({
+  return [
+    {
       key: "variations",
       title: t("imageWorkbench.review.relatedVariationsTitle"),
       description: t("imageWorkbench.review.relatedVariationsDesc"),
-      items: variations.slice(0, 6),
-    });
-  }
-
-  if (favorited.length) {
-    groups.push({
-      key: "favorites",
-      title: t("imageWorkbench.review.relatedFavoritesTitle"),
-      description: t("imageWorkbench.review.relatedFavoritesDesc"),
-      items: favorited.slice(0, 6),
-    });
-  }
-
-  return groups;
+      items: sameSeries,
+    },
+  ];
 }
 
-export function buildVersionChain(options: {
+export function buildAssetRelationContext(options: {
   selectedAssetId: string;
-  selectedJobId: string;
-  currentJob: ImageWorkbenchJob | null;
-  jobs: ImageWorkbenchJob[];
+  currentAssets: ImageWorkbenchAssetCard[];
+  libraryAssets: ImageWorkbenchAssetCard[];
+}): ImageWorkbenchAssetRelationContext {
+  const { selectedAssetId, currentAssets, libraryAssets } = options;
+  const allAssets = dedupeAssets(currentAssets.concat(libraryAssets));
+  const selectedAsset = allAssets.find((asset) => asset.id === selectedAssetId) || null;
+  if (!selectedAsset) {
+    return {
+      selectedAsset: null,
+      directSourceAsset: null,
+      rootAsset: null,
+      compareSourceAsset: null,
+      groupAssets: [],
+      chainAssets: [],
+      branchAssets: [],
+      deliveryReady: false,
+      groupCount: 0,
+      chainCount: 0,
+      branchCount: 0,
+    };
+  }
+
+  const groupAssets = selectedAsset.groupId
+    ? allAssets.filter((asset) => asset.groupId === selectedAsset.groupId)
+    : [];
+  const chainRootId = selectedAsset.rootAssetId || selectedAsset.id;
+  const chainAssets = allAssets.filter((asset) =>
+    asset.id === chainRootId || asset.rootAssetId === chainRootId
+  );
+  const directSourceAsset = selectedAsset.parentAssetId
+    ? allAssets.find((asset) => asset.id === selectedAsset.parentAssetId) || null
+    : null;
+  const rootAsset = chainRootId && chainRootId !== selectedAsset.id
+    ? allAssets.find((asset) => asset.id === chainRootId) || null
+    : null;
+  const branchAssets = sortAssetsByVersion(
+    allAssets.filter((asset) => asset.parentAssetId === selectedAsset.id)
+  );
+
+  return {
+    selectedAsset,
+    directSourceAsset,
+    rootAsset,
+    compareSourceAsset: directSourceAsset || rootAsset,
+    groupAssets,
+    chainAssets,
+    branchAssets,
+    deliveryReady: isDeliveryReady(selectedAsset),
+    groupCount: groupAssets.length,
+    chainCount: chainAssets.length,
+    branchCount: branchAssets.length,
+  };
+}
+
+export function buildAssetLineageSummary(options: {
+  selectedAssetId: string;
   currentAssets: ImageWorkbenchAssetCard[];
   libraryAssets: ImageWorkbenchAssetCard[];
   t: (key: string) => string;
 }) {
-  // jobs / selectedJobId / currentJob 入参保留以兼容现有调用点；版本链现在直读
-  // 后端字段（asset.parentAssetId / versionIndex），不再依赖 job.sourceAssetId。
+  const { selectedAssetId, currentAssets, libraryAssets, t } = options;
+  if (!selectedAssetId) {
+    return [] as ImageWorkbenchLineageSummaryItem[];
+  }
+
+  const relation = buildAssetRelationContext({
+    selectedAssetId,
+    currentAssets,
+    libraryAssets,
+  });
+  if (!relation.selectedAsset) {
+    return [] as ImageWorkbenchLineageSummaryItem[];
+  }
+
+  return [
+    {
+      key: "group",
+      label: t("imageWorkbench.review.lineageGroup"),
+      value: relation.groupCount ? String(relation.groupCount) : t("imageWorkbench.review.lineageNoGroup"),
+      tone: relation.groupCount ? "primary" : "neutral",
+    },
+    {
+      key: "chain",
+      label: t("imageWorkbench.review.lineageChain"),
+      value: relation.chainCount > 1 ? String(relation.chainCount) : t("imageWorkbench.review.lineageNoChain"),
+      tone: relation.chainCount > 1 ? "primary" : "neutral",
+    },
+    {
+      key: "branches",
+      label: t("imageWorkbench.review.lineageBranches"),
+      value: String(relation.branchCount),
+      tone: relation.branchCount ? "warning" : "neutral",
+    },
+    {
+      key: "delivery",
+      label: t("imageWorkbench.gallerySections.badges.delivery"),
+      value: relation.deliveryReady
+        ? t("imageWorkbench.review.lineageDeliveryReady")
+        : t("imageWorkbench.review.lineageDeliveryDraft"),
+      tone: relation.deliveryReady ? "success" : "neutral",
+    },
+  ] as ImageWorkbenchLineageSummaryItem[];
+}
+
+function buildCurrentGroupSections(options: {
+  currentAssets: ImageWorkbenchAssetCard[];
+  currentGroups: ImageWorkbenchGroup[];
+  currentJob: ImageWorkbenchJob | null;
+  selectedAssetId: string;
+  t: (key: string) => string;
+}) {
+  const { currentAssets, currentGroups, currentJob, selectedAssetId, t } = options;
+  if (!currentAssets.length) {
+    return [] as ImageWorkbenchGallerySection[];
+  }
+
+  if (!currentGroups.length) {
+    return [
+      {
+        key: "current-batch",
+        title: t("imageWorkbench.gallerySections.currentTitle"),
+        description: currentJob
+          ? `${t(`imageWorkbench.jobStatuses.${currentJob.status}`)} · ${currentAssets.length}`
+          : t("imageWorkbench.gallerySections.currentDesc"),
+        items: currentAssets,
+      },
+    ];
+  }
+
+  const selectedAsset = currentAssets.find((asset) => asset.id === selectedAssetId);
+  const selectedGroupId = selectedAsset?.groupId || "";
+  const orderedGroups = selectedGroupId
+    ? [...currentGroups].sort((left, right) => Number(right.id === selectedGroupId) - Number(left.id === selectedGroupId))
+    : currentGroups;
+  const sections: ImageWorkbenchGallerySection[] = orderedGroups.map((group) => {
+    const items = currentAssets.filter((asset) => asset.groupId === group.id);
+    const selected = group.id === selectedGroupId;
+    return {
+      key: `group-${group.id}`,
+      title: group.name || t("imageWorkbench.groups.defaultName"),
+      description: buildGroupDescription(group, currentJob, items.length, t),
+      selected,
+      highlights: [
+        ...(selected
+          ? [
+              {
+                key: "selected",
+                label: t("imageWorkbench.gallerySections.currentGroup"),
+              },
+            ]
+          : []),
+        {
+          key: "count",
+          label: `${t("imageWorkbench.groups.count")} ${items.length || group.count}`,
+        },
+      ],
+      items,
+    };
+  });
+
+  const groupedIds = new Set(currentGroups.map((group) => group.id));
+  const ungrouped = currentAssets.filter((asset) => !asset.groupId || !groupedIds.has(asset.groupId));
+  if (ungrouped.length) {
+    sections.push({
+      key: "group-ungrouped",
+      title: t("imageWorkbench.groups.ungrouped"),
+      description: t("imageWorkbench.gallerySections.currentDesc"),
+      items: ungrouped,
+    });
+  }
+
+  return sections.filter((section) => section.items.length);
+}
+
+function buildGroupDescription(
+  group: ImageWorkbenchGroup,
+  currentJob: ImageWorkbenchJob | null,
+  itemCount: number,
+  t: (key: string) => string
+) {
+  const type = group.type ? t(`imageWorkbench.groups.types.${group.type}`) : t("imageWorkbench.groups.types.fresh");
+  const status = currentJob ? t(`imageWorkbench.jobStatuses.${currentJob.status}`) : "";
+  return [type, status, `${itemCount || group.count} ${t("imageWorkbench.groups.images")}`]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+function buildSameGroupAssets(
+  assets: ImageWorkbenchAssetCard[],
+  selectedAssetId: string,
+  selectedJobId: string
+) {
+  const selectedAsset = assets.find((asset) => asset.id === selectedAssetId);
+  const selectedGroupId = selectedAsset?.groupId || "";
+  if (selectedGroupId) {
+    const groupAssets = assets.filter(
+      (asset) => asset.groupId === selectedGroupId && asset.id !== selectedAssetId
+    );
+    if (groupAssets.length) {
+      return groupAssets;
+    }
+  }
+
+  return assets.filter((asset) => asset.jobId === selectedJobId && asset.id !== selectedAssetId);
+}
+
+export function buildVersionChain(options: {
+  selectedAssetId: string;
+  currentAssets: ImageWorkbenchAssetCard[];
+  libraryAssets: ImageWorkbenchAssetCard[];
+  t: (key: string) => string;
+}) {
   const { selectedAssetId, currentAssets, libraryAssets, t } = options;
   if (!selectedAssetId) {
     return [] as ImageWorkbenchVersionChainItem[];
   }
 
-  const allAssets = dedupeAssets(currentAssets.concat(libraryAssets));
-  const selectedAsset = allAssets.find((asset) => asset.id === selectedAssetId);
-  if (!selectedAsset) {
+  const relation = buildAssetRelationContext({
+    selectedAssetId,
+    currentAssets,
+    libraryAssets,
+  });
+  if (!relation.selectedAsset) {
     return [] as ImageWorkbenchVersionChainItem[];
   }
 
-  const sourceAsset = selectedAsset.parentAssetId
-    ? allAssets.find((asset) => asset.id === selectedAsset.parentAssetId) || null
-    : null;
-
-  // 后端的 versionIndex 升序代表演化先后；缺值兜底用 createdAtMs 升序。
-  const branchAssets = allAssets
-    .filter((asset) => asset.parentAssetId === selectedAssetId)
-    .sort((left, right) => {
-      const lv = left.versionIndex ?? Number.POSITIVE_INFINITY;
-      const rv = right.versionIndex ?? Number.POSITIVE_INFINITY;
-      if (lv !== rv) return lv - rv;
-      return left.createdAtMs - right.createdAtMs;
-    })
-    .slice(0, 3);
-
   const items: ImageWorkbenchVersionChainItem[] = [];
 
-  if (sourceAsset) {
+  if (relation.directSourceAsset) {
     items.push({
-      key: `source-${sourceAsset.id}`,
+      key: `source-${relation.directSourceAsset.id}`,
       label: t("imageWorkbench.review.versionSource"),
       description: t("imageWorkbench.review.versionSourceDesc"),
-      asset: sourceAsset,
+      asset: relation.directSourceAsset,
       tone: "source",
     });
   }
 
   items.push({
-    key: `selected-${selectedAsset.id}`,
+    key: `selected-${relation.selectedAsset.id}`,
     label: t("imageWorkbench.review.versionSelected"),
     description: t("imageWorkbench.review.versionSelectedDesc"),
-    asset: selectedAsset,
+    asset: relation.selectedAsset,
     tone: "selected",
   });
 
-  branchAssets.forEach((asset, index) => {
+  relation.branchAssets.slice(0, 3).forEach((asset, index) => {
     items.push({
       key: `branch-${asset.id}`,
       label: t("imageWorkbench.review.versionBranch"),
@@ -330,29 +541,39 @@ export function sortAssetsForReview(items: ImageWorkbenchAssetCard[], selectedAs
   });
 }
 
+function sortAssetsByVersion(items: ImageWorkbenchAssetCard[]) {
+  return [...items].sort((left, right) => {
+    const lv = left.versionIndex ?? Number.POSITIVE_INFINITY;
+    const rv = right.versionIndex ?? Number.POSITIVE_INFINITY;
+    if (lv !== rv) return lv - rv;
+    return left.createdAtMs - right.createdAtMs;
+  });
+}
+
 export function buildAssetBadges(options: {
   asset: ImageWorkbenchAssetCard;
   selectedAssetId: string;
-  jobs?: ImageWorkbenchJob[];
   currentAssets?: ImageWorkbenchAssetCard[];
   libraryAssets?: ImageWorkbenchAssetCard[];
   t: (key: string) => string;
 }) {
-  const { asset, selectedAssetId, jobs = [], currentAssets = [], libraryAssets = [], t } = options;
+  const { asset, selectedAssetId, currentAssets = [], libraryAssets = [], t } = options;
   const badges: ImageWorkbenchAssetBadge[] = [];
-  const lineageRole = resolveLineageRole({
-    assetId: asset.id,
+  const relation = buildAssetRelationContext({
     selectedAssetId,
-    jobs,
     currentAssets,
     libraryAssets,
   });
-  const deliveryCandidate = resolveDeliveryCandidate({
-    asset,
-    jobs,
-    currentAssets,
-    libraryAssets,
-  });
+  const lineageRole = resolveLineageRole(asset.id, relation);
+  const deliveryCandidate = isDeliveryReady(asset);
+
+  if (asset.integrityStatus && asset.integrityStatus !== "ok") {
+    badges.push({
+      key: `integrity-${asset.integrityStatus}`,
+      label: t(`imageWorkbench.gallerySections.badges.${asset.integrityStatus}`),
+      tone: "danger",
+    });
+  }
 
   if (deliveryCandidate) {
     badges.push({
@@ -407,27 +628,51 @@ export function buildAssetBadges(options: {
 
 export function buildCompareStrip(options: {
   currentAssets: ImageWorkbenchAssetCard[];
+  libraryAssets?: ImageWorkbenchAssetCard[];
   selectedAssetId: string;
 }) {
-  const { currentAssets, selectedAssetId } = options;
-  if (!currentAssets.length) {
+  const { currentAssets, libraryAssets = [], selectedAssetId } = options;
+  if (!selectedAssetId) {
     return [] as ImageWorkbenchCompareItem[];
   }
 
-  const sorted = sortAssetsForReview(currentAssets, selectedAssetId);
-  const selected = sorted.find((asset) => asset.id === selectedAssetId) || sorted[0];
-  const candidates = sorted.filter((asset) => asset.id !== selected.id).slice(0, 3);
+  const allAssets = dedupeAssets(currentAssets.concat(libraryAssets));
+  const relation = buildAssetRelationContext({
+    selectedAssetId,
+    currentAssets,
+    libraryAssets,
+  });
+  if (!relation.selectedAsset) {
+    return [] as ImageWorkbenchCompareItem[];
+  }
+  const selectedAsset = relation.selectedAsset;
+  const sourceAsset = relation.compareSourceAsset;
+  const candidatePool = currentAssets.length
+    ? currentAssets
+    : buildSameGroupAssets(allAssets, selectedAssetId, selectedAsset.jobId);
+  const candidates = sortAssetsForReview(candidatePool, selectedAssetId)
+    .filter((asset) => asset.id !== selectedAsset.id && asset.id !== sourceAsset?.id)
+    .slice(0, sourceAsset ? 2 : 3);
 
-  return [
-    {
-      asset: selected,
-      role: "selected",
-    },
+  const items: ImageWorkbenchCompareItem[] = [];
+  if (sourceAsset) {
+    items.push({
+      asset: sourceAsset,
+      role: "source",
+    });
+  }
+  items.push({
+    asset: selectedAsset,
+    role: "selected",
+  });
+  items.push(
     ...candidates.map((asset) => ({
       asset,
       role: "candidate" as const,
-    })),
-  ];
+    }))
+  );
+
+  return items;
 }
 
 function dedupeAssets(items: ImageWorkbenchAssetCard[]) {
@@ -440,146 +685,28 @@ function dedupeAssets(items: ImageWorkbenchAssetCard[]) {
   return [...map.values()];
 }
 
-function buildLineageFamilyAssets(options: {
-  selectedAssetId: string;
-  jobs: ImageWorkbenchJob[];
-  currentAssets: ImageWorkbenchAssetCard[];
-  libraryAssets: ImageWorkbenchAssetCard[];
-}) {
-  // jobs 入参保留以兼容现有调用点；聚族现在直读 asset.rootAssetId。
-  const { selectedAssetId, currentAssets, libraryAssets } = options;
-  if (!selectedAssetId) {
-    return [] as ImageWorkbenchAssetCard[];
-  }
-
-  const allAssets = dedupeAssets(currentAssets.concat(libraryAssets));
-  const selected = allAssets.find((asset) => asset.id === selectedAssetId);
-  // 选中资产没有 rootAssetId（自身就是链根）时，以自身 id 作为聚族锚点。
-  const rootId = selected?.rootAssetId || selectedAssetId;
-  return allAssets.filter((asset) => (asset.rootAssetId || asset.id) === rootId);
-}
-
-function buildGallerySectionHighlights(options: {
-  items: ImageWorkbenchAssetCard[];
-  selectedAssetId: string;
-  jobs: ImageWorkbenchJob[];
-  currentAssets: ImageWorkbenchAssetCard[];
-  libraryAssets: ImageWorkbenchAssetCard[];
-  t: (key: string) => string;
-}) {
-  const { items, selectedAssetId, jobs, currentAssets, libraryAssets, t } = options;
-  const counts = {
-    source: 0,
-    branch: 0,
-    delivery: 0,
-  };
-
-  items.forEach((asset) => {
-    const role = resolveLineageRole({
-      assetId: asset.id,
-      selectedAssetId,
-      jobs,
-      currentAssets,
-      libraryAssets,
-    });
-    if (role === "source") {
-      counts.source += 1;
-    }
-    if (role === "branch") {
-      counts.branch += 1;
-    }
-    if (
-      resolveDeliveryCandidate({
-        asset,
-        jobs,
-        currentAssets,
-        libraryAssets,
-      })
-    ) {
-      counts.delivery += 1;
-    }
-  });
-
-  return [
-    counts.source
-      ? {
-          key: "source",
-          label: `${t("imageWorkbench.gallerySections.badges.source")} ${counts.source}`,
-        }
-      : null,
-    counts.branch
-      ? {
-          key: "branch",
-          label: `${t("imageWorkbench.gallerySections.badges.branch")} ${counts.branch}`,
-        }
-      : null,
-    counts.delivery
-      ? {
-          key: "delivery",
-          label: `${t("imageWorkbench.gallerySections.badges.delivery")} ${counts.delivery}`,
-        }
-      : null,
-  ].filter((item): item is { key: string; label: string } => Boolean(item));
-}
-
-function resolveLineageRole(options: {
-  assetId: string;
-  selectedAssetId: string;
-  jobs: ImageWorkbenchJob[];
-  currentAssets: ImageWorkbenchAssetCard[];
-  libraryAssets: ImageWorkbenchAssetCard[];
-}) {
-  // jobs 入参保留以兼容现有调用点；角色判定现在直读 asset.rootAssetId / parentAssetId。
-  const { assetId, selectedAssetId, currentAssets, libraryAssets } = options;
-  if (!assetId || !selectedAssetId) {
+function resolveLineageRole(assetId: string, relation: ImageWorkbenchAssetRelationContext) {
+  if (!assetId || !relation.selectedAsset) {
     return "";
   }
 
-  if (assetId === selectedAssetId) {
+  if (assetId === relation.selectedAsset.id) {
     return "selected";
   }
 
-  const allAssets = dedupeAssets(currentAssets.concat(libraryAssets));
-  const selected = allAssets.find((asset) => asset.id === selectedAssetId);
-  // selected 的链根 = rootAssetId（若有）否则自身。命中即为 source。
-  if (assetId === (selected?.rootAssetId || selectedAssetId)) {
+  if (assetId === relation.compareSourceAsset?.id || assetId === relation.rootAsset?.id) {
     return "source";
   }
 
-  const asset = allAssets.find((item) => item.id === assetId);
-  if (asset?.parentAssetId === selectedAssetId) {
+  if (relation.branchAssets.some((asset) => asset.id === assetId)) {
     return "branch";
   }
 
   return "";
 }
 
-function resolveDeliveryCandidate(options: {
-  asset: ImageWorkbenchAssetCard;
-  jobs: ImageWorkbenchJob[];
-  currentAssets: ImageWorkbenchAssetCard[];
-  libraryAssets: ImageWorkbenchAssetCard[];
-}) {
-  // jobs 入参保留以兼容现有调用点；交付判定现在直读 asset.parentAssetId。
-  const { asset, currentAssets, libraryAssets } = options;
-  if (!asset.favorite) {
-    return false;
-  }
-
-  const allAssets = dedupeAssets(currentAssets.concat(libraryAssets));
-  // 有人以本资产为 parent → 还有后续分支，不算端点。
-  const hasChildBranch = allAssets.some((item) => item.parentAssetId === asset.id);
-  if (hasChildBranch) {
-    return false;
-  }
-
-  const assetIds = new Set(allAssets.map((item) => item.id));
-  // 上游有父（且父在当前集合）或下游有子节点（已在前面排除）→ 处于某条编辑链中。
-  const hasLineage =
-    Boolean(asset.parentAssetId && assetIds.has(asset.parentAssetId)) ||
-    allAssets.some((item) => item.parentAssetId === asset.id);
-
-  return hasLineage;
+function isDeliveryReady(asset: ImageWorkbenchAssetCard) {
+  return asset.deliveryStatus === "ready";
 }
 
 export function buildBranchActions(options: {
@@ -603,7 +730,7 @@ export function buildBranchActions(options: {
       description: t("imageWorkbench.branches.inpaintDesc"),
       actionLabel: t("imageWorkbench.asset.inpaint"),
       disabled: !canInpaint,
-      disabledReason: !canInpaint ? t("imageWorkbench.errors.maskRequired") : "",
+      disabledReason: !canInpaint ? t("imageWorkbench.errors.noSelectedAsset") : "",
     },
     {
       key: "person",

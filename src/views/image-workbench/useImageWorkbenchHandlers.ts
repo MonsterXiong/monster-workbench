@@ -16,7 +16,8 @@ type Store = ReturnType<typeof useImageWorkbenchStore>;
 export function buildImageWorkbenchHandlers(store: Store) {
   async function handleSelectReviewAsset(asset: ImageWorkbenchAssetCard) {
     if (asset.jobId && asset.jobId !== store.currentJob?.id) {
-      await store.selectJob(asset.jobId);
+      await store.selectJob(asset.jobId, asset.id);
+      return;
     }
     store.selectAsset(asset.id);
   }
@@ -50,29 +51,32 @@ export function buildImageWorkbenchHandlers(store: Store) {
     handleCancel: () => void store.cancelCurrentJob(),
     handleRetry: () => void store.retryFailedTasks(),
     handleDeleteJob: () => void store.deleteCurrentJob(),
+    handleCleanupDeletedAssets: () => void store.cleanupDeletedAssets(),
     handleSelectJob: (job: ImageWorkbenchJob) => void store.selectJob(job.id),
     handleToggleFavorite: (asset: ImageWorkbenchAsset) =>
       void store.toggleAssetFavorite(asset),
+    handleSetAssetRating: (asset: ImageWorkbenchAsset, rating: number | null) =>
+      void store.setAssetRating(asset, rating),
     handleApplyTemplate: (template: ImageWorkbenchTemplate) =>
       store.applyTemplate(template),
     handleDeleteTemplate: (template: ImageWorkbenchTemplate) =>
       void store.deleteTemplate(template.id),
-    handleSaveTemplate: () => void store.saveCurrentTemplate(),
+    handleImportGeneratedAssets: () => void store.importGeneratedAssetsFromFolder(),
     handleSelectReferenceImage: () => void store.selectReferenceImage(),
+    handleUseSelectedAssetAsReference: () => store.useSelectedAssetAsReference(),
+    handleToggleAssetReference: (assetId: string) => store.toggleAssetReference(assetId),
+    handleRemoveReferenceAsset: (assetId: string) => store.removeReferenceAsset(assetId),
+    handleRemoveUploadedReferenceImage: () => store.removeUploadedReferenceImage(),
     handleClearReferenceImage: () => store.clearReferenceImage(),
-    handleCopyExternalReversePrompt: () => void store.copyExternalReversePrompt(),
-    handleUseExternalReversePrompt: () => store.useExternalReversePrompt(),
     handleRefresh: () => void store.loadInitialState(),
     handleOpenAssetLocation: () => void store.openSelectedAssetLocation(),
     handleExportJob: () => void store.exportCurrentJob(),
     handleExportSelectedAsset: () => void store.exportSelectedAsset(),
     handleCopyMetaPrompt: () => void store.copySelectedMetaPrompt(),
     handleRegenerateSelectedAsset: () => void store.regenerateSelectedAsset(),
-    handleContinueSelectedStyle: () => void store.continueSelectedStyle(),
-    handleStartInpaintSelectedAsset: () => void store.startInpaintSelectedAsset(),
     handleContinueSelectedPerson: () => void store.continueSelectedPerson(),
-    handleUpscaleSelectedAsset: (scale: 2 | 4) =>
-      void store.upscaleSelectedAsset(scale),
+    handleFixSelectedAssetHands: () => store.startFixHandsSelectedAsset(),
+    handleFixSelectedAssetByQuality: () => void store.fixSelectedAssetByQualityIssue(),
     handleBranchAction,
     handleModelConfigChange,
   };
