@@ -11,7 +11,8 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 
-CAPABILITIES = ("img2img", "person_consistency", "inpaint")
+CAPABILITIES = ("img2img", "person_consistency", "inpaint", "upscale_2x", "upscale_4x")
+GPT_IMAGE_REFERENCE_CAPABILITIES = {"img2img", "person_consistency", "inpaint"}
 IMAGE_FAMILY = {
     "image",
     "txt2img",
@@ -25,6 +26,8 @@ ACTIVE_FALLBACKS = {
     "img2img": ("img2img", "image", "txt2img"),
     "person_consistency": ("person_consistency", "image", "txt2img"),
     "inpaint": ("inpaint", "image", "txt2img"),
+    "upscale_2x": ("upscale_2x",),
+    "upscale_4x": ("upscale_4x", "upscale_2x"),
 }
 SENSITIVE_KEY_PATTERN = re.compile(
     r"api[-_]?key|token|password|secret|credential|authorization",
@@ -177,7 +180,7 @@ def is_gpt_image_config(config):
 
 
 def has_capability(config, capability):
-    if capability in CAPABILITIES and is_gpt_image_config(config):
+    if capability in GPT_IMAGE_REFERENCE_CAPABILITIES and is_gpt_image_config(config):
         return True
     return capability in normalize_capabilities(config.get("capabilities"))
 
@@ -426,7 +429,7 @@ def summarize_config(config):
         "nativeImageEdit": [
             capability
             for capability in CAPABILITIES
-            if capability in capabilities or (capability in CAPABILITIES and is_gpt_image_config(config))
+            if capability in capabilities or (capability in GPT_IMAGE_REFERENCE_CAPABILITIES and is_gpt_image_config(config))
         ],
         "imageFallback": "image" in capabilities or "txt2img" in capabilities,
     }
@@ -457,6 +460,9 @@ def print_config_summary(config_root):
 def capability_prompt(capability, custom_prompt):
     if custom_prompt:
         return custom_prompt
+    if capability in {"upscale_2x", "upscale_4x"}:
+        scale = "4x" if capability == "upscale_4x" else "2x"
+        return "Upscale the source image to {0} without changing the person, subject, composition, or scene.".format(scale)
     if capability == "img2img":
         return "Create a new polished variation from the reference image while preserving the main subject."
     if capability == "inpaint":
@@ -541,6 +547,9 @@ def build_payload(config, capability, args, output_dir):
                 args.mask_rect,
             )
         options["maskPath"] = validate_file(mask_image, "mask image")
+    if capability in {"upscale_2x", "upscale_4x"}:
+        options["sourceImagePath"] = validate_file(source_image or (reference_images[0] if reference_images else ""), "source image")
+        options["scale"] = 4 if capability == "upscale_4x" else 2
     if capability == "person_consistency" and clean_text(args.person_context_json):
         options["personContextJson"] = clean_text(args.person_context_json)
 
@@ -579,6 +588,63 @@ def run_sidecar(payload, timeout_seconds):
             "rawPreview": stdout[:1000],
         }
     return process.returncode, result, stderr
+
+
+def parse_raw_preview(result):
+    preview = result.get("rawPreview")
+    if not isinstance(preview, str) or not preview.strip():
+        return None
+    try:
+        return json.loads(preview)
+    except json.JSONDecodeError:
+        return None
+
+
+def collect_named_ints(value, target_key):
+    matches = []
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if key == target_key:
+                try:
+                    matches.append(int(item))
+                except (TypeError, ValueError):
+                    pass
+            matches.extend(collect_named_ints(item, target_key))
+    elif isinstance(value, list):
+        for item in value:
+            matches.extend(collect_named_ints(item, target_key))
+    return matches
+
+
+def result_image_token_count(result):
+    parsed = parse_raw_preview(result)
+    if parsed is None:
+        return None
+    counts = collect_named_ints(parsed, "image_tokens")
+    return max(counts) if counts else None
+
+
+def validate_real_provider_result(capability, payload, result):
+    if not result.get("ok") or capability not in {"upscale_2x", "upscale_4x"}:
+        return result
+
+    image_token_count = result_image_token_count(result)
+    validation = {
+        "capability": capability,
+        "sourceImagePath": payload.get("generation", {}).get("options", {}).get("sourceImagePath"),
+        "imageTokenCount": image_token_count,
+    }
+    checked = dict(result)
+    checked["providerValidation"] = validation
+
+    if image_token_count == 0:
+        checked["ok"] = False
+        checked["failureKind"] = "source_image_not_used"
+        checked["message"] = (
+            "Provider returned an image, but reported image_tokens=0. "
+            "The source image was not used, so this is not stable upscale."
+        )
+    return checked
 
 
 def write_report(root, records):
@@ -636,6 +702,7 @@ def run_capability(config_root, capability, args, root):
         }
 
     return_code, result, stderr = run_sidecar(payload, timeout_seconds)
+    result = validate_real_provider_result(capability, payload, result)
     write_json(capability_dir / "result.sanitized.json", redact(result))
     if stderr:
         (capability_dir / "stderr.txt").write_text(stderr[:4000], encoding="utf-8")

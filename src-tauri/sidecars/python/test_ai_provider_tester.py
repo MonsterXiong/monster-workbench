@@ -1025,6 +1025,38 @@ class AiProviderTesterContractTest(unittest.TestCase):
             self.assertIn("does not support upscale_2x", result["message"])
             self.assertIsNone(self.server.last_image_body)
 
+    def test_openai_compatible_upscale_override_is_not_treated_as_native(self):
+        with tempfile.TemporaryDirectory(prefix="monster-ai-sidecar-upscale-override-") as temp_dir:
+            source_path = Path(temp_dir) / "source.png"
+            source_path.write_bytes(PNG_BYTES)
+            self.server.last_image_body = None
+            self.server.last_image_edit_raw = None
+            result = self.run_sidecar(
+                "image",
+                output_dir=temp_dir,
+                request_id="image-upscale-override-rejected",
+                config_patch={
+                    "capabilities": ["models", "chat", "image", "txt2img", "upscale_2x"],
+                },
+                generation={
+                    "capability": "upscale_2x",
+                    "prompt": "upscale source",
+                    "model": "image-test",
+                    "options": {
+                        "size": "1024x1024",
+                        "count": 1,
+                        "sourceImagePath": str(source_path),
+                        "scale": 2,
+                        "fallbackMode": "native",
+                    },
+                },
+            )
+
+            self.assertFalse(result["ok"], result)
+            self.assertIn("does not support upscale_2x", result["message"])
+            self.assertIsNone(self.server.last_image_body)
+            self.assertIsNone(self.server.last_image_edit_raw)
+
     def test_image_contract_does_not_fallback_size_after_disconnect(self):
         with tempfile.TemporaryDirectory(prefix="monster-ai-sidecar-fallback-size-") as temp_dir:
             result = self.run_sidecar(

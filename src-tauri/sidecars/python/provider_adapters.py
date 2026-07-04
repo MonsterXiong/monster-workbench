@@ -10,6 +10,7 @@ DEFAULT_MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 MAX_REFERENCE_IMAGE_BYTES = 25 * 1024 * 1024
 PROVIDER_REGISTRY_FILE_NAME = "ai-provider-registry.json"
 GPT_IMAGE_NATIVE_EDIT_CAPABILITIES = frozenset({"img2img", "inpaint", "person_consistency"})
+OPENAI_COMPATIBLE_UNVERIFIED_IMAGE_CAPABILITIES = frozenset({"upscale_2x", "upscale_4x"})
 AUDIO_RESPONSE_FORMAT_EXTENSIONS = {
     "mp3": ".mp3",
     "wav": ".wav",
@@ -630,14 +631,19 @@ class OpenAICompatibleAdapter(ProviderAdapter):
     capabilities = frozenset({"models", "chat", "image", "txt2img", "audio", "video"})
 
     def supports_capability(self, capability):
-        if capability in GPT_IMAGE_NATIVE_EDIT_CAPABILITIES and is_gpt_image_model(self.model):
+        clean_capability = str(capability or "").strip().lower()
+        if clean_capability in OPENAI_COMPATIBLE_UNVERIFIED_IMAGE_CAPABILITIES:
+            return False
+        if clean_capability in GPT_IMAGE_NATIVE_EDIT_CAPABILITIES and is_gpt_image_model(self.model):
             return True
-        return super().supports_capability(capability)
+        return super().supports_capability(clean_capability)
 
     def metadata(self):
         result = super().metadata()
+        capabilities = set(result["capabilities"]).difference(OPENAI_COMPATIBLE_UNVERIFIED_IMAGE_CAPABILITIES)
         if is_gpt_image_model(self.model):
-            result["capabilities"] = sorted(set(result["capabilities"]).union(GPT_IMAGE_NATIVE_EDIT_CAPABILITIES))
+            capabilities.update(GPT_IMAGE_NATIVE_EDIT_CAPABILITIES)
+        result["capabilities"] = sorted(capabilities)
         return result
 
     def _headers(self):
@@ -749,6 +755,12 @@ class OpenAICompatibleAdapter(ProviderAdapter):
     ):
         self.ensure_base_model()
         self.ensure_capability("image")
+        request = image_request if isinstance(image_request, dict) else {}
+        capability = clean_optional_text(request.get("capability")).lower()
+        if capability in OPENAI_COMPATIBLE_UNVERIFIED_IMAGE_CAPABILITIES:
+            raise ProviderCapabilityError(
+                "provider adapter {0} does not support {1}".format(self.adapter_id, capability)
+            )
         body = {
             "model": self.model,
             "prompt": prompt,

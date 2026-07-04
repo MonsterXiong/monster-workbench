@@ -83,14 +83,15 @@ export const AI_PROVIDER_CAPABILITIES: AiProviderCapability[] = [
 ];
 
 const GPT_IMAGE_NATIVE_CAPABILITIES = new Set<AiProviderCapability>(["img2img", "inpaint", "person_consistency"]);
+const OPENAI_COMPATIBLE_UNVERIFIED_CAPABILITIES = new Set<AiProviderCapability>(["upscale_2x", "upscale_4x"]);
 const AI_ACTIVE_CONFIG_FALLBACKS: Record<AiActiveConfigIdKey, AiActiveConfigIdKey[]> = {
   chat: ["chat"],
   image: ["image", "txt2img"],
   txt2img: ["txt2img", "image"],
   img2img: ["img2img", "image", "txt2img"],
   inpaint: ["inpaint", "image", "txt2img"],
-  upscale_2x: ["upscale_2x", "image", "txt2img"],
-  upscale_4x: ["upscale_4x", "upscale_2x", "image", "txt2img"],
+  upscale_2x: ["upscale_2x"],
+  upscale_4x: ["upscale_4x", "upscale_2x"],
   person_consistency: ["person_consistency", "image", "txt2img"],
   audio: ["audio", "chat"],
   video: ["video", "image", "txt2img"],
@@ -255,6 +256,12 @@ export function supportsAiProviderCapability(
   configLike: AiProviderCapabilityConfig,
   capability: AiProviderCapability
 ) {
+  if (
+    OPENAI_COMPATIBLE_UNVERIFIED_CAPABILITIES.has(capability) &&
+    resolveAiProviderAdapterId(configLike) === "openai-compatible"
+  ) {
+    return false;
+  }
   return (
     (GPT_IMAGE_NATIVE_CAPABILITIES.has(capability) &&
       toTrimmedString(configLike?.imageModel || configLike?.model).toLowerCase().startsWith("gpt-image-")) ||
@@ -484,7 +491,7 @@ export const useAiProviderStore = defineStore("ai-provider", () => {
   }
 
   function modelConfigSupportsCapability(configId: string, capability: AiProviderCapability) {
-    return getModelConfigCapabilities(configId).includes(capability);
+    return supportsAiProviderCapability(getModelConfig(configId), capability);
   }
 
   function getActiveModelConfigIdForCapability(capability: AiActiveConfigIdKey) {

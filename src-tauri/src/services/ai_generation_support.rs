@@ -225,8 +225,8 @@ pub(crate) fn business_active_config_keys(capability: &str) -> &'static [&'stati
         "image" | "txt2img" => &["txt2img", "image"],
         "img2img" => &["img2img", "image", "txt2img"],
         "inpaint" => &["inpaint", "image", "txt2img"],
-        "upscale_2x" => &["upscale_2x", "image", "txt2img"],
-        "upscale_4x" => &["upscale_4x", "upscale_2x", "image", "txt2img"],
+        "upscale_2x" => &["upscale_2x"],
+        "upscale_4x" => &["upscale_4x", "upscale_2x"],
         "person_consistency" => &["person_consistency", "image", "txt2img"],
         "audio" => &["audio", "chat"],
         "video" => &["video", "image", "txt2img"],
@@ -485,6 +485,15 @@ pub(crate) fn is_image_generation_capability(capability: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn upscale_business_config_keys_require_native_capability() {
+        assert_eq!(business_active_config_keys("upscale_2x"), &["upscale_2x"]);
+        assert_eq!(
+            business_active_config_keys("upscale_4x"),
+            &["upscale_4x", "upscale_2x"]
+        );
+    }
 
     #[test]
     fn image_prompt_describes_numbered_reference_roles() {
