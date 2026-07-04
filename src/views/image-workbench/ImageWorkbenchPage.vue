@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, markRaw, nextTick, onMounted, ref, type Component } from "vue";
+import { computed, nextTick, onMounted, ref } from "vue";
 import {
   Ban,
   BookTemplate,
@@ -39,8 +39,14 @@ import ImageWorkbenchCompareStrip from "./ImageWorkbenchCompareStrip.vue";
 import ImageWorkbenchInspector from "./ImageWorkbenchInspector.vue";
 import ImageWorkbenchLightbox from "./ImageWorkbenchLightbox.vue";
 import ImageWorkbenchMaskEditor from "./ImageWorkbenchMaskEditor.vue";
+import ImageWorkbenchTaskLauncher from "./ImageWorkbenchTaskLauncher.vue";
 import ImageWorkbenchTaskPanel from "./ImageWorkbenchTaskPanel.vue";
 import "./ImageWorkbenchPage.css";
+import {
+  getImageWorkbenchTaskPresetConfig,
+  type ImageWorkbenchTaskEntryKey,
+  type ImageWorkbenchTaskPresetKey,
+} from "./imageWorkbenchTaskLauncher";
 import type {
   ImageWorkbenchBackground,
   ImageWorkbenchGenerationQuality,
@@ -50,8 +56,6 @@ import type {
   ImageWorkbenchReferenceRole,
   ImageWorkbenchTemplate,
 } from "../../types/image-workbench";
-
-type ImageWorkbenchTaskEntryKey = "create" | "reference" | "edit" | "upscale" | "person" | "style";
 
 const { t } = useI18n();
 const { confirm } = useConfirm();
@@ -76,14 +80,6 @@ const qualityOptions: ImageWorkbenchGenerationQuality[] = ["auto", "low", "mediu
 const outputFormatOptions: ImageWorkbenchOutputFormat[] = ["png", "jpeg", "webp"];
 const backgroundOptions: ImageWorkbenchBackground[] = ["auto", "opaque"];
 const moderationOptions: ImageWorkbenchModeration[] = ["auto", "low"];
-const taskEntryIcons = {
-  create: markRaw(ImagePlus),
-  reference: markRaw(Images),
-  edit: markRaw(Eraser),
-  upscale: markRaw(Star),
-  person: markRaw(Sparkles),
-  style: markRaw(BookTemplate),
-};
 
 const baseSizeOptions = computed(() => buildImageSizeOptions(t));
 const currentJob = computed(() => imageWorkbenchStore.currentJob);
@@ -249,51 +245,6 @@ const referencePickMeta = computed(() =>
   })
 );
 const showsOutputCompression = computed(() => ["jpeg", "webp"].includes(imageWorkbenchStore.outputFormat));
-const taskEntries = computed(() =>
-  ([
-    {
-      key: "create",
-      icon: taskEntryIcons.create,
-      title: t("imageWorkbench.tasks.create"),
-      description: t("imageWorkbench.tasks.createDesc"),
-    },
-    {
-      key: "reference",
-      icon: taskEntryIcons.reference,
-      title: t("imageWorkbench.tasks.reference"),
-      description: t("imageWorkbench.tasks.referenceDesc"),
-    },
-    {
-      key: "edit",
-      icon: taskEntryIcons.edit,
-      title: t("imageWorkbench.tasks.edit"),
-      description: t("imageWorkbench.tasks.editDesc"),
-    },
-    {
-      key: "upscale",
-      icon: taskEntryIcons.upscale,
-      title: t("imageWorkbench.tasks.upscale"),
-      description: t("imageWorkbench.tasks.upscaleDesc"),
-    },
-    {
-      key: "person",
-      icon: taskEntryIcons.person,
-      title: t("imageWorkbench.tasks.person"),
-      description: t("imageWorkbench.tasks.personDesc"),
-    },
-    {
-      key: "style",
-      icon: taskEntryIcons.style,
-      title: t("imageWorkbench.tasks.style"),
-      description: t("imageWorkbench.tasks.styleDesc"),
-    },
-  ] satisfies Array<{
-    key: ImageWorkbenchTaskEntryKey;
-    icon: Component;
-    title: string;
-    description: string;
-  }>)
-);
 
 function modeLabel(mode: ImageWorkbenchMode | string) {
   return t(`imageWorkbench.modes.${mode}`);
@@ -374,6 +325,31 @@ function handleTaskEntrySelect(key: ImageWorkbenchTaskEntryKey) {
   imageWorkbenchStore.notice = imageWorkbenchStore.hasReferenceImage || selectedAsset.value
     ? t("imageWorkbench.tasks.styleNotice")
     : t("imageWorkbench.tasks.needReferenceNotice");
+  focusPromptInput();
+}
+
+function appendPromptSegment(current: string, segment: string) {
+  const cleanCurrent = current.trim();
+  const cleanSegment = segment.trim();
+  if (!cleanCurrent) {
+    return cleanSegment;
+  }
+  if (!cleanSegment) {
+    return cleanCurrent;
+  }
+  return /[，。；、,.;\s]$/u.test(cleanCurrent)
+    ? `${cleanCurrent}${cleanSegment}`
+    : `${cleanCurrent}，${cleanSegment}`;
+}
+
+function handleTaskPresetApply(key: ImageWorkbenchTaskPresetKey) {
+  const preset = getImageWorkbenchTaskPresetConfig(key);
+  if (!preset) {
+    return;
+  }
+  const currentPrompt = imageWorkbenchStore.prompt.trim();
+  handleTaskEntrySelect(preset.entryKey);
+  imageWorkbenchStore.prompt = appendPromptSegment(currentPrompt, t(preset.promptKey));
   focusPromptInput();
 }
 
@@ -592,22 +568,11 @@ onMounted(async () => {
             <span>{{ t("imageWorkbench.input.title") }}</span>
           </div>
           <div class="image-workbench-form">
-            <section class="image-workbench-task-launcher">
-              <button
-                v-for="entry in taskEntries"
-                :key="entry.key"
-                type="button"
-                class="image-workbench-task-entry"
-                :class="{ 'is-active': activeTaskEntry === entry.key }"
-                @click="handleTaskEntrySelect(entry.key)"
-              >
-                <component :is="entry.icon" class="h-3.5 w-3.5" />
-                <span>
-                  <strong>{{ entry.title }}</strong>
-                  <small>{{ entry.description }}</small>
-                </span>
-              </button>
-            </section>
+            <ImageWorkbenchTaskLauncher
+              :active-key="activeTaskEntry"
+              @select="handleTaskEntrySelect"
+              @apply-preset="handleTaskPresetApply"
+            />
             <div v-if="imageWorkbenchStore.isModeDeferred" class="image-workbench-notice">
               {{ t("imageWorkbench.errors.modeDeferred") }}
             </div>

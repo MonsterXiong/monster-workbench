@@ -120,6 +120,15 @@
   @apply text-primary;
 }
 
+.image-workbench-task-presets {
+  @apply flex flex-wrap gap-1.5;
+  grid-column: 1 / -1;
+}
+
+.image-workbench-task-presets button {
+  @apply inline-flex h-7 items-center rounded-md border border-slate-200 bg-slate-50 px-2 text-[11px] font-black text-slate-600 transition hover:border-primary/40 hover:bg-white hover:text-primary dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-950;
+}
+
 .image-workbench-form label {
   @apply block space-y-1.5;
 }
