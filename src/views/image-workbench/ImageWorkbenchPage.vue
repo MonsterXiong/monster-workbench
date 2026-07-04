@@ -292,9 +292,21 @@ const referencePickMeta = computed(() =>
 );
 const showsOutputCompression = computed(() => ["jpeg", "webp"].includes(imageWorkbenchStore.outputFormat));
 const showsReferenceInput = computed(() => ["reference", "person", "style"].includes(activeTaskEntry.value));
-const showsPromptInput = computed(() => activeTaskEntry.value !== "upscale");
-const showsQuantityInput = computed(() => activeTaskEntry.value !== "upscale");
-const showsSizeInput = computed(() => activeTaskEntry.value !== "upscale");
+const showsPromptInput = computed(() =>
+  activeTaskEntry.value !== "upscale" && !(activeTaskEntry.value === "edit" && !selectedAsset.value)
+);
+const showsQuantityInput = computed(() => !["edit", "upscale"].includes(activeTaskEntry.value));
+const showsSizeInput = computed(() => !["edit", "upscale"].includes(activeTaskEntry.value));
+const promptLabel = computed(() =>
+  activeTaskEntry.value === "edit"
+    ? t("imageWorkbench.input.editPrompt")
+    : t("imageWorkbench.input.prompt")
+);
+const promptPlaceholder = computed(() =>
+  activeTaskEntry.value === "edit"
+    ? t("imageWorkbench.input.editPromptPlaceholder")
+    : t("imageWorkbench.input.promptPlaceholder")
+);
 const upscaleScaleOptions = computed(() => [
   {
     scale: 2 as const,
@@ -318,15 +330,19 @@ const canSubmitCurrentTask = computed(() => {
     : imageWorkbenchStore.canRunUpscale2x;
 });
 const modeUnavailableNotice = computed(() =>
-  activeTaskEntry.value === "upscale" && canSubmitCurrentTask.value
+  (activeTaskEntry.value === "upscale" && canSubmitCurrentTask.value) ||
+  (activeTaskEntry.value === "edit" && selectedAsset.value && !imageWorkbenchStore.hasInpaintMask)
     ? ""
     : imageWorkbenchStore.modeUnavailableReason
 );
 const activeTaskGuidance = computed(() => {
   if (activeTaskEntry.value === "edit") {
-    return selectedAsset.value
-      ? t("imageWorkbench.input.guidance.editReady")
-      : t("imageWorkbench.input.guidance.editNeedImage");
+    if (!selectedAsset.value) {
+      return t("imageWorkbench.input.guidance.editNeedImage");
+    }
+    return imageWorkbenchStore.hasInpaintMask
+      ? t("imageWorkbench.input.guidance.editMaskReady")
+      : t("imageWorkbench.input.guidance.editReady");
   }
   if (activeTaskEntry.value === "upscale") {
     return selectedAsset.value
@@ -345,7 +361,10 @@ const activeTaskGuidance = computed(() => {
   return "";
 });
 const activeTaskGuidanceReady = computed(() => {
-  if (activeTaskEntry.value === "edit" || activeTaskEntry.value === "upscale") {
+  if (activeTaskEntry.value === "edit") {
+    return Boolean(selectedAsset.value && imageWorkbenchStore.hasInpaintMask);
+  }
+  if (activeTaskEntry.value === "upscale") {
     return Boolean(selectedAsset.value);
   }
   if (activeTaskEntry.value === "reference") {
@@ -760,11 +779,11 @@ onMounted(async () => {
               </div>
             </section>
             <label v-if="showsPromptInput">
-              <span>{{ t("imageWorkbench.input.prompt") }}</span>
+              <span>{{ promptLabel }}</span>
               <textarea
                 ref="promptTextareaRef"
                 v-model="imageWorkbenchStore.prompt"
-                :placeholder="t('imageWorkbench.input.promptPlaceholder')"
+                :placeholder="promptPlaceholder"
               ></textarea>
             </label>
             <div v-if="showsReferenceInput && imageWorkbenchStore.hasReferenceImage" class="image-workbench-reference-tokens">

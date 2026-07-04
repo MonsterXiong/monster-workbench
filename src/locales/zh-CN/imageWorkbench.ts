@@ -36,6 +36,8 @@ export default {
     modelConfigSupported: "可生图",
     modelConfigUnsupported: "不支持生图",
     promptPlaceholder: "描述要生成的画面",
+    editPrompt: "修改要求",
+    editPromptPlaceholder: "描述要改成什么",
     negativePlaceholder: "不想出现的内容",
     upscaleTitle: "清晰度",
     upscale2x: "2x",
@@ -49,6 +51,7 @@ export default {
     guidance: {
       editNeedImage: "先在中间选图，再涂抹要修改的区域。",
       editReady: "去中间涂抹要修改的区域。",
+      editMaskReady: "已选好区域，描述要改成什么。",
       upscaleNeedImage: "先在中间选图，再提高清晰度。",
       upscaleReady: "将基于选中图提高清晰度。",
       referenceNeedImage: "上传参考图，或从图库选图。",

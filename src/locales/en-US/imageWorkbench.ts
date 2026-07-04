@@ -36,6 +36,8 @@ export default {
     modelConfigSupported: "Image ready",
     modelConfigUnsupported: "No image support",
     promptPlaceholder: "Describe the image",
+    editPrompt: "Edit request",
+    editPromptPlaceholder: "Describe the change",
     negativePlaceholder: "What to avoid",
     upscaleTitle: "Clarity",
     upscale2x: "2x",
@@ -49,6 +51,7 @@ export default {
     guidance: {
       editNeedImage: "Pick an image in the center, then paint the area to edit.",
       editReady: "Paint the area to edit in the center.",
+      editMaskReady: "Area selected. Describe the change.",
       upscaleNeedImage: "Pick an image in the center, then improve clarity.",
       upscaleReady: "Clarity will be improved from the selected image.",
       referenceNeedImage: "Upload a reference or pick one from the gallery.",
