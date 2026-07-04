@@ -8,7 +8,6 @@ import {
   Download,
   Eraser,
   FolderOpen,
-  Info,
   ImagePlus,
   Images,
   ListChecks,
@@ -19,6 +18,7 @@ import {
   Sparkles,
   Star,
   Trash2,
+  X,
 } from "lucide-vue-next";
 import { useConfirm } from "../../composables/useConfirm";
 import { useI18n } from "../../composables/useI18n";
@@ -64,7 +64,7 @@ const imageWorkbenchStore = useImageWorkbenchStore();
 const galleryTab = ref<"current" | "library">("current");
 const galleryLibraryFilter = ref<ImageWorkbenchLibraryFilter>("recent");
 const templatePickerOpen = ref(false);
-const sidePanel = ref<"tasks" | "details">("details");
+const taskDrawerOpen = ref(false);
 const referencePickMode = ref(false);
 const activeTaskEntry = ref<ImageWorkbenchTaskEntryKey>("create");
 const promptTextareaRef = ref<HTMLTextAreaElement | null>(null);
@@ -96,6 +96,48 @@ const canReturnToLatestJob = computed(() =>
 const currentJobStatusText = computed(() => {
   const status = currentJob.value?.status;
   return status ? t(`imageWorkbench.jobStatuses.${status}`) : t("imageWorkbench.taskbar.waiting");
+});
+const taskbarProgressLabel = computed(() =>
+  formatTemplate(t("imageWorkbench.taskbar.progressLabel"), {
+    finished: imageWorkbenchStore.jobProgress.finished,
+    total: imageWorkbenchStore.jobProgress.total,
+    percent: imageWorkbenchStore.jobProgress.percent,
+  })
+);
+const taskbarTone = computed(() => {
+  if (imageWorkbenchStore.jobProgress.failed || imageWorkbenchStore.canRetryFailedTasks) {
+    return "failed";
+  }
+  if (imageWorkbenchStore.generating || imageWorkbenchStore.jobProgress.running) {
+    return "running";
+  }
+  if (currentJob.value) {
+    return "done";
+  }
+  return "idle";
+});
+const taskbarStatusLabel = computed(() => {
+  if (taskbarTone.value === "failed") {
+    return t("imageWorkbench.taskbar.statusFailed");
+  }
+  if (taskbarTone.value === "running") {
+    return t("imageWorkbench.taskbar.statusRunning");
+  }
+  return currentJobStatusText.value;
+});
+const taskbarStatusMeta = computed(() => {
+  if (!currentJob.value) {
+    return t("imageWorkbench.taskbar.statusEmpty");
+  }
+  if (!imageWorkbenchStore.jobProgress.total) {
+    return formatTemplate(t("imageWorkbench.taskbar.jobQuantity"), {
+      count: currentJob.value.quantity,
+    });
+  }
+  return formatTemplate(t("imageWorkbench.taskbar.statusMeta"), {
+    progress: taskbarProgressLabel.value,
+    count: currentJob.value.quantity,
+  });
 });
 const visibleAssetCards = computed(() =>
   galleryTab.value === "current"
@@ -603,8 +645,8 @@ async function handleSaveTemplateFromPicker() {
 }
 
 async function handleGenerate() {
-  sidePanel.value = "tasks";
   if (activeTaskEntry.value === "upscale") {
+    taskDrawerOpen.value = true;
     await imageWorkbenchStore.upscaleSelectedAsset(upscaleScale.value);
     return;
   }
@@ -621,6 +663,7 @@ async function handleGenerate() {
       return;
     }
   }
+  taskDrawerOpen.value = true;
   await imageWorkbenchStore.runTxt2imgBatch();
 }
 
@@ -676,11 +719,9 @@ async function handleSelectAssetAndShowDetails(asset: ImageWorkbenchAssetCard) {
   if (referencePickMode.value) {
     imageWorkbenchStore.selectAsset(asset.id);
     handleToggleAssetReference(asset.id);
-    sidePanel.value = "details";
     return;
   }
   await handleSelectReviewAsset(asset);
-  sidePanel.value = "details";
 }
 
 function handleUseSelectedReference() {
@@ -689,7 +730,6 @@ function handleUseSelectedReference() {
 
 function handlePickReferenceFromLibrary() {
   galleryTab.value = "library";
-  sidePanel.value = "details";
   referencePickMode.value = true;
   imageWorkbenchStore.notice = t("imageWorkbench.reference.pickFromLibraryNotice");
 }
@@ -707,11 +747,11 @@ async function handleReturnToLatestJob() {
   }
   galleryTab.value = "current";
   await imageWorkbenchStore.selectJob(latestJob.value.id);
-  sidePanel.value = imageWorkbenchStore.generating ? "tasks" : "details";
+  taskDrawerOpen.value = imageWorkbenchStore.generating;
 }
 
 function handleRetryAndShowTasks() {
-  sidePanel.value = "tasks";
+  taskDrawerOpen.value = true;
   handleRetry();
 }
 
@@ -1070,7 +1110,7 @@ onMounted(async () => {
               <Clock3 class="h-3.5 w-3.5" />
               {{ t("imageWorkbench.workspace.returnLatest") }}
             </button>
-            <button v-if="imageWorkbenchStore.generating && sidePanel !== 'tasks'" type="button" @click="sidePanel = 'tasks'">
+            <button v-if="imageWorkbenchStore.generating && !taskDrawerOpen" type="button" @click="taskDrawerOpen = true">
               <ListChecks class="h-3.5 w-3.5" />
               {{ t("imageWorkbench.workspace.viewTasks") }}
             </button>
@@ -1240,26 +1280,53 @@ onMounted(async () => {
       </section>
 
       <aside class="image-workbench-right-rail">
-        <div class="image-workbench-side-switcher">
-          <button type="button" :class="{ 'is-active': sidePanel === 'details' }" @click="sidePanel = 'details'">
-            <Info class="h-3.5 w-3.5" />
-            <span>{{ t("imageWorkbench.details.title") }}</span>
-          </button>
-          <button type="button" :class="{ 'is-active': sidePanel === 'tasks' }" @click="sidePanel = 'tasks'">
-            <ListChecks class="h-3.5 w-3.5" />
-            <span>{{ t("imageWorkbench.taskbar.title") }}</span>
-          </button>
-        </div>
-        <ImageWorkbenchTaskPanel v-if="sidePanel === 'tasks'" />
         <ImageWorkbenchInspector
-          v-else
           @preview="openAssetPreview"
-          @show-tasks="sidePanel = 'tasks'"
+          @show-tasks="taskDrawerOpen = true"
           @sync-task-entry="handleInspectorTaskEntrySync"
           @task-entry-change="handleInspectorTaskEntryChange"
         />
       </aside>
     </section>
+
+    <section class="image-workbench-task-status" :class="`is-${taskbarTone}`">
+      <div class="image-workbench-task-status__main">
+        <ListChecks class="h-4 w-4" />
+        <span>
+          <strong>{{ taskbarStatusLabel }}</strong>
+          <small>{{ taskbarStatusMeta }}</small>
+        </span>
+      </div>
+      <div class="image-workbench-task-status__progress" aria-hidden="true">
+        <i :style="{ width: `${imageWorkbenchStore.jobProgress.percent}%` }"></i>
+      </div>
+      <button type="button" class="image-workbench-secondary" @click="taskDrawerOpen = true">
+        <ListChecks class="h-3.5 w-3.5" />
+        {{ t("imageWorkbench.workspace.viewTasks") }}
+      </button>
+    </section>
+
+    <div
+      v-if="taskDrawerOpen"
+      class="image-workbench-task-drawer"
+      role="dialog"
+      aria-modal="true"
+      :aria-label="t('imageWorkbench.taskbar.title')"
+      @click.self="taskDrawerOpen = false"
+    >
+      <aside class="image-workbench-task-drawer__panel">
+        <div class="image-workbench-task-drawer__head">
+          <span>
+            <strong>{{ t("imageWorkbench.taskbar.title") }}</strong>
+            <small>{{ taskbarStatusMeta }}</small>
+          </span>
+          <button type="button" :aria-label="t('common.close')" @click="taskDrawerOpen = false">
+            <X class="h-4 w-4" />
+          </button>
+        </div>
+        <ImageWorkbenchTaskPanel />
+      </aside>
+    </div>
 
     <ImageWorkbenchLightbox
       :asset="previewAsset"

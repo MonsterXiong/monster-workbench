@@ -528,6 +528,10 @@ export default {
   taskbar: {
     title: "Tasks",
     waiting: "No queued jobs",
+    statusRunning: "Generating",
+    statusFailed: "Needs retry",
+    statusEmpty: "Running, done, or failed jobs will appear here",
+    statusMeta: "{progress} · {count} total",
     jobProgressFallback: "{status} · {count} images",
     jobQuantity: "{count} images",
     progressLabel: "{finished}/{total}",

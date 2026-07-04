@@ -528,6 +528,10 @@ export default {
   taskbar: {
     title: "任务",
     waiting: "暂无队列",
+    statusRunning: "生成中",
+    statusFailed: "有失败项",
+    statusEmpty: "生成中、完成、失败会显示在这里",
+    statusMeta: "{progress} · 共 {count} 张",
     jobProgressFallback: "{status} · {count} 张",
     jobQuantity: "{count} 张",
     progressLabel: "{finished}/{total}",
