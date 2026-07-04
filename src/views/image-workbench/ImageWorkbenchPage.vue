@@ -293,7 +293,9 @@ const referencePickMeta = computed(() =>
 const showsOutputCompression = computed(() => ["jpeg", "webp"].includes(imageWorkbenchStore.outputFormat));
 const showsReferenceInput = computed(() => ["reference", "person", "style"].includes(activeTaskEntry.value));
 const showsPromptInput = computed(() =>
-  activeTaskEntry.value !== "upscale" && !(activeTaskEntry.value === "edit" && !selectedAsset.value)
+  activeTaskEntry.value !== "upscale" &&
+  !(activeTaskEntry.value === "edit" && !selectedAsset.value) &&
+  !(showsReferenceInput.value && !activeTaskGuidanceReady.value)
 );
 const showsQuantityInput = computed(() => !["edit", "upscale"].includes(activeTaskEntry.value));
 const showsSizeInput = computed(() => !["edit", "upscale"].includes(activeTaskEntry.value));
@@ -778,14 +780,6 @@ onMounted(async () => {
                 </button>
               </div>
             </section>
-            <label v-if="showsPromptInput">
-              <span>{{ promptLabel }}</span>
-              <textarea
-                ref="promptTextareaRef"
-                v-model="imageWorkbenchStore.prompt"
-                :placeholder="promptPlaceholder"
-              ></textarea>
-            </label>
             <section v-if="showsReferenceInput" class="image-workbench-reference">
               <div class="image-workbench-reference__head">
                 <div class="image-workbench-reference__title">
@@ -890,6 +884,14 @@ onMounted(async () => {
                 <button type="button" @click="handleClearReferenceImage">{{ t("imageWorkbench.reference.clear") }}</button>
               </div>
             </section>
+            <label v-if="showsPromptInput">
+              <span>{{ promptLabel }}</span>
+              <textarea
+                ref="promptTextareaRef"
+                v-model="imageWorkbenchStore.prompt"
+                :placeholder="promptPlaceholder"
+              ></textarea>
+            </label>
             <div v-if="showsQuantityInput || showsSizeInput" class="image-workbench-form__grid">
               <label v-if="showsQuantityInput">
                 <span>{{ t("imageWorkbench.input.quantity") }}</span>
