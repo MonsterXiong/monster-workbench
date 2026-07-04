@@ -32,6 +32,7 @@ import {
   buildCompareStrip,
   buildGallerySections,
   buildVersionChain,
+  type ImageWorkbenchLibraryFilter,
 } from "./imageWorkbenchReview";
 import { useImageWorkbenchImageFallback } from "./useImageWorkbenchImageFallback";
 import { buildImageWorkbenchHandlers } from "./useImageWorkbenchHandlers";
@@ -61,6 +62,7 @@ const { t } = useI18n();
 const { confirm } = useConfirm();
 const imageWorkbenchStore = useImageWorkbenchStore();
 const galleryTab = ref<"current" | "library">("current");
+const galleryLibraryFilter = ref<ImageWorkbenchLibraryFilter>("recent");
 const templatePickerOpen = ref(false);
 const sidePanel = ref<"tasks" | "details">("details");
 const referencePickMode = ref(false);
@@ -80,9 +82,20 @@ const qualityOptions: ImageWorkbenchGenerationQuality[] = ["auto", "low", "mediu
 const outputFormatOptions: ImageWorkbenchOutputFormat[] = ["png", "jpeg", "webp"];
 const backgroundOptions: ImageWorkbenchBackground[] = ["auto", "opaque"];
 const moderationOptions: ImageWorkbenchModeration[] = ["auto", "low"];
+const libraryFilterKeys: ImageWorkbenchLibraryFilter[] = ["recent", "favorite", "person", "style", "delivery"];
 
 const baseSizeOptions = computed(() => buildImageSizeOptions(t));
 const currentJob = computed(() => imageWorkbenchStore.currentJob);
+const libraryJobById = computed(() => {
+  const map = new Map(imageWorkbenchStore.jobs.map((job) => [job.id, job]));
+  if (currentJob.value) {
+    map.set(currentJob.value.id, currentJob.value);
+  }
+  return map;
+});
+const filteredLibraryAssetCards = computed(() =>
+  imageWorkbenchStore.libraryAssetCards.filter((asset) => matchesLibraryFilter(asset, galleryLibraryFilter.value))
+);
 const latestJob = computed(() => imageWorkbenchStore.jobs[0] || null);
 const canReturnToLatestJob = computed(() =>
   Boolean(latestJob.value && latestJob.value.id !== imageWorkbenchStore.selectedJobId)
@@ -94,8 +107,29 @@ const currentJobStatusText = computed(() => {
 const visibleAssetCards = computed(() =>
   galleryTab.value === "current"
     ? imageWorkbenchStore.currentAssetCards
-    : imageWorkbenchStore.libraryAssetCards
+    : filteredLibraryAssetCards.value
 );
+const libraryFilterOptions = computed(() => {
+  const counts: Record<ImageWorkbenchLibraryFilter, number> = {
+    recent: imageWorkbenchStore.libraryAssetCards.length,
+    favorite: 0,
+    person: 0,
+    style: 0,
+    delivery: 0,
+  };
+  imageWorkbenchStore.libraryAssetCards.forEach((asset) => {
+    libraryFilterKeys.forEach((key) => {
+      if (key !== "recent" && matchesLibraryFilter(asset, key)) {
+        counts[key] += 1;
+      }
+    });
+  });
+  return libraryFilterKeys.map((key) => ({
+    key,
+    label: t(`imageWorkbench.workspace.libraryFilters.${key}`),
+    count: counts[key],
+  }));
+});
 const lightboxAssetCards = computed(() => {
   const map = new Map<string, ImageWorkbenchAssetCard>();
   visibleAssetCards.value
@@ -144,8 +178,9 @@ const referenceRoleOptions = computed(() =>
 const gallerySections = computed(() =>
   buildGallerySections({
     galleryTab: galleryTab.value,
+    libraryFilter: galleryLibraryFilter.value,
     currentAssets: imageWorkbenchStore.currentAssetCards,
-    libraryAssets: imageWorkbenchStore.libraryAssetCards,
+    libraryAssets: filteredLibraryAssetCards.value,
     currentGroups: imageWorkbenchStore.currentGroups,
     currentJob: currentJob.value,
     selectedAssetId: selectedAsset.value?.id || "",
@@ -227,6 +262,16 @@ const workspaceContextMeta = computed(() =>
         status: currentJobStatusText.value,
       })
 );
+const workspaceEmptyTitle = computed(() =>
+  galleryTab.value === "library" && imageWorkbenchStore.libraryAssetCards.length
+    ? t("imageWorkbench.workspace.filterEmptyTitle")
+    : t("imageWorkbench.workspace.emptyTitle")
+);
+const workspaceEmptyDesc = computed(() =>
+  galleryTab.value === "library" && imageWorkbenchStore.libraryAssetCards.length
+    ? t("imageWorkbench.workspace.filterEmptyDesc")
+    : t("imageWorkbench.workspace.emptyDesc")
+);
 
 const largeBatchHint = computed(() =>
   formatTemplate(t("imageWorkbench.input.largeBatchHint"), {
@@ -284,6 +329,23 @@ const activeTaskGuidanceReady = computed(() => {
 
 function modeLabel(mode: ImageWorkbenchMode | string) {
   return t(`imageWorkbench.modes.${mode}`);
+}
+
+function matchesLibraryFilter(asset: ImageWorkbenchAssetCard, filter: ImageWorkbenchLibraryFilter) {
+  if (filter === "recent") {
+    return true;
+  }
+  if (filter === "favorite") {
+    return asset.favorite;
+  }
+  if (filter === "delivery") {
+    return asset.deliveryStatus === "ready";
+  }
+  const jobMode = libraryJobById.value.get(asset.jobId)?.mode;
+  if (filter === "person") {
+    return jobMode === "person_consistency";
+  }
+  return jobMode === "img2img";
 }
 
 function syncTaskEntryFromMode() {
@@ -912,6 +974,23 @@ onMounted(async () => {
               {{ t("imageWorkbench.workspace.viewTasks") }}
             </button>
           </div>
+          <div
+            v-if="galleryTab === 'library'"
+            class="image-workbench-library-filters"
+            role="group"
+            :aria-label="t('imageWorkbench.workspace.libraryFilterAria')"
+          >
+            <button
+              v-for="item in libraryFilterOptions"
+              :key="item.key"
+              type="button"
+              :class="{ 'is-active': galleryLibraryFilter === item.key }"
+              @click="galleryLibraryFilter = item.key"
+            >
+              <span>{{ item.label }}</span>
+              <small>{{ item.count }}</small>
+            </button>
+          </div>
           <div v-if="showWorkspaceFocus" class="image-workbench-asset-focus">
             <div class="image-workbench-asset-focus__head">
               <span>{{ t("imageWorkbench.workspace.focusTitle") }}</span>
@@ -1053,8 +1132,8 @@ onMounted(async () => {
           </div>
           <div v-else class="image-workbench-empty">
             <Images class="h-10 w-10" />
-            <strong>{{ t("imageWorkbench.workspace.emptyTitle") }}</strong>
-            <span>{{ t("imageWorkbench.workspace.emptyDesc") }}</span>
+            <strong>{{ workspaceEmptyTitle }}</strong>
+            <span>{{ workspaceEmptyDesc }}</span>
           </div>
         </section>
       </section>

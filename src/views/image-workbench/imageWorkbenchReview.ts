@@ -15,6 +15,8 @@ export type ImageWorkbenchGallerySection = {
   items: ImageWorkbenchAssetCard[];
 };
 
+export type ImageWorkbenchLibraryFilter = "recent" | "favorite" | "person" | "style" | "delivery";
+
 export type ImageWorkbenchAssetBadge = {
   key: string;
   label: string;
@@ -73,17 +75,29 @@ export type ImageWorkbenchBranchAction = {
 
 export function buildGallerySections(options: {
   galleryTab: "current" | "library";
+  libraryFilter?: ImageWorkbenchLibraryFilter;
   currentAssets: ImageWorkbenchAssetCard[];
   libraryAssets: ImageWorkbenchAssetCard[];
   currentGroups?: ImageWorkbenchGroup[];
   currentJob: ImageWorkbenchJob | null;
   selectedAssetId: string;
   t: (key: string) => string;
-}) {
-  const { galleryTab, currentAssets, libraryAssets, currentGroups = [], currentJob, selectedAssetId, t } = options;
+}): ImageWorkbenchGallerySection[] {
+  const { galleryTab, libraryFilter = "recent", currentAssets, libraryAssets, currentGroups = [], currentJob, selectedAssetId, t } = options;
 
   if (galleryTab === "current") {
     return buildCurrentGroupSections({ currentAssets, currentGroups, currentJob, selectedAssetId, t });
+  }
+
+  if (libraryFilter !== "recent") {
+    const filteredSection: ImageWorkbenchGallerySection = {
+      key: `library-${libraryFilter}`,
+      title: t(`imageWorkbench.workspace.libraryFilters.${libraryFilter}`),
+      description: t(`imageWorkbench.workspace.libraryFilterDescs.${libraryFilter}`),
+      selected: libraryAssets.some((asset) => asset.id === selectedAssetId),
+      items: sortAssetsForReview(libraryAssets, selectedAssetId),
+    };
+    return filteredSection.items.length ? [filteredSection] : [];
   }
 
   const focusedIds = new Set<string>();
