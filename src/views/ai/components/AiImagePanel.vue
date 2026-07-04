@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref } from "vue";
-import { Image, Send } from "lucide-vue-next";
+import { ArrowUpRight, Image, Send } from "lucide-vue-next";
+import { useRouter } from "vue-router";
 import AiImageMessageList, { type AiImageMessageListActions } from "./image/AiImageMessageList.vue";
 import AiImageComposerPromptTools, { type EmptyPromptStarter } from "./image/AiImageComposerPromptTools.vue";
 import AiImageComposerSettings from "./image/AiImageComposerSettings.vue";
@@ -37,6 +38,7 @@ type ImageMessage = AiConversationSession["messages"][number];
 const aiStore = useAiStore();
 const promptStore = useAiPromptLibraryStore();
 const { t } = useI18n();
+const router = useRouter();
 const imageDraftCount = ref(1);
 const imageInputRef = ref<{ focus?: () => void } | null>(null);
 const sessionSearch = ref("");
@@ -321,6 +323,10 @@ async function openGeneratedImageLocation(message: ImageMessage, index: number) 
   }
 }
 
+function openImageWorkbench() {
+  void router.push("/image-workbench");
+}
+
 const {
   getPendingImageStatusLabel,
   getPendingImageElapsedLabel,
@@ -392,6 +398,10 @@ const messageListActions: AiImageMessageListActions = {
           <h3>{{ t("aiPage.image.title") }}</h3>
           <p>{{ activeImageHeaderMeta }}</p>
         </div>
+        <BaseButton type="neutral" outline size="xs" class="image-header__workbench" @click="openImageWorkbench">
+          <template #icon><ArrowUpRight class="h-3.5 w-3.5" /></template>
+          {{ t("aiPage.image.openWorkbench") }}
+        </BaseButton>
       </header>
 
       <AiImageMessageList
@@ -525,7 +535,7 @@ const messageListActions: AiImageMessageListActions = {
   @apply flex min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950;
 }
 .image-header {
-  @apply flex shrink-0 items-center gap-3 border-b border-slate-200 px-4 py-3 dark:border-slate-800;
+  @apply flex shrink-0 flex-wrap items-center gap-3 border-b border-slate-200 px-4 py-3 dark:border-slate-800;
 }
 .image-header__icon {
   @apply flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-300;
@@ -535,6 +545,9 @@ const messageListActions: AiImageMessageListActions = {
 }
 .image-header p {
   @apply mt-0.5 truncate text-[10px] font-semibold text-slate-500 dark:text-slate-400;
+}
+.image-header__workbench {
+  @apply shrink-0;
 }
 .image-composer {
   @apply shrink-0 border-t border-slate-200 bg-white p-2.5 dark:border-slate-800 dark:bg-slate-950;
