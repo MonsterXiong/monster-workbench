@@ -398,6 +398,7 @@ export default {
     dataModelReady: "{count} 项已就绪",
     jobStatuses: "生成状态",
     taskStatuses: "任务状态",
+    more: "更多信息",
     emptyTitle: "先选一张图",
     emptyDesc: "选中图片后继续加工、导出或查看信息。",
     imageSize: "图片尺寸",

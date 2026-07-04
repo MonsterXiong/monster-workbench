@@ -1186,6 +1186,14 @@
   @apply space-y-2 rounded-md border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-900;
 }
 
+.image-workbench-action-group--primary {
+  @apply border-primary/30 bg-primary/5 dark:bg-primary/10;
+}
+
+.image-workbench-action-group--delivery {
+  @apply bg-white dark:bg-slate-950;
+}
+
 .image-workbench-action-group > small {
   @apply block text-[11px] font-semibold leading-5 text-slate-500 dark:text-slate-400;
 }
@@ -1244,6 +1252,18 @@
 
 .image-workbench-inspector-actions--supporting {
   @apply pt-1;
+}
+
+.image-workbench-inspector-foldout {
+  @apply overflow-hidden rounded-md border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950;
+}
+
+.image-workbench-inspector-foldout > summary {
+  @apply cursor-pointer select-none px-3 py-2 text-xs font-black text-slate-600 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-900;
+}
+
+.image-workbench-inspector-foldout__body {
+  @apply grid gap-3 border-t border-slate-100 p-3 dark:border-slate-800;
 }
 
 .image-workbench-rating-control {

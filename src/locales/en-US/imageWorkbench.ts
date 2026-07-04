@@ -398,6 +398,7 @@ export default {
     dataModelReady: "{count} items ready",
     jobStatuses: "Run statuses",
     taskStatuses: "Task statuses",
+    more: "More info",
     emptyTitle: "Pick an image",
     emptyDesc: "Select an image to continue editing, export, or inspect details.",
     imageSize: "Image size",

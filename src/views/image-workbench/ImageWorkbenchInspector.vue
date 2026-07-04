@@ -256,107 +256,7 @@ function openAssetPreview(asset: ImageWorkbenchAssetCard | null) {
           {{ t("imageWorkbench.groups.title") }} · {{ selectedGroupLabel }}
         </span>
       </div>
-      <div class="image-workbench-action-group image-workbench-quality-panel">
-        <span>{{ t("imageWorkbench.quality.title") }}</span>
-        <div class="image-workbench-quality-tags" role="group" :aria-label="t('imageWorkbench.quality.ariaLabel')">
-          <button
-            v-for="item in qualityIssueOptions"
-            :key="item.key"
-            type="button"
-            :class="{ 'is-active': isQualityIssueActive(item.key) }"
-            @click="imageWorkbenchStore.toggleSelectedAssetQualityIssue(item.key)"
-          >
-            {{ item.label }}
-          </button>
-        </div>
-        <button
-          type="button"
-          class="image-workbench-quality-fix"
-          :disabled="!imageWorkbenchStore.canFixSelectedAssetByQuality"
-          :title="qualityFixHint"
-          @click="handleFixSelectedAssetByQuality"
-        >
-          <Sparkles class="h-3.5 w-3.5" />
-          {{ t("imageWorkbench.quality.fixAction") }}
-        </button>
-        <small>{{ qualityFixHint }}</small>
-      </div>
-      <div v-if="lineageSummaryItems.length" class="image-workbench-lineage-summary">
-        <span
-          v-for="item in lineageSummaryItems"
-          :key="item.key"
-          class="image-workbench-lineage-summary__item"
-          :class="`is-${item.tone}`"
-        >
-          <small>{{ item.label }}</small>
-          <strong>{{ item.value }}</strong>
-        </span>
-      </div>
-      <section v-if="versionChainItems.length" class="image-workbench-version-chain">
-        <div class="image-workbench-version-chain__head">
-          <strong>{{ t("imageWorkbench.review.versionChainTitle") }}</strong>
-          <small>{{ t("imageWorkbench.review.versionChainDesc") }}</small>
-        </div>
-        <div class="image-workbench-version-chain__strip">
-          <template v-for="(item, index) in versionChainItems" :key="item.key">
-            <button
-              type="button"
-              class="image-workbench-version-card"
-              :class="[`is-${item.tone}`, { 'is-active': item.asset.id === selectedAsset?.id }]"
-              @click="handleSelectReviewAsset(item.asset)"
-            >
-              <div class="image-workbench-version-card__tag">{{ item.label }}</div>
-              <img
-                :key="`${item.asset.id}:${item.asset.displayUrl}`"
-                :src="item.asset.displayUrl"
-                alt=""
-                :title="t('imageWorkbench.asset.openPreview')"
-                @load="handleImageLoad"
-                @click.stop="openAssetPreview(item.asset)"
-                @error="handleImageLoadError($event, item.asset.filePath)"
-              />
-              <div class="image-workbench-version-card__body">
-                <strong>{{ item.asset.width || "-" }}x{{ item.asset.height || "-" }}</strong>
-                <small>{{ item.description }}</small>
-              </div>
-            </button>
-            <span
-              v-if="index < versionChainItems.length - 1"
-              class="image-workbench-version-chain__arrow"
-              aria-hidden="true"
-            >&gt;</span>
-          </template>
-        </div>
-      </section>
-      <div v-if="relatedAssetGroups.length" class="image-workbench-related-groups">
-        <section v-for="group in relatedAssetGroups" :key="group.key" class="image-workbench-related-group">
-          <div class="image-workbench-related-group__head">
-            <strong>{{ group.title }}</strong>
-            <small>{{ group.description }}</small>
-          </div>
-          <div class="image-workbench-related-strip">
-            <button
-              v-for="asset in group.items"
-              :key="asset.id"
-              type="button"
-              class="image-workbench-related-card"
-              @click="handleSelectReviewAsset(asset)"
-            >
-              <img
-                :key="`${asset.id}:${asset.displayUrl}`"
-                :src="asset.displayUrl"
-                alt=""
-                :title="t('imageWorkbench.asset.openPreview')"
-                @load="handleImageLoad"
-                @click.stop="openAssetPreview(asset)"
-                @error="handleImageLoadError($event, asset.filePath)"
-              />
-              <span>{{ asset.width || "-" }}x{{ asset.height || "-" }}</span>
-            </button>
-          </div>
-        </section>
-      </div>
-      <div class="image-workbench-action-group">
+      <div class="image-workbench-action-group image-workbench-action-group--primary">
         <span>{{ t("imageWorkbench.review.createNext") }}</span>
         <small>{{ t("imageWorkbench.review.createNextDesc") }}</small>
         <div class="image-workbench-branch-list">
@@ -396,7 +296,7 @@ function openAssetPreview(asset: ImageWorkbenchAssetCard | null) {
           </button>
         </div>
       </div>
-      <div class="image-workbench-action-group">
+      <div class="image-workbench-action-group image-workbench-action-group--delivery">
         <span>{{ t("imageWorkbench.review.deliver") }}</span>
         <div class="image-workbench-inspector-actions">
           <button type="button" @click="handleToggleFavorite(selectedAsset)">
@@ -437,98 +337,202 @@ function openAssetPreview(asset: ImageWorkbenchAssetCard | null) {
         </div>
       </div>
 
-      <dl class="image-workbench-details">
-        <div>
-          <dt>{{ t("imageWorkbench.details.requestedSize") }}</dt>
-          <dd>{{ selectedRequestedSize }}</dd>
+      <details class="image-workbench-inspector-foldout">
+        <summary>{{ t("imageWorkbench.details.more") }}</summary>
+        <div class="image-workbench-inspector-foldout__body">
+          <div class="image-workbench-action-group image-workbench-quality-panel">
+            <span>{{ t("imageWorkbench.quality.title") }}</span>
+            <div class="image-workbench-quality-tags" role="group" :aria-label="t('imageWorkbench.quality.ariaLabel')">
+              <button
+                v-for="item in qualityIssueOptions"
+                :key="item.key"
+                type="button"
+                :class="{ 'is-active': isQualityIssueActive(item.key) }"
+                @click="imageWorkbenchStore.toggleSelectedAssetQualityIssue(item.key)"
+              >
+                {{ item.label }}
+              </button>
+            </div>
+            <button
+              type="button"
+              class="image-workbench-quality-fix"
+              :disabled="!imageWorkbenchStore.canFixSelectedAssetByQuality"
+              :title="qualityFixHint"
+              @click="handleFixSelectedAssetByQuality"
+            >
+              <Sparkles class="h-3.5 w-3.5" />
+              {{ t("imageWorkbench.quality.fixAction") }}
+            </button>
+            <small>{{ qualityFixHint }}</small>
+          </div>
+          <div v-if="lineageSummaryItems.length" class="image-workbench-lineage-summary">
+            <span
+              v-for="item in lineageSummaryItems"
+              :key="item.key"
+              class="image-workbench-lineage-summary__item"
+              :class="`is-${item.tone}`"
+            >
+              <small>{{ item.label }}</small>
+              <strong>{{ item.value }}</strong>
+            </span>
+          </div>
+          <section v-if="versionChainItems.length" class="image-workbench-version-chain">
+            <div class="image-workbench-version-chain__head">
+              <strong>{{ t("imageWorkbench.review.versionChainTitle") }}</strong>
+              <small>{{ t("imageWorkbench.review.versionChainDesc") }}</small>
+            </div>
+            <div class="image-workbench-version-chain__strip">
+              <template v-for="(item, index) in versionChainItems" :key="item.key">
+                <button
+                  type="button"
+                  class="image-workbench-version-card"
+                  :class="[`is-${item.tone}`, { 'is-active': item.asset.id === selectedAsset?.id }]"
+                  @click="handleSelectReviewAsset(item.asset)"
+                >
+                  <div class="image-workbench-version-card__tag">{{ item.label }}</div>
+                  <img
+                    :key="`${item.asset.id}:${item.asset.displayUrl}`"
+                    :src="item.asset.displayUrl"
+                    alt=""
+                    :title="t('imageWorkbench.asset.openPreview')"
+                    @load="handleImageLoad"
+                    @click.stop="openAssetPreview(item.asset)"
+                    @error="handleImageLoadError($event, item.asset.filePath)"
+                  />
+                  <div class="image-workbench-version-card__body">
+                    <strong>{{ item.asset.width || "-" }}x{{ item.asset.height || "-" }}</strong>
+                    <small>{{ item.description }}</small>
+                  </div>
+                </button>
+                <span
+                  v-if="index < versionChainItems.length - 1"
+                  class="image-workbench-version-chain__arrow"
+                  aria-hidden="true"
+                >&gt;</span>
+              </template>
+            </div>
+          </section>
+          <div v-if="relatedAssetGroups.length" class="image-workbench-related-groups">
+            <section v-for="group in relatedAssetGroups" :key="group.key" class="image-workbench-related-group">
+              <div class="image-workbench-related-group__head">
+                <strong>{{ group.title }}</strong>
+                <small>{{ group.description }}</small>
+              </div>
+              <div class="image-workbench-related-strip">
+                <button
+                  v-for="asset in group.items"
+                  :key="asset.id"
+                  type="button"
+                  class="image-workbench-related-card"
+                  @click="handleSelectReviewAsset(asset)"
+                >
+                  <img
+                    :key="`${asset.id}:${asset.displayUrl}`"
+                    :src="asset.displayUrl"
+                    alt=""
+                    :title="t('imageWorkbench.asset.openPreview')"
+                    @load="handleImageLoad"
+                    @click.stop="openAssetPreview(asset)"
+                    @error="handleImageLoadError($event, asset.filePath)"
+                  />
+                  <span>{{ asset.width || "-" }}x{{ asset.height || "-" }}</span>
+                </button>
+              </div>
+            </section>
+          </div>
+          <dl class="image-workbench-details">
+            <div>
+              <dt>{{ t("imageWorkbench.details.requestedSize") }}</dt>
+              <dd>{{ selectedRequestedSize }}</dd>
+            </div>
+            <div :class="{ 'is-warning': hasImageSizeMismatch }">
+              <dt>{{ t("imageWorkbench.details.actualSize") }}</dt>
+              <dd>{{ selectedImageDimensions }}</dd>
+            </div>
+            <div>
+              <dt>{{ t("imageWorkbench.details.requestedFormat") }}</dt>
+              <dd>{{ selectedRequestedFormat }}</dd>
+            </div>
+            <div>
+              <dt>{{ t("imageWorkbench.details.actualFormat") }}</dt>
+              <dd>{{ selectedActualFormat }}</dd>
+            </div>
+            <div>
+              <dt>{{ t("imageWorkbench.details.outputQuality") }}</dt>
+              <dd>{{ selectedOutputQuality }}</dd>
+            </div>
+            <div>
+              <dt>{{ t("imageWorkbench.details.outputCompression") }}</dt>
+              <dd>{{ selectedOutputCompression }}</dd>
+            </div>
+            <div>
+              <dt>{{ t("imageWorkbench.details.background") }}</dt>
+              <dd>{{ selectedOutputBackground }}</dd>
+            </div>
+            <div>
+              <dt>{{ t("imageWorkbench.details.moderation") }}</dt>
+              <dd>{{ selectedOutputModeration }}</dd>
+            </div>
+            <div>
+              <dt>{{ t("imageWorkbench.details.assetSize") }}</dt>
+              <dd>{{ formatAssetSize(selectedAsset) }}</dd>
+            </div>
+            <div>
+              <dt>{{ t("imageWorkbench.details.integrity") }}</dt>
+              <dd>
+                {{
+                  selectedAsset.integrityStatus && selectedAsset.integrityStatus !== "ok"
+                    ? selectedAsset.integrityError || t(`imageWorkbench.gallerySections.badges.${selectedAsset.integrityStatus}`)
+                    : t("imageWorkbench.asset.integrityOk")
+                }}
+              </dd>
+            </div>
+            <div>
+              <dt>{{ t("imageWorkbench.details.rating") }}</dt>
+              <dd>{{ selectedAsset.rating ?? t("imageWorkbench.asset.unrated") }}</dd>
+            </div>
+            <div>
+              <dt>{{ t("imageWorkbench.details.group") }}</dt>
+              <dd>{{ selectedGroupLabel }}</dd>
+            </div>
+            <div>
+              <dt>{{ t("imageWorkbench.details.version") }}</dt>
+              <dd>{{ selectedAsset.versionIndex ?? "-" }}</dd>
+            </div>
+            <div>
+              <dt>{{ t("imageWorkbench.details.mimeType") }}</dt>
+              <dd>{{ selectedAsset.mimeType || "-" }}</dd>
+            </div>
+            <div>
+              <dt>{{ t("imageWorkbench.details.createdAt") }}</dt>
+              <dd>{{ formatMs(selectedAsset.createdAtMs) }}</dd>
+            </div>
+            <div>
+              <dt>{{ t("imageWorkbench.details.prompt") }}</dt>
+              <dd>{{ selectedMetadata?.originalPrompt || selectedAssetJob?.prompt || "-" }}</dd>
+            </div>
+            <div>
+              <dt>{{ t("imageWorkbench.details.negativePrompt") }}</dt>
+              <dd>{{ selectedMetadata?.negativePrompt || "-" }}</dd>
+            </div>
+            <div>
+              <dt>{{ t("imageWorkbench.details.provider") }}</dt>
+              <dd>{{ selectedMetadata?.provider || selectedModelRun?.provider || "-" }}</dd>
+            </div>
+            <div>
+              <dt>{{ t("imageWorkbench.details.model") }}</dt>
+              <dd>{{ selectedMetadata?.model || selectedModelRun?.model || "-" }}</dd>
+            </div>
+            <div>
+              <dt>{{ t("imageWorkbench.details.latency") }}</dt>
+              <dd>{{ selectedModelRun?.latencyMs ? `${selectedModelRun.latencyMs} ms` : "-" }}</dd>
+            </div>
+          </dl>
+          <details v-if="selectedModelRun?.responsePreview || selectedModelRun?.error" class="image-workbench-audit">
+            <summary>{{ t("imageWorkbench.details.responsePreview") }}</summary>
+            <pre>{{ selectedModelRun?.responsePreview || selectedModelRun?.error || "-" }}</pre>
+          </details>
         </div>
-        <div :class="{ 'is-warning': hasImageSizeMismatch }">
-          <dt>{{ t("imageWorkbench.details.actualSize") }}</dt>
-          <dd>{{ selectedImageDimensions }}</dd>
-        </div>
-        <div>
-          <dt>{{ t("imageWorkbench.details.requestedFormat") }}</dt>
-          <dd>{{ selectedRequestedFormat }}</dd>
-        </div>
-        <div>
-          <dt>{{ t("imageWorkbench.details.actualFormat") }}</dt>
-          <dd>{{ selectedActualFormat }}</dd>
-        </div>
-        <div>
-          <dt>{{ t("imageWorkbench.details.outputQuality") }}</dt>
-          <dd>{{ selectedOutputQuality }}</dd>
-        </div>
-        <div>
-          <dt>{{ t("imageWorkbench.details.outputCompression") }}</dt>
-          <dd>{{ selectedOutputCompression }}</dd>
-        </div>
-        <div>
-          <dt>{{ t("imageWorkbench.details.background") }}</dt>
-          <dd>{{ selectedOutputBackground }}</dd>
-        </div>
-        <div>
-          <dt>{{ t("imageWorkbench.details.moderation") }}</dt>
-          <dd>{{ selectedOutputModeration }}</dd>
-        </div>
-        <div>
-          <dt>{{ t("imageWorkbench.details.assetSize") }}</dt>
-          <dd>{{ formatAssetSize(selectedAsset) }}</dd>
-        </div>
-        <div>
-          <dt>{{ t("imageWorkbench.details.integrity") }}</dt>
-          <dd>
-            {{
-              selectedAsset.integrityStatus && selectedAsset.integrityStatus !== "ok"
-                ? selectedAsset.integrityError || t(`imageWorkbench.gallerySections.badges.${selectedAsset.integrityStatus}`)
-                : t("imageWorkbench.asset.integrityOk")
-            }}
-          </dd>
-        </div>
-        <div>
-          <dt>{{ t("imageWorkbench.details.rating") }}</dt>
-          <dd>{{ selectedAsset.rating ?? t("imageWorkbench.asset.unrated") }}</dd>
-        </div>
-        <div>
-          <dt>{{ t("imageWorkbench.details.group") }}</dt>
-          <dd>{{ selectedGroupLabel }}</dd>
-        </div>
-        <div>
-          <dt>{{ t("imageWorkbench.details.version") }}</dt>
-          <dd>{{ selectedAsset.versionIndex ?? "-" }}</dd>
-        </div>
-        <div>
-          <dt>{{ t("imageWorkbench.details.mimeType") }}</dt>
-          <dd>{{ selectedAsset.mimeType || "-" }}</dd>
-        </div>
-        <div>
-          <dt>{{ t("imageWorkbench.details.createdAt") }}</dt>
-          <dd>{{ formatMs(selectedAsset.createdAtMs) }}</dd>
-        </div>
-        <div>
-          <dt>{{ t("imageWorkbench.details.prompt") }}</dt>
-          <dd>{{ selectedMetadata?.originalPrompt || selectedAssetJob?.prompt || "-" }}</dd>
-        </div>
-        <div>
-          <dt>{{ t("imageWorkbench.details.negativePrompt") }}</dt>
-          <dd>{{ selectedMetadata?.negativePrompt || "-" }}</dd>
-        </div>
-        <div>
-          <dt>{{ t("imageWorkbench.details.provider") }}</dt>
-          <dd>{{ selectedMetadata?.provider || selectedModelRun?.provider || "-" }}</dd>
-        </div>
-        <div>
-          <dt>{{ t("imageWorkbench.details.model") }}</dt>
-          <dd>{{ selectedMetadata?.model || selectedModelRun?.model || "-" }}</dd>
-        </div>
-        <div>
-          <dt>{{ t("imageWorkbench.details.latency") }}</dt>
-          <dd>{{ selectedModelRun?.latencyMs ? `${selectedModelRun.latencyMs} ms` : "-" }}</dd>
-        </div>
-      </dl>
-
-      <details v-if="selectedModelRun?.responsePreview || selectedModelRun?.error" class="image-workbench-audit">
-        <summary>{{ t("imageWorkbench.details.responsePreview") }}</summary>
-        <pre>{{ selectedModelRun?.responsePreview || selectedModelRun?.error || "-" }}</pre>
       </details>
     </div>
     <div v-else class="image-workbench-empty image-workbench-empty--compact">
