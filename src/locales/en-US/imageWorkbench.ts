@@ -17,6 +17,14 @@ export default {
     retry: "Retry failed",
     refresh: "Refresh",
     deleteJob: "Delete current",
+    primaryActions: {
+      create: "Generate image",
+      reference: "Generate from reference",
+      edit: "Start edit",
+      upscale: "Improve clarity",
+      person: "Extend person",
+      style: "Convert style",
+    },
   },
   input: {
     title: "Task and input",

@@ -301,6 +301,11 @@ const showsQuantityInput = computed(() => !["edit", "upscale"].includes(activeTa
 const showsSizeInput = computed(() => !["edit", "upscale"].includes(activeTaskEntry.value));
 const promptLabel = computed(() => t(`imageWorkbench.input.promptLabels.${activeTaskEntry.value}`));
 const promptPlaceholder = computed(() => t(`imageWorkbench.input.promptPlaceholders.${activeTaskEntry.value}`));
+const primaryActionLabel = computed(() =>
+  imageWorkbenchStore.generating
+    ? t("imageWorkbench.toolbar.addToQueue")
+    : t(`imageWorkbench.toolbar.primaryActions.${activeTaskEntry.value}`)
+);
 const upscaleScaleOptions = computed(() => [
   {
     scale: 2 as const,
@@ -910,7 +915,7 @@ onMounted(async () => {
               </label>
             </div>
             <div class="image-workbench-form-actions">
-              <button class="image-workbench-action" type="button" :disabled="!canSubmitCurrentTask" @click="handleGenerate"><Play class="h-3.5 w-3.5" />{{ imageWorkbenchStore.generating ? t("imageWorkbench.toolbar.addToQueue") : t("imageWorkbench.toolbar.generate") }}</button>
+              <button class="image-workbench-action" type="button" :disabled="!canSubmitCurrentTask" @click="handleGenerate"><Play class="h-3.5 w-3.5" />{{ primaryActionLabel }}</button>
               <button class="image-workbench-secondary image-workbench-secondary--danger" type="button" :disabled="!imageWorkbenchStore.canCancelCurrentJob" @click="handleCancel"><Ban class="h-3.5 w-3.5" />{{ t("imageWorkbench.toolbar.cancel") }}</button>
             </div>
             <details class="image-workbench-advanced">

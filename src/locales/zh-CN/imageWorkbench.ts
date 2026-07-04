@@ -17,6 +17,14 @@ export default {
     retry: "重试失败项",
     refresh: "刷新",
     deleteJob: "删除当前",
+    primaryActions: {
+      create: "生成图片",
+      reference: "参考图生成",
+      edit: "开始修改",
+      upscale: "提高清晰度",
+      person: "延展人物",
+      style: "转换风格",
+    },
   },
   input: {
     title: "任务和输入",
