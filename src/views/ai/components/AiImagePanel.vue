@@ -89,15 +89,6 @@ const activeSizeNotice = computed(() => {
   }
   return formatTemplate(t("aiPage.image.experimentalSizeNotice"), { size: activeSizeLabel.value });
 });
-const imageCountOptions = computed(() =>
-  [1, 2, 3, 4].map((count) => ({
-    label: `x${count}`,
-    selectedLabel: `x${count}`,
-    description: formatTemplate(t("aiPage.image.resultImageCount"), { count }),
-    filterText: `${count} ${formatTemplate(t("aiPage.image.resultImageCount"), { count })} x${count}`,
-    value: count,
-  }))
-);
 const activeImageModelName = computed(() => aiStore.activeImageConfig?.imageModel || aiStore.activeImageConfig?.model || "-");
 const {
   input,
@@ -421,7 +412,6 @@ const messageListActions: AiImageMessageListActions = {
             :image-draft-size="aiStore.imageDraftSize"
             :image-size-options="imageSizeOptions"
             :image-draft-count="imageDraftCount"
-            :image-count-options="imageCountOptions"
             :active-size-label="activeSizeLabel"
             :active-size-detail="activeSizeDetail"
             @update:model-config-id="handleImageModelConfigChange"

@@ -696,7 +696,7 @@ impl<R: Runtime> AiProviderService<R> {
                 {
                     config.image_size = size.to_string();
                 }
-                config.image_count = options.count.clamp(1, 4);
+                config.image_count = options.count.max(1);
                 validate_generation_config(
                     &config,
                     capability,

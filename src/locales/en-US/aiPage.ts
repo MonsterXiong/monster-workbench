@@ -71,6 +71,7 @@ export default {
       error: "Error",
       inputPlaceholder: "Enter an image prompt",
       sizePresetLabel: "Common Sizes",
+      sizeAuto: "Auto",
       promptToolsLabel: "Prompt Tools",
       sizeKindSquare: "Square",
       sizeKindPortrait: "Portrait",
@@ -120,6 +121,7 @@ export default {
       failureHintUnsupportedSize: "The model explicitly rejected this size. Use a size that has passed real strict testing; this size should not be whitelisted.",
       failureHintTimeout: "The generation request timed out. It may be queued or slow on the provider side; retry later and keep the timing record.",
       failureHintConnection: "The model service connection failed or restarted. Retry after the service is stable.",
+      failureHintProviderUnavailable: "This model has no available account capacity. Try another model or provider, or retry later.",
       failureHintCanceled: "Generation was canceled. Retry directly, or refill the prompt and adjust size, style, or model configuration.",
       failureKind: {
         unsupported_size: "Unsupported size",
@@ -127,6 +129,7 @@ export default {
         connection: "Connection error",
         rate_limited: "Rate limited",
         auth: "Auth failed",
+        provider_unavailable: "Provider unavailable",
         provider_http: "Provider error",
         provider_error: "Service error",
         canceled: "Canceled",

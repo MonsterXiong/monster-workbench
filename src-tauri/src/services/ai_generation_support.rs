@@ -237,7 +237,7 @@ pub(crate) fn business_active_config_keys(capability: &str) -> &'static [&'stati
 pub(crate) fn normalize_generation_options(
     mut options: AiGenerationOptions,
 ) -> AiGenerationOptions {
-    options.count = options.count.clamp(1, 4);
+    options.count = options.count.max(1);
     options
 }
 
@@ -249,13 +249,13 @@ pub(crate) fn build_image_generation_prompt(
     let mut parts = vec![prompt.trim().to_string()];
     match capability {
         "img2img" => {
-            parts.push("Use the reference image as visual guidance.".to_string());
+            parts.push("Use the reference image as the primary visual constraint. Preserve the main subject, composition cues, identity, and visual style unless the user explicitly asks to change them.".to_string());
         }
         "inpaint" => {
             parts.push("Edit only the masked area and preserve the unmasked image.".to_string());
         }
         "person_consistency" => {
-            parts.push("Keep the same person's core identity, face shape, hairstyle, age impression, and overall temperament as much as the model allows.".to_string());
+            parts.push("Use the reference image as the identity source. Keep the same person's face shape, hairstyle, age impression, and overall temperament; change only the requested expression, pose, scene, or style.".to_string());
         }
         "upscale_2x" | "upscale_4x" => {
             let scale = options
@@ -275,6 +275,15 @@ pub(crate) fn build_image_generation_prompt(
         .filter(|value| !value.is_empty())
     {
         parts.push(format!("Reference image path: {path}"));
+    }
+    for (index, path) in options
+        .reference_image_paths
+        .iter()
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .enumerate()
+    {
+        parts.push(format!("Reference image {} path: {path}", index + 1));
     }
     if let Some(path) = options
         .source_image_path
@@ -298,7 +307,7 @@ pub(crate) fn build_image_generation_prompt(
         .map(str::trim)
         .filter(|value| !value.is_empty())
     {
-        parts.push(format!("Person consistency context: {context}"));
+        parts.extend(reference_context_prompt_lines(context));
     }
     if !options.reference_asset_ids.is_empty() {
         parts.push(format!(
@@ -312,6 +321,43 @@ pub(crate) fn build_image_generation_prompt(
         .filter(|part| !part.trim().is_empty())
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+fn reference_context_prompt_lines(context: &str) -> Vec<String> {
+    let Ok(parsed) = serde_json::from_str::<serde_json::Value>(context) else {
+        return vec![format!("Reference context: {context}")];
+    };
+    let mut lines = Vec::new();
+    if let Some(items) = parsed
+        .get("referenceRoles")
+        .and_then(|item| item.as_array())
+    {
+        for (fallback_index, item) in items.iter().enumerate() {
+            let index = item
+                .get("index")
+                .and_then(|value| value.as_u64())
+                .unwrap_or((fallback_index + 1) as u64);
+            let role = item
+                .get("role")
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .unwrap_or("reference");
+            let source = item
+                .get("source")
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .unwrap_or("image");
+            lines.push(format!(
+                "Reference image {index} / 参考图{index}: use as {role} reference ({source})."
+            ));
+        }
+    }
+    if lines.is_empty() {
+        lines.push(format!("Reference context: {context}"));
+    }
+    lines
 }
 
 pub(crate) fn provider_request_timeout_ms(action: &str, config: &AiProviderConfig) -> u64 {
@@ -434,4 +480,38 @@ pub(crate) fn is_image_generation_capability(capability: &str) -> bool {
             | "upscale_2x"
             | "upscale_4x"
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn image_prompt_describes_numbered_reference_roles() {
+        let mut options = AiGenerationOptions::default();
+        options.reference_image_paths = vec![
+            "C:/refs/person.png".to_string(),
+            "C:/refs/style.png".to_string(),
+        ];
+        options.person_context_json = Some(
+            serde_json::json!({
+                "referenceRoles": [
+                    { "index": 1, "role": "person", "source": "asset" },
+                    { "index": 2, "role": "style", "source": "uploaded" }
+                ]
+            })
+            .to_string(),
+        );
+
+        let prompt = build_image_generation_prompt(
+            "img2img",
+            "参考图1换一个表情，参考图2保持风格",
+            &options,
+        );
+
+        assert!(prompt.contains("Reference image 1 path: C:/refs/person.png"));
+        assert!(prompt.contains("Reference image 2 path: C:/refs/style.png"));
+        assert!(prompt.contains("Reference image 1 / 参考图1: use as person reference"));
+        assert!(prompt.contains("Reference image 2 / 参考图2: use as style reference"));
+    }
 }

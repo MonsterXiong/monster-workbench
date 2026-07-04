@@ -7,7 +7,9 @@ import urllib.request
 
 
 DEFAULT_MAX_RESPONSE_BYTES = 4 * 1024 * 1024
+MAX_REFERENCE_IMAGE_BYTES = 25 * 1024 * 1024
 PROVIDER_REGISTRY_FILE_NAME = "ai-provider-registry.json"
+GPT_IMAGE_NATIVE_EDIT_CAPABILITIES = frozenset({"img2img", "inpaint", "person_consistency"})
 AUDIO_RESPONSE_FORMAT_EXTENSIONS = {
     "mp3": ".mp3",
     "wav": ".wav",
@@ -170,6 +172,85 @@ def request_json(url, method, headers, body, timeout, max_bytes=DEFAULT_MAX_RESP
             if attempt >= retries:
                 break
     raise last_error
+
+
+def guess_image_content_type(path):
+    clean = str(path or "").lower()
+    if clean.endswith(".png"):
+        return "image/png"
+    if clean.endswith(".jpg") or clean.endswith(".jpeg"):
+        return "image/jpeg"
+    if clean.endswith(".webp"):
+        return "image/webp"
+    if clean.endswith(".svg"):
+        return "image/svg+xml"
+    return "application/octet-stream"
+
+
+def read_multipart_file(path):
+    clean = clean_optional_text(path)
+    if not clean or not os.path.isfile(clean):
+        raise RuntimeError("reference image file is missing")
+    size = os.path.getsize(clean)
+    if size <= 0:
+        raise RuntimeError("reference image file is empty")
+    if size > MAX_REFERENCE_IMAGE_BYTES:
+        raise RuntimeError("reference image exceeds {0} MB".format(MAX_REFERENCE_IMAGE_BYTES // 1024 // 1024))
+    with open(clean, "rb") as file:
+        return {
+            "filename": os.path.basename(clean) or "image.png",
+            "content_type": guess_image_content_type(clean),
+            "content": file.read(),
+        }
+
+
+def read_multipart_mask_file(path):
+    file_info = read_multipart_file(path)
+    if file_info["content_type"] != "image/png":
+        raise RuntimeError("mask image must be a PNG file with an alpha channel")
+    return file_info
+
+
+def build_multipart_form_data(fields, files):
+    boundary = "----monster-tools-{0}".format(uuid.uuid4().hex)
+    chunks = []
+    for name, value in fields.items():
+        if value is None or value == "":
+            continue
+        chunks.append(("--{0}\r\n".format(boundary)).encode("utf-8"))
+        chunks.append(('Content-Disposition: form-data; name="{0}"\r\n\r\n'.format(name)).encode("utf-8"))
+        chunks.append(str(value).encode("utf-8"))
+        chunks.append(b"\r\n")
+    file_items = files.items() if isinstance(files, dict) else (files or [])
+    for name, file_info in file_items:
+        if not file_info:
+            continue
+        chunks.append(("--{0}\r\n".format(boundary)).encode("utf-8"))
+        chunks.append(
+            (
+                'Content-Disposition: form-data; name="{0}"; filename="{1}"\r\n'
+                "Content-Type: {2}\r\n\r\n"
+            ).format(name, file_info["filename"], file_info["content_type"]).encode("utf-8")
+        )
+        chunks.append(file_info["content"])
+        chunks.append(b"\r\n")
+    chunks.append(("--{0}--\r\n".format(boundary)).encode("utf-8"))
+    return boundary, b"".join(chunks)
+
+
+def request_multipart_json(url, method, headers, fields, files, timeout, max_bytes=DEFAULT_MAX_RESPONSE_BYTES):
+    boundary, data = build_multipart_form_data(fields, files)
+    request_headers = {key: value for key, value in headers.items() if key.lower() != "content-type"}
+    request_headers["Content-Type"] = "multipart/form-data; boundary={0}".format(boundary)
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({})) if is_local_url(url) else None
+    request = urllib.request.Request(url, data=data, headers=request_headers, method=method)
+    open_url = opener.open if opener else urllib.request.urlopen
+    with open_url(request, timeout=timeout) as response:
+        raw = response.read(max_bytes + 1)
+        if len(raw) > max_bytes:
+            raise RuntimeError("响应体超过 {0} MB，请降低图片尺寸或改用返回 URL 的生图接口".format(max_bytes // 1024 // 1024))
+        parsed = json.loads(raw.decode("utf-8", errors="ignore") or "{}")
+        return response.status, parsed
 
 
 def ensure_output_dir(output_dir):
@@ -354,6 +435,14 @@ def clean_optional_text(value):
     return str(value or "").strip()
 
 
+def is_gpt_image_model(model):
+    return clean_optional_text(model).lower().startswith("gpt-image-")
+
+
+def openai_image_file_field_name(model):
+    return "image[]" if is_gpt_image_model(model) else "image"
+
+
 def parse_json_or_text(value):
     text = clean_optional_text(value)
     if not text:
@@ -372,6 +461,43 @@ def normalize_positive_int(value):
     return number if number > 0 else None
 
 
+def normalize_percent_int(value):
+    try:
+        number = int(value)
+    except Exception:
+        return None
+    return number if 0 <= number <= 100 else None
+
+
+def clean_optional_text_list(value):
+    if not isinstance(value, list):
+        return []
+    result = []
+    for item in value:
+        clean = clean_optional_text(item)
+        if clean and clean not in result:
+            result.append(clean)
+    return result
+
+
+def openai_compatible_image_output_fields(image_request):
+    request = image_request if isinstance(image_request, dict) else {}
+    fields = {}
+    for request_key, api_key in [
+        ("quality", "quality"),
+        ("outputFormat", "output_format"),
+        ("background", "background"),
+        ("moderation", "moderation"),
+    ]:
+        value = clean_optional_text(request.get(request_key))
+        if value:
+            fields[api_key] = value
+    output_compression = normalize_percent_int(request.get("outputCompression"))
+    if output_compression is not None and fields.get("output_format") in {"jpeg", "webp"}:
+        fields["output_compression"] = output_compression
+    return fields
+
+
 def openai_compatible_image_extension_fields(image_request):
     request = image_request if isinstance(image_request, dict) else {}
     if not request.get("nativeSupported") or request.get("promptFallback"):
@@ -383,6 +509,7 @@ def openai_compatible_image_extension_fields(image_request):
 
     fields = {"generation_mode": capability}
     reference_image_path = clean_optional_text(request.get("referenceImagePath"))
+    reference_image_paths = clean_optional_text_list(request.get("referenceImagePaths"))
     source_image_path = clean_optional_text(request.get("sourceImagePath"))
     mask_path = clean_optional_text(request.get("maskPath"))
     source_asset_id = clean_optional_text(request.get("sourceAssetId"))
@@ -392,6 +519,8 @@ def openai_compatible_image_extension_fields(image_request):
         reference_image = reference_image_path or source_image_path
         if reference_image:
             fields["reference_image"] = reference_image
+        if reference_image_paths:
+            fields["reference_images"] = reference_image_paths
     if capability in ("inpaint", "upscale_2x", "upscale_4x") and source_image_path:
         fields["image"] = source_image_path
     if capability == "inpaint" and mask_path:
@@ -414,6 +543,44 @@ def openai_compatible_image_extension_fields(image_request):
         fields["fallback_mode"] = fallback_mode
 
     return fields
+
+
+def openai_compatible_image_edit_request(image_request, prompt, image_size, image_count, model):
+    request = image_request if isinstance(image_request, dict) else {}
+    if not request.get("nativeSupported") or request.get("promptFallback"):
+        return None
+    capability = clean_optional_text(request.get("capability")).lower()
+    if capability not in {"img2img", "person_consistency", "inpaint"}:
+        return None
+
+    reference_image_path = clean_optional_text(request.get("referenceImagePath"))
+    reference_image_paths = clean_optional_text_list(request.get("referenceImagePaths"))
+    source_image_path = clean_optional_text(request.get("sourceImagePath"))
+    mask_path = clean_optional_text(request.get("maskPath"))
+    image_paths = [source_image_path] if capability == "inpaint" else reference_image_paths
+    if capability != "inpaint" and not image_paths:
+        fallback_image = reference_image_path or source_image_path
+        image_paths = [fallback_image] if fallback_image else []
+    image_paths = [path for path in image_paths if path]
+    if not image_paths:
+        return None
+
+    fields = {
+        "model": model,
+        "prompt": prompt,
+        "n": image_count,
+        "size": image_size or "1024x1024",
+        "generation_mode": capability,
+    }
+    fields.update(openai_compatible_image_output_fields(request))
+    person_context = clean_optional_text(request.get("personContextJson"))
+    if capability == "person_consistency" and person_context:
+        fields["person_context"] = person_context
+    image_field_name = openai_image_file_field_name(model)
+    files = [(image_field_name, read_multipart_file(path)) for path in image_paths]
+    if capability == "inpaint" and mask_path:
+        files.append(("mask", read_multipart_mask_file(mask_path)))
+    return {"fields": fields, "files": files}
 
 
 class ProviderAdapter:
@@ -462,6 +629,17 @@ class OpenAICompatibleAdapter(ProviderAdapter):
     adapter_id = "openai-compatible"
     capabilities = frozenset({"models", "chat", "image", "txt2img", "audio", "video"})
 
+    def supports_capability(self, capability):
+        if capability in GPT_IMAGE_NATIVE_EDIT_CAPABILITIES and is_gpt_image_model(self.model):
+            return True
+        return super().supports_capability(capability)
+
+    def metadata(self):
+        result = super().metadata()
+        if is_gpt_image_model(self.model):
+            result["capabilities"] = sorted(set(result["capabilities"]).union(GPT_IMAGE_NATIVE_EDIT_CAPABILITIES))
+        return result
+
     def _headers(self):
         headers = {"Content-Type": "application/json"}
         api_key = str(self.provider.get("apiKey") or "")
@@ -483,6 +661,13 @@ class OpenAICompatibleAdapter(ProviderAdapter):
         if self.base_url.endswith("/images/generations"):
             return self.base_url
         return self.base_url + "/images/generations"
+
+    def _image_edits_url(self):
+        if self.base_url.endswith("/images/edits"):
+            return self.base_url
+        if self.base_url.endswith("/images/generations"):
+            return self.base_url[:-len("/images/generations")] + "/images/edits"
+        return self.base_url + "/images/edits"
 
     def _audio_speech_url(self):
         if self.base_url.endswith("/audio/speech"):
@@ -570,6 +755,30 @@ class OpenAICompatibleAdapter(ProviderAdapter):
             "n": image_count,
             "size": image_size or "1024x1024",
         }
+        body.update(openai_compatible_image_output_fields(image_request))
+        edit_request = openai_compatible_image_edit_request(
+            image_request,
+            prompt,
+            image_size,
+            image_count,
+            self.model,
+        )
+        if edit_request:
+            status, parsed = request_multipart_json(
+                self._image_edits_url(),
+                "POST",
+                self._headers(),
+                edit_request["fields"],
+                edit_request["files"],
+                self.timeout,
+                max_bytes=max_response_bytes,
+            )
+            return {
+                **self.metadata(),
+                "statusCode": status,
+                "model": self.model,
+                "raw": parsed,
+            }
         body.update(openai_compatible_image_extension_fields(image_request))
         status, parsed = request_json(
             self._images_url(),

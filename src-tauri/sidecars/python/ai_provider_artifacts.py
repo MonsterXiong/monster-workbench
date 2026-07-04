@@ -21,7 +21,6 @@ def read_positive_int_env(name, default):
 MAX_IMAGE_RESPONSE_BYTES = read_positive_int_env("AI_PROVIDER_MAX_IMAGE_RESPONSE_BYTES", 192 * 1024 * 1024)
 MAX_DECODED_IMAGE_BYTES = read_positive_int_env("AI_PROVIDER_MAX_DECODED_IMAGE_BYTES", 96 * 1024 * 1024)
 MAX_IMAGE_DOWNLOAD_TIMEOUT_SECONDS = read_positive_int_env("AI_PROVIDER_IMAGE_DOWNLOAD_TIMEOUT_SECONDS", 60)
-MAX_IMAGE_ITEMS = 4
 MAX_IMAGE_URL_CHARS = 2048
 
 
@@ -87,6 +86,15 @@ def guess_extension(content_type, fallback=".png"):
     return fallback
 
 
+def extension_from_output_format(output_format):
+    clean = str(output_format or "").strip().lower()
+    if clean == "jpeg":
+        return ".jpg"
+    if clean == "webp":
+        return ".webp"
+    return ".png"
+
+
 def mime_from_extension(ext):
     ext = (ext or "").lower()
     if ext in (".jpg", ".jpeg"):
@@ -133,8 +141,43 @@ def jpeg_dimensions_from_bytes(data):
     return ""
 
 
+def webp_dimensions_from_bytes(data):
+    if len(data) < 20 or not data.startswith(b"RIFF") or data[8:12] != b"WEBP":
+        return ""
+
+    index = 12
+    while index + 8 <= len(data):
+        chunk_type = data[index:index + 4]
+        chunk_size = int.from_bytes(data[index + 4:index + 8], "little")
+        payload_start = index + 8
+        payload_end = payload_start + chunk_size
+        if payload_end > len(data):
+            break
+
+        payload = data[payload_start:payload_end]
+        if chunk_type == b"VP8X" and len(payload) >= 10:
+            width = int.from_bytes(payload[4:7], "little") + 1
+            height = int.from_bytes(payload[7:10], "little") + 1
+            if width > 0 and height > 0:
+                return "{0}x{1}".format(width, height)
+        if chunk_type == b"VP8 " and len(payload) >= 10 and payload[3:6] == b"\x9d\x01\x2a":
+            width = int.from_bytes(payload[6:8], "little") & 0x3FFF
+            height = int.from_bytes(payload[8:10], "little") & 0x3FFF
+            if width > 0 and height > 0:
+                return "{0}x{1}".format(width, height)
+        if chunk_type == b"VP8L" and len(payload) >= 5 and payload[0] == 0x2F:
+            bits = int.from_bytes(payload[1:5], "little")
+            width = (bits & 0x3FFF) + 1
+            height = ((bits >> 14) & 0x3FFF) + 1
+            if width > 0 and height > 0:
+                return "{0}x{1}".format(width, height)
+
+        index = payload_end + (chunk_size % 2)
+    return ""
+
+
 def image_dimensions_from_bytes(data):
-    return png_dimensions_from_bytes(data) or jpeg_dimensions_from_bytes(data)
+    return png_dimensions_from_bytes(data) or jpeg_dimensions_from_bytes(data) or webp_dimensions_from_bytes(data)
 
 
 def save_bytes(output_dir, data, ext, mime_type=None):
@@ -156,13 +199,13 @@ def save_bytes(output_dir, data, ext, mime_type=None):
     }
 
 
-def save_base64_image(output_dir, value):
+def save_base64_image(output_dir, value, fallback_ext=".png"):
     b64_value = str(value)
     if "," in b64_value and b64_value.startswith("data:"):
         header, b64_value = b64_value.split(",", 1)
         ext = ".jpg" if "jpeg" in header or "jpg" in header else ".webp" if "webp" in header else ".png"
     else:
-        ext = ".png"
+        ext = fallback_ext
     try:
         decoded_size = (len(b64_value.rstrip("=")) * 3) // 4
         if decoded_size > MAX_DECODED_IMAGE_BYTES:
@@ -189,11 +232,11 @@ def download_image_to_file(output_dir, url, timeout):
         return save_bytes(output_dir, data, guess_extension(content_type), content_type or None)
 
 
-def parse_images(payload, output_dir, timeout, provider_base_url):
+def parse_images(payload, output_dir, timeout, provider_base_url, output_format=None):
     urls = []
     paths = []
     saved_files = []
-    for item in (payload.get("data") or [])[:MAX_IMAGE_ITEMS]:
+    for item in (payload.get("data") or []):
         if not isinstance(item, dict):
             continue
         if item.get("url"):
@@ -213,7 +256,11 @@ def parse_images(payload, output_dir, timeout, provider_base_url):
                 urls.append(url)
         elif item.get("b64_json"):
             try:
-                saved_path = save_base64_image(output_dir, item["b64_json"])
+                saved_path = save_base64_image(
+                    output_dir,
+                    item["b64_json"],
+                    extension_from_output_format(output_format),
+                )
                 if saved_path:
                     paths.append(saved_path["path"])
                     saved_files.append(saved_path)

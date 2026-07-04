@@ -1,6 +1,4 @@
 <script setup lang="ts">
-import { clampNumber } from "../../../../utils";
-
 type SelectOptionValue = string | number | boolean | Record<string, unknown> | null | undefined;
 export type ImageComposerSelectOption<T extends SelectOptionValue = SelectOptionValue> = {
   label: string;
@@ -20,7 +18,6 @@ defineProps<{
   imageDraftSize: string;
   imageSizeOptions: ImageComposerSelectOption<string>[];
   imageDraftCount: number;
-  imageCountOptions: ImageComposerSelectOption<number>[];
   activeSizeLabel: string;
   activeSizeDetail: string;
 }>();
@@ -40,7 +37,8 @@ function updateImageDraftSize(value: unknown) {
 }
 
 function updateImageDraftCount(value: unknown) {
-  emit("update:imageDraftCount", clampNumber(Number(value), 1, 4, 1, 0));
+  const numeric = Number(value);
+  emit("update:imageDraftCount", Number.isFinite(numeric) ? Math.max(1, Math.floor(numeric)) : 1);
 }
 </script>
 
@@ -62,12 +60,12 @@ function updateImageDraftCount(value: unknown) {
         :fit-input-width="false"
         @update:model-value="updateImageDraftSize"
       />
-      <BaseSelect
+      <BaseInput
         :model-value="imageDraftCount"
-        :options="imageCountOptions"
+        type="number"
+        min="1"
         size="sm"
         class="count-select"
-        :fit-input-width="false"
         @update:model-value="updateImageDraftCount"
       />
     </div>
@@ -93,12 +91,12 @@ function updateImageDraftCount(value: unknown) {
 }
 .count-select {
   @apply shrink-0;
-  width: 76px;
+  width: 84px;
 }
 .size-select :deep(.base-select__selected-label) {
   @apply w-full text-center font-black;
 }
-.count-select :deep(.base-select__selected-label) {
+.count-select :deep(input) {
   @apply w-full text-center font-black;
 }
 .composer-size-detail {

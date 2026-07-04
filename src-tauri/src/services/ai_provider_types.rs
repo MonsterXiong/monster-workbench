@@ -56,6 +56,16 @@ pub struct AiGenerationOptions {
     #[serde(default = "default_generation_count")]
     pub count: usize,
     #[serde(default)]
+    pub quality: Option<String>,
+    #[serde(default)]
+    pub output_format: Option<String>,
+    #[serde(default)]
+    pub output_compression: Option<u8>,
+    #[serde(default)]
+    pub background: Option<String>,
+    #[serde(default)]
+    pub moderation: Option<String>,
+    #[serde(default)]
     pub format: Option<String>,
     #[serde(default)]
     pub voice: Option<String>,
@@ -63,6 +73,8 @@ pub struct AiGenerationOptions {
     pub duration_seconds: Option<u32>,
     #[serde(default)]
     pub reference_asset_ids: Vec<String>,
+    #[serde(default)]
+    pub reference_image_paths: Vec<String>,
     #[serde(default)]
     pub reference_image_path: Option<String>,
     #[serde(default)]
@@ -86,10 +98,16 @@ impl Default for AiGenerationOptions {
             temperature: None,
             size: None,
             count: default_generation_count(),
+            quality: None,
+            output_format: None,
+            output_compression: None,
+            background: None,
+            moderation: None,
             format: None,
             voice: None,
             duration_seconds: None,
             reference_asset_ids: Vec::new(),
+            reference_image_paths: Vec::new(),
             reference_image_path: None,
             source_asset_id: None,
             source_image_path: None,

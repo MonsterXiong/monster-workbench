@@ -48,6 +48,7 @@ export type AiImageFailureKind =
   | "connection"
   | "rate_limited"
   | "auth"
+  | "provider_unavailable"
   | "provider_http"
   | "provider_error"
   | "canceled";
@@ -122,6 +123,7 @@ export interface AiGenerationOptions {
   voice?: string | null;
   durationSeconds?: number | null;
   referenceAssetIds?: string[];
+  referenceImagePaths?: string[];
   referenceImagePath?: string | null;
   sourceAssetId?: string | null;
   sourceImagePath?: string | null;

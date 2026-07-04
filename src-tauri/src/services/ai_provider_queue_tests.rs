@@ -37,11 +37,11 @@ fn test_queue_config(key: &str, concurrency_limit: usize) -> AiProviderQueueConf
 }
 
 #[test]
-fn image_queue_wait_timeout_does_not_auto_cancel_queueing() {
+fn image_queue_wait_timeout_uses_provider_request_timeout_window() {
     let config = test_config(720_000);
     let wait_timeout = provider_test_queue_wait_timeout("image", &config);
 
-    assert_eq!(wait_timeout, Duration::ZERO);
+    assert_eq!(wait_timeout, Duration::from_millis(750_000));
 }
 
 #[test]
@@ -555,7 +555,7 @@ fn queue_cancel_wakes_waiting_request() {
         .expect("waiting request should wake after cancellation");
     assert!(result
         .expect_err("waiting request should be cancelled")
-        .contains("已被取消"));
+        .contains("已取消"));
     handle.join().expect("waiting thread should join");
 }
 

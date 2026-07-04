@@ -1,7 +1,6 @@
 from dataclasses import dataclass
 
 from ai_provider_artifacts import (
-    MAX_IMAGE_ITEMS,
     first_saved_file_dimensions,
     parse_images,
     saved_file_to_artifact,
@@ -70,6 +69,17 @@ def normalize_reference_asset_ids(value):
     return result
 
 
+def normalize_reference_image_paths(value):
+    if not isinstance(value, list):
+        return []
+    result = []
+    for item in value:
+        clean = clean_text(item)
+        if clean and clean not in result:
+            result.append(clean)
+    return result
+
+
 def native_image_capability_supported(adapter, capability):
     if capability in {"image", "txt2img"}:
         return True
@@ -110,12 +120,18 @@ def build_image_generation_request(ctx, adapter, api_image_size, image_count):
         "imageSize": api_image_size,
         "imageCount": image_count,
         "referenceAssetIds": normalize_reference_asset_ids(options.get("referenceAssetIds")),
+        "referenceImagePaths": normalize_reference_image_paths(options.get("referenceImagePaths")),
         "referenceImagePath": clean_text(options.get("referenceImagePath")),
         "sourceAssetId": clean_text(options.get("sourceAssetId")),
         "sourceImagePath": clean_text(options.get("sourceImagePath")),
         "maskPath": clean_text(options.get("maskPath")),
         "personContextJson": clean_text(options.get("personContextJson")),
         "scale": options.get("scale"),
+        "quality": clean_text(options.get("quality")),
+        "outputFormat": clean_text(options.get("outputFormat")),
+        "outputCompression": options.get("outputCompression"),
+        "background": clean_text(options.get("background")),
+        "moderation": clean_text(options.get("moderation")),
         "fallbackMode": fallback_mode,
         "nativeSupported": native_supported,
         "promptFallback": prompt_fallback,
@@ -159,7 +175,7 @@ def run_models_action(ctx, adapter, limits):
 def run_image_action(ctx, image_adapter, limits):
     api_image_size = resolve_api_image_size(ctx.image_size)
     requested_count = ctx.generation_options.get("count") or ctx.config.get("imageCount") or 1
-    image_count = max(1, min(MAX_IMAGE_ITEMS, int(requested_count)))
+    image_count = max(1, int(requested_count))
     image_request = build_image_generation_request(ctx, image_adapter, api_image_size, image_count)
     provider_result = image_adapter.image(
         ctx.image_prompt,
@@ -169,7 +185,13 @@ def run_image_action(ctx, image_adapter, limits):
         image_request=image_request,
     )
     parsed = provider_result["raw"]
-    image_urls, image_paths, saved_files = parse_images(parsed, ctx.output_dir, ctx.timeout, ctx.base_url)
+    image_urls, image_paths, saved_files = parse_images(
+        parsed,
+        ctx.output_dir,
+        ctx.timeout,
+        ctx.base_url,
+        image_request.get("outputFormat"),
+    )
     saved_file_dimensions = first_saved_file_dimensions(saved_files)
     actual_image_size = saved_file_dimensions or api_image_size
     result = build_provider_result(

@@ -83,7 +83,7 @@ export function createAiImageMessageMeta(getContext: () => ImageMessageMetaConte
   }
 
   function getMessageImageCount(message: ImageMessage) {
-    return clampNumber(Number(message.imageCount || getPreviewItems(message).length || 1), 1, 4, 1, 0);
+    return clampNumber(Number(message.imageCount || getPreviewItems(message).length || 1), 1, Number.MAX_SAFE_INTEGER, 1, 0);
   }
 
   function getMessageActualSize(message: ImageMessage) {
@@ -209,6 +209,9 @@ export function createAiImageMessageMeta(getContext: () => ImageMessageMetaConte
     }
     if (message.failureKind === "connection") {
       return t("aiPage.image.failureHintConnection");
+    }
+    if (message.failureKind === "provider_unavailable") {
+      return t("aiPage.image.failureHintProviderUnavailable");
     }
     return t("aiPage.image.failureHint");
   }

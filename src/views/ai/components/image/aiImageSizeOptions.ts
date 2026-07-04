@@ -4,45 +4,12 @@ import {
   getDimensionsRatio,
   joinBy,
   parseDimensionsText,
+  IMAGE_GENERATION_AUTO_SIZE,
+  VERIFIED_IMAGE_GENERATION_SIZE_VALUES,
+  isExperimentalGptImage2Size,
 } from "../../../../utils";
 
 type ImageTranslate = (key: string) => string;
-
-export const VERIFIED_IMAGE_SIZE_VALUES = [
-  "1008x1792",
-  "1008x1344",
-  "1536x864",
-  "1344x1008",
-  "1024x1024",
-  "2048x2048",
-  "1152x2048",
-  "2048x1152",
-  "1536x2048",
-  "2048x1536",
-  "1344x2016",
-  "2016x1344",
-  "2000x1600",
-  "1600x2000",
-  "2000x1200",
-  "1200x2000",
-  "2048x1024",
-  "1024x2048",
-  "2880x2880",
-  "2160x3840",
-  "3840x2160",
-  "2160x2880",
-  "2880x2160",
-  "2304x3456",
-  "3456x2304",
-  "2880x2304",
-  "2304x2880",
-  "3600x2160",
-  "2160x3600",
-  "3840x1920",
-  "1920x3840",
-  "3840x1280",
-  "1280x3840",
-];
 
 const EXPERIMENTAL_IMAGE_SIZE_VALUES = new Set<string>();
 
@@ -72,7 +39,7 @@ const IMAGE_SIZE_TIER_LABELS = new Map<string, string>([
 ]);
 
 export function isExperimentalImageSize(size: string) {
-  return EXPERIMENTAL_IMAGE_SIZE_VALUES.has(size);
+  return EXPERIMENTAL_IMAGE_SIZE_VALUES.has(size) || isExperimentalGptImage2Size(size);
 }
 
 export function getImageSizeTierLabel(size: string) {
@@ -116,6 +83,17 @@ export function getImageSizeKindLabel(size: string, t: ImageTranslate) {
 }
 
 export function buildImageSizeOption(size: string, t: ImageTranslate) {
+  if (size === IMAGE_GENERATION_AUTO_SIZE) {
+    const label = t("aiPage.image.sizeAuto");
+    return {
+      label,
+      selectedLabel: label,
+      description: label,
+      filterText: `${label} ${size}`,
+      meta: "",
+      value: size,
+    };
+  }
   const dimensions = parseDimensionsText(size);
   const ratio = dimensions ? formatReducedAspectRatio(dimensions, ":") : size;
   const tier = getImageSizeTierLabel(size);
@@ -133,5 +111,7 @@ export function buildImageSizeOption(size: string, t: ImageTranslate) {
 }
 
 export function buildImageSizeOptions(t: ImageTranslate) {
-  return VERIFIED_IMAGE_SIZE_VALUES.map((size) => buildImageSizeOption(size, t));
+  return [IMAGE_GENERATION_AUTO_SIZE, ...VERIFIED_IMAGE_GENERATION_SIZE_VALUES].map((size) =>
+    buildImageSizeOption(size, t)
+  );
 }

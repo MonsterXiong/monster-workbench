@@ -157,7 +157,7 @@ export const useAiProviderRuntimeStore = defineStore("ai-provider-runtime", () =
       const normalizedCount = clampNumber(
         Number(options.imageCount || base.imageCount || 1),
         1,
-        4,
+        Number.MAX_SAFE_INTEGER,
         base.imageCount || 1,
         0
       );

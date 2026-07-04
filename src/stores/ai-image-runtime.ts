@@ -133,7 +133,7 @@ export const useAiImageRuntimeStore = defineStore("ai-image-runtime", () => {
       throw new Error(IMAGE_PROVIDER_UNSUPPORTED_MESSAGE);
     }
     const normalizedImageSize = normalizeImageSize(imageSize);
-    const normalizedImageCount = clampNumber(Number(imageCount), 1, 4, 1, 0);
+    const normalizedImageCount = clampNumber(Number(imageCount), 1, Number.MAX_SAFE_INTEGER, 1, 0);
     const session = ensureActiveSession("image", {
       modelConfigId: modelConfig.id,
       imageSize: normalizedImageSize,

@@ -245,7 +245,14 @@ impl AiGenerationRepo {
                AND status = 'running'
                AND worker_id = ?
                AND claim_token = ?",
-            params![new_leased_until_ms, now, now, request_id, worker_id, claim_token],
+            params![
+                new_leased_until_ms,
+                now,
+                now,
+                request_id,
+                worker_id,
+                claim_token
+            ],
         )?;
         Ok(affected > 0)
     }

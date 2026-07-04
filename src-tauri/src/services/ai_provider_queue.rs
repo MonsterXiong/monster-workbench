@@ -1,3 +1,6 @@
+use crate::services::ai_generation_support::{
+    provider_request_timeout_ms, provider_sidecar_timeout_ms,
+};
 use crate::services::ai_provider_config::AI_PROVIDER_TEST_MAX_CONFIG_CONCURRENCY;
 use crate::services::ai_provider_task::now_ms;
 use crate::services::ai_provider_types::AiProviderConfig;
@@ -164,7 +167,7 @@ impl AiProviderTestQueue {
         let pending_count = state.queued.len() + running_items_len(&state);
         if pending_count >= AI_PROVIDER_TEST_QUEUE_LIMIT {
             return Err(format!(
-                "AI 模型测试队列已满，最多允许 {} 个任务同时排队，请稍后再试",
+                "AI 模型队列已满，最多允许 {} 个任务同时排队，请稍后再试",
                 AI_PROVIDER_TEST_QUEUE_LIMIT
             ));
         }
@@ -205,7 +208,7 @@ impl AiProviderTestQueue {
 
         loop {
             if state.cancelled_ids.remove(&ticket.id) {
-                return Err("AI 模型测试排队任务已被取消".to_string());
+                return Err("AI 模型排队任务已取消".to_string());
             }
 
             if !ticket.wait_timeout.is_zero()
@@ -217,7 +220,7 @@ impl AiProviderTestQueue {
                 state.metadata_by_id.remove(&ticket.id);
                 self.ready.notify_all();
                 return Err(format!(
-                    "AI 模型测试排队超过 {} 秒，已自动取消，请稍后重试",
+                    "AI 模型排队超过 {} 秒，已自动取消，请稍后重试",
                     ticket.wait_timeout.as_secs()
                 ));
             }
@@ -463,10 +466,11 @@ fn normalize_queue_key(action: &str, config: &AiProviderConfig) -> String {
 
 pub(crate) fn provider_test_queue_wait_timeout(
     action: &str,
-    _config: &AiProviderConfig,
+    config: &AiProviderConfig,
 ) -> Duration {
     if matches!(action, "image" | "video") {
-        return Duration::ZERO;
+        let request_timeout_ms = provider_request_timeout_ms(action, config);
+        return Duration::from_millis(provider_sidecar_timeout_ms(action, request_timeout_ms));
     }
 
     AI_PROVIDER_TEST_QUEUE_WAIT_TIMEOUT

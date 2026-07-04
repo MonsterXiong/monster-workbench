@@ -1,4 +1,5 @@
 use crate::infra::{AppError, AppResult};
+use crate::services::ai_provider_image_size::is_image_size_supported_for_model;
 use crate::services::ai_provider_types::{AiGenerationOptions, AiProviderConfig};
 use serde_json::{json, Value};
 
@@ -13,42 +14,6 @@ const AI_PROVIDER_REGISTRY_JSON: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../src/config/ai-provider-registry.json"
 ));
-const SUPPORTED_IMAGE_SIZES: &[&str] = &[
-    "1008x1792",
-    "1008x1344",
-    "1536x864",
-    "1344x1008",
-    "1024x1024",
-    "2048x2048",
-    "1152x2048",
-    "2048x1152",
-    "1536x2048",
-    "2048x1536",
-    "1344x2016",
-    "2016x1344",
-    "2000x1600",
-    "1600x2000",
-    "2000x1200",
-    "1200x2000",
-    "2048x1024",
-    "1024x2048",
-    "2880x2880",
-    "2160x3840",
-    "3840x2160",
-    "2160x2880",
-    "2880x2160",
-    "2304x3456",
-    "3456x2304",
-    "2880x2304",
-    "2304x2880",
-    "3600x2160",
-    "2160x3600",
-    "3840x1920",
-    "1920x3840",
-    "3840x1280",
-    "1280x3840",
-];
-
 pub(super) fn validate_provider_config(config: &AiProviderConfig, action: &str) -> AppResult<()> {
     if !matches!(action, "models" | "chat" | "image") {
         return Err(AppError::Config("不支持的 AI 测试动作".to_string()));
@@ -67,8 +32,8 @@ pub(super) fn validate_provider_config(config: &AiProviderConfig, action: &str) 
     }
 
     if action == "image" {
-        if config.image_count == 0 || config.image_count > 4 {
-            return Err(AppError::Config("生图一次仅支持 1 到 4 张图片".to_string()));
+        if config.image_count == 0 {
+            return Err(AppError::Config("生图数量必须大于 0".to_string()));
         }
 
         if config.image_model.trim().is_empty() {
@@ -79,7 +44,7 @@ pub(super) fn validate_provider_config(config: &AiProviderConfig, action: &str) 
             return Err(AppError::Config("生图提示词不能为空".to_string()));
         }
 
-        if !SUPPORTED_IMAGE_SIZES.contains(&config.image_size.as_str()) {
+        if !is_image_size_supported_for_model(&config.image_model, &config.image_size) {
             return Err(AppError::Config("不支持的生图尺寸".to_string()));
         }
     }
@@ -445,6 +410,7 @@ fn validate_text_len(label: &str, value: &str, max_chars: usize) -> AppResult<()
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::services::ai_provider_image_size::verified_image_size_values;
 
     fn make_config() -> AiProviderConfig {
         AiProviderConfig {
@@ -633,15 +599,26 @@ mod tests {
                 .expect_err("image generation should validate image count")
                 .to_response()
                 .detail
-                .contains("生图一次仅支持")
+                .contains("生图数量必须大于 0")
         );
         assert!(
             validate_generation_config(&config, "txt2img", "draw", "image-test")
                 .expect_err("txt2img generation should validate image count")
                 .to_response()
                 .detail
-                .contains("生图一次仅支持")
+                .contains("生图数量必须大于 0")
         );
+    }
+
+    #[test]
+    fn validate_generation_config_allows_image_count_above_legacy_limit() {
+        let mut config = make_config();
+        config.image_count = 17;
+
+        validate_generation_config(&config, "image", "draw", "image-test")
+            .expect("image generation should not be capped by the old 4-image limit");
+        validate_generation_config(&config, "txt2img", "draw", "image-test")
+            .expect("txt2img generation should not be capped by the old 4-image limit");
     }
 
     #[test]
@@ -749,9 +726,21 @@ mod tests {
 
     #[test]
     fn validate_provider_config_accepts_verified_image_sizes() {
-        for size in SUPPORTED_IMAGE_SIZES {
+        for size in verified_image_size_values() {
             let mut config = make_config();
             config.image_size = (*size).to_string();
+
+            validate_provider_config(&config, "image")
+                .unwrap_or_else(|error| panic!("{size} should be accepted: {error:?}"));
+        }
+    }
+
+    #[test]
+    fn validate_provider_config_accepts_gpt_image_2_flexible_sizes() {
+        for size in ["auto", "1024x1792"] {
+            let mut config = make_config();
+            config.image_model = "gpt-image-2".to_string();
+            config.image_size = size.to_string();
 
             validate_provider_config(&config, "image")
                 .unwrap_or_else(|error| panic!("{size} should be accepted: {error:?}"));

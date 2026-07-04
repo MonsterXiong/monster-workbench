@@ -15,12 +15,38 @@ SCRIPT_PATH = Path(__file__).with_name("ai_provider_tester.py")
 SPEC = importlib.util.spec_from_file_location("ai_provider_tester", SCRIPT_PATH)
 AI_PROVIDER_TESTER = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(AI_PROVIDER_TESTER)
+from ai_provider_artifacts import image_dimensions_from_bytes
+
 PNG_BYTES = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADElEQVR42mP8z8AARQAFAgH/"
     "qk9lAAAAAElFTkSuQmCC"
 )
 AUDIO_BYTES = base64.b64decode("UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQAAAAA=")
 VIDEO_BYTES = b"\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00mp42isom\x00\x00\x00\x08mdat"
+
+
+def build_webp_chunk(chunk_type, payload):
+    padding = b"\x00" if len(payload) % 2 else b""
+    riff_payload = b"WEBP" + chunk_type + len(payload).to_bytes(4, "little") + payload + padding
+    return b"RIFF" + len(riff_payload).to_bytes(4, "little") + riff_payload
+
+
+WEBP_VP8X_BYTES = build_webp_chunk(
+    b"VP8X",
+    b"\x00\x00\x00\x00"
+    + (1086 - 1).to_bytes(3, "little")
+    + (1448 - 1).to_bytes(3, "little"),
+)
+WEBP_VP8_BYTES = build_webp_chunk(
+    b"VP8 ",
+    b"\x00\x00\x00\x9d\x01\x2a"
+    + (640).to_bytes(2, "little")
+    + (360).to_bytes(2, "little"),
+)
+WEBP_VP8L_BYTES = build_webp_chunk(
+    b"VP8L",
+    b"\x2f" + ((320 - 1) | ((240 - 1) << 14)).to_bytes(4, "little"),
+)
 
 
 class MockProviderHandler(BaseHTTPRequestHandler):
@@ -106,9 +132,15 @@ class MockProviderHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         content_length = int(self.headers.get("Content-Length", "0") or "0")
+        content_type = self.headers.get("Content-Type", "")
         body = {}
+        raw_body = b""
         if content_length:
-            body = json.loads(self.rfile.read(content_length).decode("utf-8") or "{}")
+            raw_body = self.rfile.read(content_length)
+            if content_type.startswith("multipart/form-data"):
+                body = {"__multipart": True}
+            else:
+                body = json.loads(raw_body.decode("utf-8") or "{}")
 
         if self.path == "/v1/messages":
             if body.get("model") == "claude-test":
@@ -175,6 +207,14 @@ class MockProviderHandler(BaseHTTPRequestHandler):
             if "unsupported size image" in prompt:
                 self._write_json({"error": {"message": "unsupported image size"}}, status=400)
                 return
+            if "account unavailable image" in prompt:
+                self._write_json({
+                    "error": {
+                        "message": "No available compatible accounts",
+                        "type": "api_error",
+                    }
+                }, status=503)
+                return
             if "fallback size image" in prompt:
                 self.close_connection = True
                 return
@@ -217,7 +257,17 @@ class MockProviderHandler(BaseHTTPRequestHandler):
                     }]
                 })
                 return
+            if body.get("output_format") == "webp":
+                self._write_json({"data": [{"b64_json": base64.b64encode(WEBP_VP8X_BYTES).decode("ascii")}]})
+                return
             self._write_json({"data": [{"b64_json": base64.b64encode(PNG_BYTES).decode("ascii")}]})
+            return
+
+        if self.path == "/v1/images/edits":
+            self.server.last_image_edit_content_type = content_type
+            self.server.last_image_edit_raw = raw_body
+            payload = WEBP_VP8X_BYTES if b'name="output_format"' in raw_body and b"webp" in raw_body else PNG_BYTES
+            self._write_json({"data": [{"b64_json": base64.b64encode(payload).decode("ascii")}]})
             return
 
         self._write_json({"error": "not found"}, status=404)
@@ -310,6 +360,11 @@ class AiProviderTesterContractTest(unittest.TestCase):
         }
         registry_path.write_text(json.dumps(registry), encoding="utf-8")
         return {"MONSTER_AI_PROVIDER_REGISTRY_PATH": str(registry_path)}
+
+    def test_image_dimension_reader_supports_webp_containers(self):
+        self.assertEqual(image_dimensions_from_bytes(WEBP_VP8X_BYTES), "1086x1448")
+        self.assertEqual(image_dimensions_from_bytes(WEBP_VP8_BYTES), "640x360")
+        self.assertEqual(image_dimensions_from_bytes(WEBP_VP8L_BYTES), "320x240")
 
     def test_models_contract(self):
         result = self.run_sidecar("models", request_id="models-contract")
@@ -633,40 +688,237 @@ class AiProviderTesterContractTest(unittest.TestCase):
             self.assertEqual(saved_file["mimeType"], "image/png")
             self.assertEqual(saved_file["dimensions"], "1x1")
 
+    def test_image_generation_count_is_not_capped_by_legacy_limit(self):
+        with tempfile.TemporaryDirectory(prefix="monster-ai-sidecar-count-") as temp_dir:
+            result = self.run_sidecar(
+                "image",
+                output_dir=temp_dir,
+                request_id="image-count-17",
+                generation={
+                    "capability": "image",
+                    "prompt": "blue robot",
+                    "model": "image-test",
+                    "options": {
+                        "size": "1024x1024",
+                        "count": 17,
+                    },
+                },
+            )
+
+            self.assertTrue(result["ok"], result)
+            self.assertEqual(self.server.last_image_body["n"], 17)
+
+    def test_image_generation_forwards_gpt_image_output_options(self):
+        with tempfile.TemporaryDirectory(prefix="monster-ai-sidecar-image-options-") as temp_dir:
+            result = self.run_sidecar(
+                "image",
+                output_dir=temp_dir,
+                request_id="image-output-options",
+                generation={
+                    "capability": "image",
+                    "prompt": "blue robot",
+                    "model": "gpt-image-2",
+                    "options": {
+                        "size": "1024x1024",
+                        "quality": "high",
+                        "outputFormat": "jpeg",
+                        "outputCompression": 82,
+                        "background": "opaque",
+                        "moderation": "low",
+                    },
+                },
+            )
+
+            self.assertTrue(result["ok"], result)
+            self.assertEqual(self.server.last_image_body["quality"], "high")
+            self.assertEqual(self.server.last_image_body["output_format"], "jpeg")
+            self.assertEqual(self.server.last_image_body["output_compression"], 82)
+            self.assertEqual(self.server.last_image_body["background"], "opaque")
+            self.assertEqual(self.server.last_image_body["moderation"], "low")
+            self.assertTrue(result["savedFiles"][0]["path"].endswith(".jpg"))
+            self.assertEqual(result["savedFiles"][0]["mimeType"], "image/jpeg")
+
     def test_image_generation_native_inpaint_forwards_source_and_mask(self):
         with tempfile.TemporaryDirectory(prefix="monster-ai-sidecar-native-inpaint-") as temp_dir:
-            registry_path = Path(temp_dir) / "ai-provider-registry.json"
+            source_path = Path(temp_dir) / "source.png"
+            mask_path = Path(temp_dir) / "mask.png"
+            source_path.write_bytes(PNG_BYTES)
+            mask_path.write_bytes(PNG_BYTES)
             result = self.run_sidecar(
                 "image",
                 output_dir=temp_dir,
                 request_id="image-native-inpaint",
-                env_patch=self.enhanced_registry_env(registry_path),
                 generation={
                     "capability": "inpaint",
                     "prompt": "replace the sky",
-                    "model": "image-test",
+                    "model": "gpt-image-2",
                     "options": {
                         "size": "1024x1024",
                         "count": 1,
                         "sourceAssetId": "asset-source",
-                        "sourceImagePath": "C:/Monster/source.png",
-                        "maskPath": "C:/Monster/mask.svg",
+                        "sourceImagePath": str(source_path),
+                        "maskPath": str(mask_path),
                         "fallbackMode": "native",
                     },
                 },
             )
 
             self.assertTrue(result["ok"], result)
-            self.assertEqual(self.server.last_image_body["model"], "image-test")
-            self.assertEqual(self.server.last_image_body["prompt"], "replace the sky")
-            self.assertEqual(self.server.last_image_body["generation_mode"], "inpaint")
-            self.assertEqual(self.server.last_image_body["image"], "C:/Monster/source.png")
-            self.assertEqual(self.server.last_image_body["mask"], "C:/Monster/mask.svg")
-            self.assertEqual(self.server.last_image_body["source_asset_id"], "asset-source")
-            self.assertEqual(self.server.last_image_body["fallback_mode"], "native")
+            self.assertIn("multipart/form-data", self.server.last_image_edit_content_type)
+            raw = self.server.last_image_edit_raw
+            self.assertIn(b'name="model"', raw)
+            self.assertIn(b"gpt-image-2", raw)
+            self.assertIn(b'name="prompt"', raw)
+            self.assertIn(b"replace the sky", raw)
+            self.assertIn(b'name="generation_mode"', raw)
+            self.assertIn(b"inpaint", raw)
+            self.assertIn(b'name="image[]"; filename="source.png"', raw)
+            self.assertIn(b'name="mask"; filename="mask.png"', raw)
+
+    def test_image_generation_native_img2img_uploads_reference_image(self):
+        with tempfile.TemporaryDirectory(prefix="monster-ai-sidecar-native-img2img-") as temp_dir:
+            reference_path = Path(temp_dir) / "reference.png"
+            reference_path.write_bytes(PNG_BYTES)
+            result = self.run_sidecar(
+                "image",
+                output_dir=temp_dir,
+                request_id="image-native-img2img",
+                generation={
+                    "capability": "img2img",
+                    "prompt": "make a smiling expression",
+                    "model": "gpt-image-2",
+                    "options": {
+                        "size": "1024x1024",
+                        "count": 1,
+                        "referenceImagePath": str(reference_path),
+                        "fallbackMode": "native",
+                    },
+                },
+            )
+
+            self.assertTrue(result["ok"], result)
+            raw = self.server.last_image_edit_raw
+            self.assertIn(b'name="prompt"', raw)
+            self.assertIn(b"make a smiling expression", raw)
+            self.assertIn(b'name="generation_mode"', raw)
+            self.assertIn(b"img2img", raw)
+            self.assertIn(b'name="image[]"; filename="reference.png"', raw)
+
+    def test_image_generation_native_img2img_forwards_output_options(self):
+        with tempfile.TemporaryDirectory(prefix="monster-ai-sidecar-native-img2img-options-") as temp_dir:
+            reference_path = Path(temp_dir) / "reference.png"
+            reference_path.write_bytes(PNG_BYTES)
+            result = self.run_sidecar(
+                "image",
+                output_dir=temp_dir,
+                request_id="image-native-img2img-output-options",
+                generation={
+                    "capability": "img2img",
+                    "prompt": "make a smiling expression",
+                    "model": "gpt-image-2",
+                    "options": {
+                        "size": "1024x1024",
+                        "referenceImagePath": str(reference_path),
+                        "quality": "medium",
+                        "outputFormat": "webp",
+                        "outputCompression": 76,
+                        "background": "auto",
+                        "moderation": "auto",
+                        "fallbackMode": "native",
+                    },
+                },
+            )
+
+            self.assertTrue(result["ok"], result)
+            raw = self.server.last_image_edit_raw
+            self.assertIn(b'name="quality"', raw)
+            self.assertIn(b"medium", raw)
+            self.assertIn(b'name="output_format"', raw)
+            self.assertIn(b"webp", raw)
+            self.assertIn(b'name="output_compression"', raw)
+            self.assertIn(b"76", raw)
+            self.assertIn(b'name="background"', raw)
+            self.assertIn(b"auto", raw)
+            self.assertIn(b'name="moderation"', raw)
+            self.assertIn(b"auto", raw)
+            saved_file = result["savedFiles"][0]
+            self.assertTrue(saved_file["path"].endswith(".webp"))
+            self.assertEqual(saved_file["mimeType"], "image/webp")
+            self.assertEqual(saved_file["dimensions"], "1086x1448")
+            self.assertEqual(result["actualImageSize"], "1086x1448")
+
+    def test_image_generation_native_img2img_uploads_multiple_reference_images(self):
+        with tempfile.TemporaryDirectory(prefix="monster-ai-sidecar-native-img2img-multi-") as temp_dir:
+            reference_a = Path(temp_dir) / "reference-a.png"
+            reference_b = Path(temp_dir) / "reference-b.png"
+            reference_a.write_bytes(PNG_BYTES)
+            reference_b.write_bytes(PNG_BYTES)
+            result = self.run_sidecar(
+                "image",
+                output_dir=temp_dir,
+                request_id="image-native-img2img-multi",
+                generation={
+                    "capability": "img2img",
+                    "prompt": "combine these references",
+                    "model": "gpt-image-2",
+                    "options": {
+                        "size": "1024x1024",
+                        "count": 1,
+                        "referenceImagePaths": [str(reference_a), str(reference_b)],
+                        "fallbackMode": "native",
+                    },
+                },
+            )
+
+            self.assertTrue(result["ok"], result)
+            raw = self.server.last_image_edit_raw
+            self.assertIn(b'name="generation_mode"', raw)
+            self.assertIn(b"img2img", raw)
+            self.assertIn(b'name="image[]"; filename="reference-a.png"', raw)
+            self.assertIn(b'name="image[]"; filename="reference-b.png"', raw)
+
+    def test_image_generation_native_person_consistency_uploads_reference_image(self):
+        with tempfile.TemporaryDirectory(prefix="monster-ai-sidecar-native-person-") as temp_dir:
+            reference_path = Path(temp_dir) / "person-reference.png"
+            reference_path.write_bytes(PNG_BYTES)
+            result = self.run_sidecar(
+                "image",
+                output_dir=temp_dir,
+                request_id="image-native-person-consistency",
+                generation={
+                    "capability": "person_consistency",
+                    "prompt": "make a surprised expression",
+                    "model": "gpt-image-2",
+                    "options": {
+                        "size": "1024x1024",
+                        "count": 1,
+                        "sourceImagePath": str(reference_path),
+                        "personContextJson": json.dumps({
+                            "sourceImagePath": str(reference_path),
+                            "promise": "best_effort_identity_consistency",
+                        }),
+                        "fallbackMode": "native",
+                    },
+                },
+            )
+
+            self.assertTrue(result["ok"], result)
+            self.assertIn("multipart/form-data", self.server.last_image_edit_content_type)
+            raw = self.server.last_image_edit_raw
+            self.assertIn(b'name="prompt"', raw)
+            self.assertIn(b"make a surprised expression", raw)
+            self.assertIn(b'name="generation_mode"', raw)
+            self.assertIn(b"person_consistency", raw)
+            self.assertIn(b'name="person_context"', raw)
+            self.assertIn(b"best_effort_identity_consistency", raw)
+            self.assertIn(b'name="image[]"; filename="person-reference.png"', raw)
 
     def test_image_generation_uses_model_config_capability_override(self):
         with tempfile.TemporaryDirectory(prefix="monster-ai-sidecar-config-capability-") as temp_dir:
+            source_path = Path(temp_dir) / "source.png"
+            mask_path = Path(temp_dir) / "mask.png"
+            source_path.write_bytes(PNG_BYTES)
+            mask_path.write_bytes(PNG_BYTES)
             result = self.run_sidecar(
                 "image",
                 output_dir=temp_dir,
@@ -681,17 +933,46 @@ class AiProviderTesterContractTest(unittest.TestCase):
                     "options": {
                         "size": "1024x1024",
                         "count": 1,
-                        "sourceImagePath": "C:/Monster/source.png",
-                        "maskPath": "C:/Monster/mask.svg",
+                        "sourceImagePath": str(source_path),
+                        "maskPath": str(mask_path),
                         "fallbackMode": "native",
                     },
                 },
             )
 
             self.assertTrue(result["ok"], result)
-            self.assertEqual(self.server.last_image_body["generation_mode"], "inpaint")
-            self.assertEqual(self.server.last_image_body["image"], "C:/Monster/source.png")
-            self.assertEqual(self.server.last_image_body["mask"], "C:/Monster/mask.svg")
+            raw = self.server.last_image_edit_raw
+            self.assertIn(b'name="generation_mode"', raw)
+            self.assertIn(b"inpaint", raw)
+            self.assertIn(b'name="image"; filename="source.png"', raw)
+            self.assertIn(b'name="mask"; filename="mask.png"', raw)
+
+    def test_image_generation_native_inpaint_rejects_non_png_mask(self):
+        with tempfile.TemporaryDirectory(prefix="monster-ai-sidecar-native-mask-format-") as temp_dir:
+            source_path = Path(temp_dir) / "source.png"
+            mask_path = Path(temp_dir) / "mask.svg"
+            source_path.write_bytes(PNG_BYTES)
+            mask_path.write_text("<svg></svg>", encoding="utf-8")
+            result = self.run_sidecar(
+                "image",
+                output_dir=temp_dir,
+                request_id="image-native-inpaint-mask-format",
+                generation={
+                    "capability": "inpaint",
+                    "prompt": "paint a new sign",
+                    "model": "gpt-image-2",
+                    "options": {
+                        "size": "1024x1024",
+                        "count": 1,
+                        "sourceImagePath": str(source_path),
+                        "maskPath": str(mask_path),
+                        "fallbackMode": "native",
+                    },
+                },
+            )
+
+            self.assertFalse(result["ok"], result)
+            self.assertIn("mask image must be a PNG file", result["message"])
 
     def test_image_generation_prompt_fallback_does_not_forward_native_paths(self):
         with tempfile.TemporaryDirectory(prefix="monster-ai-sidecar-fallback-inpaint-") as temp_dir:
@@ -785,6 +1066,27 @@ class AiProviderTesterContractTest(unittest.TestCase):
             self.assertIsNone(result["fallbackImageSize"])
             self.assertEqual(result["imageAttempts"], 1)
             self.assertEqual(result["failureKind"], "unsupported_size")
+            self.assertFalse(result["imagePaths"])
+
+    def test_provider_account_unavailable_is_reported_as_actionable_failure_kind(self):
+        with tempfile.TemporaryDirectory(prefix="monster-ai-sidecar-account-unavailable-") as temp_dir:
+            result = self.run_sidecar(
+                "image",
+                output_dir=temp_dir,
+                request_id="image-account-unavailable",
+                config_patch={
+                    "imagePrompt": "account unavailable image",
+                    "imageSize": "1024x1024",
+                },
+            )
+
+            self.assertFalse(result["ok"], result)
+            self.assertEqual(result["requestId"], "image-account-unavailable")
+            self.assertEqual(result["statusCode"], 503)
+            self.assertEqual(result["failureKind"], "provider_unavailable")
+            self.assertIn("当前模型没有可用账号", result["message"])
+            self.assertNotIn("No available compatible accounts", result["message"])
+            self.assertIn("No available compatible accounts", result["rawPreview"])
             self.assertFalse(result["imagePaths"])
 
     def test_tall_oversized_size_is_reported_without_prompt_only_fallback(self):

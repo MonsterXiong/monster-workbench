@@ -5,6 +5,7 @@ import time
 SECRET_KEYS = {"api_key", "apikey", "apiKey", "authorization", "token", "secret", "password"}
 MAX_PREVIEW_CHARS = 4096
 MAX_RAW_STRING_CHARS = 512
+PROVIDER_UNAVAILABLE_MESSAGE = "当前模型没有可用账号或账号池已耗尽，请换一个模型/Provider，或稍后重试"
 
 
 def trim_value(value, max_chars, marker="[已截断]"):
@@ -130,6 +131,8 @@ def is_timeout_error(error):
 
 def classify_image_http_error(status_code, detail):
     text = str(detail or "").lower()
+    if status_code == 503 and is_provider_account_unavailable(text):
+        return "provider_unavailable"
     if status_code in (400, 413, 422) and any(
         marker in text
         for marker in (
@@ -156,6 +159,23 @@ def classify_image_http_error(status_code, detail):
     if status_code in (401, 403):
         return "auth"
     return "provider_http"
+
+
+def is_provider_account_unavailable(text):
+    return any(
+        marker in text
+        for marker in (
+            "no available compatible accounts",
+            "no available accounts",
+            "no compatible accounts",
+            "no available account",
+            "account pool",
+            "compatible accounts",
+            "账号池",
+            "可用账号",
+            "兼容账号",
+        )
+    )
 
 
 def classify_image_exception(error):

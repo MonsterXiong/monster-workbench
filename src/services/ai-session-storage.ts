@@ -28,6 +28,7 @@ const AI_IMAGE_FAILURE_KINDS: AiImageFailureKind[] = [
   "connection",
   "rate_limited",
   "auth",
+  "provider_unavailable",
   "provider_http",
   "provider_error",
   "canceled",
@@ -38,6 +39,8 @@ const SUPPORTED_IMAGE_SIZES = new Set([
   "1536x864",
   "1344x1008",
   "1024x1024",
+  "1024x1536",
+  "1536x1024",
   "2048x2048",
   "1152x2048",
   "2048x1152",
@@ -177,7 +180,7 @@ export function normalizeAiSessions(
             ? clampNumber(message.imageAttempts, 1, 10, 1, 0)
             : undefined,
           imageCount: message.imageCount
-            ? clampNumber(message.imageCount, 1, 4, 1, 0)
+            ? clampNumber(message.imageCount, 1, Number.MAX_SAFE_INTEGER, 1, 0)
             : undefined,
           failureKind: normalizeImageFailureKind(message.failureKind),
           imageUrls: Array.isArray(message.imageUrls)

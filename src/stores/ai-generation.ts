@@ -186,7 +186,7 @@ export const useAiGenerationStore = defineStore("ai-generation", () => {
     if (capability === "image" || capability === "txt2img") {
       return {
         size: imageSize.value,
-        count: clampNumber(imageCount.value, 1, 4, 1, 0),
+        count: clampNumber(imageCount.value, 1, Number.MAX_SAFE_INTEGER, 1, 0),
       };
     }
     if (capability === "audio") {

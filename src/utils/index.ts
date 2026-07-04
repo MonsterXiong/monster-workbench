@@ -12,6 +12,7 @@ export * from "./error/index";
 export * from "./file/index";
 export * from "./format/index";
 export * from "./id/index";
+export * from "./image-generation-size";
 export * from "./json/index";
 export * from "./keyboard/index";
 export * from "./number/index";

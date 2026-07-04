@@ -82,6 +82,7 @@ export const AI_PROVIDER_CAPABILITIES: AiProviderCapability[] = [
   "video",
 ];
 
+const GPT_IMAGE_NATIVE_CAPABILITIES = new Set<AiProviderCapability>(["img2img", "inpaint", "person_consistency"]);
 const AI_ACTIVE_CONFIG_FALLBACKS: Record<AiActiveConfigIdKey, AiActiveConfigIdKey[]> = {
   chat: ["chat"],
   image: ["image", "txt2img"],
@@ -130,7 +131,7 @@ function createId(prefix: string) {
 }
 
 type AiProviderCapabilityConfig =
-  | Partial<Pick<AiProviderConfig, "provider" | "baseUrl" | "adapterId" | "capabilities">>
+  | Partial<Pick<AiProviderConfig, "provider" | "baseUrl" | "adapterId" | "capabilities" | "model" | "imageModel">>
   | null
   | undefined;
 
@@ -254,7 +255,11 @@ export function supportsAiProviderCapability(
   configLike: AiProviderCapabilityConfig,
   capability: AiProviderCapability
 ) {
-  return resolveAiProviderCapabilities(configLike).includes(capability);
+  return (
+    (GPT_IMAGE_NATIVE_CAPABILITIES.has(capability) &&
+      toTrimmedString(configLike?.imageModel || configLike?.model).toLowerCase().startsWith("gpt-image-")) ||
+    resolveAiProviderCapabilities(configLike).includes(capability)
+  );
 }
 
 export function normalizeAiProviderQueueMode(value: unknown): AiProviderQueueMode {
@@ -319,7 +324,7 @@ export function normalizeAiProviderConfig(
     imageCount: clampNumber(
       Number(raw?.imageCount || defaultAiProviderConfig.imageCount),
       1,
-      4,
+      Number.MAX_SAFE_INTEGER,
       defaultAiProviderConfig.imageCount,
       0
     ),

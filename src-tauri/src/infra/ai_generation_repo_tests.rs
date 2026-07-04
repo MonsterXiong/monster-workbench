@@ -206,7 +206,8 @@ fn renew_business_task_lease_fails_when_status_not_running() {
 #[test]
 fn reset_running_business_tasks_by_other_worker_only_resets_foreign_workers() {
     let repo = test_repo();
-    repo.enqueue_business_task(new_task("own-worker")).expect("enqueue");
+    repo.enqueue_business_task(new_task("own-worker"))
+        .expect("enqueue");
     repo.enqueue_business_task(new_task("other-worker"))
         .expect("enqueue");
     let claimed_at = now_ms();
@@ -243,7 +244,8 @@ fn reset_running_business_tasks_by_other_worker_only_resets_foreign_workers() {
 #[test]
 fn reset_running_business_tasks_with_expired_lease_only_resets_expired() {
     let repo = test_repo();
-    repo.enqueue_business_task(new_task("fresh-lease")).expect("enqueue");
+    repo.enqueue_business_task(new_task("fresh-lease"))
+        .expect("enqueue");
     repo.enqueue_business_task(new_task("expired-lease"))
         .expect("enqueue");
     let claimed_at = now_ms();
@@ -283,7 +285,8 @@ fn reset_running_business_tasks_with_expired_lease_only_resets_expired() {
 #[test]
 fn fail_stuck_running_business_tasks_marks_oldest_as_failed() {
     let repo = test_repo();
-    repo.enqueue_business_task(new_task("fresh-claim")).expect("enqueue");
+    repo.enqueue_business_task(new_task("fresh-claim"))
+        .expect("enqueue");
     repo.enqueue_business_task(new_task("stuck-claim"))
         .expect("enqueue");
     let now = now_ms();

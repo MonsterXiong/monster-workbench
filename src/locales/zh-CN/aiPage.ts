@@ -71,6 +71,7 @@ export default {
       error: "错误",
       inputPlaceholder: "输入生图提示词",
       sizePresetLabel: "常用尺寸",
+      sizeAuto: "自动",
       promptToolsLabel: "提示词工具",
       sizeKindSquare: "方图",
       sizeKindPortrait: "竖屏",
@@ -120,6 +121,7 @@ export default {
       failureHintUnsupportedSize: "模型明确拒绝了该尺寸，请换用真实测试通过的尺寸；这个尺寸不应进入可选白名单。",
       failureHintTimeout: "生成请求超时，可能是模型排队或服务端生成过慢；建议稍后重试并保留该次耗时记录。",
       failureHintConnection: "模型服务连接异常或重启中，请确认服务稳定后重试。",
+      failureHintProviderUnavailable: "当前模型没有可用账号或账号池已耗尽，请换一个模型/Provider，或稍后重试。",
       failureHintCanceled: "生成已取消，可以直接重试，或回填提示词后调整尺寸、风格和模型配置。",
       failureKind: {
         unsupported_size: "尺寸不支持",
@@ -127,6 +129,7 @@ export default {
         connection: "连接异常",
         rate_limited: "限流",
         auth: "鉴权失败",
+        provider_unavailable: "账号不可用",
         provider_http: "服务返回错误",
         provider_error: "服务异常",
         canceled: "已取消",

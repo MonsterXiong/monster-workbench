@@ -14,6 +14,7 @@ from ai_provider_artifacts import (
 from ai_provider_input import parse_provider_request
 from ai_provider_results import (
     MAX_PREVIEW_CHARS,
+    PROVIDER_UNAVAILABLE_MESSAGE,
     build_media_failure_result,
     classify_image_exception,
     classify_image_http_error,
@@ -89,6 +90,8 @@ def main():
         message_detail = safe_detail[:240] if safe_detail else "网关返回空响应"
         action_label = media_action_label(ctx.action)
         failure_kind = classify_image_http_error(error.code, support_detail or message_detail) if ctx.action == "image" else None
+        if failure_kind == "provider_unavailable":
+            message_detail = PROVIDER_UNAVAILABLE_MESSAGE
         result = build_media_failure_result(
             ctx,
             "{0}: 模型提供商返回 HTTP {1}: {2}".format(action_label, error.code, message_detail),

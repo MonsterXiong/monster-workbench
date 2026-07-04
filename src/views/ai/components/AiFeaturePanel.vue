@@ -191,7 +191,7 @@ async function handleCancel() {
             </label>
             <label class="field-block">
               <span class="field-label">{{ t("aiPage.features.imageCount") }}</span>
-              <BaseInput v-model="aiStore.generationImageCount" type="number" min="1" max="4" />
+              <BaseInput v-model="aiStore.generationImageCount" type="number" min="1" />
             </label>
           </div>
 

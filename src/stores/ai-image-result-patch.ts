@@ -1,7 +1,9 @@
 import {
   clampNumber,
+  normalizeImageGenerationSizeValue,
   parseDimensionsText,
   toTrimmedString,
+  validateGptImage2Size,
 } from "../utils";
 import type {
   AiGenerationResult,
@@ -15,45 +17,9 @@ type AiSessionMessage = AiConversationSession["messages"][number];
 
 const IMAGE_RESULT_LATENCY_MAX_MS = 24 * 60 * 60_000;
 
-const SUPPORTED_IMAGE_SIZES = new Set([
-  "1008x1792",
-  "1008x1344",
-  "1536x864",
-  "1344x1008",
-  "1024x1024",
-  "2048x2048",
-  "1152x2048",
-  "2048x1152",
-  "1536x2048",
-  "2048x1536",
-  "1344x2016",
-  "2016x1344",
-  "2000x1600",
-  "1600x2000",
-  "2000x1200",
-  "1200x2000",
-  "2048x1024",
-  "1024x2048",
-  "2880x2880",
-  "2160x3840",
-  "3840x2160",
-  "2160x2880",
-  "2880x2160",
-  "2304x3456",
-  "3456x2304",
-  "2880x2304",
-  "2304x2880",
-  "3600x2160",
-  "2160x3600",
-  "3840x1920",
-  "1920x3840",
-  "3840x1280",
-  "1280x3840",
-]);
-
 export function normalizeImageSize(value: unknown) {
-  const size = toTrimmedString(value);
-  return SUPPORTED_IMAGE_SIZES.has(size) ? size : "1008x1792";
+  const validation = validateGptImage2Size(value);
+  return validation.valid ? validation.normalizedSize : normalizeImageGenerationSizeValue("1008x1792");
 }
 
 export function buildImagePromptWithSize(prompt: string, imageSize: string) {
