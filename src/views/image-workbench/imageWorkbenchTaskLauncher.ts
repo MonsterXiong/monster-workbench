@@ -109,24 +109,6 @@ export const imageWorkbenchTaskPresetConfigs: ImageWorkbenchTaskPresetConfig[] =
     promptKey: "imageWorkbench.tasks.presetPrompts.removeFlaw",
   },
   {
-    key: "finalHd",
-    entryKey: "upscale",
-    labelKey: "imageWorkbench.tasks.presets.finalHd",
-    promptKey: "imageWorkbench.tasks.presetPrompts.finalHd",
-  },
-  {
-    key: "ecommerceHd",
-    entryKey: "upscale",
-    labelKey: "imageWorkbench.tasks.presets.ecommerceHd",
-    promptKey: "imageWorkbench.tasks.presetPrompts.ecommerceHd",
-  },
-  {
-    key: "textureDetail",
-    entryKey: "upscale",
-    labelKey: "imageWorkbench.tasks.presets.textureDetail",
-    promptKey: "imageWorkbench.tasks.presetPrompts.textureDetail",
-  },
-  {
     key: "characterTurnaround",
     entryKey: "person",
     labelKey: "imageWorkbench.tasks.presets.characterTurnaround",
