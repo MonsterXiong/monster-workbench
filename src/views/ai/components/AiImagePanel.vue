@@ -172,11 +172,9 @@ const imageStatusLabel = computed(() => {
   }
   return isBusy.value ? t("aiPage.image.generating") : t("aiPage.image.ready");
 });
-const activeImageHeaderMeta = computed(() => [
-  aiStore.activeImageConfig?.name || aiStore.activeImageConfig?.displayName,
-  activeImageModelName.value,
-  isBusy.value ? imageStatusLabel.value : "",
-].filter(Boolean).join(" · "));
+const activeImageHeaderMeta = computed(() =>
+  [t("aiPage.image.desc"), isBusy.value ? imageStatusLabel.value : ""].filter(Boolean).join(" · ")
+);
 const {
   renameDialogVisible,
   renameDraft,
@@ -324,7 +322,15 @@ async function openGeneratedImageLocation(message: ImageMessage, index: number) 
 }
 
 function openImageWorkbench() {
-  void router.push("/image-workbench");
+  const draftPrompt = input.value.trim();
+  void router.push(
+    draftPrompt
+      ? {
+          path: "/image-workbench",
+          query: { prompt: draftPrompt },
+        }
+      : "/image-workbench"
+  );
 }
 
 const {

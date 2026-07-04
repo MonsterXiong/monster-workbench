@@ -172,7 +172,7 @@ async function handleImageTest() {
 async function handleDeleteConfig() {
   try {
     await aiStore.deleteModelConfig(aiStore.selectedConfigId);
-    emit("tested", true, "模型配置已删除");
+    emit("tested", true, t("aiPage.config.deleteSuccess"));
   } catch (err) {
     emit("failed", getErrorMessage(err, t("settings.aiProvider.saveFailed")));
   }
