@@ -51,7 +51,11 @@ impl GlobalWorkerPool {
     /// 阻塞 acquire；wait_timeout 控制最长等待，超时返回 None（调用方应跳过
     /// 本次 worker 启动而非崩溃）。仅 `'static` self（即从 OnceLock 取的全局唯一
     /// 池实例）能持有 permit；测试里要用独立池请走 `acquire_owned` 闭包路径。
-    pub fn acquire(&'static self, owner_label: &str, wait_timeout: Duration) -> Option<WorkerPermit> {
+    pub fn acquire(
+        &'static self,
+        owner_label: &str,
+        wait_timeout: Duration,
+    ) -> Option<WorkerPermit> {
         let deadline = Instant::now() + wait_timeout;
         let mut state = self.state.lock().ok()?;
         loop {

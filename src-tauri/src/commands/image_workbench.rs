@@ -1,15 +1,24 @@
 use crate::infra::image_workbench_types::{
-    ImageWorkbenchAsset, ImageWorkbenchJob, ImageWorkbenchSnapshot, ImageWorkbenchTemplate,
+    ImageWorkbenchAsset, ImageWorkbenchGroup, ImageWorkbenchJob, ImageWorkbenchSnapshot,
+    ImageWorkbenchTemplate,
 };
 use crate::services::ai_service::AiProviderService;
+use crate::services::image_workbench_cleanup::{
+    CleanupImageWorkbenchDeletedAssetsResult, CleanupImageWorkbenchInvalidAssetsResult,
+};
+use crate::services::image_workbench_import::{
+    ImportImageWorkbenchGeneratedAssetsRequest, ImportImageWorkbenchGeneratedAssetsResult,
+};
 use crate::services::image_workbench_mask::{
     SaveImageWorkbenchMaskRequest, SaveImageWorkbenchMaskResult,
 };
 use crate::services::image_workbench_service::{
     CreateImageWorkbenchJobRequest, ImageWorkbenchContractSummary, ImageWorkbenchService,
     ImportImageWorkbenchReferenceRequest, ImportImageWorkbenchReferenceResult,
-    RecordImageWorkbenchAssetRequest, SaveImageWorkbenchTemplateRequest,
-    SetImageWorkbenchAssetFavoriteRequest, UpdateImageWorkbenchTaskStatusRequest,
+    QueryImageWorkbenchAssetsRequest, RecordImageWorkbenchAssetRequest,
+    SaveImageWorkbenchTemplateRequest, SetImageWorkbenchAssetFavoriteRequest,
+    SetImageWorkbenchAssetQualityIssuesRequest, SetImageWorkbenchAssetRatingRequest,
+    UpdateImageWorkbenchTaskStatusRequest,
 };
 use crate::services::runtime_janitor::WorkerIdentity;
 use std::sync::Mutex;
@@ -55,6 +64,26 @@ pub fn list_image_workbench_assets(
 }
 
 #[tauri::command]
+pub fn query_image_workbench_assets(
+    request: QueryImageWorkbenchAssetsRequest,
+    state: ImageWorkbenchState<'_>,
+) -> Result<Vec<ImageWorkbenchAsset>, String> {
+    let service = state.lock().unwrap_or_else(|e| e.into_inner());
+    service
+        .query_assets(request)
+        .map_err(|e| e.to_json_string())
+}
+
+#[tauri::command]
+pub fn list_image_workbench_groups(
+    job_id: String,
+    state: ImageWorkbenchState<'_>,
+) -> Result<Vec<ImageWorkbenchGroup>, String> {
+    let service = state.lock().unwrap_or_else(|e| e.into_inner());
+    service.list_groups(job_id).map_err(|e| e.to_json_string())
+}
+
+#[tauri::command]
 pub fn import_image_workbench_reference(
     request: ImportImageWorkbenchReferenceRequest,
     state: ImageWorkbenchState<'_>,
@@ -62,6 +91,17 @@ pub fn import_image_workbench_reference(
     let service = state.lock().unwrap_or_else(|e| e.into_inner());
     service
         .import_reference_image(request)
+        .map_err(|e| e.to_json_string())
+}
+
+#[tauri::command]
+pub fn import_image_workbench_generated_assets(
+    request: ImportImageWorkbenchGeneratedAssetsRequest,
+    state: ImageWorkbenchState<'_>,
+) -> Result<ImportImageWorkbenchGeneratedAssetsResult, String> {
+    let service = state.lock().unwrap_or_else(|e| e.into_inner());
+    service
+        .import_generated_assets(request)
         .map_err(|e| e.to_json_string())
 }
 
@@ -121,14 +161,38 @@ pub fn cancel_image_workbench_job(
 }
 
 #[tauri::command]
+pub fn cancel_image_workbench_task(
+    task_id: String,
+    state: ImageWorkbenchState<'_>,
+    ai_state: AiProviderState<'_>,
+) -> Result<ImageWorkbenchSnapshot, String> {
+    let snapshot = {
+        let service = state.lock().unwrap_or_else(|e| e.into_inner());
+        service
+            .cancel_task(&task_id)
+            .map_err(|e| e.to_json_string())?
+    };
+    let ai_service = ai_state.lock().unwrap_or_else(|e| e.into_inner());
+    let _ = ai_service.cancel_generation_task(&task_id);
+    Ok(snapshot)
+}
+
+#[tauri::command]
 pub fn retry_image_workbench_failed_tasks(
     job_id: String,
+    app_handle: AppHandle,
     state: ImageWorkbenchState<'_>,
+    worker_identity: WorkerIdentityState<'_>,
 ) -> Result<ImageWorkbenchSnapshot, String> {
     let service = state.lock().unwrap_or_else(|e| e.into_inner());
-    service
+    let worker_id = worker_identity.worker_id.clone();
+    let snapshot = service
         .retry_failed_tasks(&job_id)
-        .map_err(|e| e.to_json_string())
+        .map_err(|e| e.to_json_string())?;
+    service
+        .start_job_runner(app_handle, &job_id, worker_id)
+        .map_err(|e| e.to_json_string())?;
+    Ok(snapshot)
 }
 
 #[tauri::command]
@@ -145,9 +209,33 @@ pub fn recover_image_workbench_interrupted_jobs(
 pub fn delete_image_workbench_job(
     job_id: String,
     state: ImageWorkbenchState<'_>,
+    ai_state: AiProviderState<'_>,
 ) -> Result<(), String> {
-    let service = state.lock().unwrap_or_else(|e| e.into_inner());
-    service.delete_job(&job_id).map_err(|e| e.to_json_string())
+    let task_ids = {
+        let service = state.lock().unwrap_or_else(|e| e.into_inner());
+        let snapshot = service
+            .get_snapshot(&job_id)
+            .map_err(|e| e.to_json_string())?;
+        service
+            .delete_job(&job_id)
+            .map_err(|e| e.to_json_string())?;
+        snapshot
+            .tasks
+            .iter()
+            .filter(|task| {
+                matches!(
+                    task.status.as_str(),
+                    "queued" | "running" | "validating" | "retrying"
+                )
+            })
+            .map(|task| task.id.clone())
+            .collect::<Vec<_>>()
+    };
+    let ai_service = ai_state.lock().unwrap_or_else(|e| e.into_inner());
+    for task_id in task_ids {
+        let _ = ai_service.cancel_generation_task(&task_id);
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -167,6 +255,26 @@ pub fn export_image_workbench_asset(
     let service = state.lock().unwrap_or_else(|e| e.into_inner());
     service
         .export_asset(&asset_id)
+        .map_err(|e| e.to_json_string())
+}
+
+#[tauri::command]
+pub fn cleanup_image_workbench_deleted_assets(
+    state: ImageWorkbenchState<'_>,
+) -> Result<CleanupImageWorkbenchDeletedAssetsResult, String> {
+    let service = state.lock().unwrap_or_else(|e| e.into_inner());
+    service
+        .cleanup_deleted_job_assets()
+        .map_err(|e| e.to_json_string())
+}
+
+#[tauri::command]
+pub fn cleanup_image_workbench_invalid_assets(
+    state: ImageWorkbenchState<'_>,
+) -> Result<CleanupImageWorkbenchInvalidAssetsResult, String> {
+    let service = state.lock().unwrap_or_else(|e| e.into_inner());
+    service
+        .cleanup_invalid_assets()
         .map_err(|e| e.to_json_string())
 }
 
@@ -198,6 +306,28 @@ pub fn set_image_workbench_asset_favorite(
     let service = state.lock().unwrap_or_else(|e| e.into_inner());
     service
         .set_asset_favorite(request)
+        .map_err(|e| e.to_json_string())
+}
+
+#[tauri::command]
+pub fn set_image_workbench_asset_rating(
+    request: SetImageWorkbenchAssetRatingRequest,
+    state: ImageWorkbenchState<'_>,
+) -> Result<ImageWorkbenchSnapshot, String> {
+    let service = state.lock().unwrap_or_else(|e| e.into_inner());
+    service
+        .set_asset_rating(request)
+        .map_err(|e| e.to_json_string())
+}
+
+#[tauri::command]
+pub fn set_image_workbench_asset_quality_issues(
+    request: SetImageWorkbenchAssetQualityIssuesRequest,
+    state: ImageWorkbenchState<'_>,
+) -> Result<ImageWorkbenchSnapshot, String> {
+    let service = state.lock().unwrap_or_else(|e| e.into_inner());
+    service
+        .set_asset_quality_issues(request)
         .map_err(|e| e.to_json_string())
 }
 

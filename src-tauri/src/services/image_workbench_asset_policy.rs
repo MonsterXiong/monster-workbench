@@ -24,18 +24,24 @@ impl ImageWorkbenchAssetPathPolicy {
         Self { path_provider }
     }
 
-    pub(crate) fn normalize_optional_asset_path(
+    pub(crate) fn normalize_optional_mask_path(
         &self,
         label: &str,
         value: Option<String>,
         task_id: &str,
     ) -> AppResult<Option<String>> {
-        match normalize_optional_string(value) {
-            Some(path) => Ok(Some(
-                self.persist_workbench_asset_path(label, &path, task_id)?,
-            )),
-            None => Ok(None),
+        let Some(path) = normalize_optional_string(value) else {
+            return Ok(None);
+        };
+        let source_path = validate_local_asset_path(label, &path)?;
+        let mask_root = self.workbench_mask_root()?;
+        let canonical_mask_root = canonicalize_existing_dir(&mask_root, "图片工作台蒙版目录")?;
+        if source_path.starts_with(&canonical_mask_root) {
+            return Ok(Some(path_to_storage_string(&source_path)));
         }
+
+        self.persist_workbench_asset_path(label, &path, task_id)
+            .map(Some)
     }
 
     pub(crate) fn persist_workbench_asset_path(
@@ -49,7 +55,7 @@ impl ImageWorkbenchAssetPathPolicy {
         let canonical_workbench_root =
             canonicalize_existing_dir(&workbench_root, "图片工作台资产目录")?;
         if source_path.starts_with(&canonical_workbench_root) {
-            return Ok(source_path.to_string_lossy().to_string());
+            return Ok(path_to_storage_string(&source_path));
         }
 
         let generated_root = self.generated_asset_root()?;
@@ -76,7 +82,7 @@ impl ImageWorkbenchAssetPathPolicy {
         })?;
         dest_path
             .canonicalize()
-            .map(|path| path.to_string_lossy().to_string())
+            .map(|path| path_to_storage_string(&path))
             .map_err(|error| AppError::Io(format!("解析图片工作台资产路径失败: {}", error)))
     }
 
@@ -148,7 +154,59 @@ impl ImageWorkbenchAssetPathPolicy {
         })?;
 
         let mut result = reference_import_result(canonical_dest, dest_metadata.len());
-        result.original_path = source_path.to_string_lossy().to_string();
+        result.original_path = path_to_storage_string(&source_path);
+        Ok(result)
+    }
+
+    pub(crate) fn import_external_image_asset(
+        &self,
+        label: &str,
+        value: &str,
+        task_id: &str,
+    ) -> AppResult<ImportedImageWorkbenchReference> {
+        let source_path = validate_local_asset_path(label, value)?;
+        validate_reference_image_extension(label, &source_path)?;
+        let metadata = fs::metadata(&source_path).map_err(|error| {
+            AppError::Io(format!(
+                "读取图片工作台导入资产元数据失败 ({}): {}",
+                source_path.display(),
+                error
+            ))
+        })?;
+        if !metadata.is_file() {
+            return Err(AppError::Permission(format!(
+                "{} 必须指向本地图片文件",
+                label
+            )));
+        }
+
+        let asset_root = self.workbench_asset_root()?;
+        let canonical_asset_root = canonicalize_existing_dir(&asset_root, "图片工作台资产目录")?;
+        let dest_dir = canonical_asset_root.join(sanitize_path_segment(task_id));
+        fs::create_dir_all(&dest_dir)
+            .map_err(|error| AppError::Io(format!("创建图片工作台资产目录失败: {}", error)))?;
+        let dest_path = dest_dir.join(unique_asset_file_name(&source_path));
+        fs::copy(&source_path, &dest_path).map_err(|error| {
+            AppError::Io(format!(
+                "复制图片工作台导入资产失败 ({} -> {}): {}",
+                source_path.display(),
+                dest_path.display(),
+                error
+            ))
+        })?;
+        let dest_metadata = fs::metadata(&dest_path).map_err(|error| {
+            AppError::Io(format!(
+                "读取图片工作台导入资产失败 ({}): {}",
+                dest_path.display(),
+                error
+            ))
+        })?;
+        let canonical_dest = dest_path
+            .canonicalize()
+            .map_err(|error| AppError::Io(format!("解析图片工作台导入资产路径失败: {}", error)))?;
+
+        let mut result = reference_import_result(canonical_dest, dest_metadata.len());
+        result.original_path = path_to_storage_string(&source_path);
         Ok(result)
     }
 
@@ -193,6 +251,20 @@ impl ImageWorkbenchAssetPathPolicy {
                     error
                 ))
             })?;
+        }
+        Ok(root)
+    }
+
+    fn workbench_mask_root(&self) -> AppResult<PathBuf> {
+        let root = self
+            .path_provider
+            .get_app_local_data_dir()?
+            .join("ai")
+            .join("image-workbench")
+            .join("masks");
+        if !root.exists() {
+            fs::create_dir_all(&root)
+                .map_err(|error| AppError::Io(format!("创建图片工作台蒙版目录失败: {}", error)))?;
         }
         Ok(root)
     }
@@ -327,13 +399,30 @@ fn validate_reference_image_extension(label: &str, path: &Path) -> AppResult<()>
 }
 
 fn reference_import_result(path: PathBuf, size_bytes: u64) -> ImportedImageWorkbenchReference {
+    let file_path = path_to_storage_string(&path);
     ImportedImageWorkbenchReference {
         mime_type: mime_type_for_image_path(&path),
-        file_path: path.to_string_lossy().to_string(),
-        original_path: path.to_string_lossy().to_string(),
+        file_path: file_path.clone(),
+        original_path: file_path,
         size_bytes,
         created_at_ms: now_millis(),
     }
+}
+
+fn path_to_storage_string(path: &Path) -> String {
+    strip_windows_extended_path_prefix(&path.to_string_lossy())
+}
+
+fn strip_windows_extended_path_prefix(value: &str) -> String {
+    const EXTENDED_PREFIX: &str = "\\\\?\\";
+    const EXTENDED_UNC_PREFIX: &str = "\\\\?\\UNC\\";
+    if let Some(rest) = value.strip_prefix(EXTENDED_UNC_PREFIX) {
+        return format!("\\\\{}", rest);
+    }
+    if let Some(rest) = value.strip_prefix(EXTENDED_PREFIX) {
+        return rest.to_string();
+    }
+    value.to_string()
 }
 
 fn mime_type_for_image_path(path: &Path) -> Option<String> {

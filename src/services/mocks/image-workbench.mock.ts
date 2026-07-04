@@ -12,6 +12,10 @@ import {
   mergeMockNegativePrompt,
   parseMockReferenceAssetIds,
 } from "./image-workbench-prompt.mock";
+import { listMockImageWorkbenchAssets, listMockImageWorkbenchGroups, queryMockImageWorkbenchAssets, refreshMockImageWorkbenchAssetDeliveryStatus, setMockImageWorkbenchAssetFavorite, setMockImageWorkbenchAssetQualityIssues, setMockImageWorkbenchAssetRating } from "./image-workbench-assets.mock";
+import { cleanupMockImageWorkbenchDeletedAssets, cleanupMockImageWorkbenchInvalidAssets, exportMockImageWorkbenchAsset, exportMockImageWorkbenchJob } from "./image-workbench-delivery.mock";
+import { buildMockImageWorkbenchFailureFields } from "./image-workbench-failure.mock";
+import { importMockImageWorkbenchGeneratedAssets } from "./image-workbench-import.mock";
 
 type MockHandlerResult = {
   handled: boolean;
@@ -26,7 +30,6 @@ const mockImageWorkbenchModelRuns = new Map<string, any>();
 const mockImageWorkbenchTemplates = new Map<string, any>();
 const mockImageWorkbenchGroups = new Map<string, any>();
 
-const MOCK_IMAGE_WORKBENCH_MAX_QUANTITY = 16;
 const MOCK_IMAGE_WORKBENCH_TASK_STATUSES = new Set([
   "queued",
   "running",
@@ -107,14 +110,12 @@ function assertMockImageWorkbenchTaskTransition(task: any, nextStatus: string) {
   if (task.status === nextStatus) {
     return;
   }
-  const retryCount = Number(task.retryCount || 0);
-  const maxRetries = Number(task.maxRetries || 0);
   const allowed =
     (task.status === "queued" && ["running", "failed", "cancelled"].includes(nextStatus)) ||
     (task.status === "running" && ["validating", "succeeded", "failed", "cancelled", "retrying"].includes(nextStatus)) ||
     (task.status === "validating" && ["succeeded", "failed", "cancelled"].includes(nextStatus)) ||
     (task.status === "retrying" && ["running", "failed", "cancelled"].includes(nextStatus)) ||
-    (task.status === "failed" && nextStatus === "retrying" && retryCount < maxRetries);
+    (task.status === "failed" && nextStatus === "retrying");
 
   if (!allowed) {
     throw new Error(`[ERR_IPC_BROWSER] 图片工作台任务状态不能从 ${task.status} 切换到 ${nextStatus}`);
@@ -133,31 +134,26 @@ function getMockImageWorkbenchContract() {
       "image_workbench_assets",
       "image_workbench_metadata",
       "image_workbench_templates",
+      "image_workbench_groups",
       "image_workbench_model_runs",
     ],
     jobStatuses: ["draft", "queued", "running", "validating", "succeeded", "failed", "cancelled", "partial_succeeded"],
     taskStatuses: ["queued", "running", "validating", "retrying", "succeeded", "failed", "cancelled"],
     supportedModes: ["txt2img", "img2img", "inpaint", "person_consistency", "upscale_2x", "upscale_4x"],
     deferredModes: [],
-    maxQuantity: MOCK_IMAGE_WORKBENCH_MAX_QUANTITY,
+    maxQuantity: null,
   };
 }
 
 function listMockImageWorkbenchJobs(args: Record<string, unknown>) {
   const limit = Math.max(1, Math.min(Number(args.limit || 50), 100));
-  return sortByMany(mapValuesToArray(mockImageWorkbenchJobs), [
+  return sortByMany(mapValuesToArray(mockImageWorkbenchJobs).filter(isActiveMockImageWorkbenchJob), [
     { getValue: (job) => -Number(job.updatedAtMs || 0) },
     { getValue: (job) => -Number(job.createdAtMs || 0) },
   ]).slice(0, limit);
 }
 
-function listMockImageWorkbenchAssets(args: Record<string, unknown>) {
-  const limit = Math.max(1, Math.min(Number(args.limit || 100), 200));
-  return sortByMany(mapValuesToArray(mockImageWorkbenchAssets), [
-    { getValue: (asset) => (asset.favorite ? 0 : 1) },
-    { getValue: (asset) => -Number(asset.createdAtMs || 0) },
-  ]).slice(0, limit);
-}
+function isActiveMockImageWorkbenchJob(job: any) { return !job?.archivedAtMs && !job?.deletedAtMs; }
 
 function getMockImageWorkbenchSnapshot(jobId: string) {
   const job = mockImageWorkbenchJobs.get(jobId);
@@ -186,13 +182,23 @@ function getMockImageWorkbenchSnapshot(jobId: string) {
   return { job, tasks, assets, metadata, modelRuns };
 }
 
+function getMockImageWorkbenchAssetContext() {
+  return {
+    jobs: mockImageWorkbenchJobs,
+    assets: mockImageWorkbenchAssets,
+    groups: mockImageWorkbenchGroups,
+    getSnapshot: getMockImageWorkbenchSnapshot,
+  };
+}
+
 function recalculateMockImageWorkbenchJob(jobId: string) {
   const snapshot = getMockImageWorkbenchSnapshot(jobId);
   const now = getCurrentTimestampMs();
   const tasks = snapshot.tasks;
-  const hasRunning = tasks.some((task) => task.status === "running");
+  const hasRunning = tasks.some((task) => ["running", "retrying"].includes(task.status));
   const hasValidating = tasks.some((task) => task.status === "validating");
   const hasSucceeded = tasks.some((task) => task.status === "succeeded");
+  const hasQueued = tasks.some((task) => task.status === "queued");
   const allQueued = tasks.every((task) => task.status === "queued");
   const allSucceeded = tasks.every((task) => task.status === "succeeded");
   const allFailed = tasks.every((task) => task.status === "failed");
@@ -212,7 +218,7 @@ function recalculateMockImageWorkbenchJob(jobId: string) {
               ? "cancelled"
               : allTerminal && hasSucceeded
                 ? "partial_succeeded"
-                : "running";
+                : hasQueued ? "queued" : "running";
 
   const job = {
     ...snapshot.job,
@@ -251,6 +257,21 @@ function recordMockImageWorkbenchModelRun(task: any, modelRun: any) {
   });
 }
 
+function cancelMockImageWorkbenchTaskRecord(task: any, job: any, now = getCurrentTimestampMs()) {
+  const error = task.error || "用户取消";
+  cancelMockAiGenerationTask(task.id);
+  mockImageWorkbenchTasks.set(task.id, {
+    ...task, status: "cancelled", error,
+    ...buildMockImageWorkbenchFailureFields({ status: "cancelled", error }),
+    claimToken: null, leasedUntilMs: null,
+    finishedAtMs: task.finishedAtMs || now, updatedAtMs: now,
+  });
+  recordMockImageWorkbenchModelRun(task, {
+    provider: "unknown", model: job.model || null, capability: job.mode || "txt2img",
+    status: "cancelled", requestJson: JSON.stringify({ mode: job.mode || "txt2img", size: job.size || null, count: 1 }), error,
+  });
+}
+
 function createImageWorkbenchJob(args: Record<string, unknown>) {
   const request = args.request as any;
   const prompt = String(request?.prompt || "").trim();
@@ -272,12 +293,9 @@ function createImageWorkbenchJob(args: Record<string, unknown>) {
   if (
     !Number.isFinite(rawQuantity) ||
     !Number.isInteger(rawQuantity) ||
-    rawQuantity < 1 ||
-    rawQuantity > MOCK_IMAGE_WORKBENCH_MAX_QUANTITY
+    rawQuantity < 1
   ) {
-    throw new Error(
-      `[ERR_IPC_BROWSER] 图片工作台任务数量必须在 1 到 ${MOCK_IMAGE_WORKBENCH_MAX_QUANTITY} 之间`
-    );
+    throw new Error("[ERR_IPC_BROWSER] 图片工作台任务数量必须大于 0");
   }
   const now = getCurrentTimestampMs();
   const quantity = Math.floor(rawQuantity);
@@ -305,6 +323,8 @@ function createImageWorkbenchJob(args: Record<string, unknown>) {
     startedAtMs: null,
     finishedAtMs: null,
     error: null,
+    archivedAtMs: null,
+    deletedAtMs: null,
   };
   mockImageWorkbenchJobs.set(jobId, job);
   // 一 job 一 group：对齐后端 image_workbench_groups 表，浏览器降级也产出组语义。
@@ -346,6 +366,7 @@ function updateImageWorkbenchTaskStatus(args: Record<string, unknown>) {
     ...task,
     status: request.status,
     error: request.error || null,
+    ...buildMockImageWorkbenchFailureFields(request),
     retryCount: task.status === "failed" && request.status === "retrying" ? task.retryCount + 1 : task.retryCount,
     claimToken: clearClaim
       ? null
@@ -381,41 +402,39 @@ function cancelImageWorkbenchJob(args: Record<string, unknown>) {
   const now = getCurrentTimestampMs();
   mapValuesToArray(mockImageWorkbenchTasks)
     .filter((task) => task.jobId === jobId && ["queued", "running", "validating", "retrying"].includes(task.status))
-    .forEach((task) => {
-      cancelMockAiGenerationTask(task.id);
-      mockImageWorkbenchTasks.set(task.id, {
-        ...task,
-        status: "cancelled",
-        error: task.error || "用户取消",
-        claimToken: null,
-        leasedUntilMs: null,
-        finishedAtMs: task.finishedAtMs || now,
-        updatedAtMs: now,
-      });
-      recordMockImageWorkbenchModelRun(task, {
-        provider: "unknown",
-        model: job.model || null,
-        capability: job.mode || "txt2img",
-        status: "cancelled",
-        requestJson: JSON.stringify({ mode: job.mode || "txt2img", size: job.size || null, count: 1 }),
-        error: "用户取消",
-      });
-    });
+    .forEach((task) => cancelMockImageWorkbenchTaskRecord(task, job, now));
   recalculateMockImageWorkbenchJob(jobId);
+  void runMockImageWorkbenchJob(jobId);
   return getMockImageWorkbenchSnapshot(jobId);
+}
+
+function cancelImageWorkbenchTask(args: Record<string, unknown>) {
+  const taskId = String(args.taskId || "");
+  const task = mockImageWorkbenchTasks.get(taskId);
+  if (!task) {
+    throw new Error("[ERR_IPC_BROWSER] 浏览器 Mock 未找到图片工作台任务");
+  }
+  const job = mockImageWorkbenchJobs.get(task.jobId);
+  if (!job || !["queued", "running", "validating", "retrying"].includes(task.status)) {
+    return getMockImageWorkbenchSnapshot(task.jobId);
+  }
+  cancelMockImageWorkbenchTaskRecord(task, job);
+  recalculateMockImageWorkbenchJob(task.jobId);
+  return getMockImageWorkbenchSnapshot(task.jobId);
 }
 
 function recoverImageWorkbenchInterruptedJobs() {
   const now = getCurrentTimestampMs();
   const affectedJobIds = new Set<string>();
   mapValuesToArray(mockImageWorkbenchTasks)
-    .filter((task) => ["queued", "running", "validating", "retrying"].includes(task.status))
+    .filter((task) => isActiveMockImageWorkbenchJob(mockImageWorkbenchJobs.get(task.jobId)) && ["queued", "running", "validating", "retrying"].includes(task.status))
     .forEach((task) => {
       affectedJobIds.add(task.jobId);
       mockImageWorkbenchTasks.set(task.id, {
         ...task,
         status: ["running", "validating"].includes(task.status) ? "queued" : task.status,
         error: null,
+        failureType: null, failureHint: null,
         claimToken: null,
         leasedUntilMs: null,
         finishedAtMs: null,
@@ -435,7 +454,7 @@ function retryImageWorkbenchFailedTasks(args: Record<string, unknown>) {
   const now = getCurrentTimestampMs();
   let updated = 0;
   mapValuesToArray(mockImageWorkbenchTasks)
-    .filter((task) => task.jobId === jobId && task.status === "failed" && task.retryCount < task.maxRetries)
+    .filter((task) => task.jobId === jobId && task.status === "failed")
     .forEach((task) => {
       updated += 1;
       mockImageWorkbenchTasks.set(task.id, {
@@ -443,6 +462,7 @@ function retryImageWorkbenchFailedTasks(args: Record<string, unknown>) {
         status: "retrying",
         retryCount: task.retryCount + 1,
         error: null,
+        failureType: null, failureHint: null,
         claimToken: null,
         leasedUntilMs: null,
         finishedAtMs: null,
@@ -458,8 +478,12 @@ function retryImageWorkbenchFailedTasks(args: Record<string, unknown>) {
 
 function startImageWorkbenchJobRunner(args: Record<string, unknown>) {
   const jobId = String(args.jobId || "");
-  if (!mockImageWorkbenchJobs.has(jobId)) {
+  const job = mockImageWorkbenchJobs.get(jobId);
+  if (!job) {
     throw new Error("[ERR_IPC_BROWSER] 浏览器 Mock 未找到图片工作台作业");
+  }
+  if (!isActiveMockImageWorkbenchJob(job)) {
+    return getMockImageWorkbenchSnapshot(jobId);
   }
   void runMockImageWorkbenchJob(jobId);
   return getMockImageWorkbenchSnapshot(jobId);
@@ -472,6 +496,9 @@ async function runMockImageWorkbenchJob(jobId: string) {
   const snapshot = getMockImageWorkbenchSnapshot(jobId);
   const tasks = snapshot.tasks.filter((task: any) => ["queued", "retrying"].includes(task.status));
   for (const task of tasks) {
+    if (!isActiveMockImageWorkbenchJob(mockImageWorkbenchJobs.get(jobId))) {
+      break;
+    }
     const current = mockImageWorkbenchTasks.get(task.id);
     if (!current || !["queued", "retrying"].includes(current.status)) {
       continue;
@@ -637,49 +664,21 @@ async function runMockImageWorkbenchJob(jobId: string) {
 
 function deleteImageWorkbenchJob(args: Record<string, unknown>) {
   const jobId = String(args.jobId || "");
-  if (!mockImageWorkbenchJobs.delete(jobId)) {
-    throw new Error("[ERR_IPC_BROWSER] 浏览器 Mock 未找到图片工作台作业");
-  }
-  const taskIds = new Set(
-    mapValuesToArray(mockImageWorkbenchTasks)
-      .filter((task) => task.jobId === jobId)
-      .map((task) => task.id)
-  );
-  const assetIds = new Set(
-    mapValuesToArray(mockImageWorkbenchAssets)
-      .filter((asset) => asset.jobId === jobId)
-      .map((asset) => asset.id)
-  );
-  taskIds.forEach((taskId) => mockImageWorkbenchTasks.delete(taskId));
-  assetIds.forEach((assetId) => mockImageWorkbenchAssets.delete(assetId));
-  mapValuesToArray(mockImageWorkbenchMetadata)
-    .filter((item) => assetIds.has(item.assetId))
-    .forEach((item) => mockImageWorkbenchMetadata.delete(item.id));
-  mapValuesToArray(mockImageWorkbenchModelRuns)
-    .filter((item) => item.jobId === jobId)
-    .forEach((item) => mockImageWorkbenchModelRuns.delete(item.id));
-  mapValuesToArray(mockImageWorkbenchGroups)
-    .filter((item) => item.jobId === jobId)
-    .forEach((item) => mockImageWorkbenchGroups.delete(item.id));
+  const job = mockImageWorkbenchJobs.get(jobId);
+  if (!job) throw new Error("[ERR_IPC_BROWSER] 浏览器 Mock 未找到图片工作台作业");
+  const now = getCurrentTimestampMs();
+  mockImageWorkbenchJobs.set(jobId, { ...job, deletedAtMs: job.deletedAtMs || now, updatedAtMs: now });
+  mapValuesToArray(mockImageWorkbenchTasks)
+    .filter((task) => task.jobId === jobId && ["queued", "running", "validating", "retrying"].includes(task.status))
+    .forEach((task) => {
+      cancelMockAiGenerationTask(task.id);
+      mockImageWorkbenchTasks.set(task.id, {
+        ...task, status: "cancelled", error: task.error || "作业已删除",
+        ...buildMockImageWorkbenchFailureFields({ status: "cancelled", error: task.error || "作业已删除" }),
+        claimToken: null, leasedUntilMs: null, finishedAtMs: task.finishedAtMs || now, updatedAtMs: now,
+      });
+    });
   return null;
-}
-
-function exportImageWorkbenchJob(args: Record<string, unknown>) {
-  const jobId = String(args.jobId || "");
-  const snapshot = getMockImageWorkbenchSnapshot(jobId);
-  if (!snapshot.assets.length) {
-    throw new Error("[ERR_IPC_BROWSER] 当前作业暂无可导出的图片资产");
-  }
-  return `C:\\Users\\MockUser\\.monster-tools\\ai\\image-workbench\\exports\\${jobId}-${getCurrentTimestampMs()}`;
-}
-
-function exportImageWorkbenchAsset(args: Record<string, unknown>) {
-  const assetId = String(args.assetId || "");
-  const asset = mockImageWorkbenchAssets.get(assetId);
-  if (!asset) {
-    throw new Error("[ERR_IPC_BROWSER] 浏览器 Mock 未找到图片工作台资产");
-  }
-  return `C:\\Users\\MockUser\\.monster-tools\\ai\\image-workbench\\exports\\${assetId}-${getCurrentTimestampMs()}`;
 }
 
 function recordImageWorkbenchTaskAsset(args: Record<string, unknown>) {
@@ -705,7 +704,11 @@ function recordImageWorkbenchTaskAsset(args: Record<string, unknown>) {
     parentAssetId: src?.id ?? null,
     rootAssetId: src ? src.rootAssetId ?? src.id : null,
     versionIndex: src ? (src.versionIndex ?? 0) + 1 : null,
+    deliveryStatus: null, qualityIssues: [], integrityStatus: "ok", integrityError: null, integrityCheckedAtMs: now,
   });
+  if (src?.id) {
+    refreshMockImageWorkbenchAssetDeliveryStatus(getMockImageWorkbenchAssetContext(), src.id);
+  }
   if (request.metadata) {
     const metadataId = createMockImageWorkbenchId("iw-meta");
     mockImageWorkbenchMetadata.set(metadataId, {
@@ -727,26 +730,6 @@ function recordImageWorkbenchTaskAsset(args: Record<string, unknown>) {
     recordMockImageWorkbenchModelRun(task, request.modelRun);
   }
   return getMockImageWorkbenchSnapshot(task.jobId);
-}
-
-function setImageWorkbenchAssetFavorite(args: Record<string, unknown>) {
-  const request = args.request as any;
-  const asset = mockImageWorkbenchAssets.get(String(request?.assetId || ""));
-  if (!asset) {
-    throw new Error("[ERR_IPC_BROWSER] 浏览器 Mock 未找到图片工作台资产");
-  }
-  mockImageWorkbenchAssets.set(asset.id, {
-    ...asset,
-    favorite: Boolean(request.favorite),
-  });
-  const job = mockImageWorkbenchJobs.get(asset.jobId);
-  if (job) {
-    mockImageWorkbenchJobs.set(asset.jobId, {
-      ...job,
-      updatedAtMs: getCurrentTimestampMs(),
-    });
-  }
-  return getMockImageWorkbenchSnapshot(asset.jobId);
 }
 
 function listImageWorkbenchTemplates() {
@@ -810,9 +793,13 @@ export function handleImageWorkbenchMock(command: string, args: Record<string, u
     case "list_image_workbench_jobs":
       return { handled: true, value: listMockImageWorkbenchJobs(args) };
     case "list_image_workbench_assets":
-      return { handled: true, value: listMockImageWorkbenchAssets(args) };
-    case "import_image_workbench_reference":
-      return { handled: true, value: importMockImageWorkbenchReference(args) };
+      return { handled: true, value: listMockImageWorkbenchAssets(getMockImageWorkbenchAssetContext(), args) };
+    case "query_image_workbench_assets":
+      return { handled: true, value: queryMockImageWorkbenchAssets(getMockImageWorkbenchAssetContext(), args) };
+    case "list_image_workbench_groups":
+      return { handled: true, value: listMockImageWorkbenchGroups(getMockImageWorkbenchAssetContext(), args) };
+    case "import_image_workbench_reference": return { handled: true, value: importMockImageWorkbenchReference(args) };
+    case "import_image_workbench_generated_assets": return { handled: true, value: importMockImageWorkbenchGeneratedAssets() };
     case "get_image_workbench_job_snapshot":
       return { handled: true, value: getMockImageWorkbenchSnapshot(String(args.jobId || "")) };
     case "update_image_workbench_task_status":
@@ -821,6 +808,8 @@ export function handleImageWorkbenchMock(command: string, args: Record<string, u
       return { handled: true, value: startImageWorkbenchJobRunner(args) };
     case "cancel_image_workbench_job":
       return { handled: true, value: cancelImageWorkbenchJob(args) };
+    case "cancel_image_workbench_task":
+      return { handled: true, value: cancelImageWorkbenchTask(args) };
     case "retry_image_workbench_failed_tasks":
       return { handled: true, value: retryImageWorkbenchFailedTasks(args) };
     case "recover_image_workbench_interrupted_jobs":
@@ -828,15 +817,23 @@ export function handleImageWorkbenchMock(command: string, args: Record<string, u
     case "delete_image_workbench_job":
       return { handled: true, value: deleteImageWorkbenchJob(args) };
     case "export_image_workbench_job":
-      return { handled: true, value: exportImageWorkbenchJob(args) };
+      return { handled: true, value: exportMockImageWorkbenchJob(getMockImageWorkbenchAssetContext(), args) };
     case "export_image_workbench_asset":
-      return { handled: true, value: exportImageWorkbenchAsset(args) };
+      return { handled: true, value: exportMockImageWorkbenchAsset(getMockImageWorkbenchAssetContext(), args) };
+    case "cleanup_image_workbench_deleted_assets":
+      return { handled: true, value: cleanupMockImageWorkbenchDeletedAssets(getMockImageWorkbenchAssetContext()) };
+    case "cleanup_image_workbench_invalid_assets":
+      return { handled: true, value: cleanupMockImageWorkbenchInvalidAssets(getMockImageWorkbenchAssetContext()) };
     case "save_image_workbench_mask":
       return { handled: true, value: saveImageWorkbenchMask(args) };
     case "record_image_workbench_task_asset":
       return { handled: true, value: recordImageWorkbenchTaskAsset(args) };
     case "set_image_workbench_asset_favorite":
-      return { handled: true, value: setImageWorkbenchAssetFavorite(args) };
+      return { handled: true, value: setMockImageWorkbenchAssetFavorite(getMockImageWorkbenchAssetContext(), args) };
+    case "set_image_workbench_asset_rating":
+      return { handled: true, value: setMockImageWorkbenchAssetRating(getMockImageWorkbenchAssetContext(), args) };
+    case "set_image_workbench_asset_quality_issues":
+      return { handled: true, value: setMockImageWorkbenchAssetQualityIssues(getMockImageWorkbenchAssetContext(), args) };
     case "list_image_workbench_templates":
       return { handled: true, value: listImageWorkbenchTemplates() };
     case "save_image_workbench_template":

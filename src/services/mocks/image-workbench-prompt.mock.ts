@@ -78,7 +78,7 @@ export function buildMockImageWorkbenchMaskResult(
   }
   return {
     assetId,
-    maskPath: `C:\\Users\\MockUser\\.monster-tools\\ai\\image-workbench\\masks\\${assetId}-${now}.svg`,
+    maskPath: `C:\\Users\\MockUser\\.monster-tools\\ai\\image-workbench\\masks\\${assetId}-${now}.png`,
     width,
     height,
     strokeCount: strokes.length,

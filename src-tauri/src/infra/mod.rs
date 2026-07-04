@@ -7,6 +7,7 @@ pub mod db_nav;
 pub mod fs;
 #[allow(dead_code)]
 pub mod http;
+pub mod image_workbench_prompt;
 pub mod image_workbench_query;
 pub mod image_workbench_repo;
 pub mod image_workbench_row_mapper;

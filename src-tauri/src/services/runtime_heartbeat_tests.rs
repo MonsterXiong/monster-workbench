@@ -41,6 +41,7 @@ fn seed_running_task(repo: &ImageWorkbenchRepo) -> (String, String, String) {
             person_context_json: None,
             upscale_scale: None,
             fallback_policy: None,
+            generation_options_json: None,
         })
         .expect("create job");
     let task_id = snapshot.tasks[0].id.clone();
@@ -93,8 +94,8 @@ fn heartbeat_keeps_running_task_alive_in_short_window() {
     let db_path = fresh_db_path();
     let seed_repo = ImageWorkbenchRepo::new(db_path.clone());
     let (job_id, task_id, claim_token) = seed_running_task(&seed_repo);
-    let original_lease = read_lease_until_ms(&seed_repo, &job_id, &task_id)
-        .expect("initial lease present");
+    let original_lease =
+        read_lease_until_ms(&seed_repo, &job_id, &task_id).expect("initial lease present");
 
     let handle = spawn_image_task_heartbeat(
         ImageWorkbenchRepo::new(db_path.clone()),
@@ -130,4 +131,3 @@ fn heartbeat_uses_ai_provider_cancel_registry_for_takeover_signal() {
 
     ai_provider_cancel_registry().remove("heartbeat-test-rid");
 }
-

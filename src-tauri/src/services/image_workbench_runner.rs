@@ -1,11 +1,12 @@
-//! 图片工作台 worker 串行循环。
+//! 图片工作台 worker 任务循环。
 //!
 //! 历史上这条循环（claim → spawn heartbeat → generate → stop heartbeat →
 //! 写终态）住在 image_workbench_service 主文件内，已偏大；阶段 B2a 抽出
 //! 独立模块为 B2b dispatcher 接入腾出体量预算。**零行为变化**：仍然
-//! 是"每个 job 一条 spawn_blocking 串行循环"，只是位置变了。
+//! 是"worker 领取一个 task → 生成 → 写终态 → 继续领取"，只是位置变了。
 //!
-//! 调用方仍是 `ImageWorkbenchService::start_job_runner`；本模块复用
+//! 调用方仍是 `ImageWorkbenchService::start_job_runner`；一个 job 可启动多个
+//! worker 并发领取任务，本模块复用
 //! service 的几个 pub(super) 方法（`record_asset` / `update_task_status` /
 //! `fail_generation_task` / `repo`）。设计文档：
 //! `agent/worker-heartbeat-design.md`。
@@ -14,12 +15,12 @@ use crate::infra::image_workbench_types::ImageWorkbenchSnapshot;
 use crate::infra::AppResult;
 use crate::services::ai_provider_types::{AiBusinessGenerationRequest, AiGenerationResult};
 use crate::services::image_workbench_service::{
-    is_cancel_error, parse_artifact_dimensions, pick_image_artifact, validate_workbench_mode,
-    ImageWorkbenchService, RecordImageWorkbenchAssetRequest, RecordImageWorkbenchMetadataInput,
-    UpdateImageWorkbenchTaskStatusRequest, IMAGE_WORKBENCH_TASK_LEASE_MS,
+    generation_options_for_job, generation_result_model_run,
 };
 use crate::services::image_workbench_service::{
-    generation_options_for_job, generation_result_model_run,
+    image_artifacts, is_cancel_error, parse_artifact_dimensions, validate_workbench_mode,
+    ImageWorkbenchService, RecordImageWorkbenchAssetRequest, RecordImageWorkbenchMetadataInput,
+    UpdateImageWorkbenchTaskStatusRequest, IMAGE_WORKBENCH_TASK_LEASE_MS,
 };
 use crate::services::runtime_heartbeat::spawn_image_task_heartbeat;
 
@@ -57,12 +58,14 @@ where
                 task_id: task_id.clone(),
                 status: "succeeded".to_string(),
                 error: None,
+                failure_type: None,
+                failure_hint: None,
                 model_run: None,
             })?;
             continue;
         }
 
-        let job = latest.job.clone();
+        let mut job = latest.job.clone();
         let Some(task) = latest.tasks.iter().find(|task| task.id == task_id) else {
             continue;
         };
@@ -71,14 +74,32 @@ where
             .clone()
             .filter(|value| !value.trim().is_empty())
             .unwrap_or_else(|| job.prompt.clone());
-        let target_size = job.size.clone();
+        let target_size = resolve_generation_target_size(service, &job);
+        if job.size != target_size {
+            job.size = target_size.clone();
+        }
+        let mut options = generation_options_for_job(&job, target_size.clone());
+        options.reference_image_paths = match service.resolve_reference_image_paths_for_job(&job) {
+            Ok(paths) => paths,
+            Err(error) => {
+                latest = service.fail_generation_task(
+                    job_id,
+                    &task_id,
+                    &job,
+                    "failed",
+                    error.to_json_string(),
+                    None,
+                )?;
+                continue;
+            }
+        };
         let request = AiBusinessGenerationRequest {
             capability: job.mode.clone(),
             provider_config_id: job.provider_config_id.clone(),
             prompt: prompt.clone(),
             model: job.model.clone(),
             request_id: Some(task_id.clone()),
-            options: generation_options_for_job(&job, target_size.clone()),
+            options,
         };
 
         // 阶段 B1：worker 阻塞 generate 期间起独立心跳线程续租，避免视频 / 高清放大
@@ -129,7 +150,8 @@ where
                     continue;
                 }
 
-                let Some(artifact) = pick_image_artifact(&result.artifacts) else {
+                let artifacts = image_artifacts(&result.artifacts);
+                if artifacts.is_empty() {
                     latest = service.fail_generation_task(
                         job_id,
                         &task_id,
@@ -139,53 +161,69 @@ where
                         Some(&result),
                     )?;
                     continue;
-                };
-                let Some(artifact_path) = artifact.path.clone() else {
-                    latest = service.fail_generation_task(
-                        job_id,
-                        &task_id,
-                        &job,
-                        "failed",
-                        "AI 生成结果缺少本地图片路径".to_string(),
-                        Some(&result),
-                    )?;
-                    continue;
-                };
+                }
 
-                service.record_asset(RecordImageWorkbenchAssetRequest {
-                    task_id: task_id.clone(),
-                    file_path: artifact_path,
-                    thumbnail_path: None,
-                    width: parse_artifact_dimensions(artifact.dimensions.as_deref()).0,
-                    height: parse_artifact_dimensions(artifact.dimensions.as_deref()).1,
-                    mime_type: artifact
-                        .mime_type
-                        .clone()
-                        .or_else(|| Some("image/png".to_string())),
-                    size_bytes: artifact.size_bytes,
-                    metadata: Some(RecordImageWorkbenchMetadataInput {
-                        original_prompt: Some(job.prompt.clone()),
-                        expanded_prompt: Some(prompt.clone()),
-                        negative_prompt: job.negative_prompt.clone(),
-                        seed: None,
-                        model: Some(result.model.clone()),
-                        mode: Some(job.mode.clone()),
-                        provider: Some(result.provider.clone()),
-                        reference_asset_ids_json: job.reference_asset_ids_json.clone(),
-                        mask_path: job.mask_path.clone(),
-                        person_context_json: job.person_context_json.clone(),
-                    }),
-                    model_run: Some(generation_result_model_run(
-                        &job,
-                        "succeeded",
-                        Some(&result),
-                        None,
-                    )),
-                })?;
+                let mut record_failed = false;
+                for (index, artifact) in artifacts.iter().enumerate() {
+                    let Some(artifact_path) = artifact.path.clone() else {
+                        continue;
+                    };
+                    let (width, height) = parse_artifact_dimensions(artifact.dimensions.as_deref());
+                    if let Err(error) = service.record_asset(RecordImageWorkbenchAssetRequest {
+                        task_id: task_id.clone(),
+                        file_path: artifact_path,
+                        thumbnail_path: None,
+                        width,
+                        height,
+                        mime_type: artifact
+                            .mime_type
+                            .clone()
+                            .or_else(|| Some("image/png".to_string())),
+                        size_bytes: artifact.size_bytes,
+                        metadata: Some(RecordImageWorkbenchMetadataInput {
+                            original_prompt: Some(job.prompt.clone()),
+                            expanded_prompt: Some(prompt.clone()),
+                            negative_prompt: job.negative_prompt.clone(),
+                            seed: None,
+                            model: Some(result.model.clone()),
+                            mode: Some(job.mode.clone()),
+                            provider: Some(result.provider.clone()),
+                            reference_asset_ids_json: job.reference_asset_ids_json.clone(),
+                            mask_path: job.mask_path.clone(),
+                            person_context_json: job.person_context_json.clone(),
+                        }),
+                        model_run: if index == 0 {
+                            Some(generation_result_model_run(
+                                &job,
+                                "succeeded",
+                                Some(&result),
+                                None,
+                            ))
+                        } else {
+                            None
+                        },
+                    }) {
+                        latest = service.fail_generation_task(
+                            job_id,
+                            &task_id,
+                            &job,
+                            "failed",
+                            error.to_json_string(),
+                            Some(&result),
+                        )?;
+                        record_failed = true;
+                        break;
+                    }
+                }
+                if record_failed {
+                    continue;
+                }
                 latest = service.update_task_status(UpdateImageWorkbenchTaskStatusRequest {
                     task_id: task_id.clone(),
                     status: "succeeded".to_string(),
                     error: None,
+                    failure_type: None,
+                    failure_hint: None,
                     model_run: None,
                 })?;
             }
@@ -202,4 +240,31 @@ where
     }
 
     Ok(latest)
+}
+
+fn resolve_generation_target_size(
+    service: &ImageWorkbenchService,
+    job: &crate::infra::image_workbench_types::ImageWorkbenchJob,
+) -> Option<String> {
+    if job.mode != "inpaint" {
+        return job.size.clone();
+    }
+    let Some(source_asset_id) = job
+        .source_asset_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return job.size.clone();
+    };
+    let Ok(repo) = service.repo() else {
+        return job.size.clone();
+    };
+    let Ok(asset) = repo.get_asset_by_id(source_asset_id) else {
+        return job.size.clone();
+    };
+    match (asset.width, asset.height) {
+        (Some(width), Some(height)) if width > 0 && height > 0 => Some(format!("{width}x{height}")),
+        _ => job.size.clone(),
+    }
 }

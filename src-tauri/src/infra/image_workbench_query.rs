@@ -22,8 +22,8 @@ pub(crate) fn get_job(conn: &Connection, job_id: &str) -> AppResult<ImageWorkben
     conn.query_row(
         "SELECT id, mode, status, prompt, negative_prompt, quantity, provider_config_id, model, size,
                 reference_asset_ids_json, source_asset_id, source_image_path, mask_path, person_context_json,
-                upscale_scale, fallback_policy, created_at_ms, updated_at_ms, queued_at_ms,
-                started_at_ms, finished_at_ms, error
+                upscale_scale, fallback_policy, generation_options_json, created_at_ms, updated_at_ms, queued_at_ms,
+                started_at_ms, finished_at_ms, error, archived_at_ms, deleted_at_ms
          FROM image_workbench_jobs
          WHERE id = ?",
         params![job_id],
@@ -50,7 +50,8 @@ pub(crate) fn get_task(conn: &Connection, task_id: &str) -> AppResult<ImageWorkb
 pub(crate) fn get_asset(conn: &Connection, asset_id: &str) -> AppResult<ImageWorkbenchAsset> {
     conn.query_row(
         "SELECT id, job_id, task_id, file_path, thumbnail_path, width, height, mime_type, size_bytes, favorite, created_at_ms,
-                group_id, rating, parent_asset_id, root_asset_id, version_index
+                group_id, rating, parent_asset_id, root_asset_id, version_index, delivery_status,
+                quality_issues_json, COALESCE(integrity_status, 'ok'), integrity_error, integrity_checked_at_ms
          FROM image_workbench_assets
          WHERE id = ?",
         params![asset_id],
@@ -58,6 +59,23 @@ pub(crate) fn get_asset(conn: &Connection, asset_id: &str) -> AppResult<ImageWor
     )
     .optional()?
     .ok_or_else(|| AppError::Database(format!("未找到图片工作台资产: {}", asset_id)))
+}
+
+pub(crate) fn get_asset_by_import_fingerprint(
+    conn: &Connection,
+    fingerprint: &str,
+) -> AppResult<Option<ImageWorkbenchAsset>> {
+    conn.query_row(
+        "SELECT id, job_id, task_id, file_path, thumbnail_path, width, height, mime_type, size_bytes, favorite, created_at_ms,
+                group_id, rating, parent_asset_id, root_asset_id, version_index, delivery_status,
+                quality_issues_json, COALESCE(integrity_status, 'ok'), integrity_error, integrity_checked_at_ms
+         FROM image_workbench_assets
+         WHERE import_fingerprint = ?",
+        params![fingerprint],
+        map_asset,
+    )
+    .optional()
+    .map_err(AppError::from)
 }
 
 pub(crate) fn get_template(
@@ -99,7 +117,8 @@ pub(crate) fn list_tasks(conn: &Connection, job_id: &str) -> AppResult<Vec<Image
 pub(crate) fn list_assets(conn: &Connection, job_id: &str) -> AppResult<Vec<ImageWorkbenchAsset>> {
     let mut stmt = conn.prepare(
         "SELECT id, job_id, task_id, file_path, thumbnail_path, width, height, mime_type, size_bytes, favorite, created_at_ms,
-                group_id, rating, parent_asset_id, root_asset_id, version_index
+                group_id, rating, parent_asset_id, root_asset_id, version_index, delivery_status,
+                quality_issues_json, COALESCE(integrity_status, 'ok'), integrity_error, integrity_checked_at_ms
          FROM image_workbench_assets
          WHERE job_id = ?
          ORDER BY created_at_ms ASC",
@@ -151,8 +170,15 @@ pub(crate) fn query_assets(
 
     let mut sql = String::from(
         "SELECT id, job_id, task_id, file_path, thumbnail_path, width, height, mime_type, size_bytes, favorite, created_at_ms,
-                group_id, rating, parent_asset_id, root_asset_id, version_index
-         FROM image_workbench_assets",
+                group_id, rating, parent_asset_id, root_asset_id, version_index, delivery_status,
+                quality_issues_json, COALESCE(integrity_status, 'ok'), integrity_error, integrity_checked_at_ms
+         FROM image_workbench_assets
+         WHERE job_id IN (
+             SELECT id
+             FROM image_workbench_jobs
+             WHERE deleted_at_ms IS NULL
+               AND archived_at_ms IS NULL
+         )",
     );
 
     let mut conditions: Vec<&str> = Vec::new();
@@ -166,12 +192,14 @@ pub(crate) fn query_assets(
         binds.push(Value::Integer(min_rating as i64));
     }
     if !conditions.is_empty() {
-        sql.push_str(" WHERE ");
+        sql.push_str(" AND ");
         sql.push_str(&conditions.join(" AND "));
     }
 
     sql.push_str(match query.sort {
-        ImageWorkbenchAssetSort::FavoriteThenRecent => " ORDER BY favorite DESC, created_at_ms DESC",
+        ImageWorkbenchAssetSort::FavoriteThenRecent => {
+            " ORDER BY favorite DESC, created_at_ms DESC"
+        }
         ImageWorkbenchAssetSort::RecentFirst => " ORDER BY created_at_ms DESC",
         ImageWorkbenchAssetSort::RatingDesc => {
             " ORDER BY rating DESC, favorite DESC, created_at_ms DESC"
@@ -186,10 +214,28 @@ pub(crate) fn query_assets(
     collect_rows(rows)
 }
 
-pub(crate) fn list_groups(
+pub(crate) fn list_deleted_job_assets(
     conn: &Connection,
-    job_id: &str,
-) -> AppResult<Vec<ImageWorkbenchGroup>> {
+    limit: u32,
+) -> AppResult<Vec<ImageWorkbenchAsset>> {
+    let limit = limit.clamp(1, 1_000) as i64;
+    let mut stmt = conn.prepare(
+        "SELECT a.id, a.job_id, a.task_id, a.file_path, a.thumbnail_path, a.width, a.height,
+                a.mime_type, a.size_bytes, a.favorite, a.created_at_ms,
+                a.group_id, a.rating, a.parent_asset_id, a.root_asset_id, a.version_index,
+                a.delivery_status, a.quality_issues_json, COALESCE(a.integrity_status, 'ok'),
+                a.integrity_error, a.integrity_checked_at_ms
+         FROM image_workbench_assets a
+         INNER JOIN image_workbench_jobs j ON j.id = a.job_id
+         WHERE j.deleted_at_ms IS NOT NULL
+         ORDER BY j.deleted_at_ms ASC, a.created_at_ms ASC
+         LIMIT ?",
+    )?;
+    let rows = stmt.query_map(params![limit], map_asset)?;
+    collect_rows(rows)
+}
+
+pub(crate) fn list_groups(conn: &Connection, job_id: &str) -> AppResult<Vec<ImageWorkbenchGroup>> {
     let mut stmt = conn.prepare(
         "SELECT id, job_id, source_id, name, type, agent_preset, agent_ids_json, base_prompt,
                 count, created_at_ms, updated_at_ms
@@ -229,7 +275,10 @@ pub(crate) struct AssetLineage {
 /// - version = 源资产 version + 1（源无 version 视为 0）
 ///
 /// 源资产不存在或 job 无 source_asset_id 时返回空版本链（全新生成）。
-pub(crate) fn resolve_lineage(conn: &Connection, job: &ImageWorkbenchJob) -> AppResult<AssetLineage> {
+pub(crate) fn resolve_lineage(
+    conn: &Connection,
+    job: &ImageWorkbenchJob,
+) -> AppResult<AssetLineage> {
     let Some(source_id) = job.source_asset_id.as_deref() else {
         return Ok(AssetLineage::default());
     };

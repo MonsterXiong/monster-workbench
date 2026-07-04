@@ -1,3 +1,6 @@
+use crate::infra::image_workbench_prompt::{
+    build_image_workbench_task_prompt, ImageWorkbenchPromptBuildContext,
+};
 use crate::infra::image_workbench_query;
 use crate::infra::image_workbench_row_mapper::{collect_rows, map_job, map_template};
 use crate::infra::image_workbench_schema::init_image_workbench_schema;
@@ -12,11 +15,17 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 static ID_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
+#[path = "image_workbench_repo_cleanup.rs"]
+mod image_workbench_repo_cleanup;
+#[path = "image_workbench_repo_runtime.rs"]
+mod image_workbench_repo_runtime;
+
 use crate::infra::image_workbench_types::{
     ImageWorkbenchAsset, ImageWorkbenchAssetQuery, ImageWorkbenchGroup, ImageWorkbenchJob,
-    ImageWorkbenchSnapshot, ImageWorkbenchTaskClaim, ImageWorkbenchTaskStatusPatch,
-    ImageWorkbenchTemplate, NewImageWorkbenchAsset, NewImageWorkbenchGroup, NewImageWorkbenchJob,
-    NewImageWorkbenchMetadata, NewImageWorkbenchModelRun, NewImageWorkbenchTemplate,
+    ImageWorkbenchSnapshot, ImageWorkbenchTask, ImageWorkbenchTaskClaim,
+    ImageWorkbenchTaskStatusPatch, ImageWorkbenchTemplate, NewImageWorkbenchAsset,
+    NewImageWorkbenchGroup, NewImageWorkbenchJob, NewImageWorkbenchMetadata,
+    NewImageWorkbenchModelRun, NewImageWorkbenchTemplate,
 };
 
 pub struct ImageWorkbenchRepo {
@@ -49,8 +58,8 @@ impl ImageWorkbenchRepo {
             "INSERT INTO image_workbench_jobs
                 (id, mode, status, prompt, negative_prompt, quantity, provider_config_id, model, size,
                  reference_asset_ids_json, source_asset_id, source_image_path, mask_path, person_context_json,
-                 upscale_scale, fallback_policy, created_at_ms, updated_at_ms, queued_at_ms)
-             VALUES (?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                 upscale_scale, fallback_policy, generation_options_json, created_at_ms, updated_at_ms, queued_at_ms)
+             VALUES (?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             params![
                 job_id,
                 input.mode,
@@ -67,6 +76,7 @@ impl ImageWorkbenchRepo {
                 input.person_context_json,
                 input.upscale_scale.map(|value| value as i64),
                 input.fallback_policy,
+                input.generation_options_json,
                 now,
                 now,
                 now
@@ -98,13 +108,23 @@ impl ImageWorkbenchRepo {
             ],
         )?;
 
+        let reference_count = count_reference_assets(input.reference_asset_ids_json.as_deref());
+        let prompt_context = ImageWorkbenchPromptBuildContext {
+            mode: input.mode.as_str(),
+            reference_count,
+            has_source: input.source_asset_id.is_some() || input.source_image_path.is_some(),
+            person_context_json: input.person_context_json.as_deref(),
+        };
+
         for index in 0..input.quantity {
             let task_prompt = input
                 .task_prompts
                 .get(index as usize)
                 .cloned()
                 .filter(|value| !value.trim().is_empty())
-                .unwrap_or_else(|| input.prompt.clone());
+                .unwrap_or_else(|| {
+                    build_image_workbench_task_prompt(&input.prompt, index, &prompt_context)
+                });
             tx.execute(
                 "INSERT INTO image_workbench_tasks
                     (id, job_id, queue_index, status, retry_count, max_retries, prompt, created_at_ms, updated_at_ms,
@@ -149,9 +169,11 @@ impl ImageWorkbenchRepo {
         let mut stmt = conn.prepare(
             "SELECT id, mode, status, prompt, negative_prompt, quantity, provider_config_id, model, size,
                     reference_asset_ids_json, source_asset_id, source_image_path, mask_path, person_context_json,
-                    upscale_scale, fallback_policy, created_at_ms, updated_at_ms, queued_at_ms,
-                    started_at_ms, finished_at_ms, error
+                    upscale_scale, fallback_policy, generation_options_json, created_at_ms, updated_at_ms, queued_at_ms,
+                    started_at_ms, finished_at_ms, error, archived_at_ms, deleted_at_ms
              FROM image_workbench_jobs
+             WHERE archived_at_ms IS NULL
+               AND deleted_at_ms IS NULL
              ORDER BY updated_at_ms DESC, created_at_ms DESC
              LIMIT ?",
         )?;
@@ -164,6 +186,11 @@ impl ImageWorkbenchRepo {
             limit,
             ..Default::default()
         })
+    }
+
+    pub fn list_deleted_job_assets(&self, limit: u32) -> AppResult<Vec<ImageWorkbenchAsset>> {
+        let conn = self.connect()?;
+        image_workbench_query::list_deleted_job_assets(&conn, limit)
     }
 
     /// 跨作业资产库查询：支持 group_id / min_rating 筛选、分页与排序。
@@ -181,18 +208,92 @@ impl ImageWorkbenchRepo {
         image_workbench_query::get_asset(&conn, asset_id)
     }
 
-    pub fn delete_job(&self, job_id: &str) -> AppResult<()> {
+    pub fn get_task_by_id(&self, task_id: &str) -> AppResult<ImageWorkbenchTask> {
         let conn = self.connect()?;
-        let affected = conn.execute(
-            "DELETE FROM image_workbench_jobs WHERE id = ?",
-            params![job_id],
-        )?;
-        if affected == 0 {
-            return Err(AppError::Database(format!(
-                "未找到图片工作台作业: {}",
-                job_id
-            )));
+        image_workbench_query::get_task(&conn, task_id)
+    }
+
+    pub fn get_asset_by_import_fingerprint(
+        &self,
+        fingerprint: &str,
+    ) -> AppResult<Option<ImageWorkbenchAsset>> {
+        let conn = self.connect()?;
+        image_workbench_query::get_asset_by_import_fingerprint(&conn, fingerprint)
+    }
+
+    pub fn update_asset_integrity_many(
+        &self,
+        patches: &[(String, String, Option<String>, i64)],
+    ) -> AppResult<()> {
+        if patches.is_empty() {
+            return Ok(());
         }
+        let mut conn = self.connect()?;
+        let tx = conn.transaction()?;
+        for (asset_id, status, error, checked_at_ms) in patches {
+            tx.execute(
+                "UPDATE image_workbench_assets
+                 SET integrity_status = ?,
+                     integrity_error = ?,
+                     integrity_checked_at_ms = ?
+                 WHERE id = ?",
+                params![status, error, checked_at_ms, asset_id],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn delete_job(&self, job_id: &str) -> AppResult<()> {
+        let mut conn = self.connect()?;
+        let job = image_workbench_query::get_job(&conn, job_id)?;
+        if job.deleted_at_ms.is_some() {
+            return Ok(());
+        }
+        let now = now_ms();
+        let tx = conn.transaction()?;
+        tx.execute(
+            "UPDATE image_workbench_jobs
+             SET deleted_at_ms = COALESCE(deleted_at_ms, ?),
+                 updated_at_ms = ?
+             WHERE id = ?",
+            params![now, now, job_id],
+        )?;
+        tx.execute(
+            "UPDATE image_workbench_tasks
+             SET status = 'cancelled',
+                 error = COALESCE(error, '作业已删除'),
+                 failure_type = 'cancelled',
+                 failure_hint = '作业已删除',
+                 claim_token = NULL,
+                 leased_until_ms = NULL,
+                 finished_at_ms = COALESCE(finished_at_ms, ?),
+                 updated_at_ms = ?
+             WHERE job_id = ?
+               AND status IN ('queued', 'running', 'validating', 'retrying')",
+            params![now, now, job_id],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    #[allow(dead_code)]
+    pub fn set_job_archived(&self, job_id: &str, archived: bool) -> AppResult<()> {
+        let conn = self.connect()?;
+        let job = image_workbench_query::get_job(&conn, job_id)?;
+        if job.deleted_at_ms.is_some() {
+            return Err(AppError::Config(
+                "已删除的图片工作台作业不能归档或取消归档".to_string(),
+            ));
+        }
+        let now = now_ms();
+        conn.execute(
+            "UPDATE image_workbench_jobs
+             SET archived_at_ms = ?,
+                 updated_at_ms = ?
+             WHERE id = ?",
+            params![if archived { Some(now) } else { None }, now, job_id],
+        )?;
         Ok(())
     }
 
@@ -204,6 +305,8 @@ impl ImageWorkbenchRepo {
             "UPDATE image_workbench_tasks
              SET status = 'cancelled',
                  error = COALESCE(error, '用户取消'),
+                 failure_type = 'cancelled',
+                 failure_hint = '用户取消',
                  claim_token = NULL,
                  leased_until_ms = NULL,
                  finished_at_ms = COALESCE(finished_at_ms, ?),
@@ -242,14 +345,13 @@ impl ImageWorkbenchRepo {
         image_workbench_query::get_job(&conn, job_id)?;
         let tasks = image_workbench_query::list_tasks(&conn, job_id)?;
         let mut updated = 0;
-        for task in tasks
-            .iter()
-            .filter(|task| task.status == "failed" && task.retry_count < task.max_retries)
-        {
+        for task in tasks.iter().filter(|task| task.status == "failed") {
             conn.execute(
                 "UPDATE image_workbench_tasks
                  SET status = 'retrying',
                      error = NULL,
+                     failure_type = NULL,
+                     failure_hint = NULL,
                      claim_token = NULL,
                      leased_until_ms = NULL,
                      retry_count = retry_count + 1,
@@ -271,9 +373,12 @@ impl ImageWorkbenchRepo {
         let conn = self.connect()?;
         let now = now_ms();
         let mut stmt = conn.prepare(
-            "SELECT DISTINCT job_id
-             FROM image_workbench_tasks
-             WHERE status IN ('queued', 'running', 'validating', 'retrying')",
+            "SELECT DISTINCT t.job_id
+             FROM image_workbench_tasks t
+             INNER JOIN image_workbench_jobs j ON j.id = t.job_id
+             WHERE t.status IN ('queued', 'running', 'validating', 'retrying')
+               AND j.deleted_at_ms IS NULL
+               AND j.archived_at_ms IS NULL",
         )?;
         let job_ids = collect_rows(stmt.query_map([], |row| row.get::<_, String>(0))?)?;
 
@@ -285,6 +390,8 @@ impl ImageWorkbenchRepo {
                          ELSE status
                      END,
                      error = NULL,
+                     failure_type = NULL,
+                     failure_hint = NULL,
                      claim_token = NULL,
                      leased_until_ms = NULL,
                      finished_at_ms = NULL,
@@ -339,6 +446,8 @@ impl ImageWorkbenchRepo {
             "UPDATE image_workbench_tasks
              SET status = ?,
                  error = ?,
+                 failure_type = ?,
+                 failure_hint = ?,
                  retry_count = ?,
                  claim_token = CASE WHEN ? = 1 THEN NULL ELSE claim_token END,
                  leased_until_ms = CASE WHEN ? = 1 THEN NULL ELSE leased_until_ms END,
@@ -349,6 +458,8 @@ impl ImageWorkbenchRepo {
             params![
                 patch.status,
                 patch.error,
+                patch.failure_type,
+                patch.failure_hint,
                 retry_count as i64,
                 clear_claim,
                 clear_claim,
@@ -379,222 +490,73 @@ impl ImageWorkbenchRepo {
     ) -> AppResult<Option<ImageWorkbenchTaskClaim>> {
         let conn = self.connect()?;
         let now = now_ms();
-        image_workbench_query::get_job(&conn, job_id)?;
-        let task = image_workbench_query::list_tasks(&conn, job_id)?.into_iter().find(|task| {
-            task_ids
-                .map(|ids| ids.iter().any(|id| id == &task.id))
-                .unwrap_or(true)
-                && is_claimable_task(task, now)
-        });
-        let Some(task) = task else {
-            return Ok(None);
-        };
-
-        let claim_token = next_id("iw-claim");
-        let leased_until_ms = now + lease_ms.max(1_000);
-        let affected = conn.execute(
-            "UPDATE image_workbench_tasks
-             SET status = 'running',
-                 error = NULL,
-                 worker_id = ?,
-                 claim_token = ?,
-                 claimed_at_ms = ?,
-                 leased_until_ms = ?,
-                 last_heartbeat_ms = ?,
-                 started_at_ms = COALESCE(started_at_ms, ?),
-                 finished_at_ms = NULL,
-                 updated_at_ms = ?
-             WHERE id = ?
-               AND job_id = ?
-               AND (
-                    status IN ('queued', 'retrying')
-                    OR (
-                        status IN ('running', 'validating')
-                        AND (leased_until_ms IS NULL OR leased_until_ms <= ?)
-                    )
-               )",
-            params![
-                worker_id,
-                claim_token,
-                now,
-                leased_until_ms,
-                now,
-                now,
-                now,
-                task.id,
-                job_id,
-                now
-            ],
-        )?;
-        if affected == 0 {
+        let job = image_workbench_query::get_job(&conn, job_id)?;
+        if job.deleted_at_ms.is_some() || job.archived_at_ms.is_some() {
             return Ok(None);
         }
+        let candidates = image_workbench_query::list_tasks(&conn, job_id)?
+            .into_iter()
+            .filter(|task| {
+                task_ids
+                    .map(|ids| ids.iter().any(|id| id == &task.id))
+                    .unwrap_or(true)
+                    && is_claimable_task(task, now)
+            })
+            .collect::<Vec<_>>();
 
-        self.recalculate_job_status(&conn, &task.job_id, now)?;
-        let snapshot = self.get_snapshot(&task.job_id)?;
-        Ok(Some(ImageWorkbenchTaskClaim {
-            task_id: task.id,
-            claim_token,
-            snapshot,
-        }))
-    }
+        for task in candidates {
+            let claim_token = next_id("iw-claim");
+            let leased_until_ms = now + lease_ms.max(1_000);
+            let affected = conn.execute(
+                "UPDATE image_workbench_tasks
+                 SET status = 'running',
+                     error = NULL,
+                     failure_type = NULL,
+                     failure_hint = NULL,
+                     worker_id = ?,
+                     claim_token = ?,
+                     claimed_at_ms = ?,
+                     leased_until_ms = ?,
+                     last_heartbeat_ms = ?,
+                     started_at_ms = COALESCE(started_at_ms, ?),
+                     finished_at_ms = NULL,
+                     updated_at_ms = ?
+                 WHERE id = ?
+                   AND job_id = ?
+                   AND (
+                        status IN ('queued', 'retrying')
+                        OR (
+                            status IN ('running', 'validating')
+                            AND (leased_until_ms IS NULL OR leased_until_ms <= ?)
+                        )
+                   )",
+                params![
+                    worker_id,
+                    claim_token,
+                    now,
+                    leased_until_ms,
+                    now,
+                    now,
+                    now,
+                    task.id,
+                    job_id,
+                    now
+                ],
+            )?;
+            if affected == 0 {
+                continue;
+            }
 
-    /// 续租 (heartbeat)：worker 周期调用，刷新 leased_until_ms 与 last_heartbeat_ms。
-    /// 仅当 task 仍处于 running、worker_id 与 claim_token 匹配时才会更新成功。
-    /// 返回 false 表示 task 已被 janitor 抢回 / 被 cancel / 被另一个 worker 接手，
-    /// worker 应立即终止当前执行（A2 阶段实际接入）。
-    #[allow(dead_code)]
-    pub fn renew_image_task_lease(
-        &self,
-        task_id: &str,
-        worker_id: &str,
-        claim_token: &str,
-        new_leased_until_ms: i64,
-    ) -> AppResult<bool> {
-        let conn = self.connect()?;
-        let now = now_ms();
-        let affected = conn.execute(
-            "UPDATE image_workbench_tasks
-             SET leased_until_ms = ?,
-                 last_heartbeat_ms = ?,
-                 updated_at_ms = ?
-             WHERE id = ?
-               AND status = 'running'
-               AND worker_id = ?
-               AND claim_token = ?",
-            params![new_leased_until_ms, now, now, task_id, worker_id, claim_token],
-        )?;
-        Ok(affected > 0)
-    }
-
-    /// janitor (1)：把所有 worker_id 不属于当前进程的 running/validating task 回滚为 queued。
-    /// 用于替代 recover_interrupted_jobs 在重启时的硬重置；运行期内也可用来清理上一次进程残留。
-    /// retry_count 不增（不算业务失败）。返回受影响的 task 数。
-    #[allow(dead_code)]
-    pub fn reset_running_image_tasks_by_other_worker(
-        &self,
-        current_worker_id: &str,
-    ) -> AppResult<u32> {
-        let conn = self.connect()?;
-        let now = now_ms();
-        let affected = conn.execute(
-            "UPDATE image_workbench_tasks
-             SET status = 'queued',
-                 worker_id = NULL,
-                 claim_token = NULL,
-                 leased_until_ms = NULL,
-                 last_heartbeat_ms = NULL,
-                 claimed_at_ms = NULL,
-                 started_at_ms = NULL,
-                 finished_at_ms = NULL,
-                 error = NULL,
-                 updated_at_ms = ?
-             WHERE status IN ('running', 'validating')
-               AND (worker_id IS NULL OR worker_id != ?)",
-            params![now, current_worker_id],
-        )?;
-        Ok(affected as u32)
-    }
-
-    /// janitor (2)：当前进程内的 worker thread panic / 阻塞 → lease 过期但 worker_id 仍是当前。
-    /// 把 leased_until_ms <= cutoff_ms 的 running/validating task 回滚为 queued。
-    /// retry_count 不增。
-    #[allow(dead_code)]
-    pub fn reset_running_image_tasks_with_expired_lease(
-        &self,
-        current_worker_id: &str,
-        cutoff_ms: i64,
-    ) -> AppResult<u32> {
-        let conn = self.connect()?;
-        let now = now_ms();
-        let affected = conn.execute(
-            "UPDATE image_workbench_tasks
-             SET status = 'queued',
-                 worker_id = NULL,
-                 claim_token = NULL,
-                 leased_until_ms = NULL,
-                 last_heartbeat_ms = NULL,
-                 claimed_at_ms = NULL,
-                 started_at_ms = NULL,
-                 finished_at_ms = NULL,
-                 error = NULL,
-                 updated_at_ms = ?
-             WHERE status IN ('running', 'validating')
-               AND worker_id = ?
-               AND leased_until_ms IS NOT NULL
-               AND leased_until_ms <= ?",
-            params![now, current_worker_id, cutoff_ms],
-        )?;
-        Ok(affected as u32)
-    }
-
-    /// janitor (3)：兜底。心跳一直在跳但 task claim 已超过 STUCK_RUNNING_MAX_MS，
-    /// 视为真挂死，标 failed 且 retry_count++。返回受影响的 task 数。
-    #[allow(dead_code)]
-    pub fn fail_stuck_running_image_tasks(
-        &self,
-        claimed_before_ms: i64,
-        error_text: &str,
-    ) -> AppResult<u32> {
-        let conn = self.connect()?;
-        let now = now_ms();
-        let affected = conn.execute(
-            "UPDATE image_workbench_tasks
-             SET status = 'failed',
-                 retry_count = retry_count + 1,
-                 worker_id = NULL,
-                 claim_token = NULL,
-                 leased_until_ms = NULL,
-                 last_heartbeat_ms = NULL,
-                 finished_at_ms = ?,
-                 error = ?,
-                 updated_at_ms = ?
-             WHERE status IN ('running', 'validating')
-               AND claimed_at_ms IS NOT NULL
-               AND claimed_at_ms <= ?",
-            params![now, error_text, now, claimed_before_ms],
-        )?;
-        Ok(affected as u32)
-    }
-
-    /// 测试专用：直接把一个已存在的 task 写成 running + 指定 worker_id / claim_token / 时间戳，
-    /// 用来模拟跨进程残留与心跳超时场景。生产代码请走 claim_next_runnable_task。
-    #[cfg(test)]
-    pub(crate) fn test_only_seed_running_task(
-        &self,
-        task_id: &str,
-        worker_id: Option<&str>,
-        claim_token: Option<&str>,
-        claimed_at_ms: i64,
-        leased_until_ms: i64,
-        last_heartbeat_ms: Option<i64>,
-    ) -> AppResult<()> {
-        let conn = self.connect()?;
-        conn.execute(
-            "UPDATE image_workbench_tasks
-             SET status = 'running',
-                 worker_id = ?,
-                 claim_token = ?,
-                 claimed_at_ms = ?,
-                 leased_until_ms = ?,
-                 last_heartbeat_ms = ?,
-                 started_at_ms = ?,
-                 finished_at_ms = NULL,
-                 error = NULL,
-                 updated_at_ms = ?
-             WHERE id = ?",
-            params![
-                worker_id,
+            self.recalculate_job_status(&conn, &task.job_id, now)?;
+            let snapshot = self.get_snapshot(&task.job_id)?;
+            return Ok(Some(ImageWorkbenchTaskClaim {
+                task_id: task.id,
                 claim_token,
-                claimed_at_ms,
-                leased_until_ms,
-                last_heartbeat_ms,
-                claimed_at_ms,
-                claimed_at_ms,
-                task_id,
-            ],
-        )?;
-        Ok(())
+                snapshot,
+            }));
+        }
+
+        Ok(None)
     }
 
     pub fn record_asset(
@@ -617,13 +579,15 @@ impl ImageWorkbenchRepo {
         let parent_asset_id = asset.parent_asset_id.clone().or(lineage.parent_asset_id);
         let root_asset_id = asset.root_asset_id.clone().or(lineage.root_asset_id);
         let version_index = asset.version_index.or(lineage.version_index);
+        let parent_asset_id_for_delivery = parent_asset_id.clone();
 
         let tx = conn.transaction()?;
         tx.execute(
             "INSERT INTO image_workbench_assets
                 (id, job_id, task_id, file_path, thumbnail_path, width, height, mime_type, size_bytes, favorite, created_at_ms,
-                 group_id, rating, parent_asset_id, root_asset_id, version_index)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)",
+                 group_id, rating, parent_asset_id, root_asset_id, version_index, delivery_status, quality_issues_json, integrity_status, integrity_error, integrity_checked_at_ms,
+                 import_fingerprint, import_source_path)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, NULL, NULL, 'ok', NULL, ?, ?, ?)",
             params![
                 asset_id,
                 job_id,
@@ -639,9 +603,16 @@ impl ImageWorkbenchRepo {
                 asset.rating.map(|value| value as i64),
                 parent_asset_id,
                 root_asset_id,
-                version_index.map(|value| value as i64)
+                version_index.map(|value| value as i64),
+                now,
+                asset.import_fingerprint,
+                asset.import_source_path
             ],
         )?;
+
+        if let Some(parent_asset_id) = parent_asset_id_for_delivery {
+            refresh_asset_delivery_status(&tx, &parent_asset_id)?;
+        }
 
         if let Some(metadata) = metadata {
             tx.execute(
@@ -699,21 +670,24 @@ impl ImageWorkbenchRepo {
         asset_id: &str,
         favorite: bool,
     ) -> AppResult<ImageWorkbenchSnapshot> {
-        let conn = self.connect()?;
+        let mut conn = self.connect()?;
         let asset = image_workbench_query::get_asset(&conn, asset_id)?;
         let now = now_ms();
-        conn.execute(
+        let tx = conn.transaction()?;
+        tx.execute(
             "UPDATE image_workbench_assets
              SET favorite = ?
              WHERE id = ?",
             params![if favorite { 1 } else { 0 }, asset_id],
         )?;
-        conn.execute(
+        refresh_asset_delivery_status(&tx, asset_id)?;
+        tx.execute(
             "UPDATE image_workbench_jobs
              SET updated_at_ms = ?
              WHERE id = ?",
             params![now, asset.job_id],
         )?;
+        tx.commit()?;
         self.get_snapshot(&asset.job_id)
     }
 
@@ -733,6 +707,36 @@ impl ImageWorkbenchRepo {
              SET rating = ?
              WHERE id = ?",
             params![rating.map(|value| value as i64), asset_id],
+        )?;
+        conn.execute(
+            "UPDATE image_workbench_jobs
+             SET updated_at_ms = ?
+             WHERE id = ?",
+            params![now, asset.job_id],
+        )?;
+        self.get_snapshot(&asset.job_id)
+    }
+
+    pub fn set_asset_quality_issues(
+        &self,
+        asset_id: &str,
+        quality_issues: &[String],
+    ) -> AppResult<ImageWorkbenchSnapshot> {
+        let conn = self.connect()?;
+        let asset = image_workbench_query::get_asset(&conn, asset_id)?;
+        let now = now_ms();
+        let quality_issues_json = if quality_issues.is_empty() {
+            None
+        } else {
+            Some(serde_json::to_string(quality_issues).map_err(|error| {
+                AppError::Database(format!("图片质检标签序列化失败: {}", error))
+            })?)
+        };
+        conn.execute(
+            "UPDATE image_workbench_assets
+             SET quality_issues_json = ?
+             WHERE id = ?",
+            params![quality_issues_json, asset_id],
         )?;
         conn.execute(
             "UPDATE image_workbench_jobs
@@ -895,6 +899,7 @@ impl ImageWorkbenchRepo {
         let has_running = tasks.iter().any(|task| task.status == "running");
         let has_validating = tasks.iter().any(|task| task.status == "validating");
         let has_retrying = tasks.iter().any(|task| task.status == "retrying");
+        let has_queued = tasks.iter().any(|task| task.status == "queued");
         let has_succeeded = tasks.iter().any(|task| task.status == "succeeded");
         let all_queued = tasks.iter().all(|task| task.status == "queued");
         let all_terminal = tasks
@@ -918,6 +923,8 @@ impl ImageWorkbenchRepo {
             "failed"
         } else if all_terminal && has_succeeded {
             "partial_succeeded"
+        } else if has_queued {
+            "queued"
         } else {
             "running"
         };
@@ -938,19 +945,52 @@ impl ImageWorkbenchRepo {
              SET status = ?,
                  updated_at_ms = ?,
                  started_at_ms = COALESCE(started_at_ms, ?),
-                 finished_at_ms = CASE WHEN ? IS NULL THEN finished_at_ms ELSE ? END
+                 finished_at_ms = ?
              WHERE id = ?",
-            params![
-                next_status,
-                now,
-                started_at,
-                finished_at,
-                finished_at,
-                job_id
-            ],
+            params![next_status, now, started_at, finished_at, job_id],
         )?;
 
         Ok(())
+    }
+}
+
+fn refresh_asset_delivery_status(conn: &Connection, asset_id: &str) -> AppResult<()> {
+    conn.execute(
+        "UPDATE image_workbench_assets
+         SET delivery_status = CASE
+             WHEN favorite = 1
+                  AND parent_asset_id IS NOT NULL
+                  AND EXISTS (
+                      SELECT 1
+                      FROM image_workbench_assets parent
+                      WHERE parent.id = image_workbench_assets.parent_asset_id
+                  )
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM image_workbench_assets child
+                      WHERE child.parent_asset_id = image_workbench_assets.id
+                  )
+             THEN 'ready'
+             ELSE NULL
+         END
+         WHERE id = ?",
+        params![asset_id],
+    )?;
+    Ok(())
+}
+
+fn count_reference_assets(value: Option<&str>) -> usize {
+    let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+        return 0;
+    };
+    match serde_json::from_str::<serde_json::Value>(value) {
+        Ok(serde_json::Value::Array(items)) => items
+            .iter()
+            .filter(|item| item.as_str().is_some_and(|text| !text.trim().is_empty()))
+            .count(),
+        Ok(serde_json::Value::String(text)) if !text.trim().is_empty() => 1,
+        Ok(_) => 0,
+        Err(_) => 1,
     }
 }
 

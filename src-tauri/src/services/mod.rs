@@ -1,6 +1,7 @@
 mod ai_generation_support;
 mod ai_generation_task;
 mod ai_provider_config;
+mod ai_provider_image_size;
 mod ai_provider_output;
 mod ai_provider_process;
 mod ai_provider_queue;
@@ -15,6 +16,10 @@ pub mod config_service;
 pub mod database_service;
 pub mod file_service;
 mod image_workbench_asset_policy;
+pub(crate) mod image_workbench_cancel;
+pub(crate) mod image_workbench_cleanup;
+mod image_workbench_failure;
+pub(crate) mod image_workbench_import;
 pub(crate) mod image_workbench_mask;
 mod image_workbench_runner;
 pub mod image_workbench_service;

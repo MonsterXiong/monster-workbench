@@ -5,6 +5,12 @@ export type ImageWorkbenchMode =
   | "person_consistency"
   | "upscale_2x"
   | "upscale_4x";
+export type ImageWorkbenchReferenceRole = "person" | "prop" | "scene" | "style";
+export type ImageWorkbenchQualityIssue = "hands" | "identity" | "prop" | "scene";
+export type ImageWorkbenchGenerationQuality = "auto" | "low" | "medium" | "high";
+export type ImageWorkbenchOutputFormat = "png" | "jpeg" | "webp";
+export type ImageWorkbenchBackground = "auto" | "opaque";
+export type ImageWorkbenchModeration = "auto" | "low";
 export type ImageWorkbenchJobStatus =
   | "draft"
   | "queued"
@@ -22,6 +28,21 @@ export type ImageWorkbenchTaskStatus =
   | "succeeded"
   | "failed"
   | "cancelled";
+export type ImageWorkbenchFailureType =
+  | "auth"
+  | "model"
+  | "size"
+  | "rate_limit"
+  | "provider_unavailable"
+  | "upstream"
+  | "timeout"
+  | "connection"
+  | "save"
+  | "cancelled"
+  | "unknown";
+
+export type ImageWorkbenchDeliveryStatus = "ready";
+export type ImageWorkbenchAssetIntegrityStatus = "ok" | "missing" | "corrupt";
 
 export interface ImageWorkbenchJob {
   id: string;
@@ -40,12 +61,15 @@ export interface ImageWorkbenchJob {
   personContextJson?: string | null;
   upscaleScale?: number | null;
   fallbackPolicy?: string | null;
+  generationOptionsJson?: string | null;
   createdAtMs: number;
   updatedAtMs: number;
   queuedAtMs?: number | null;
   startedAtMs?: number | null;
   finishedAtMs?: number | null;
   error?: string | null;
+  archivedAtMs?: number | null;
+  deletedAtMs?: number | null;
 }
 
 export interface ImageWorkbenchTask {
@@ -65,7 +89,7 @@ export interface ImageWorkbenchTask {
   error?: string | null;
   groupId?: string | null;
   variantIndex?: number | null;
-  failureType?: string | null;
+  failureType?: ImageWorkbenchFailureType | null;
   failureHint?: string | null;
 }
 
@@ -86,6 +110,11 @@ export interface ImageWorkbenchAsset {
   parentAssetId?: string | null;
   rootAssetId?: string | null;
   versionIndex?: number | null;
+  deliveryStatus?: ImageWorkbenchDeliveryStatus | null;
+  qualityIssues?: ImageWorkbenchQualityIssue[];
+  integrityStatus?: ImageWorkbenchAssetIntegrityStatus | null;
+  integrityError?: string | null;
+  integrityCheckedAtMs?: number | null;
 }
 
 export interface ImageWorkbenchMetadata {
@@ -132,6 +161,20 @@ export interface ImageWorkbenchTemplate {
   updatedAtMs: number;
 }
 
+export interface ImageWorkbenchGroup {
+  id: string;
+  jobId: string;
+  sourceId?: string | null;
+  name?: string | null;
+  type?: string | null;
+  agentPreset?: string | null;
+  agentIdsJson?: string | null;
+  basePrompt?: string | null;
+  count: number;
+  createdAtMs: number;
+  updatedAtMs: number;
+}
+
 export interface ImageWorkbenchSnapshot {
   job: ImageWorkbenchJob;
   tasks: ImageWorkbenchTask[];
@@ -146,7 +189,7 @@ export interface ImageWorkbenchContractSummary {
   taskStatuses: ImageWorkbenchTaskStatus[];
   supportedModes: ImageWorkbenchMode[];
   deferredModes: ImageWorkbenchMode[];
-  maxQuantity: number;
+  maxQuantity?: number | null;
 }
 
 export interface CreateImageWorkbenchJobRequest {
@@ -159,12 +202,14 @@ export interface CreateImageWorkbenchJobRequest {
   size?: string | null;
   referenceAssetIds?: string[];
   referenceAssetIdsJson?: string | null;
+  referenceImagePaths?: string[];
   sourceAssetId?: string | null;
   sourceImagePath?: string | null;
   maskPath?: string | null;
   personContextJson?: string | null;
   upscaleScale?: number | null;
   fallbackPolicy?: string | null;
+  generationOptionsJson?: string | null;
 }
 
 export interface ImportImageWorkbenchReferenceRequest {
@@ -177,6 +222,68 @@ export interface ImportImageWorkbenchReferenceResult {
   mimeType?: string | null;
   sizeBytes: number;
   createdAtMs: number;
+}
+
+export interface ImportImageWorkbenchGeneratedAssetsRequest {
+  directoryPath: string;
+  limit?: number | null;
+  offset?: number | null;
+}
+
+export interface ImportImageWorkbenchGeneratedAssetItem {
+  stem: string;
+  jsonPath?: string | null;
+  imagePath?: string | null;
+  status: "pending" | "imported" | "duplicate" | "failed";
+  assetId?: string | null;
+  jobId?: string | null;
+  fingerprint?: string | null;
+  integrityStatus: ImageWorkbenchAssetIntegrityStatus;
+  integrityError?: string | null;
+}
+
+export interface ImportImageWorkbenchGeneratedAssetsResult {
+  jobId?: string | null;
+  scanned: number;
+  imported: number;
+  duplicates: number;
+  missing: number;
+  corrupt: number;
+  failed: number;
+  items: ImportImageWorkbenchGeneratedAssetItem[];
+}
+
+export interface CleanupImageWorkbenchDeletedAssetsResult {
+  scannedAssets: number;
+  removedFiles: number;
+  removedDirs: number;
+  missingFiles: number;
+  skippedFiles: number;
+  removedBytes: number;
+  warnings: string[];
+}
+
+export interface CleanupImageWorkbenchInvalidAssetsResult {
+  scannedAssets: number;
+  removedAssets: number;
+  missingAssets: number;
+  corruptAssets: number;
+}
+
+export type ImageWorkbenchAssetSort =
+  | "favorite_then_recent"
+  | "favoriteThenRecent"
+  | "recent_first"
+  | "recentFirst"
+  | "rating_desc"
+  | "ratingDesc";
+
+export interface QueryImageWorkbenchAssetsRequest {
+  limit?: number;
+  offset?: number;
+  groupId?: string | null;
+  minRating?: number | null;
+  sort?: ImageWorkbenchAssetSort | null;
 }
 
 export interface ImageWorkbenchMaskPoint {
@@ -211,6 +318,8 @@ export interface UpdateImageWorkbenchTaskStatusRequest {
   taskId: string;
   status: ImageWorkbenchTaskStatus;
   error?: string | null;
+  failureType?: ImageWorkbenchFailureType | null;
+  failureHint?: string | null;
   modelRun?: RecordImageWorkbenchModelRunInput | null;
 }
 
@@ -261,4 +370,14 @@ export interface SaveImageWorkbenchTemplateRequest {
 export interface SetImageWorkbenchAssetFavoriteRequest {
   assetId: string;
   favorite: boolean;
+}
+
+export interface SetImageWorkbenchAssetRatingRequest {
+  assetId: string;
+  rating?: number | null;
+}
+
+export interface SetImageWorkbenchAssetQualityIssuesRequest {
+  assetId: string;
+  qualityIssues: ImageWorkbenchQualityIssue[];
 }

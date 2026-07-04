@@ -56,6 +56,7 @@ fn fresh_image_job(repo: &ImageWorkbenchRepo, prompt: &str) -> (String, String) 
             person_context_json: None,
             upscale_scale: None,
             fallback_policy: None,
+            generation_options_json: None,
         })
         .expect("create job");
     let job_id = snapshot.job.id.clone();

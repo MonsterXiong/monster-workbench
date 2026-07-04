@@ -1,11 +1,17 @@
 import { callTauri } from "./tauri";
 import type {
+  CleanupImageWorkbenchDeletedAssetsResult,
+  CleanupImageWorkbenchInvalidAssetsResult,
   CreateImageWorkbenchJobRequest,
   ImageWorkbenchAsset,
   ImageWorkbenchContractSummary,
+  ImageWorkbenchGroup,
   ImageWorkbenchJob,
+  ImportImageWorkbenchGeneratedAssetsRequest,
+  ImportImageWorkbenchGeneratedAssetsResult,
   ImportImageWorkbenchReferenceRequest,
   ImportImageWorkbenchReferenceResult,
+  QueryImageWorkbenchAssetsRequest,
   SaveImageWorkbenchMaskRequest,
   SaveImageWorkbenchMaskResult,
   ImageWorkbenchSnapshot,
@@ -13,6 +19,8 @@ import type {
   RecordImageWorkbenchAssetRequest,
   SaveImageWorkbenchTemplateRequest,
   SetImageWorkbenchAssetFavoriteRequest,
+  SetImageWorkbenchAssetQualityIssuesRequest,
+  SetImageWorkbenchAssetRatingRequest,
   UpdateImageWorkbenchTaskStatusRequest,
 } from "../types/image-workbench";
 
@@ -33,10 +41,24 @@ export const imageWorkbenchService = {
     return callTauri<ImageWorkbenchAsset[]>("list_image_workbench_assets", { limit });
   },
 
+  async queryAssets(request: QueryImageWorkbenchAssetsRequest): Promise<ImageWorkbenchAsset[]> {
+    return callTauri<ImageWorkbenchAsset[]>("query_image_workbench_assets", { request });
+  },
+
+  async listGroups(jobId: string): Promise<ImageWorkbenchGroup[]> {
+    return callTauri<ImageWorkbenchGroup[]>("list_image_workbench_groups", { jobId });
+  },
+
   async importReference(
     request: ImportImageWorkbenchReferenceRequest
   ): Promise<ImportImageWorkbenchReferenceResult> {
     return callTauri<ImportImageWorkbenchReferenceResult>("import_image_workbench_reference", { request });
+  },
+
+  async importGeneratedAssets(
+    request: ImportImageWorkbenchGeneratedAssetsRequest
+  ): Promise<ImportImageWorkbenchGeneratedAssetsResult> {
+    return callTauri<ImportImageWorkbenchGeneratedAssetsResult>("import_image_workbench_generated_assets", { request });
   },
 
   async recoverInterruptedJobs(): Promise<number> {
@@ -67,6 +89,10 @@ export const imageWorkbenchService = {
     return callTauri<ImageWorkbenchSnapshot>("cancel_image_workbench_job", { jobId });
   },
 
+  async cancelTask(taskId: string): Promise<ImageWorkbenchSnapshot> {
+    return callTauri<ImageWorkbenchSnapshot>("cancel_image_workbench_task", { taskId });
+  },
+
   async retryFailedTasks(jobId: string): Promise<ImageWorkbenchSnapshot> {
     return callTauri<ImageWorkbenchSnapshot>("retry_image_workbench_failed_tasks", { jobId });
   },
@@ -83,6 +109,14 @@ export const imageWorkbenchService = {
     return callTauri<string>("export_image_workbench_asset", { assetId });
   },
 
+  async cleanupDeletedAssets(): Promise<CleanupImageWorkbenchDeletedAssetsResult> {
+    return callTauri<CleanupImageWorkbenchDeletedAssetsResult>("cleanup_image_workbench_deleted_assets");
+  },
+
+  async cleanupInvalidAssets(): Promise<CleanupImageWorkbenchInvalidAssetsResult> {
+    return callTauri<CleanupImageWorkbenchInvalidAssetsResult>("cleanup_image_workbench_invalid_assets");
+  },
+
   async saveMask(request: SaveImageWorkbenchMaskRequest): Promise<SaveImageWorkbenchMaskResult> {
     return callTauri<SaveImageWorkbenchMaskResult>("save_image_workbench_mask", { request });
   },
@@ -91,6 +125,18 @@ export const imageWorkbenchService = {
     request: SetImageWorkbenchAssetFavoriteRequest
   ): Promise<ImageWorkbenchSnapshot> {
     return callTauri<ImageWorkbenchSnapshot>("set_image_workbench_asset_favorite", { request });
+  },
+
+  async setAssetRating(
+    request: SetImageWorkbenchAssetRatingRequest
+  ): Promise<ImageWorkbenchSnapshot> {
+    return callTauri<ImageWorkbenchSnapshot>("set_image_workbench_asset_rating", { request });
+  },
+
+  async setAssetQualityIssues(
+    request: SetImageWorkbenchAssetQualityIssuesRequest
+  ): Promise<ImageWorkbenchSnapshot> {
+    return callTauri<ImageWorkbenchSnapshot>("set_image_workbench_asset_quality_issues", { request });
   },
 
   async listTemplates(): Promise<ImageWorkbenchTemplate[]> {

@@ -42,7 +42,7 @@ pub(crate) fn validate_task_status_transition(
         ),
         "validating" => matches!(next_status, "succeeded" | "failed" | "cancelled"),
         "retrying" => matches!(next_status, "running" | "failed" | "cancelled"),
-        "failed" => next_status == "retrying" && task.retry_count < task.max_retries,
+        "failed" => next_status == "retrying",
         "succeeded" | "cancelled" => false,
         _ => false,
     };

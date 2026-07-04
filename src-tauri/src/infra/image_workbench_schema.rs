@@ -28,7 +28,9 @@ pub fn init_image_workbench_schema(db_path: &Path) -> AppResult<()> {
             queued_at_ms INTEGER,
             started_at_ms INTEGER,
             finished_at_ms INTEGER,
-            error TEXT
+            error TEXT,
+            archived_at_ms INTEGER,
+            deleted_at_ms INTEGER
          );
 
          CREATE TABLE IF NOT EXISTS image_workbench_tasks (
@@ -61,6 +63,12 @@ pub fn init_image_workbench_schema(db_path: &Path) -> AppResult<()> {
             size_bytes INTEGER,
             favorite INTEGER NOT NULL DEFAULT 0,
             created_at_ms INTEGER NOT NULL,
+            integrity_status TEXT NOT NULL DEFAULT 'ok',
+            integrity_error TEXT,
+            integrity_checked_at_ms INTEGER,
+            quality_issues_json TEXT,
+            import_fingerprint TEXT,
+            import_source_path TEXT,
             FOREIGN KEY(job_id) REFERENCES image_workbench_jobs(id) ON DELETE CASCADE,
             FOREIGN KEY(task_id) REFERENCES image_workbench_tasks(id) ON DELETE CASCADE
          );
@@ -157,7 +165,7 @@ fn ensure_image_workbench_task_runtime_columns(conn: &Connection) -> AppResult<(
 
     // Worker heartbeat / lease 巡检所需的运行时列，以及资产组 / 变体 / 失败分类列。
     // 所有列均可空，旧行保留 NULL。group_id/variant_index 用于把同一作业的 N 张变体
-    // 归入资产组；failure_type/failure_hint 承载结构化失败枚举（业务写入留后续轮次）。
+    // 归入资产组；failure_type/failure_hint 承载结构化失败枚举，由状态更新链路写入/清理。
     for (name, sql) in [
         (
             "worker_id",
@@ -211,7 +219,8 @@ fn ensure_image_workbench_task_runtime_columns(conn: &Connection) -> AppResult<(
 /// 资产组 / 评分 / 版本链所需的列。所有列均可空，旧行保留 NULL：
 /// group_id 把资产归入资产组，rating 是 0..5 评分（与既有 favorite 布尔并存，
 /// 不替换），parent_asset_id/root_asset_id/version_index 承载同源复跑的版本链。
-/// 业务写入逻辑留后续轮次，本轮只保证列就位、可读写。
+/// 资产评分、版本链、交付状态和文件健康状态已接入业务写入；作业生命周期由
+/// jobs archived_at_ms/deleted_at_ms 承载。
 fn ensure_image_workbench_asset_columns(conn: &Connection) -> AppResult<()> {
     let mut stmt = conn.prepare("PRAGMA table_info(image_workbench_assets)")?;
     let columns = stmt
@@ -239,6 +248,34 @@ fn ensure_image_workbench_asset_columns(conn: &Connection) -> AppResult<()> {
             "version_index",
             "ALTER TABLE image_workbench_assets ADD COLUMN version_index INTEGER",
         ),
+        (
+            "delivery_status",
+            "ALTER TABLE image_workbench_assets ADD COLUMN delivery_status TEXT",
+        ),
+        (
+            "integrity_status",
+            "ALTER TABLE image_workbench_assets ADD COLUMN integrity_status TEXT",
+        ),
+        (
+            "integrity_error",
+            "ALTER TABLE image_workbench_assets ADD COLUMN integrity_error TEXT",
+        ),
+        (
+            "integrity_checked_at_ms",
+            "ALTER TABLE image_workbench_assets ADD COLUMN integrity_checked_at_ms INTEGER",
+        ),
+        (
+            "quality_issues_json",
+            "ALTER TABLE image_workbench_assets ADD COLUMN quality_issues_json TEXT",
+        ),
+        (
+            "import_fingerprint",
+            "ALTER TABLE image_workbench_assets ADD COLUMN import_fingerprint TEXT",
+        ),
+        (
+            "import_source_path",
+            "ALTER TABLE image_workbench_assets ADD COLUMN import_source_path TEXT",
+        ),
     ] {
         if !columns.contains(name) {
             conn.execute(sql, [])?;
@@ -248,6 +285,54 @@ fn ensure_image_workbench_asset_columns(conn: &Connection) -> AppResult<()> {
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_image_workbench_assets_group
             ON image_workbench_assets(group_id)",
+        [],
+    )?;
+
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_image_workbench_assets_delivery
+            ON image_workbench_assets(delivery_status, created_at_ms)",
+        [],
+    )?;
+
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_image_workbench_assets_integrity
+            ON image_workbench_assets(integrity_status, created_at_ms)",
+        [],
+    )?;
+
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_image_workbench_assets_import_fingerprint
+            ON image_workbench_assets(import_fingerprint)
+            WHERE import_fingerprint IS NOT NULL",
+        [],
+    )?;
+
+    conn.execute(
+        "UPDATE image_workbench_assets
+         SET integrity_status = 'ok'
+         WHERE integrity_status IS NULL OR integrity_status = ''",
+        [],
+    )?;
+
+    conn.execute(
+        "UPDATE image_workbench_assets
+         SET delivery_status = CASE
+             WHEN favorite = 1
+                  AND parent_asset_id IS NOT NULL
+                  AND EXISTS (
+                      SELECT 1
+                      FROM image_workbench_assets parent
+                      WHERE parent.id = image_workbench_assets.parent_asset_id
+                  )
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM image_workbench_assets child
+                      WHERE child.parent_asset_id = image_workbench_assets.id
+                  )
+             THEN 'ready'
+             ELSE NULL
+         END
+         WHERE delivery_status IS NULL OR delivery_status = 'ready'",
         [],
     )?;
 
@@ -289,11 +374,29 @@ fn ensure_image_workbench_job_columns(conn: &Connection) -> AppResult<()> {
             "fallback_policy",
             "ALTER TABLE image_workbench_jobs ADD COLUMN fallback_policy TEXT",
         ),
+        (
+            "generation_options_json",
+            "ALTER TABLE image_workbench_jobs ADD COLUMN generation_options_json TEXT",
+        ),
+        (
+            "archived_at_ms",
+            "ALTER TABLE image_workbench_jobs ADD COLUMN archived_at_ms INTEGER",
+        ),
+        (
+            "deleted_at_ms",
+            "ALTER TABLE image_workbench_jobs ADD COLUMN deleted_at_ms INTEGER",
+        ),
     ] {
         if !columns.contains(name) {
             conn.execute(sql, [])?;
         }
     }
+
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_image_workbench_jobs_lifecycle
+            ON image_workbench_jobs(deleted_at_ms, archived_at_ms, updated_at_ms)",
+        [],
+    )?;
 
     Ok(())
 }

@@ -19,12 +19,15 @@ pub struct ImageWorkbenchJob {
     pub person_context_json: Option<String>,
     pub upscale_scale: Option<u32>,
     pub fallback_policy: Option<String>,
+    pub generation_options_json: Option<String>,
     pub created_at_ms: i64,
     pub updated_at_ms: i64,
     pub queued_at_ms: Option<i64>,
     pub started_at_ms: Option<i64>,
     pub finished_at_ms: Option<i64>,
     pub error: Option<String>,
+    pub archived_at_ms: Option<i64>,
+    pub deleted_at_ms: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -69,6 +72,11 @@ pub struct ImageWorkbenchAsset {
     pub parent_asset_id: Option<String>,
     pub root_asset_id: Option<String>,
     pub version_index: Option<u32>,
+    pub delivery_status: Option<String>,
+    pub quality_issues: Vec<String>,
+    pub integrity_status: String,
+    pub integrity_error: Option<String>,
+    pub integrity_checked_at_ms: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -218,6 +226,7 @@ pub struct NewImageWorkbenchJob {
     pub person_context_json: Option<String>,
     pub upscale_scale: Option<u32>,
     pub fallback_policy: Option<String>,
+    pub generation_options_json: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -225,6 +234,8 @@ pub struct ImageWorkbenchTaskStatusPatch {
     pub task_id: String,
     pub status: String,
     pub error: Option<String>,
+    pub failure_type: Option<String>,
+    pub failure_hint: Option<String>,
     pub model_run: Option<NewImageWorkbenchModelRun>,
 }
 
@@ -242,6 +253,8 @@ pub struct NewImageWorkbenchAsset {
     pub parent_asset_id: Option<String>,
     pub root_asset_id: Option<String>,
     pub version_index: Option<u32>,
+    pub import_fingerprint: Option<String>,
+    pub import_source_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]

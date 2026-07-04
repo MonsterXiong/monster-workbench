@@ -1,8 +1,8 @@
-use crate::infra::AppResult;
 use crate::infra::image_workbench_types::{
     ImageWorkbenchAsset, ImageWorkbenchGroup, ImageWorkbenchJob, ImageWorkbenchMetadata,
     ImageWorkbenchModelRun, ImageWorkbenchTask, ImageWorkbenchTemplate,
 };
+use crate::infra::AppResult;
 
 /// 把 rusqlite 的行迭代器收敛成 Vec<T>，遇到错误立即返回。
 /// 历史上散落在 repo 主文件，A1 拆分时统一沉到 row mapper 模块。
@@ -29,17 +29,20 @@ pub(crate) fn map_job(row: &rusqlite::Row<'_>) -> rusqlite::Result<ImageWorkbenc
         size: row.get(8)?,
         reference_asset_ids_json: row.get(9)?,
         source_asset_id: row.get(10)?,
-        source_image_path: row.get(11)?,
-        mask_path: row.get(12)?,
+        source_image_path: normalize_optional_storage_path(row.get(11)?),
+        mask_path: normalize_optional_storage_path(row.get(12)?),
         person_context_json: row.get(13)?,
         upscale_scale: row.get::<_, Option<i64>>(14)?.map(|value| value as u32),
         fallback_policy: row.get(15)?,
-        created_at_ms: row.get(16)?,
-        updated_at_ms: row.get(17)?,
-        queued_at_ms: row.get(18)?,
-        started_at_ms: row.get(19)?,
-        finished_at_ms: row.get(20)?,
-        error: row.get(21)?,
+        generation_options_json: row.get(16)?,
+        created_at_ms: row.get(17)?,
+        updated_at_ms: row.get(18)?,
+        queued_at_ms: row.get(19)?,
+        started_at_ms: row.get(20)?,
+        finished_at_ms: row.get(21)?,
+        error: row.get(22)?,
+        archived_at_ms: row.get(23)?,
+        deleted_at_ms: row.get(24)?,
     })
 }
 
@@ -71,8 +74,8 @@ pub(crate) fn map_asset(row: &rusqlite::Row<'_>) -> rusqlite::Result<ImageWorkbe
         id: row.get(0)?,
         job_id: row.get(1)?,
         task_id: row.get(2)?,
-        file_path: row.get(3)?,
-        thumbnail_path: row.get(4)?,
+        file_path: normalize_storage_path(row.get(3)?),
+        thumbnail_path: normalize_optional_storage_path(row.get(4)?),
         width: row.get::<_, Option<i64>>(5)?.map(|value| value as u32),
         height: row.get::<_, Option<i64>>(6)?.map(|value| value as u32),
         mime_type: row.get(7)?,
@@ -84,6 +87,11 @@ pub(crate) fn map_asset(row: &rusqlite::Row<'_>) -> rusqlite::Result<ImageWorkbe
         parent_asset_id: row.get(13)?,
         root_asset_id: row.get(14)?,
         version_index: row.get::<_, Option<i64>>(15)?.map(|value| value as u32),
+        delivery_status: row.get(16)?,
+        quality_issues: parse_quality_issues_json(row.get(17)?),
+        integrity_status: row.get(18)?,
+        integrity_error: row.get(19)?,
+        integrity_checked_at_ms: row.get(20)?,
     })
 }
 
@@ -100,7 +108,7 @@ pub(crate) fn map_metadata(row: &rusqlite::Row<'_>) -> rusqlite::Result<ImageWor
         mode: row.get(8)?,
         provider: row.get(9)?,
         reference_asset_ids_json: row.get(10)?,
-        mask_path: row.get(11)?,
+        mask_path: normalize_optional_storage_path(row.get(11)?),
         person_context_json: row.get(12)?,
         created_at_ms: row.get(13)?,
     })
@@ -151,4 +159,44 @@ pub(crate) fn map_group(row: &rusqlite::Row<'_>) -> rusqlite::Result<ImageWorkbe
         created_at_ms: row.get(9)?,
         updated_at_ms: row.get(10)?,
     })
+}
+
+fn normalize_storage_path(value: String) -> String {
+    strip_windows_extended_path_prefix(&value)
+}
+
+fn normalize_optional_storage_path(value: Option<String>) -> Option<String> {
+    value.map(normalize_storage_path)
+}
+
+fn strip_windows_extended_path_prefix(value: &str) -> String {
+    const EXTENDED_PREFIX: &str = "\\\\?\\";
+    const EXTENDED_UNC_PREFIX: &str = "\\\\?\\UNC\\";
+    let upper = value.to_ascii_uppercase();
+    if upper.starts_with(EXTENDED_UNC_PREFIX) {
+        return format!("\\\\{}", &value[EXTENDED_UNC_PREFIX.len()..]);
+    }
+    if upper.starts_with(EXTENDED_PREFIX) {
+        return value[EXTENDED_PREFIX.len()..].to_string();
+    }
+    value.to_string()
+}
+
+fn parse_quality_issues_json(value: Option<String>) -> Vec<String> {
+    let Some(raw) = value
+        .map(|item| item.trim().to_string())
+        .filter(|item| !item.is_empty())
+    else {
+        return Vec::new();
+    };
+    serde_json::from_str::<Vec<String>>(&raw)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|issue| matches!(issue.as_str(), "hands" | "identity" | "prop" | "scene"))
+        .fold(Vec::new(), |mut acc, issue| {
+            if !acc.contains(&issue) {
+                acc.push(issue);
+            }
+            acc
+        })
 }

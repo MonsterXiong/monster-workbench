@@ -28,6 +28,7 @@ fn image_workbench_create_job_splits_tasks() {
             person_context_json: None,
             upscale_scale: None,
             fallback_policy: None,
+            generation_options_json: None,
         })
         .expect("create job");
 
@@ -60,6 +61,7 @@ fn image_workbench_create_job_uses_task_prompts() {
             person_context_json: None,
             upscale_scale: None,
             fallback_policy: None,
+            generation_options_json: None,
         })
         .expect("create job");
 
@@ -93,6 +95,7 @@ fn image_workbench_task_status_updates_job_status() {
             person_context_json: None,
             upscale_scale: None,
             fallback_policy: None,
+            generation_options_json: None,
         })
         .expect("create job");
 
@@ -103,6 +106,8 @@ fn image_workbench_task_status_updates_job_status() {
             task_id: first.clone(),
             status: "running".to_string(),
             error: None,
+            failure_type: None,
+            failure_hint: None,
             model_run: None,
         })
         .expect("mark running");
@@ -112,6 +117,8 @@ fn image_workbench_task_status_updates_job_status() {
         task_id: first,
         status: "succeeded".to_string(),
         error: None,
+        failure_type: None,
+        failure_hint: None,
         model_run: None,
     })
     .expect("mark first success");
@@ -121,10 +128,19 @@ fn image_workbench_task_status_updates_job_status() {
             task_id: second,
             status: "failed".to_string(),
             error: Some("模拟失败".to_string()),
+            failure_type: Some("unknown".to_string()),
+            failure_hint: Some("模拟失败".to_string()),
             model_run: None,
         })
         .expect("mark second failed");
     assert_eq!(partial.job.status, "partial_succeeded");
+    let failed_task = partial
+        .tasks
+        .iter()
+        .find(|task| task.status == "failed")
+        .expect("failed task should exist");
+    assert_eq!(failed_task.failure_type.as_deref(), Some("unknown"));
+    assert_eq!(failed_task.failure_hint.as_deref(), Some("模拟失败"));
 }
 
 #[test]
@@ -147,6 +163,7 @@ fn image_workbench_task_running_claim_is_single_owner() {
             person_context_json: None,
             upscale_scale: None,
             fallback_policy: None,
+            generation_options_json: None,
         })
         .expect("create job");
     let task_id = snapshot.tasks[0].id.clone();
@@ -165,6 +182,51 @@ fn image_workbench_task_running_claim_is_single_owner() {
         .claim_next_runnable_task_for_worker(&snapshot.job.id, Some(&task_ids), 60_000, None)
         .expect("second claim should not error");
     assert!(duplicate.is_none());
+}
+
+#[test]
+fn image_workbench_claims_distinct_tasks_for_parallel_workers() {
+    let repo = test_repo();
+    let snapshot = repo
+        .create_job(NewImageWorkbenchJob {
+            mode: "txt2img".to_string(),
+            prompt: "parallel claim".to_string(),
+            negative_prompt: None,
+            task_prompts: Vec::new(),
+            quantity: 3,
+            provider_config_id: None,
+            model: None,
+            size: None,
+            reference_asset_ids_json: None,
+            source_asset_id: None,
+            source_image_path: None,
+            mask_path: None,
+            person_context_json: None,
+            upscale_scale: None,
+            fallback_policy: None,
+            generation_options_json: None,
+        })
+        .expect("create job");
+
+    let first = repo
+        .claim_next_runnable_task_for_worker(&snapshot.job.id, None, 60_000, Some("worker"))
+        .expect("first claim")
+        .expect("first task");
+    let second = repo
+        .claim_next_runnable_task_for_worker(&snapshot.job.id, None, 60_000, Some("worker"))
+        .expect("second claim")
+        .expect("second task");
+
+    assert_ne!(first.task_id, second.task_id);
+    let claimed = repo.get_snapshot(&snapshot.job.id).expect("snapshot");
+    assert_eq!(
+        claimed
+            .tasks
+            .iter()
+            .filter(|task| task.status == "running")
+            .count(),
+        2
+    );
 }
 
 #[test]
@@ -187,6 +249,7 @@ fn image_workbench_task_status_rejects_terminal_reopen_and_tracks_retry() {
             person_context_json: None,
             upscale_scale: None,
             fallback_policy: None,
+            generation_options_json: None,
         })
         .expect("create job");
 
@@ -195,6 +258,8 @@ fn image_workbench_task_status_rejects_terminal_reopen_and_tracks_retry() {
         task_id: success_task.clone(),
         status: "running".to_string(),
         error: None,
+        failure_type: None,
+        failure_hint: None,
         model_run: None,
     })
     .expect("mark running");
@@ -202,6 +267,8 @@ fn image_workbench_task_status_rejects_terminal_reopen_and_tracks_retry() {
         task_id: success_task.clone(),
         status: "succeeded".to_string(),
         error: None,
+        failure_type: None,
+        failure_hint: None,
         model_run: None,
     })
     .expect("mark succeeded");
@@ -210,6 +277,8 @@ fn image_workbench_task_status_rejects_terminal_reopen_and_tracks_retry() {
             task_id: success_task,
             status: "running".to_string(),
             error: None,
+            failure_type: None,
+            failure_hint: None,
             model_run: None,
         })
         .expect_err("terminal task should not reopen");
@@ -220,6 +289,8 @@ fn image_workbench_task_status_rejects_terminal_reopen_and_tracks_retry() {
         task_id: retry_task.clone(),
         status: "failed".to_string(),
         error: Some("provider failed".to_string()),
+        failure_type: Some("unknown".to_string()),
+        failure_hint: Some("provider failed".to_string()),
         model_run: None,
     })
     .expect("mark failed");
@@ -228,6 +299,8 @@ fn image_workbench_task_status_rejects_terminal_reopen_and_tracks_retry() {
             task_id: retry_task.clone(),
             status: "retrying".to_string(),
             error: None,
+            failure_type: None,
+            failure_hint: None,
             model_run: None,
         })
         .expect("mark retrying");
@@ -239,6 +312,35 @@ fn image_workbench_task_status_rejects_terminal_reopen_and_tracks_retry() {
     assert_eq!(task.retry_count, 1);
     assert_eq!(task.status, "retrying");
     assert!(task.finished_at_ms.is_none());
+    assert_eq!(task.failure_type, None);
+    assert_eq!(task.failure_hint, None);
+
+    repo.update_task_status(ImageWorkbenchTaskStatusPatch {
+        task_id: retry_task.clone(),
+        status: "failed".to_string(),
+        error: Some("provider failed again".to_string()),
+        failure_type: Some("unknown".to_string()),
+        failure_hint: Some("provider failed again".to_string()),
+        model_run: None,
+    })
+    .expect("mark failed again");
+    let retried_again = repo
+        .update_task_status(ImageWorkbenchTaskStatusPatch {
+            task_id: retry_task.clone(),
+            status: "retrying".to_string(),
+            error: None,
+            failure_type: None,
+            failure_hint: None,
+            model_run: None,
+        })
+        .expect("retry should not be capped by max_retries");
+    let task = retried_again
+        .tasks
+        .iter()
+        .find(|task| task.id == retry_task)
+        .expect("retried task should exist");
+    assert_eq!(task.retry_count, 2);
+    assert_eq!(task.status, "retrying");
 }
 
 #[test]
@@ -261,6 +363,7 @@ fn image_workbench_task_status_records_failed_model_run() {
             person_context_json: None,
             upscale_scale: None,
             fallback_policy: None,
+            generation_options_json: None,
         })
         .expect("create job");
     let task_id = snapshot.tasks[0].id.clone();
@@ -269,6 +372,8 @@ fn image_workbench_task_status_records_failed_model_run() {
         task_id: task_id.clone(),
         status: "running".to_string(),
         error: None,
+        failure_type: None,
+        failure_hint: None,
         model_run: None,
     })
     .expect("mark running");
@@ -278,6 +383,8 @@ fn image_workbench_task_status_records_failed_model_run() {
             task_id,
             status: "failed".to_string(),
             error: Some("provider failed".to_string()),
+            failure_type: Some("model".to_string()),
+            failure_hint: Some("provider failed".to_string()),
             model_run: Some(NewImageWorkbenchModelRun {
                 provider: Some("custom".to_string()),
                 model: Some("gpt-image-2".to_string()),
@@ -291,6 +398,11 @@ fn image_workbench_task_status_records_failed_model_run() {
         .expect("mark failed");
 
     assert_eq!(failed.model_runs.len(), 1);
+    assert_eq!(failed.tasks[0].failure_type.as_deref(), Some("model"));
+    assert_eq!(
+        failed.tasks[0].failure_hint.as_deref(),
+        Some("provider failed")
+    );
     let run = &failed.model_runs[0];
     assert_eq!(run.status, "failed");
     assert_eq!(run.task_id.as_deref(), Some(failed.tasks[0].id.as_str()));
@@ -321,6 +433,7 @@ fn image_workbench_records_asset_metadata_and_model_run() {
             person_context_json: None,
             upscale_scale: None,
             fallback_policy: None,
+            generation_options_json: None,
         })
         .expect("create job");
     let task_id = snapshot.tasks[0].id.clone();
@@ -383,6 +496,7 @@ fn image_workbench_lists_jobs_and_recent_assets() {
             person_context_json: None,
             upscale_scale: None,
             fallback_policy: None,
+            generation_options_json: None,
         })
         .expect("create job");
     let task_id = snapshot.tasks[0].id.clone();
@@ -408,6 +522,74 @@ fn image_workbench_lists_jobs_and_recent_assets() {
     assert_eq!(jobs.len(), 1);
     assert_eq!(assets.len(), 1);
     assert_eq!(assets[0].file_path, "C:/mock/list.png");
+
+    repo.delete_job(&snapshot.job.id).expect("soft delete job");
+    let deleted_snapshot = repo
+        .get_snapshot(&snapshot.job.id)
+        .expect("deleted job snapshot should remain addressable");
+    assert!(deleted_snapshot.job.deleted_at_ms.is_some());
+    assert!(repo.list_jobs(10).expect("jobs after delete").is_empty());
+    assert!(repo
+        .list_recent_assets(10)
+        .expect("assets after delete")
+        .is_empty());
+}
+
+#[test]
+fn image_workbench_reads_legacy_extended_windows_paths_as_displayable_paths() {
+    let repo = test_repo();
+    let snapshot = repo
+        .create_job(NewImageWorkbenchJob {
+            mode: "img2img".to_string(),
+            prompt: "legacy paths".to_string(),
+            negative_prompt: None,
+            task_prompts: Vec::new(),
+            quantity: 1,
+            provider_config_id: None,
+            model: None,
+            size: None,
+            reference_asset_ids_json: None,
+            source_asset_id: None,
+            source_image_path: Some(r"\\?\C:\mock\source.png".to_string()),
+            mask_path: Some(r"\\?\C:\mock\mask.svg".to_string()),
+            person_context_json: None,
+            upscale_scale: None,
+            fallback_policy: None,
+            generation_options_json: None,
+        })
+        .expect("create job");
+    let task_id = snapshot.tasks[0].id.clone();
+
+    let recorded = repo
+        .record_asset(
+            NewImageWorkbenchAsset {
+                task_id,
+                file_path: r"\\?\C:\mock\asset.png".to_string(),
+                thumbnail_path: Some(r"\\?\C:\mock\thumb.png".to_string()),
+                ..Default::default()
+            },
+            Some(NewImageWorkbenchMetadata {
+                mask_path: Some(r"\\?\C:\mock\mask.svg".to_string()),
+                ..Default::default()
+            }),
+            None,
+        )
+        .expect("record asset");
+
+    assert_eq!(
+        recorded.job.source_image_path.as_deref(),
+        Some(r"C:\mock\source.png")
+    );
+    assert_eq!(recorded.job.mask_path.as_deref(), Some(r"C:\mock\mask.svg"));
+    assert_eq!(recorded.assets[0].file_path, r"C:\mock\asset.png");
+    assert_eq!(
+        recorded.assets[0].thumbnail_path.as_deref(),
+        Some(r"C:\mock\thumb.png")
+    );
+    assert_eq!(
+        recorded.metadata[0].mask_path.as_deref(),
+        Some(r"C:\mock\mask.svg")
+    );
 }
 
 #[test]
@@ -430,30 +612,101 @@ fn image_workbench_cancels_and_retries_job_tasks() {
             person_context_json: None,
             upscale_scale: None,
             fallback_policy: None,
+            generation_options_json: None,
         })
         .expect("create job");
     let job_id = snapshot.job.id.clone();
     let failed_task = snapshot.tasks[0].id.clone();
 
     repo.update_task_status(ImageWorkbenchTaskStatusPatch {
-        task_id: failed_task,
+        task_id: failed_task.clone(),
         status: "failed".to_string(),
         error: Some("provider failed".to_string()),
+        failure_type: Some("unknown".to_string()),
+        failure_hint: Some("provider failed".to_string()),
         model_run: None,
     })
     .expect("mark failed");
 
     let retrying = repo.retry_failed_tasks(&job_id).expect("retry failed task");
-    assert!(retrying
+    assert!(retrying.tasks.iter().any(|task| task.status == "retrying"
+        && task.retry_count == 1
+        && task.failure_type.is_none()
+        && task.failure_hint.is_none()));
+
+    repo.update_task_status(ImageWorkbenchTaskStatusPatch {
+        task_id: failed_task,
+        status: "failed".to_string(),
+        error: Some("provider failed again".to_string()),
+        failure_type: Some("unknown".to_string()),
+        failure_hint: Some("provider failed again".to_string()),
+        model_run: None,
+    })
+    .expect("mark failed again");
+
+    let retrying_again = repo
+        .retry_failed_tasks(&job_id)
+        .expect("retry should ignore legacy max_retries");
+    assert!(retrying_again
         .tasks
         .iter()
-        .any(|task| task.status == "retrying" && task.retry_count == 1));
+        .any(|task| task.status == "retrying" && task.retry_count == 2));
 
     let cancelled = repo.cancel_job(&job_id).expect("cancel job");
     assert!(cancelled
         .tasks
         .iter()
         .all(|task| task.status == "cancelled" || task.status == "failed"));
+    assert!(cancelled.tasks.iter().any(|task| task.status == "cancelled"
+        && task.failure_type.as_deref() == Some("cancelled")
+        && task.failure_hint.as_deref() == Some("用户取消")));
+}
+
+#[test]
+fn image_workbench_retry_clears_job_finished_at() {
+    let repo = test_repo();
+    let snapshot = repo
+        .create_job(NewImageWorkbenchJob {
+            mode: "txt2img".to_string(),
+            prompt: "重试清理完成时间".to_string(),
+            negative_prompt: None,
+            task_prompts: Vec::new(),
+            quantity: 1,
+            provider_config_id: None,
+            model: None,
+            size: None,
+            reference_asset_ids_json: None,
+            source_asset_id: None,
+            source_image_path: None,
+            mask_path: None,
+            person_context_json: None,
+            upscale_scale: None,
+            fallback_policy: None,
+            generation_options_json: None,
+        })
+        .expect("create job");
+    let job_id = snapshot.job.id.clone();
+    let task_id = snapshot.tasks[0].id.clone();
+
+    let failed = repo
+        .update_task_status(ImageWorkbenchTaskStatusPatch {
+            task_id,
+            status: "failed".to_string(),
+            error: Some("provider failed".to_string()),
+            failure_type: Some("unknown".to_string()),
+            failure_hint: Some("provider failed".to_string()),
+            model_run: None,
+        })
+        .expect("mark failed");
+    assert_eq!(failed.job.status, "failed");
+    assert!(failed.job.finished_at_ms.is_some());
+
+    let retrying = repo.retry_failed_tasks(&job_id).expect("retry failed task");
+    assert_eq!(retrying.job.status, "running");
+    assert!(
+        retrying.job.finished_at_ms.is_none(),
+        "retrying job should not keep stale finished_at_ms"
+    );
 }
 
 #[test]
@@ -476,6 +729,7 @@ fn image_workbench_recovers_interrupted_jobs() {
             person_context_json: None,
             upscale_scale: None,
             fallback_policy: None,
+            generation_options_json: None,
         })
         .expect("create job");
     let job_id = snapshot.job.id.clone();
@@ -485,6 +739,8 @@ fn image_workbench_recovers_interrupted_jobs() {
         task_id: running_task,
         status: "running".to_string(),
         error: None,
+        failure_type: None,
+        failure_hint: None,
         model_run: None,
     })
     .expect("mark running");
@@ -531,6 +787,7 @@ fn image_workbench_updates_asset_favorite_and_templates() {
             person_context_json: None,
             upscale_scale: None,
             fallback_policy: None,
+            generation_options_json: None,
         })
         .expect("create job");
     let task_id = snapshot.tasks[0].id.clone();
@@ -592,6 +849,7 @@ fn seed_single_task_repo() -> (ImageWorkbenchRepo, String) {
             person_context_json: None,
             upscale_scale: None,
             fallback_policy: None,
+            generation_options_json: None,
         })
         .expect("create job");
     let task_id = snapshot.tasks[0].id.clone();
@@ -660,7 +918,12 @@ fn renew_image_task_lease_fails_when_claim_token_mismatch() {
     .expect("seed running");
 
     let ok = repo
-        .renew_image_task_lease(&task_id, "worker-A", "claim-tok-other", claimed_at + 120_000)
+        .renew_image_task_lease(
+            &task_id,
+            "worker-A",
+            "claim-tok-other",
+            claimed_at + 120_000,
+        )
         .expect("renew");
     assert!(!ok);
 }
@@ -685,6 +948,7 @@ fn reset_running_image_tasks_by_other_worker_only_resets_foreign_workers() {
             person_context_json: None,
             upscale_scale: None,
             fallback_policy: None,
+            generation_options_json: None,
         })
         .expect("create job");
     let own_task = snapshot.tasks[0].id.clone();
@@ -744,6 +1008,7 @@ fn reset_running_image_tasks_with_expired_lease_only_resets_expired() {
             person_context_json: None,
             upscale_scale: None,
             fallback_policy: None,
+            generation_options_json: None,
         })
         .expect("create job");
     let fresh_task = snapshot.tasks[0].id.clone();
@@ -802,6 +1067,7 @@ fn fail_stuck_running_image_tasks_marks_oldest_as_failed_and_increments_retry() 
             person_context_json: None,
             upscale_scale: None,
             fallback_policy: None,
+            generation_options_json: None,
         })
         .expect("create job");
     let fresh_task = snapshot.tasks[0].id.clone();
@@ -839,6 +1105,8 @@ fn fail_stuck_running_image_tasks_marks_oldest_as_failed_and_increments_retry() 
     assert_eq!(fresh.status, "running");
     assert_eq!(stuck.status, "failed");
     assert_eq!(stuck.error.as_deref(), Some("worker_stuck"));
+    assert_eq!(stuck.failure_type.as_deref(), Some("timeout"));
+    assert_eq!(stuck.failure_hint.as_deref(), Some("worker_stuck"));
     assert_eq!(stuck.retry_count, 1, "retry_count should increment");
 }
 
@@ -862,6 +1130,7 @@ fn seed_job_with_task() -> (ImageWorkbenchRepo, String, String) {
             person_context_json: None,
             upscale_scale: None,
             fallback_policy: None,
+            generation_options_json: None,
         })
         .expect("create job");
     let job_id = snapshot.job.id.clone();
@@ -881,6 +1150,8 @@ fn image_workbench_schema_migration_is_idempotent_and_backfills_columns() {
     // 失败分类列本轮仍不写入，保持 None。
     assert_eq!(task.failure_type, None);
     assert_eq!(task.failure_hint, None);
+    assert_eq!(snapshot.job.archived_at_ms, None);
+    assert_eq!(snapshot.job.deleted_at_ms, None);
     // create_job 已建一个资产组。
     assert_eq!(repo.list_groups(&_job_id).expect("groups").len(), 1);
 }
@@ -912,10 +1183,20 @@ fn image_workbench_create_and_list_groups_round_trip() {
     assert_eq!(fetched.base_prompt.as_deref(), Some("雨夜森林小屋"));
     assert_eq!(fetched.agent_ids_json.as_deref(), Some("[\"agent-1\"]"));
 
-    // 删除 job 应级联删除其全部资产组。
+    // delete_job 现在是软删除：历史列表隐藏，但组关系保留给后续恢复/审计/文件清理使用。
     repo.delete_job(&job_id).expect("delete job");
-    assert!(repo.get_group_by_id(&group.id).is_err());
-    assert!(repo.list_groups(&job_id).expect("groups").is_empty());
+    assert!(repo
+        .get_snapshot(&job_id)
+        .expect("snapshot")
+        .job
+        .deleted_at_ms
+        .is_some());
+    assert!(repo.get_group_by_id(&group.id).is_ok());
+    assert!(repo
+        .list_groups(&job_id)
+        .expect("groups")
+        .iter()
+        .any(|g| g.id == group.id));
 }
 
 #[test]
@@ -936,6 +1217,8 @@ fn image_workbench_record_asset_persists_group_rating_and_version_chain() {
                 parent_asset_id: Some("iw-asset-parent".to_string()),
                 root_asset_id: Some("iw-asset-root".to_string()),
                 version_index: Some(2),
+                import_fingerprint: None,
+                import_source_path: None,
             },
             None,
             None,
@@ -949,8 +1232,100 @@ fn image_workbench_record_asset_persists_group_rating_and_version_chain() {
     assert_eq!(fetched.parent_asset_id.as_deref(), Some("iw-asset-parent"));
     assert_eq!(fetched.root_asset_id.as_deref(), Some("iw-asset-root"));
     assert_eq!(fetched.version_index, Some(2));
+    assert_eq!(fetched.delivery_status, None);
+    assert_eq!(fetched.integrity_status, "ok");
+    assert_eq!(fetched.integrity_error, None);
+    assert!(fetched.integrity_checked_at_ms.is_some());
     // favorite 默认仍为 false，与 rating 并存互不影响。
     assert!(!fetched.favorite);
+}
+
+#[test]
+fn image_workbench_asset_integrity_can_be_updated() {
+    let (repo, _job_id, task_id) = seed_job_with_task();
+    let snapshot = repo
+        .record_asset(
+            NewImageWorkbenchAsset {
+                task_id,
+                file_path: "C:/mock/missing.png".to_string(),
+                ..Default::default()
+            },
+            None,
+            None,
+        )
+        .expect("record asset");
+    let asset_id = snapshot.assets[0].id.clone();
+
+    repo.update_asset_integrity_many(&[(
+        asset_id.clone(),
+        "missing".to_string(),
+        Some("资产文件不存在".to_string()),
+        42,
+    )])
+    .expect("integrity should update");
+
+    let fetched = repo.get_asset_by_id(&asset_id).expect("get asset");
+    assert_eq!(fetched.integrity_status, "missing");
+    assert_eq!(fetched.integrity_error.as_deref(), Some("资产文件不存在"));
+    assert_eq!(fetched.integrity_checked_at_ms, Some(42));
+}
+
+#[test]
+fn image_workbench_delete_invalid_assets_removes_records() {
+    let (repo, _job_id, task_id) = seed_job_with_task();
+    let missing = repo
+        .record_asset(
+            NewImageWorkbenchAsset {
+                task_id: task_id.clone(),
+                file_path: "C:/mock/missing.png".to_string(),
+                ..Default::default()
+            },
+            None,
+            None,
+        )
+        .expect("record missing")
+        .assets[0]
+        .id
+        .clone();
+    let corrupt = repo
+        .record_asset(
+            NewImageWorkbenchAsset {
+                task_id,
+                file_path: "C:/mock/corrupt.png".to_string(),
+                ..Default::default()
+            },
+            None,
+            None,
+        )
+        .expect("record corrupt")
+        .assets
+        .last()
+        .expect("corrupt asset")
+        .id
+        .clone();
+
+    repo.update_asset_integrity_many(&[
+        (
+            missing.clone(),
+            "missing".to_string(),
+            Some("不存在".to_string()),
+            1,
+        ),
+        (
+            corrupt.clone(),
+            "corrupt".to_string(),
+            Some("损坏".to_string()),
+            1,
+        ),
+    ])
+    .expect("mark invalid");
+
+    let removed = repo
+        .delete_invalid_assets_by_ids(&[missing.clone(), corrupt.clone()])
+        .expect("delete invalid");
+    assert_eq!(removed, 2);
+    assert!(repo.get_asset_by_id(&missing).is_err());
+    assert!(repo.get_asset_by_id(&corrupt).is_err());
 }
 
 #[test]
@@ -981,9 +1356,52 @@ fn image_workbench_set_asset_rating_coexists_with_favorite() {
     // 评分后收藏标志不应被改写。
     assert!(rated.assets[0].favorite);
 
-    let cleared = repo.set_asset_rating(&asset_id, None).expect("clear rating");
+    let cleared = repo
+        .set_asset_rating(&asset_id, None)
+        .expect("clear rating");
     assert_eq!(cleared.assets[0].rating, None);
     assert!(cleared.assets[0].favorite);
+}
+
+#[test]
+fn image_workbench_set_asset_quality_issues_persists_and_clears() {
+    let (repo, _job_id, task_id) = seed_job_with_task();
+    let snapshot = repo
+        .record_asset(
+            NewImageWorkbenchAsset {
+                task_id,
+                file_path: "C:/mock/quality.png".to_string(),
+                ..Default::default()
+            },
+            None,
+            None,
+        )
+        .expect("record asset");
+    let asset_id = snapshot.assets[0].id.clone();
+    assert!(snapshot.assets[0].quality_issues.is_empty());
+
+    let tagged = repo
+        .set_asset_quality_issues(&asset_id, &["hands".to_string(), "scene".to_string()])
+        .expect("set quality issues");
+    let tagged_asset = tagged
+        .assets
+        .iter()
+        .find(|asset| asset.id == asset_id)
+        .expect("tagged asset");
+    assert_eq!(tagged_asset.quality_issues, vec!["hands", "scene"]);
+
+    let fetched = repo.get_asset_by_id(&asset_id).expect("get tagged asset");
+    assert_eq!(fetched.quality_issues, vec!["hands", "scene"]);
+
+    let cleared = repo
+        .set_asset_quality_issues(&asset_id, &[])
+        .expect("clear quality issues");
+    let cleared_asset = cleared
+        .assets
+        .iter()
+        .find(|asset| asset.id == asset_id)
+        .expect("cleared asset");
+    assert!(cleared_asset.quality_issues.is_empty());
 }
 
 #[test]
@@ -1016,7 +1434,9 @@ fn image_workbench_query_assets_filters_paginates_and_sorts() {
         })
         .expect("query group-1");
     assert_eq!(group1.len(), 2);
-    assert!(group1.iter().all(|a| a.group_id.as_deref() == Some("group-1")));
+    assert!(group1
+        .iter()
+        .all(|a| a.group_id.as_deref() == Some("group-1")));
 
     // 按 min_rating 筛选（排除无评分与低评分）。
     let high = repo
@@ -1081,6 +1501,7 @@ fn create_job_with(
         person_context_json: None,
         upscale_scale: None,
         fallback_policy: None,
+        generation_options_json: None,
     })
     .expect("create job")
 }
@@ -1196,4 +1617,38 @@ fn image_workbench_rerun_chain_derives_parent_root_and_version() {
         "链根应稳定收敛到 α"
     );
     assert_eq!(gamma_asset.version_index, Some(2));
+}
+
+#[test]
+fn image_workbench_delivery_status_tracks_favorite_leaf() {
+    let repo = test_repo();
+
+    let job_a = create_job_with(&repo, "txt2img", "初版", 1, None);
+    let alpha = record_asset_on(&repo, &job_a.tasks[0].id, "C:/mock/alpha.png");
+    repo.set_asset_favorite(&alpha, true)
+        .expect("favorite root asset");
+    let alpha_asset = repo.get_asset_by_id(&alpha).expect("get alpha");
+    assert_eq!(alpha_asset.delivery_status, None);
+
+    let job_b = create_job_with(&repo, "img2img", "复跑一", 1, Some(alpha.clone()));
+    let beta = record_asset_on(&repo, &job_b.tasks[0].id, "C:/mock/beta.png");
+    repo.set_asset_favorite(&beta, true)
+        .expect("favorite leaf asset");
+    let beta_asset = repo.get_asset_by_id(&beta).expect("get beta");
+    assert_eq!(beta_asset.delivery_status.as_deref(), Some("ready"));
+
+    let job_c = create_job_with(&repo, "img2img", "复跑二", 1, Some(beta.clone()));
+    let gamma = record_asset_on(&repo, &job_c.tasks[0].id, "C:/mock/gamma.png");
+    let beta_after_branch = repo.get_asset_by_id(&beta).expect("get beta after branch");
+    assert_eq!(beta_after_branch.delivery_status, None);
+
+    repo.set_asset_favorite(&gamma, true)
+        .expect("favorite new leaf asset");
+    let gamma_asset = repo.get_asset_by_id(&gamma).expect("get gamma");
+    assert_eq!(gamma_asset.delivery_status.as_deref(), Some("ready"));
+
+    repo.set_asset_favorite(&gamma, false)
+        .expect("unfavorite new leaf asset");
+    let gamma_after_clear = repo.get_asset_by_id(&gamma).expect("get gamma after clear");
+    assert_eq!(gamma_after_clear.delivery_status, None);
 }

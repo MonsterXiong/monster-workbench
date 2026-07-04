@@ -48,8 +48,8 @@ fn permit_acquire_blocks_until_capacity_frees_up() {
     let barrier_clone = barrier.clone();
     let handle = thread::spawn(move || {
         barrier_clone.wait();
-        let permit = acquire_global_worker_permit("late", Duration::from_secs(2))
-            .expect("被释放后应能拿到");
+        let permit =
+            acquire_global_worker_permit("late", Duration::from_secs(2)).expect("被释放后应能拿到");
         // 立即归还，避免影响后续测试基线。
         drop(permit);
     });
@@ -86,10 +86,7 @@ fn permit_acquire_returns_none_on_timeout_when_full() {
     let start = std::time::Instant::now();
     let result = acquire_global_worker_permit("late", Duration::from_millis(80));
     assert!(result.is_none(), "超时应返回 None 而非 panic");
-    assert!(
-        start.elapsed() >= Duration::from_millis(50),
-        "超时应有等待"
-    );
+    assert!(start.elapsed() >= Duration::from_millis(50), "超时应有等待");
 
     drop(permits);
 }
