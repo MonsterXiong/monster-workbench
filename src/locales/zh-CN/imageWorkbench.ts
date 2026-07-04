@@ -156,6 +156,7 @@ export default {
     pickTarget: "加为参考",
     pickDone: "完成",
     selected: "已选参考",
+    settings: "参考设置",
     insert: "引用",
     insertedNotice: "已插入 {token}",
     promptToken: "参考图{index}的{role}",

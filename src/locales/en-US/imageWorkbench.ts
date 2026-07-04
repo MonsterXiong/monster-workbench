@@ -156,6 +156,7 @@ export default {
     pickTarget: "Add reference",
     pickDone: "Done",
     selected: "Selected",
+    settings: "Reference settings",
     insert: "Insert",
     insertedNotice: "Inserted {token}",
     promptToken: "reference image {index} {role}",

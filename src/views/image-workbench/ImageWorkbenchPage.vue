@@ -786,17 +786,6 @@ onMounted(async () => {
                 :placeholder="promptPlaceholder"
               ></textarea>
             </label>
-            <div v-if="showsReferenceInput && imageWorkbenchStore.hasReferenceImage" class="image-workbench-reference-tokens">
-              <button
-                v-for="(item, index) in imageWorkbenchStore.referenceItems"
-                :key="`token-${item.key}`"
-                type="button"
-                @click="insertReferencePrompt(index)"
-              >
-                <Link class="h-3.5 w-3.5" />
-                {{ referencePromptToken(index) }}
-              </button>
-            </div>
             <section v-if="showsReferenceInput" class="image-workbench-reference">
               <div class="image-workbench-reference__head">
                 <div class="image-workbench-reference__title">
@@ -844,26 +833,9 @@ onMounted(async () => {
                       {{ t("imageWorkbench.reference.current") }} {{ index + 1 }}
                       · {{ referenceRoleLabel(item.role, index) }}
                     </strong>
-                    <select
-                      class="image-workbench-reference-role-select"
-                      :value="normalizeReferenceRole(item.role, index)"
-                      @change="handleReferenceRoleChange(item.key, $event)"
-                    >
-                      <option
-                        v-for="option in referenceRoleOptions"
-                        :key="option.role"
-                        :value="option.role"
-                      >
-                        {{ option.label }}
-                      </option>
-                    </select>
                     <small>{{ item.label }}</small>
                   </div>
                   <div class="image-workbench-reference-card__actions">
-                    <button type="button" @click="insertReferencePrompt(index)">
-                      <Link class="h-3.5 w-3.5" />
-                      {{ t("imageWorkbench.reference.insert") }}
-                    </button>
                     <button
                       type="button"
                       @click="item.isUploaded ? handleRemoveUploadedReferenceImage() : handleRemoveReferenceAsset(item.assetId)"
@@ -873,6 +845,46 @@ onMounted(async () => {
                   </div>
                 </div>
               </div>
+              <details v-if="imageWorkbenchStore.hasReferenceImage" class="image-workbench-reference-settings">
+                <summary>
+                  <span>{{ t("imageWorkbench.reference.settings") }}</span>
+                  <small>{{ referenceLimitLabel }}</small>
+                </summary>
+                <div class="image-workbench-reference-settings__body">
+                  <div class="image-workbench-reference-tokens">
+                    <button
+                      v-for="(item, index) in imageWorkbenchStore.referenceItems"
+                      :key="`token-${item.key}`"
+                      type="button"
+                      @click="insertReferencePrompt(index)"
+                    >
+                      <Link class="h-3.5 w-3.5" />
+                      {{ referencePromptToken(index) }}
+                    </button>
+                  </div>
+                  <div class="image-workbench-reference-role-list">
+                    <label
+                      v-for="(item, index) in imageWorkbenchStore.referenceItems"
+                      :key="`role-${item.key}`"
+                    >
+                      <span>{{ t("imageWorkbench.reference.current") }} {{ index + 1 }}</span>
+                      <select
+                        class="image-workbench-reference-role-select"
+                        :value="normalizeReferenceRole(item.role, index)"
+                        @change="handleReferenceRoleChange(item.key, $event)"
+                      >
+                        <option
+                          v-for="option in referenceRoleOptions"
+                          :key="option.role"
+                          :value="option.role"
+                        >
+                          {{ option.label }}
+                        </option>
+                      </select>
+                    </label>
+                  </div>
+                </div>
+              </details>
               <div v-if="imageWorkbenchStore.hasReferenceImage" class="image-workbench-reference-actions">
                 <button type="button" @click="handleContinueSelectedPerson"><Sparkles class="h-3.5 w-3.5" />{{ t("imageWorkbench.reference.keepPerson") }}</button>
                 <button type="button" @click="handleClearReferenceImage">{{ t("imageWorkbench.reference.clear") }}</button>
