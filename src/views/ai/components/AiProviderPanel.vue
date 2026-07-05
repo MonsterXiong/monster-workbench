@@ -1,7 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted } from "vue";
 import { Bot, CheckCircle2, Gauge, KeyRound, Link, ListChecks, Plus, Save, TestTube2, Trash2 } from "lucide-vue-next";
-import { AI_PROVIDER_CAPABILITIES } from "../../../stores/ai-provider";
+import {
+  AI_PROVIDER_CAPABILITIES,
+  DEFAULT_AI_MAX_CONCURRENCY,
+  MAX_AI_MODEL_CONCURRENCY,
+} from "../../../stores/ai-provider";
 import { useAiStore } from "../../../stores/ai";
 import { useI18n } from "../../../composables/useI18n";
 import type { AiProviderCapability, AiProviderQueueMode, AiProviderTestAction } from "../../../types/ai";
@@ -325,10 +329,10 @@ async function handleDeleteConfig() {
             :model-value="config.maxConcurrency"
             type="number"
             min="1"
-            max="6"
+            :max="MAX_AI_MODEL_CONCURRENCY"
             :disabled="config.queueMode !== 'concurrent'"
             :placeholder="t('settings.aiProvider.maxConcurrencyPlaceholder')"
-            @update:model-value="aiStore.patchConfig({ maxConcurrency: clampNumber($event, 1, 6, 3, 0) })"
+            @update:model-value="aiStore.patchConfig({ maxConcurrency: clampNumber($event, 1, MAX_AI_MODEL_CONCURRENCY, DEFAULT_AI_MAX_CONCURRENCY, 0) })"
           />
         </label>
 

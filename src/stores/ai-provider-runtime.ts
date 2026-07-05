@@ -29,6 +29,7 @@ const TASK_POLL_INTERVAL_MS = 600;
 const TASK_POLL_RECOVERY_SLACK_MS = 30_000;
 const IMAGE_TASK_POLL_INTERVAL_MS = 300;
 const IMAGE_SIDECAR_TIMEOUT_SLACK_MS = 30_000;
+const CHAT_SIDECAR_TIMEOUT_SLACK_MS = 10_000;
 const IMAGE_QUEUE_POLL_TIMEOUT_MS = 24 * 60 * 60_000;
 const AI_PROVIDER_TEST_CANCELLED_MESSAGE = "AI provider test canceled";
 const AI_PROVIDER_UNSUPPORTED_ACTION_MESSAGES: Record<AiProviderTestAction, string> = {
@@ -97,13 +98,21 @@ export const useAiProviderRuntimeStore = defineStore("ai-provider-runtime", () =
             defaultAiProviderConfig.timeoutMs,
             0
           ) + IMAGE_SIDECAR_TIMEOUT_SLACK_MS
-        : clampNumber(
-            configSnapshot.timeoutMs,
-            3_000,
-            60_000,
-            defaultAiProviderConfig.timeoutMs,
-            0
-          );
+        : action === "chat"
+          ? clampNumber(
+              configSnapshot.timeoutMs,
+              3_000,
+              900_000,
+              defaultAiProviderConfig.timeoutMs,
+              0
+            ) + CHAT_SIDECAR_TIMEOUT_SLACK_MS
+          : clampNumber(
+              configSnapshot.timeoutMs,
+              3_000,
+              60_000,
+              defaultAiProviderConfig.timeoutMs,
+              0
+            );
     const queueTimeoutMs =
       action === "image"
         ? IMAGE_QUEUE_POLL_TIMEOUT_MS

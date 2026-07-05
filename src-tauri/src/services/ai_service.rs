@@ -823,10 +823,18 @@ impl<R: Runtime> AiProviderService<R> {
                 terminate_child(&mut child);
                 let _ = join_output_reader(stdout_reader);
                 let _ = join_output_reader(stderr_reader);
-                return Err(AppError::Process(format!(
-                    "AI 模型连接测试超时，{} 秒内未收到 sidecar 返回",
-                    timeout_ms / 1000
-                )));
+                let timeout_message = if generation.is_some() {
+                    format!(
+                        "AI 生成任务超时，{} 秒内未收到 sidecar 返回",
+                        timeout_ms / 1000
+                    )
+                } else {
+                    format!(
+                        "AI 模型连接测试超时，{} 秒内未收到 sidecar 返回",
+                        timeout_ms / 1000
+                    )
+                };
+                return Err(AppError::Process(timeout_message));
             }
 
             std::thread::sleep(Duration::from_millis(80));

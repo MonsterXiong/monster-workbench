@@ -13,6 +13,9 @@ use tauri::{AppHandle, Runtime};
 const AI_PROVIDER_IMAGE_REQUEST_TIMEOUT_MS_MIN: u64 = 60_000;
 const AI_PROVIDER_IMAGE_REQUEST_TIMEOUT_MS_MAX: u64 = 900_000;
 const AI_PROVIDER_IMAGE_SIDECAR_TIMEOUT_SLACK_MS: u64 = 30_000;
+const AI_PROVIDER_CHAT_REQUEST_TIMEOUT_MS_MIN: u64 = 3_000;
+const AI_PROVIDER_CHAT_REQUEST_TIMEOUT_MS_MAX: u64 = 900_000;
+const AI_PROVIDER_CHAT_SIDECAR_TIMEOUT_SLACK_MS: u64 = 10_000;
 const AI_PROVIDER_AUDIO_REQUEST_TIMEOUT_MS_MAX: u64 = 300_000;
 const AI_PROVIDER_AUDIO_SIDECAR_TIMEOUT_SLACK_MS: u64 = 5_000;
 
@@ -369,14 +372,21 @@ pub(crate) fn provider_request_timeout_ms(action: &str, config: &AiProviderConfi
         "audio" => config
             .timeout_ms
             .clamp(3_000, AI_PROVIDER_AUDIO_REQUEST_TIMEOUT_MS_MAX),
+        "chat" => config.timeout_ms.clamp(
+            AI_PROVIDER_CHAT_REQUEST_TIMEOUT_MS_MIN,
+            AI_PROVIDER_CHAT_REQUEST_TIMEOUT_MS_MAX,
+        ),
         _ => config.timeout_ms.clamp(3_000, 60_000),
     }
 }
 
 pub(crate) fn provider_sidecar_timeout_ms(action: &str, request_timeout_ms: u64) -> u64 {
     match action {
-        "image" | "video" => request_timeout_ms + AI_PROVIDER_IMAGE_SIDECAR_TIMEOUT_SLACK_MS,
-        "audio" => request_timeout_ms + AI_PROVIDER_AUDIO_SIDECAR_TIMEOUT_SLACK_MS,
+        "image" | "video" => {
+            request_timeout_ms.saturating_add(AI_PROVIDER_IMAGE_SIDECAR_TIMEOUT_SLACK_MS)
+        }
+        "audio" => request_timeout_ms.saturating_add(AI_PROVIDER_AUDIO_SIDECAR_TIMEOUT_SLACK_MS),
+        "chat" => request_timeout_ms.saturating_add(AI_PROVIDER_CHAT_SIDECAR_TIMEOUT_SLACK_MS),
         _ => request_timeout_ms,
     }
 }
@@ -486,6 +496,28 @@ pub(crate) fn is_image_generation_capability(capability: &str) -> bool {
 mod tests {
     use super::*;
 
+    fn timeout_config(timeout_ms: u64) -> AiProviderConfig {
+        AiProviderConfig {
+            provider: "custom".to_string(),
+            adapter_id: "openai-compatible".to_string(),
+            display_name: "Mock".to_string(),
+            base_url: "https://example.com/v1".to_string(),
+            api_key: "secret".to_string(),
+            remember_api_key: false,
+            model: "chat-test".to_string(),
+            test_prompt: "ping".to_string(),
+            image_model: "image-test".to_string(),
+            image_prompt: "mock image".to_string(),
+            image_size: "1024x1024".to_string(),
+            image_count: 1,
+            timeout_ms,
+            queue_mode: "serial".to_string(),
+            max_concurrency: 3,
+            capabilities: Vec::new(),
+            queue_key: String::new(),
+        }
+    }
+
     #[test]
     fn upscale_business_config_keys_require_native_capability() {
         assert_eq!(business_active_config_keys("upscale_2x"), &["upscale_2x"]);
@@ -522,5 +554,33 @@ mod tests {
         assert!(prompt.contains("Reference image 2 path: C:/refs/style.png"));
         assert!(prompt.contains("Reference image 1 / 参考图1: use as person reference"));
         assert!(prompt.contains("Reference image 2 / 参考图2: use as style reference"));
+    }
+
+    #[test]
+    fn chat_timeout_respects_long_provider_config() {
+        let config = timeout_config(180_000);
+
+        let request_timeout_ms = provider_request_timeout_ms("chat", &config);
+
+        assert_eq!(request_timeout_ms, 180_000);
+        assert_eq!(
+            provider_sidecar_timeout_ms("chat", request_timeout_ms),
+            190_000
+        );
+    }
+
+    #[test]
+    fn chat_timeout_clamps_to_shared_generation_max() {
+        let config = timeout_config(1_200_000);
+
+        assert_eq!(provider_request_timeout_ms("chat", &config), 900_000);
+        assert_eq!(provider_sidecar_timeout_ms("chat", 900_000), 910_000);
+    }
+
+    #[test]
+    fn non_generation_provider_actions_keep_short_timeout_cap() {
+        let config = timeout_config(180_000);
+
+        assert_eq!(provider_request_timeout_ms("models", &config), 60_000);
     }
 }

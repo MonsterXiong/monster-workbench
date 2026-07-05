@@ -46,6 +46,7 @@ const DALLE_2_IMAGE_SIZES: &[&str] = &["256x256", "512x512", "1024x1024"];
 const DALLE_3_IMAGE_SIZES: &[&str] = &["1024x1024", "1792x1024", "1024x1792"];
 const GPT_IMAGE_STANDARD_SIZES: &[&str] = &[IMAGE_SIZE_AUTO, "1024x1024", "1536x1024", "1024x1536"];
 
+#[cfg(test)]
 pub(super) fn verified_image_size_values() -> &'static [&'static str] {
     VERIFIED_IMAGE_SIZES
 }

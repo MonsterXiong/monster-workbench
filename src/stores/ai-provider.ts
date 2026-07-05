@@ -28,8 +28,8 @@ import type {
 export const AI_PROVIDER_CONFIG_KEY = "aiProvider";
 export const AI_MODEL_CONFIGS_KEY = "aiModelConfigs";
 export const AI_ACTIVE_MODEL_CONFIGS_KEY = "aiActiveModelConfigs";
-export const DEFAULT_AI_MAX_CONCURRENCY = 3;
-export const MAX_AI_MODEL_CONCURRENCY = 6;
+export const DEFAULT_AI_MAX_CONCURRENCY = 8;
+export const MAX_AI_MODEL_CONCURRENCY = 8;
 export const AI_IMAGE_REQUEST_TIMEOUT_MS = 720_000;
 export const AI_IMAGE_REQUEST_TIMEOUT_MAX_MS = 900_000;
 
@@ -121,7 +121,7 @@ export const defaultAiProviderConfig: AiProviderConfig = {
   imageSize: "1008x1792",
   imageCount: 1,
   timeoutMs: AI_IMAGE_REQUEST_TIMEOUT_MS,
-  queueMode: "serial",
+  queueMode: "concurrent",
   maxConcurrency: DEFAULT_AI_MAX_CONCURRENCY,
 };
 
@@ -592,6 +592,21 @@ export const useAiProviderStore = defineStore("ai-provider", () => {
     config.value = toAiProviderConfig(updated);
   }
 
+  function patchModelConfig(configId: string, patch: Partial<AiProviderConfig>) {
+    const current = getModelConfig(configId);
+    const next = normalizeAiProviderConfig(applyObjectPatch(toAiProviderConfig(current), patch));
+    const updated: AiModelConfig = {
+      ...applyObjectPatch(current, next),
+      name: patch.displayName ? String(patch.displayName) : current.name || next.displayName,
+      updatedAt: currentTime(),
+    };
+    modelConfigs.value = replaceByValue(modelConfigs.value, (item) => item.id, current.id, updated);
+    if (selectedConfigId.value === updated.id) {
+      config.value = toAiProviderConfig(updated);
+    }
+    return updated;
+  }
+
   async function saveConfig() {
     await writeAiProviderState(
       modelConfigs.value,
@@ -646,6 +661,7 @@ export const useAiProviderStore = defineStore("ai-provider", () => {
     modelConfigSupportsCapability,
     loadConfig,
     patchConfig,
+    patchModelConfig,
     saveConfig,
     selectModelConfig,
     createModelConfig,

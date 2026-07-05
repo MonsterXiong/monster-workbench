@@ -800,7 +800,7 @@ fn direct_generation_can_cancel_queued_request() {
         .expect("queued generation task should join")
         .expect_err("queued generation should be cancelled");
     assert!(
-        queued_result.contains("排队任务已被取消"),
+        queued_result.contains("排队任务已取消"),
         "{queued_result}"
     );
     assert!(

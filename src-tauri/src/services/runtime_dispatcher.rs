@@ -4,7 +4,7 @@
 //!
 //! 解决 G5："多个 image_workbench job 同时 running，叠加把本地 Provider
 //! queue / sidecar 子进程压垮"的问题。同时 running 的 worker 数 <=
-//! `GLOBAL_WORKER_LIMIT`（默认 4，跨 job 累加）。
+//! `GLOBAL_WORKER_LIMIT`（默认 8，跨 job 累加）。
 //!
 //! 与设计文档原始 dispatcher 方案的差异（折衷）：
 //! - 不重写 image_workbench 的 worker 模型；保留 "每 job 一条

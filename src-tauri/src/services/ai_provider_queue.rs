@@ -11,7 +11,7 @@ use std::time::Duration;
 
 static AI_PROVIDER_TEST_QUEUE: OnceLock<AiProviderTestQueue> = OnceLock::new();
 const AI_PROVIDER_TEST_QUEUE_LIMIT: usize = 16;
-const AI_PROVIDER_TEST_RUNNING_LIMIT: usize = 6;
+const AI_PROVIDER_TEST_RUNNING_LIMIT: usize = 8;
 const AI_PROVIDER_TEST_QUEUE_WAIT_TIMEOUT: Duration = Duration::from_secs(90);
 
 #[derive(Debug, Clone)]

@@ -3,7 +3,7 @@ use crate::services::ai_provider_image_size::is_image_size_supported_for_model;
 use crate::services::ai_provider_types::{AiGenerationOptions, AiProviderConfig};
 use serde_json::{json, Value};
 
-pub(super) const AI_PROVIDER_TEST_MAX_CONFIG_CONCURRENCY: usize = 6;
+pub(super) const AI_PROVIDER_TEST_MAX_CONFIG_CONCURRENCY: usize = 8;
 
 const AI_PROVIDER_DISPLAY_NAME_MAX_CHARS: usize = 128;
 const AI_PROVIDER_BASE_URL_MAX_CHARS: usize = 2_048;

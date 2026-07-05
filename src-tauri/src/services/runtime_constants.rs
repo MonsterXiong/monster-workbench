@@ -32,12 +32,12 @@ pub(crate) const STUCK_RUNNING_MAX_MS: u64 = 6 * 60 * 60 * 1000;
 
 /// 阶段 B2b：全局并发 worker 数上限。同时 running 的 worker（无论属于
 /// 哪个 image_workbench job）累加不超过该值，避免多 job 同跑把本地 Provider
-/// queue / sidecar 子进程压垮。默认 4，可在 runtime 通过 env override。
-pub(crate) const GLOBAL_WORKER_LIMIT: usize = 4;
+/// queue / sidecar 子进程压垮。中转站支持高并发时允许更快推进批量生图。
+pub(crate) const GLOBAL_WORKER_LIMIT: usize = 8;
 
 /// 图片工作台单个 job 默认最多占用的 worker 数。保留 job 内 task 并发，
 /// 同时避免一个大 job 吃满 GLOBAL_WORKER_LIMIT，让后续 job 有机会并行推进。
-pub(crate) const IMAGE_WORKBENCH_JOB_WORKER_LIMIT: usize = 2;
+pub(crate) const IMAGE_WORKBENCH_JOB_WORKER_LIMIT: usize = 4;
 
 /// dispatcher 主循环节拍。500ms 内能响应 wake notify 也能在没事时低 CPU 自旋。
 /// B2b 简化方案没有真主循环（直接靠 spawn_blocking + permit 阻塞），保留常量
