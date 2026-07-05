@@ -11,7 +11,6 @@ import {
   FolderOpen,
   ImagePlus,
   Images,
-  Link,
   Maximize2,
   Play,
   RefreshCcw,
@@ -155,6 +154,13 @@ const selectedAssetCard = computed(() =>
     .find((item: ImageWorkbenchAssetCard) => item.id === selectedAsset.value?.id) || null
 );
 const selectedAssetDisplayUrl = computed(() => selectedAssetCard.value?.displayUrl || "");
+const selectedAssetPromptSummary = computed(() =>
+  imageWorkbenchStore.selectedAssetMetadata?.originalPrompt ||
+  imageWorkbenchStore.selectedAssetMetadata?.expandedPrompt ||
+  imageWorkbenchStore.selectedAssetJob?.prompt ||
+  currentJob.value?.prompt ||
+  t("imageWorkbench.review.emptyPrompt")
+);
 const previewAsset = ref<ImageWorkbenchAssetCard | null>(null);
 const canSaveTemplate = computed(() => Boolean(imageWorkbenchStore.prompt.trim()));
 const isInpaintWorkspace = computed(() =>
@@ -191,12 +197,6 @@ const workspaceEmptyDesc = computed(() => t("imageWorkbench.workspace.emptyDesc"
 const largeBatchHint = computed(() =>
   formatTemplate(t("imageWorkbench.input.largeBatchHint"), {
     count: imageWorkbenchStore.generationQuantity,
-  })
-);
-const referenceLimitLabel = computed(() =>
-  formatTemplate(t("imageWorkbench.reference.limitLabel"), {
-    count: imageWorkbenchStore.referenceCount,
-    limit: imageWorkbenchStore.referenceLimit,
   })
 );
 const selectedAssetIsReference = computed(() =>
@@ -582,6 +582,12 @@ function openAssetPreview(asset: ImageWorkbenchAssetCard | null) {
   previewAsset.value = asset;
 }
 
+function handleOpenSelectedAssetPreview() {
+  if (selectedAssetCard.value) {
+    openAssetPreview(selectedAssetCard.value);
+  }
+}
+
 async function handleOpenAssetPreview(asset: ImageWorkbenchAssetCard) {
   await handleSelectAssetAndShowDetails(asset);
   openAssetPreview(asset);
@@ -709,6 +715,7 @@ async function handleSelectAssetAndShowDetails(asset: ImageWorkbenchAssetCard) {
 
 async function handleGalleryAssetClick(asset: ImageWorkbenchAssetCard) {
   if (asset.id === imageWorkbenchStore.selectedAssetId && !isInpaintWorkspace.value) {
+    handleClearSelectedAsset();
     return;
   }
   await handleSelectAssetAndShowDetails(asset);
@@ -837,10 +844,6 @@ onBeforeUnmount(() => {
                 <Clock3 class="h-3.5 w-3.5" />
                 {{ t("imageWorkbench.workspace.returnLatest") }}
               </button>
-              <button v-if="selectedAsset && !isInpaintWorkspace" class="image-workbench-secondary" type="button" @click="handleClearSelectedAsset">
-                <X class="h-3.5 w-3.5" />
-                {{ t("imageWorkbench.review.clearSelection") }}
-              </button>
               <button v-if="imageWorkbenchStore.canRetryFailedTasks" class="image-workbench-secondary" type="button" @click="handleRetryCurrentJob">
                 <RotateCcw class="h-3.5 w-3.5" />
                 {{ t("imageWorkbench.toolbar.retry") }}
@@ -880,6 +883,40 @@ onBeforeUnmount(() => {
                 />
                 <ImagePlus v-else class="h-3.5 w-3.5" />
                 <small>{{ reference.label }}</small>
+              </button>
+            </div>
+          </div>
+          <div
+            v-if="selectedAsset && selectedAssetCard && !showSceneGuide && !isInpaintWorkspace"
+            class="image-workbench-selection-bar"
+          >
+            <button
+              type="button"
+              class="image-workbench-selection-bar__thumb"
+              :title="t('imageWorkbench.asset.openPreview')"
+              @click="handleOpenSelectedAssetPreview"
+            >
+              <img
+                :key="selectedAssetDisplayUrl"
+                :src="selectedAssetDisplayUrl"
+                alt=""
+                @load="handleImageLoad"
+                @error="handleImageLoadError($event, selectedAsset.filePath)"
+              />
+            </button>
+            <div class="image-workbench-selection-bar__copy">
+              <span>{{ t("imageWorkbench.gallerySections.selectedTitle") }}</span>
+              <strong>{{ selectedAssetPromptSummary }}</strong>
+              <small>{{ selectedAssetNativeSize || t("imageWorkbench.review.emptyValue") }}</small>
+            </div>
+            <div class="image-workbench-selection-bar__actions">
+              <button type="button" class="image-workbench-secondary" @click="handleOpenSelectedAssetPreview">
+                <Maximize2 class="h-3.5 w-3.5" />
+                {{ t("imageWorkbench.asset.openPreview") }}
+              </button>
+              <button type="button" class="image-workbench-secondary" @click="handleClearSelectedAsset">
+                <X class="h-3.5 w-3.5" />
+                {{ t("imageWorkbench.review.clearSelection") }}
               </button>
             </div>
           </div>
@@ -1205,46 +1242,6 @@ onBeforeUnmount(() => {
                 {{ imageWorkbenchStore.imageSizeError }}
               </small>
             </label>
-            <details v-if="imageWorkbenchStore.hasReferenceImage" class="image-workbench-reference-settings">
-              <summary>
-                <span>{{ t("imageWorkbench.reference.settings") }}</span>
-                <small>{{ referenceLimitLabel }}</small>
-              </summary>
-              <div class="image-workbench-reference-settings__body">
-                <div class="image-workbench-reference-tokens">
-                  <button
-                    v-for="(item, index) in imageWorkbenchStore.referenceItems"
-                    :key="`token-${item.key}`"
-                    type="button"
-                    @click="insertReferencePrompt(index)"
-                  >
-                    <Link class="h-3.5 w-3.5" />
-                    {{ referencePromptToken(index) }}
-                  </button>
-                </div>
-                <div class="image-workbench-reference-role-list">
-                  <label
-                    v-for="(item, index) in imageWorkbenchStore.referenceItems"
-                    :key="`role-${item.key}`"
-                  >
-                    <span>{{ t("imageWorkbench.reference.current") }} {{ index + 1 }}</span>
-                    <select
-                      class="image-workbench-reference-role-select"
-                      :value="normalizeReferenceRole(item.role, index)"
-                      @change="handleReferenceRoleChange(item.key, $event)"
-                    >
-                      <option
-                        v-for="option in referenceRoleOptions"
-                        :key="option.role"
-                        :value="option.role"
-                      >
-                        {{ option.label }}
-                      </option>
-                    </select>
-                  </label>
-                </div>
-              </div>
-            </details>
             <label>
               <span>{{ t("imageWorkbench.input.negativePrompt") }}</span>
               <input v-model="imageWorkbenchStore.negativePrompt" :placeholder="t('imageWorkbench.input.negativePlaceholder')" />
@@ -1365,6 +1362,7 @@ onBeforeUnmount(() => {
           @sync-task-entry="handleInspectorTaskEntrySync"
           @task-entry-change="handleInspectorTaskEntryChange"
           @prepare-task-entry="handlePrepareTaskEntry"
+          @clear-selection="handleClearSelectedAsset"
         />
       </aside>
     </section>

@@ -10,6 +10,7 @@ import {
   RotateCcw,
   Sparkles,
   Star,
+  X,
 } from "lucide-vue-next";
 import { useI18n } from "../../composables/useI18n";
 import { useImageWorkbenchStore } from "../../stores/image-workbench";
@@ -54,6 +55,7 @@ const emit = defineEmits<{
   (event: "sync-task-entry"): void;
   (event: "task-entry-change", key: ImageWorkbenchTaskEntryKey): void;
   (event: "prepare-task-entry", key: ImageWorkbenchTaskEntryKey): void;
+  (event: "clear-selection"): void;
 }>();
 
 const selectedAsset = computed(() => imageWorkbenchStore.selectedAsset);
@@ -308,6 +310,16 @@ function branchActionTaskEntry(actionKey: string): ImageWorkbenchTaskEntryKey | 
     <div class="image-workbench-section__head">
       <Info class="h-4 w-4" />
       <span>{{ inspectorTitle }}</span>
+      <button
+        v-if="selectedAsset"
+        type="button"
+        class="image-workbench-section__head-action"
+        :aria-label="t('imageWorkbench.review.clearSelection')"
+        :title="t('imageWorkbench.review.clearSelection')"
+        @click="emit('clear-selection')"
+      >
+        <X class="h-3.5 w-3.5" />
+      </button>
     </div>
     <div v-if="selectedAsset" class="image-workbench-inspector">
       <div class="image-workbench-preview">
