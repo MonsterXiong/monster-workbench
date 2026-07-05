@@ -418,16 +418,7 @@ function handleTaskEntrySelect(key: ImageWorkbenchTaskEntryKey) {
     return;
   }
   if (key === "edit") {
-    imageWorkbenchStore.mode = "inpaint";
-    if (imageWorkbenchStore.canRunInpaint) {
-      imageWorkbenchStore.startInpaintSelectedAsset();
-    } else if (selectedAssetUnavailableReason.value) {
-      imageWorkbenchStore.notice = selectedAssetUnavailableReason.value;
-    } else if (selectedAsset.value) {
-      imageWorkbenchStore.notice = t("imageWorkbench.errors.inpaintDeferred");
-    } else {
-      imageWorkbenchStore.notice = t("imageWorkbench.tasks.needImageNotice");
-    }
+    prepareInpaintForSelectedAsset();
     return;
   }
   if (key === "upscale") {
@@ -467,6 +458,25 @@ function handleTaskEntrySelect(key: ImageWorkbenchTaskEntryKey) {
     ? t("imageWorkbench.tasks.styleNotice")
     : t("imageWorkbench.tasks.needReferenceNotice"));
   focusPromptInput();
+}
+
+function prepareInpaintForSelectedAsset() {
+  imageWorkbenchStore.mode = "inpaint";
+  referenceComposerOpen.value = false;
+  if (imageWorkbenchStore.canRunInpaint) {
+    sceneGuideOpen.value = false;
+    commandSettingsOpen.value = false;
+    imageWorkbenchStore.startInpaintSelectedAsset();
+    return true;
+  }
+  if (selectedAssetUnavailableReason.value) {
+    imageWorkbenchStore.notice = selectedAssetUnavailableReason.value;
+  } else if (selectedAsset.value) {
+    imageWorkbenchStore.notice = t("imageWorkbench.errors.inpaintDeferred");
+  } else {
+    imageWorkbenchStore.notice = t("imageWorkbench.tasks.needImageNotice");
+  }
+  return false;
 }
 
 function ensureSelectedAssetReference() {
@@ -706,11 +716,19 @@ async function handleSelectReferenceImageFromComposer() {
 
 async function handleSelectAssetAndShowDetails(asset: ImageWorkbenchAssetCard) {
   await handleSelectReviewAsset(asset);
+  if (activeTaskEntry.value === "edit") {
+    prepareInpaintForSelectedAsset();
+    return;
+  }
   if (usesImageWorkbenchReferenceEntry(activeTaskEntry.value) && !imageWorkbenchStore.hasReferenceImage) {
     if (handleUseSelectedAssetAsReference()) {
       applyDefaultReferenceRole(asset.id);
     }
   }
+}
+
+async function handleStartSourceSelect(asset: ImageWorkbenchAssetCard) {
+  await handleSelectAssetAndShowDetails(asset);
 }
 
 async function handleGalleryAssetClick(asset: ImageWorkbenchAssetCard) {
@@ -931,8 +949,10 @@ onBeforeUnmount(() => {
           <ImageWorkbenchStartPanel
             v-else-if="showSceneGuide"
             :active-key="activeTaskEntry"
+            :source-assets="visibleAssetCards"
             @select-task="handleSceneTaskSelect"
             @apply-preset="handleTaskPresetApply"
+            @select-source="handleStartSourceSelect"
           />
           <div
             v-else-if="visibleAssetCards.length"
