@@ -122,6 +122,112 @@ export function setMockImageWorkbenchAssetQualityIssues(
   return context.getSnapshot(asset.jobId);
 }
 
+export function deleteMockImageWorkbenchAssets(
+  context: ImageWorkbenchAssetMockContext,
+  args: Record<string, unknown>
+) {
+  const request = args.request as any;
+  const ids: string[] = Array.from(new Set<string>(
+    (Array.isArray(request?.assetIds) ? request.assetIds : [])
+      .map((item: unknown) => String(item || "").trim())
+      .filter(Boolean)
+  ));
+  let deletedAssets = 0;
+  const touchedJobIds = new Set<string>();
+  ids.forEach((assetId) => {
+    const asset = context.assets.get(assetId);
+    if (!asset) {
+      return;
+    }
+    context.assets.delete(assetId);
+    deletedAssets += 1;
+    touchedJobIds.add(asset.jobId);
+  });
+  touchedJobIds.forEach((jobId) => touchMockImageWorkbenchJob(context.jobs, jobId));
+  return {
+    deletedAssets,
+    deletedFiles: request?.deleteFiles === false ? 0 : deletedAssets,
+    skippedFiles: 0,
+  };
+}
+
+export function tagMockImageWorkbenchAssetsGroup(
+  context: ImageWorkbenchAssetMockContext,
+  args: Record<string, unknown>
+) {
+  const request = args.request as any;
+  const ids: string[] = Array.from(new Set<string>(
+    (Array.isArray(request?.assetIds) ? request.assetIds : [])
+      .map((item: unknown) => String(item || "").trim())
+      .filter(Boolean)
+  ));
+  const assets = ids
+    .map((assetId) => context.assets.get(assetId))
+    .filter(Boolean);
+  if (!assets.length) {
+    return { taggedAssets: 0, groups: [] };
+  }
+
+  const now = getCurrentTimestampMs();
+  const targetGroups = new Map<string, any>();
+  const existingGroupId = String(request?.groupId || "").trim();
+  if (existingGroupId) {
+    const group = context.groups.get(existingGroupId);
+    if (!group) {
+      throw new Error("[ERR_IPC_BROWSER] 浏览器 Mock 未找到图片群组");
+    }
+    targetGroups.set(group.jobId, group);
+  } else {
+    const groupName = String(request?.groupName || "").trim();
+    if (!groupName) {
+      throw new Error("[ERR_IPC_BROWSER] 图片群组名称不能为空");
+    }
+    assets.forEach((asset) => {
+      if (targetGroups.has(asset.jobId)) {
+        return;
+      }
+      const groupId = `iw-group-${now}-${Math.random().toString(36).slice(2, 8)}`;
+      const group = {
+        id: groupId,
+        jobId: asset.jobId,
+        sourceId: null,
+        name: groupName,
+        type: "manual",
+        agentPreset: null,
+        agentIdsJson: null,
+        basePrompt: groupName,
+        count: 0,
+        createdAtMs: now,
+        updatedAtMs: now,
+      };
+      context.groups.set(groupId, group);
+      targetGroups.set(asset.jobId, group);
+    });
+  }
+
+  let taggedAssets = 0;
+  assets.forEach((asset) => {
+    const group = targetGroups.get(asset.jobId);
+    if (!group) {
+      return;
+    }
+    context.assets.set(asset.id, {
+      ...asset,
+      groupId: group.id,
+    });
+    taggedAssets += 1;
+    touchMockImageWorkbenchJob(context.jobs, asset.jobId);
+  });
+
+  const groups = Array.from(targetGroups.values()).map((group) => {
+    const count = mapValuesToArray(context.assets).filter((asset) => asset.groupId === group.id).length;
+    const nextGroup = { ...group, count, updatedAtMs: now };
+    context.groups.set(group.id, nextGroup);
+    return nextGroup;
+  });
+  return { taggedAssets, groups };
+}
+
 function sortMockAssets(assets: any[], sort: string) {
   if (sort === "recent_first" || sort === "recentFirst") {
     return sortByMany(assets, [{ getValue: (asset) => -Number(asset.createdAtMs || 0) }]);

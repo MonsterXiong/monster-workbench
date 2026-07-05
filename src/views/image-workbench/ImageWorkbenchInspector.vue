@@ -43,13 +43,17 @@ const imageWorkbenchStore = useImageWorkbenchStore();
 const props = defineProps<{
   assetShelfView: ImageWorkbenchAssetShelfView;
   assetShelfDialogOpen: boolean;
+  activeTaskEntry: ImageWorkbenchTaskEntryKey;
 }>();
 const assetRatingOptions = [0, 1, 2, 3, 4, 5];
 const qualityIssueKeys: ImageWorkbenchQualityIssue[] = ["hands", "identity", "prop", "scene"];
 const { handleImageLoad, handleImageLoadError } = useImageWorkbenchImageFallback();
 const emit = defineEmits<{
   (event: "preview", asset: ImageWorkbenchAssetCard | null): void;
+  (event: "review-asset", asset: ImageWorkbenchAssetCard): void;
   (event: "toggle-reference", asset: ImageWorkbenchAssetCard): void;
+  (event: "select-source", asset: ImageWorkbenchAssetCard): void;
+  (event: "prepare-quality-fix", asset: ImageWorkbenchAssetCard): void;
   (event: "update:asset-shelf-view", view: ImageWorkbenchAssetShelfView): void;
   (event: "update:asset-shelf-dialog-open", open: boolean): void;
   (event: "sync-task-entry"): void;
@@ -334,7 +338,7 @@ function branchActionTaskEntry(actionKey: string): ImageWorkbenchTaskEntryKey | 
         />
       </div>
       <div class="image-workbench-selection-summary">
-        <strong>{{ selectedMetadata?.originalPrompt || selectedMetadata?.expandedPrompt || t("imageWorkbench.review.emptyPrompt") }}</strong>
+        <strong>{{ selectedMetadata?.expandedPrompt || selectedMetadata?.originalPrompt || t("imageWorkbench.review.emptyPrompt") }}</strong>
         <small>{{ selectedAssetSummary }}</small>
         <div class="image-workbench-selection-summary__tags">
           <span :class="{ 'is-ready': selectedDeliveryReady }">{{ selectedDeliveryStatusLabel }}</span>
@@ -641,7 +645,7 @@ function branchActionTaskEntry(actionKey: string): ImageWorkbenchTaskEntryKey | 
             </div>
             <div>
               <dt>{{ t("imageWorkbench.details.prompt") }}</dt>
-              <dd>{{ selectedMetadata?.originalPrompt || selectedAssetJob?.prompt || "-" }}</dd>
+              <dd>{{ selectedMetadata?.expandedPrompt || selectedMetadata?.originalPrompt || selectedAssetJob?.prompt || "-" }}</dd>
             </div>
             <div>
               <dt>{{ t("imageWorkbench.details.negativePrompt") }}</dt>
@@ -671,8 +675,12 @@ function branchActionTaskEntry(actionKey: string): ImageWorkbenchTaskEntryKey | 
       v-else
       :asset-shelf-view="props.assetShelfView"
       :asset-shelf-dialog-open="props.assetShelfDialogOpen"
+      :active-task-entry="props.activeTaskEntry"
       @preview="emit('preview', $event)"
+      @review-asset="emit('review-asset', $event)"
       @toggle-reference="emit('toggle-reference', $event)"
+      @select-source="emit('select-source', $event)"
+      @prepare-quality-fix="emit('prepare-quality-fix', $event)"
       @update:asset-shelf-view="emit('update:asset-shelf-view', $event)"
       @update:asset-shelf-dialog-open="emit('update:asset-shelf-dialog-open', $event)"
     />

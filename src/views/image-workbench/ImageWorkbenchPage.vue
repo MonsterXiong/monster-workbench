@@ -1,14 +1,16 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import {
   Ban,
   BookTemplate,
   ChevronDown,
+  Clapperboard,
   Clock3,
   Download,
   Eraser,
   FolderOpen,
+  Gauge,
   ImagePlus,
   Images,
   Maximize2,
@@ -38,6 +40,9 @@ import ImageWorkbenchLightbox from "./ImageWorkbenchLightbox.vue";
 import ImageWorkbenchMaskEditor from "./ImageWorkbenchMaskEditor.vue";
 import ImageWorkbenchReferenceSourcePicker from "./ImageWorkbenchReferenceSourcePicker.vue";
 import ImageWorkbenchStartPanel from "./ImageWorkbenchStartPanel.vue";
+import ImageWorkbenchStoryboardDraftPanel, {
+  type ImageWorkbenchStoryboardDraftScene,
+} from "./ImageWorkbenchStoryboardDraftPanel.vue";
 import ImageWorkbenchTaskPanel from "./ImageWorkbenchTaskPanel.vue";
 import "./ImageWorkbenchPage.css";
 import {
@@ -53,6 +58,7 @@ import {
   buildImageWorkbenchJobReferenceViews,
   type ImageWorkbenchJobReferenceView,
 } from "./imageWorkbenchReferences";
+import { buildImageWorkbenchStoryboardBatch } from "../../stores/image-workbench-storyboard";
 import type {
   ImageWorkbenchBackground,
   ImageWorkbenchGenerationQuality,
@@ -77,7 +83,12 @@ const assetShelfDialogOpen = ref(false);
 const activeTaskEntry = ref<ImageWorkbenchTaskEntryKey>("create");
 const activeScenePreset = ref<ImageWorkbenchTaskPresetKey | null>(null);
 const promptTextareaRef = ref<HTMLTextAreaElement | null>(null);
+const storyboardDraftScenes = ref<ImageWorkbenchStoryboardDraftScene[]>([]);
+const storyboardDraftPrefix = ref("");
+const storyboardDraftNegativePrompt = ref("");
+const storyboardAiAction = ref<"recognize" | "generate" | "">("");
 const upscaleScale = ref<2 | 4>(2);
+const sourceAssetShelfPreloaded = ref(false);
 const { handleImageLoad, handleImageLoadError } = useImageWorkbenchImageFallback();
 
 const qualityOptions: ImageWorkbenchGenerationQuality[] = ["auto", "low", "medium", "high"];
@@ -97,6 +108,7 @@ const activeScenePresetMeta = computed(() =>
 const commandSceneLabel = computed(() =>
   activeScenePresetMeta.value?.label || activeTaskMeta.value?.title || t("imageWorkbench.tasks.create")
 );
+const isStoryboardTask = computed(() => activeTaskEntry.value === "storyboard");
 const currentJob = computed(() => imageWorkbenchStore.currentJob);
 const latestJob = computed(() => imageWorkbenchStore.jobs[0] || null);
 const canReturnToLatestJob = computed(() =>
@@ -107,19 +119,31 @@ const currentJobStatusText = computed(() => {
   return status ? t(`imageWorkbench.jobStatuses.${status}`) : t("imageWorkbench.taskbar.waiting");
 });
 const visibleAssetCards = computed(() => imageWorkbenchStore.currentAssetCards);
+const hasCurrentGroupLayout = computed(() => imageWorkbenchStore.currentGroups.length > 0);
+const allAssetCards = computed(() => {
+  const map = new Map<string, ImageWorkbenchAssetCard>();
+  imageWorkbenchStore.currentAssetCards
+    .concat(imageWorkbenchStore.libraryAssetCards)
+    .forEach((asset) => map.set(asset.id, asset));
+  return [...map.values()].sort((left, right) => right.createdAtMs - left.createdAtMs);
+});
 const showWorkspaceStart = computed(() =>
-  !visibleAssetCards.value.length && !isInpaintWorkspace.value
+  !visibleAssetCards.value.length && !hasCurrentGroupLayout.value && !isInpaintWorkspace.value
 );
 const showSceneGuide = computed(() =>
   !isInpaintWorkspace.value && (sceneGuideOpen.value || showWorkspaceStart.value)
 );
 const workspaceHeaderTitle = computed(() =>
-  showSceneGuide.value
+  isStoryboardTask.value && showSceneGuide.value
+    ? t("imageWorkbench.storyboardDraft.title")
+    : showSceneGuide.value
     ? t("imageWorkbench.workspace.creationTitle")
     : t("imageWorkbench.workspace.current")
 );
 const workspaceHeaderDesc = computed(() =>
-  showSceneGuide.value
+  isStoryboardTask.value && showSceneGuide.value
+    ? t("imageWorkbench.storyboardDraft.desc")
+    : showSceneGuide.value
     ? t("imageWorkbench.workspace.creationDesc")
     : workspaceSummary.value
 );
@@ -155,8 +179,8 @@ const selectedAssetCard = computed(() =>
 );
 const selectedAssetDisplayUrl = computed(() => selectedAssetCard.value?.displayUrl || "");
 const selectedAssetPromptSummary = computed(() =>
-  imageWorkbenchStore.selectedAssetMetadata?.originalPrompt ||
   imageWorkbenchStore.selectedAssetMetadata?.expandedPrompt ||
+  imageWorkbenchStore.selectedAssetMetadata?.originalPrompt ||
   imageWorkbenchStore.selectedAssetJob?.prompt ||
   currentJob.value?.prompt ||
   t("imageWorkbench.review.emptyPrompt")
@@ -194,10 +218,53 @@ const workspaceSummary = computed(() => {
 });
 const workspaceEmptyTitle = computed(() => t("imageWorkbench.workspace.emptyTitle"));
 const workspaceEmptyDesc = computed(() => t("imageWorkbench.workspace.emptyDesc"));
+const storyboardDraftBatch = computed(() =>
+  buildImageWorkbenchStoryboardBatch({
+    prefix: storyboardDraftPrefix.value,
+    negativePrompt: storyboardDraftNegativePrompt.value,
+    scenes: storyboardDraftScenes.value,
+  })
+);
+const storyboardDraftTaskCount = computed(() => storyboardDraftBatch.value.taskPrompts.length);
+const hasStoryboardBatchPrompt = computed(() =>
+  isStoryboardTask.value && storyboardDraftTaskCount.value > 0
+);
+const hasStoryboardRawPrompt = computed(() => Boolean(imageWorkbenchStore.prompt.trim()));
+const effectiveGenerationCount = computed(() =>
+  isStoryboardTask.value
+    ? storyboardDraftTaskCount.value
+    : imageWorkbenchStore.generationQuantity
+);
+const shouldConfirmCurrentGeneration = computed(() =>
+  imageWorkbenchStore.shouldConfirmLargeGeneration ||
+  (hasStoryboardBatchPrompt.value && effectiveGenerationCount.value >= 32)
+);
+const storyboardBatchPrimaryLabel = computed(() =>
+  formatTemplate(t("imageWorkbench.input.storyboardBatchPrimary"), {
+    count: storyboardDraftTaskCount.value,
+  })
+);
 const largeBatchHint = computed(() =>
   formatTemplate(t("imageWorkbench.input.largeBatchHint"), {
-    count: imageWorkbenchStore.generationQuantity,
+    count: effectiveGenerationCount.value,
   })
+);
+const providerQueueStatusLabel = computed(() =>
+  imageWorkbenchStore.imageProviderQueueIsSerial
+    ? t("imageWorkbench.input.queueSerialChip")
+    : formatTemplate(t("imageWorkbench.input.queueConcurrentChip"), {
+      count: imageWorkbenchStore.imageProviderQueueConcurrency,
+    })
+);
+const providerQueueStatusTitle = computed(() =>
+  imageWorkbenchStore.imageProviderQueueIsSerial
+    ? t("imageWorkbench.input.queueSerialStatus")
+    : formatTemplate(t("imageWorkbench.input.queueConcurrentStatus"), {
+      count: imageWorkbenchStore.imageProviderQueueConcurrency,
+    })
+);
+const providerQueueNeedsConcurrency = computed(() =>
+  imageWorkbenchStore.imageProviderQueueNeedsUpgrade && effectiveGenerationCount.value > 1
 );
 const selectedAssetIsReference = computed(() =>
   Boolean(selectedAsset.value && imageWorkbenchStore.referenceAssets.some((asset) => asset.id === selectedAsset.value?.id))
@@ -208,8 +275,20 @@ const selectedAssetUnavailableReason = computed(() =>
     ? t("imageWorkbench.errors.invalidSelectedAsset")
     : ""
 );
+const canSubmitStoryboardBatch = computed(() =>
+  storyboardDraftTaskCount.value > 0 &&
+  imageWorkbenchStore.canRunPersonConsistency &&
+  !imageWorkbenchStore.imageSizeError &&
+  !imageWorkbenchStore.storyboardRecognitionLoading
+);
+const canSmartRecognizeStoryboard = computed(() =>
+  isStoryboardTask.value &&
+  hasStoryboardRawPrompt.value &&
+  !imageWorkbenchStore.loading &&
+  !imageWorkbenchStore.storyboardRecognitionLoading
+);
 const showsOutputCompression = computed(() => ["jpeg", "webp"].includes(imageWorkbenchStore.outputFormat));
-const showsReferenceInput = computed(() => ["reference", "person", "style"].includes(activeTaskEntry.value));
+const showsReferenceInput = computed(() => ["reference", "person", "storyboard", "style"].includes(activeTaskEntry.value));
 const showsPromptInput = computed(() =>
   activeTaskEntry.value !== "upscale" &&
   !(activeTaskEntry.value === "edit" && !selectedAsset.value)
@@ -217,14 +296,18 @@ const showsPromptInput = computed(() =>
 const showsGenerationControls = computed(() =>
   !["edit", "upscale"].includes(activeTaskEntry.value)
 );
-const showsQuantityInput = computed(() => showsGenerationControls.value);
+const showsQuantityInput = computed(() => showsGenerationControls.value && !isStoryboardTask.value);
 const showsSizeInput = computed(() => showsGenerationControls.value);
 const promptPlaceholder = computed(() => t(`imageWorkbench.input.promptPlaceholders.${activeTaskEntry.value}`));
-const primaryActionLabel = computed(() =>
-  imageWorkbenchStore.generating
-    ? t("imageWorkbench.toolbar.addToQueue")
-    : t(`imageWorkbench.toolbar.primaryActions.${activeTaskEntry.value}`)
-);
+const primaryActionLabel = computed(() => {
+  if (isStoryboardTask.value && hasStoryboardBatchPrompt.value) {
+    return storyboardBatchPrimaryLabel.value;
+  }
+  if (imageWorkbenchStore.generating) {
+    return t("imageWorkbench.toolbar.addToQueue");
+  }
+  return t(`imageWorkbench.toolbar.primaryActions.${activeTaskEntry.value}`);
+});
 const primaryActionTitle = computed(() => {
   if (canSubmitCurrentTask.value) {
     return primaryActionLabel.value;
@@ -234,6 +317,15 @@ const primaryActionTitle = computed(() => {
   }
   if (modeUnavailableNotice.value) {
     return modeUnavailableNotice.value;
+  }
+  if (isStoryboardTask.value && selectedAssetUnavailableReason.value) {
+    return selectedAssetUnavailableReason.value;
+  }
+  if (isStoryboardTask.value && !storyboardDraftTaskCount.value) {
+    return t("imageWorkbench.errors.storyboardPromptRequired");
+  }
+  if (isStoryboardTask.value && !imageWorkbenchStore.hasReferenceImage && !selectedAsset.value) {
+    return t("imageWorkbench.errors.noReferenceImage");
   }
   if (activeTaskGuidance.value) {
     return activeTaskGuidance.value;
@@ -255,6 +347,9 @@ const upscaleScaleOptions = computed(() => [
   },
 ]);
 const canSubmitCurrentTask = computed(() => {
+  if (isStoryboardTask.value) {
+    return canSubmitStoryboardBatch.value;
+  }
   if (activeTaskEntry.value !== "upscale") {
     return imageWorkbenchStore.canGenerate;
   }
@@ -290,6 +385,10 @@ const shouldShowReferenceComposer = computed(() =>
   showsReferenceInput.value && referenceComposerOpen.value
 );
 
+interface ImageWorkbenchTaskEntrySelectOptions {
+  useSelectedAsset?: boolean;
+}
+
 function ensureReferenceTaskContext() {
   if (showsReferenceInput.value) {
     return;
@@ -320,6 +419,15 @@ function handleToggleCommandSettings() {
   }
 }
 
+function handleOpenCommandSettings() {
+  commandSettingsOpen.value = true;
+  referenceComposerOpen.value = false;
+}
+
+async function handleEnableImageProviderConcurrency() {
+  await imageWorkbenchStore.enableImageProviderConcurrency();
+}
+
 function modeLabel(mode: ImageWorkbenchMode | string) {
   return t(`imageWorkbench.modes.${mode}`);
 }
@@ -348,6 +456,113 @@ function focusPromptInput() {
   void nextTick(() => promptTextareaRef.value?.focus());
 }
 
+function syncStoryboardDraftFromPrompt() {
+  const batch = imageWorkbenchStore.storyboardBatchPreview;
+  storyboardDraftPrefix.value = batch.prefix;
+  storyboardDraftNegativePrompt.value = batch.negativePrompt;
+  storyboardDraftScenes.value = batch.scenes.map((scene, index) => ({
+    key: `storyboard-${index}-${scene.index}-${scene.title}`,
+    index: index + 1,
+    title: scene.title,
+    picturePrompt: scene.picturePrompt,
+    cameraPrompt: scene.cameraPrompt,
+    emotionKeywords: scene.emotionKeywords,
+    referencePrompt: scene.referencePrompt,
+  }));
+}
+
+function applyStoryboardDraftFromAiResult(
+  result: Awaited<
+    ReturnType<
+      typeof imageWorkbenchStore.recognizeStoryboardPromptWithAi |
+      typeof imageWorkbenchStore.generateStoryboardPromptWithAi
+    >
+  >
+) {
+  const fallbackBatch = imageWorkbenchStore.storyboardBatchPreview;
+  storyboardDraftPrefix.value = result.prefix || fallbackBatch.prefix;
+  storyboardDraftNegativePrompt.value = result.negativePrompt || fallbackBatch.negativePrompt;
+  storyboardDraftScenes.value = result.scenes.map((scene, index) => ({
+    key: `storyboard-ai-${index}-${scene.index}-${scene.title}`,
+    index: index + 1,
+    title: scene.title,
+    picturePrompt: scene.picturePrompt,
+    cameraPrompt: scene.cameraPrompt,
+    emotionKeywords: scene.emotionKeywords,
+    referencePrompt: scene.referencePrompt,
+  }));
+}
+
+function updateStoryboardDraftScene(index: number, patch: Partial<ImageWorkbenchStoryboardDraftScene>) {
+  storyboardDraftScenes.value = storyboardDraftScenes.value.map((scene, sceneIndex) =>
+    sceneIndex === index ? { ...scene, ...patch } : scene
+  );
+}
+
+function removeStoryboardDraftScene(index: number) {
+  storyboardDraftScenes.value = storyboardDraftScenes.value
+    .filter((_, sceneIndex) => sceneIndex !== index)
+    .map((scene, sceneIndex) => ({
+      ...scene,
+      index: sceneIndex + 1,
+    }));
+}
+
+async function handleStoryboardBatchGenerate() {
+  if (!(await confirmCurrentGeneration())) {
+    return;
+  }
+  const batch = storyboardDraftBatch.value;
+  sceneGuideOpen.value = false;
+  commandSettingsOpen.value = false;
+  await imageWorkbenchStore.runStoryboardPromptBatch({
+    jobPrompt: batch.jobPrompt,
+    negativePrompt: batch.negativePrompt,
+    taskPrompts: batch.taskPrompts,
+    sceneCount: batch.scenes.length,
+    variantsPerScene: batch.variantsPerScene,
+    generationOptions: batch.generationOptions,
+  });
+}
+
+async function handleStoryboardSmartRecognize() {
+  const sourcePrompt = imageWorkbenchStore.prompt.trim();
+  sceneGuideOpen.value = true;
+  storyboardAiAction.value = "recognize";
+  try {
+    const result = await imageWorkbenchStore.recognizeStoryboardPromptWithAi(sourcePrompt);
+    if (sourcePrompt !== imageWorkbenchStore.prompt.trim()) {
+      return;
+    }
+    applyStoryboardDraftFromAiResult(result);
+  } catch {
+    // Store error is already surfaced in the workbench error bar.
+  } finally {
+    if (storyboardAiAction.value === "recognize") {
+      storyboardAiAction.value = "";
+    }
+  }
+}
+
+async function handleStoryboardGenerateStory() {
+  const sourcePrompt = imageWorkbenchStore.prompt.trim();
+  sceneGuideOpen.value = true;
+  storyboardAiAction.value = "generate";
+  try {
+    const result = await imageWorkbenchStore.generateStoryboardPromptWithAi(sourcePrompt);
+    if (sourcePrompt !== imageWorkbenchStore.prompt.trim()) {
+      return;
+    }
+    applyStoryboardDraftFromAiResult(result);
+  } catch {
+    // Store error is already surfaced in the workbench error bar.
+  } finally {
+    if (storyboardAiAction.value === "generate") {
+      storyboardAiAction.value = "";
+    }
+  }
+}
+
 function consumeRouteDraftPrompt() {
   const rawPrompt = route.query.prompt;
   const routePrompt = Array.isArray(rawPrompt) ? rawPrompt[0] : rawPrompt;
@@ -369,7 +584,22 @@ function handleUpscaleScaleSelect(scale: 2 | 4) {
   upscaleScale.value = scale;
   const targetMode: ImageWorkbenchMode = scale === 4 ? "upscale_4x" : "upscale_2x";
   imageWorkbenchStore.mode = targetMode;
+  imageWorkbenchStore.quantity = 1;
   imageWorkbenchStore.prompt = t("imageWorkbench.asset.upscaleDefaultPrompt");
+}
+
+function prepareSourceAssetShelf() {
+  assetShelfView.value = "library";
+  if (
+    !sourceAssetShelfPreloaded.value &&
+    imageWorkbenchStore.assetLibraryHasMore &&
+    !imageWorkbenchStore.assetLibraryLoadingMore
+  ) {
+    sourceAssetShelfPreloaded.value = true;
+    void imageWorkbenchStore.loadMoreAssetLibrary().catch(() => {
+      sourceAssetShelfPreloaded.value = false;
+    });
+  }
 }
 
 function handleNewWorkbenchTask() {
@@ -392,7 +622,17 @@ function handleSceneTaskSelect(key: ImageWorkbenchTaskEntryKey) {
   sceneGuideOpen.value = true;
 }
 
-function handleTaskEntrySelect(key: ImageWorkbenchTaskEntryKey) {
+function handleToggleSceneGuide() {
+  sceneGuideOpen.value = !sceneGuideOpen.value;
+  if (sceneGuideOpen.value && isStoryboardTask.value) {
+    syncStoryboardDraftFromPrompt();
+  }
+}
+
+function handleTaskEntrySelect(
+  key: ImageWorkbenchTaskEntryKey,
+  options: ImageWorkbenchTaskEntrySelectOptions = {}
+) {
   activeTaskEntry.value = key;
   activeScenePreset.value = null;
   referenceComposerOpen.value = usesImageWorkbenchReferenceEntry(key) && !imageWorkbenchStore.hasReferenceImage;
@@ -418,28 +658,49 @@ function handleTaskEntrySelect(key: ImageWorkbenchTaskEntryKey) {
     return;
   }
   if (key === "edit") {
-    prepareInpaintForSelectedAsset();
+    imageWorkbenchStore.mode = "inpaint";
+    imageWorkbenchStore.quantity = 1;
+    imageWorkbenchStore.closeInpaintEditor();
+    referenceComposerOpen.value = false;
+    commandSettingsOpen.value = false;
+    prepareSourceAssetShelf();
+    if (options.useSelectedAsset) {
+      prepareInpaintForSelectedAsset();
+      return;
+    }
+    imageWorkbenchStore.clearSelectedAsset();
+    imageWorkbenchStore.notice = t("imageWorkbench.input.guidance.editNeedImage");
     return;
   }
   if (key === "upscale") {
     handleUpscaleScaleSelect(2);
+    prepareSourceAssetShelf();
+    if (!options.useSelectedAsset) {
+      imageWorkbenchStore.clearSelectedAsset();
+    }
     imageWorkbenchStore.notice = selectedAssetUnavailableReason.value ||
-      (selectedAsset.value
+      (options.useSelectedAsset && selectedAsset.value
       ? t("imageWorkbench.tasks.upscaleNotice")
       : t("imageWorkbench.tasks.needImageNotice"));
     return;
   }
-  if (key === "person") {
+  if (key === "person" || key === "storyboard") {
     imageWorkbenchStore.mode = "person_consistency";
     const usedSelectedReference = ensureSelectedAssetReference();
     applyDefaultReferenceRoles(defaultReferenceRoleForTask(key));
     if (usedSelectedReference) {
       referenceComposerOpen.value = false;
     }
-    imageWorkbenchStore.prompt = imageWorkbenchStore.prompt.trim() || t("imageWorkbench.asset.personDefaultPrompt");
+    if (key === "person") {
+      imageWorkbenchStore.prompt = imageWorkbenchStore.prompt.trim() || t("imageWorkbench.asset.personDefaultPrompt");
+    }
+    if (key === "storyboard") {
+      syncStoryboardDraftFromPrompt();
+      sceneGuideOpen.value = true;
+    }
     imageWorkbenchStore.notice = selectedAssetUnavailableReason.value ||
       (usedSelectedReference || imageWorkbenchStore.hasReferenceImage
-      ? t("imageWorkbench.tasks.personNotice")
+      ? t(key === "storyboard" ? "imageWorkbench.tasks.storyboardNotice" : "imageWorkbench.tasks.personNotice")
       : t("imageWorkbench.tasks.needReferenceNotice"));
     focusPromptInput();
     return;
@@ -462,6 +723,7 @@ function handleTaskEntrySelect(key: ImageWorkbenchTaskEntryKey) {
 
 function prepareInpaintForSelectedAsset() {
   imageWorkbenchStore.mode = "inpaint";
+  imageWorkbenchStore.quantity = 1;
   referenceComposerOpen.value = false;
   if (imageWorkbenchStore.canRunInpaint) {
     sceneGuideOpen.value = false;
@@ -492,7 +754,7 @@ function handleTaskPresetApply(key: ImageWorkbenchTaskPresetKey) {
   }
   handleTaskEntrySelect(preset.entryKey);
   activeScenePreset.value = key;
-  sceneGuideOpen.value = false;
+  sceneGuideOpen.value = preset.entryKey === "edit" || preset.entryKey === "upscale";
   imageWorkbenchStore.prompt = t(preset.promptKey);
   imageWorkbenchStore.outputQuality = "high";
   focusPromptInput();
@@ -511,7 +773,7 @@ function referenceRoleLabel(role: ImageWorkbenchReferenceRole | undefined, index
 }
 
 function defaultReferenceRoleForTask(key = activeTaskEntry.value): ImageWorkbenchReferenceRole {
-  if (key === "person") {
+  if (key === "person" || key === "storyboard") {
     return "person";
   }
   if (key === "style") {
@@ -621,7 +883,12 @@ function handleInspectorTaskEntryChange(key: ImageWorkbenchTaskEntryKey) {
   if (key === "upscale") {
     upscaleScale.value = imageWorkbenchStore.mode === "upscale_4x" ? 4 : 2;
   }
-  if (key === "reference" || key === "style" || key === "person") {
+  if (key === "storyboard") {
+    imageWorkbenchStore.mode = "person_consistency";
+    syncStoryboardDraftFromPrompt();
+    sceneGuideOpen.value = true;
+  }
+  if (key === "reference" || key === "style" || key === "person" || key === "storyboard") {
     focusPromptInput();
   }
 }
@@ -633,31 +900,43 @@ function handleInspectorTaskEntrySync() {
   }
 }
 
+function syncTaskEntryForQualityFix(issue: string) {
+  handleInspectorTaskEntryChange(issue === "identity" ? "person" : "edit");
+}
+
 async function handleSaveTemplateFromPicker() {
   await imageWorkbenchStore.saveCurrentTemplate();
   templatePickerOpen.value = false;
 }
 
 async function handleGenerate() {
+  if (isStoryboardTask.value) {
+    await handleStoryboardBatchGenerate();
+    return;
+  }
   sceneGuideOpen.value = false;
   if (activeTaskEntry.value === "upscale") {
     await imageWorkbenchStore.upscaleSelectedAsset(upscaleScale.value);
     return;
   }
-  if (imageWorkbenchStore.shouldConfirmLargeGeneration) {
-    const ok = await confirm({
-      title: t("imageWorkbench.input.largeBatchConfirmTitle"),
-      message: formatTemplate(t("imageWorkbench.input.largeBatchConfirmMessage"), {
-        count: imageWorkbenchStore.generationQuantity,
-      }),
-      confirmText: t("imageWorkbench.input.largeBatchConfirmAction"),
-      cancelText: t("common.cancel"),
-    });
-    if (!ok) {
-      return;
-    }
+  if (!(await confirmCurrentGeneration())) {
+    return;
   }
   await imageWorkbenchStore.runTxt2imgBatch();
+}
+
+async function confirmCurrentGeneration() {
+  if (!shouldConfirmCurrentGeneration.value) {
+    return true;
+  }
+  return confirm({
+    title: t("imageWorkbench.input.largeBatchConfirmTitle"),
+    message: formatTemplate(t("imageWorkbench.input.largeBatchConfirmMessage"), {
+      count: effectiveGenerationCount.value,
+    }),
+    confirmText: t("imageWorkbench.input.largeBatchConfirmAction"),
+    cancelText: t("common.cancel"),
+  });
 }
 
 async function handleCleanupDeletedAssets() {
@@ -709,7 +988,10 @@ async function handleSelectReferenceImageFromComposer() {
   if (!selectedPath) {
     return;
   }
-  imageWorkbenchStore.mode = activeTaskEntry.value === "person" ? "person_consistency" : "img2img";
+  imageWorkbenchStore.mode =
+    activeTaskEntry.value === "person" || activeTaskEntry.value === "storyboard"
+      ? "person_consistency"
+      : "img2img";
   applyDefaultReferenceRole("uploaded");
   referenceComposerOpen.value = false;
 }
@@ -729,6 +1011,30 @@ async function handleSelectAssetAndShowDetails(asset: ImageWorkbenchAssetCard) {
 
 async function handleStartSourceSelect(asset: ImageWorkbenchAssetCard) {
   await handleSelectAssetAndShowDetails(asset);
+  if (activeTaskEntry.value === "edit" || activeTaskEntry.value === "upscale") {
+    assetShelfDialogOpen.value = false;
+  }
+}
+
+async function handlePrepareQualityFixFromShelf(asset: ImageWorkbenchAssetCard) {
+  await handleSelectReviewAsset(asset);
+  const issue = imageWorkbenchStore.prepareSelectedAssetQualityFix();
+  if (!issue) {
+    return;
+  }
+  syncTaskEntryForQualityFix(issue);
+  assetShelfDialogOpen.value = false;
+  sceneGuideOpen.value = false;
+  commandSettingsOpen.value = false;
+  referenceComposerOpen.value = false;
+}
+
+async function handleReviewAssetFromShelf(asset: ImageWorkbenchAssetCard) {
+  await handleSelectReviewAsset(asset);
+  assetShelfDialogOpen.value = false;
+  sceneGuideOpen.value = false;
+  commandSettingsOpen.value = false;
+  referenceComposerOpen.value = false;
 }
 
 async function handleGalleryAssetClick(asset: ImageWorkbenchAssetCard) {
@@ -780,7 +1086,10 @@ function handleToggleReferenceFromShelf(asset: ImageWorkbenchAssetCard) {
     const nextEntry = usesImageWorkbenchReferenceEntry(activeTaskEntry.value) ? activeTaskEntry.value : "reference";
     activeTaskEntry.value = nextEntry;
     activeScenePreset.value = null;
-    imageWorkbenchStore.mode = nextEntry === "person" ? "person_consistency" : "img2img";
+    imageWorkbenchStore.mode =
+      nextEntry === "person" || nextEntry === "storyboard"
+        ? "person_consistency"
+        : "img2img";
     imageWorkbenchStore.notice = t("imageWorkbench.reference.assetSelectedNotice");
     referenceComposerOpen.value = false;
     applyDefaultReferenceRole(asset.id, defaultReferenceRoleForTask(nextEntry));
@@ -791,7 +1100,7 @@ function handleToggleReferenceFromShelf(asset: ImageWorkbenchAssetCard) {
 }
 
 function handlePrepareTaskEntry(key: ImageWorkbenchTaskEntryKey) {
-  handleTaskEntrySelect(key);
+  handleTaskEntrySelect(key, { useSelectedAsset: true });
 }
 
 function handlePickReferenceFromLibrary() {
@@ -812,6 +1121,28 @@ async function handleReturnToLatestJob() {
 function handleRetryCurrentJob() {
   handleRetry();
 }
+
+watch(
+  () => imageWorkbenchStore.prompt,
+  () => {
+    if (!isStoryboardTask.value) {
+      return;
+    }
+    syncStoryboardDraftFromPrompt();
+    sceneGuideOpen.value = true;
+  }
+);
+
+watch(
+  () => activeTaskEntry.value,
+  (key) => {
+    if (key !== "storyboard") {
+      return;
+    }
+    syncStoryboardDraftFromPrompt();
+    sceneGuideOpen.value = true;
+  }
+);
 
 onMounted(async () => {
   window.addEventListener("keydown", handleWorkbenchKeydown);
@@ -946,16 +1277,38 @@ onBeforeUnmount(() => {
             @save="imageWorkbenchStore.saveInpaintMaskDraft"
             @clear="imageWorkbenchStore.clearInpaintMask"
           />
+          <ImageWorkbenchStoryboardDraftPanel
+            v-else-if="isStoryboardTask && showSceneGuide"
+            :scenes="storyboardDraftScenes"
+            :prefix="storyboardDraftPrefix"
+            :negative-prompt="storyboardDraftNegativePrompt"
+            :task-count="storyboardDraftTaskCount"
+            :variants-per-scene="storyboardDraftBatch.variantsPerScene"
+            :can-generate="canSubmitCurrentTask"
+            :has-raw-prompt="hasStoryboardRawPrompt"
+            :can-smart-recognize="canSmartRecognizeStoryboard"
+            :smart-recognizing="imageWorkbenchStore.storyboardRecognitionLoading"
+            :ai-action="storyboardAiAction"
+            @update-prefix="storyboardDraftPrefix = $event"
+            @update-negative-prompt="storyboardDraftNegativePrompt = $event"
+            @update-scene="updateStoryboardDraftScene"
+            @remove-scene="removeStoryboardDraftScene"
+            @focus-prompt="focusPromptInput"
+            @smart-recognize="handleStoryboardSmartRecognize"
+            @generate-storyboard="handleStoryboardGenerateStory"
+            @generate="handleStoryboardBatchGenerate"
+          />
           <ImageWorkbenchStartPanel
             v-else-if="showSceneGuide"
             :active-key="activeTaskEntry"
-            :source-assets="visibleAssetCards"
+            :active-preset-key="activeScenePreset"
+            :source-assets="allAssetCards"
             @select-task="handleSceneTaskSelect"
             @apply-preset="handleTaskPresetApply"
             @select-source="handleStartSourceSelect"
           />
           <div
-            v-else-if="visibleAssetCards.length"
+            v-else-if="gallerySections.length"
             class="image-workbench-gallery-sections"
             @click.self="handleCanvasBackgroundClick"
           >
@@ -979,9 +1332,13 @@ onBeforeUnmount(() => {
                     </span>
                   </div>
                 </div>
-                <span>{{ section.items.length }}</span>
+                <span>{{ section.items.length || section.expectedCount || 0 }}</span>
               </div>
               <div class="image-workbench-grid">
+                <div v-if="!section.items.length" class="image-workbench-gallery-section__empty">
+                  <Images class="h-5 w-5" />
+                  <span>{{ t("imageWorkbench.gallerySections.emptyGroup") }}</span>
+                </div>
                 <article
                   v-for="asset in section.items"
                   :key="asset.id"
@@ -1043,7 +1400,7 @@ onBeforeUnmount(() => {
             <button
               class="image-workbench-command-chip is-primary"
               type="button"
-              @click="sceneGuideOpen = !sceneGuideOpen"
+              @click="handleToggleSceneGuide"
             >
               <Sparkles class="h-3.5 w-3.5" />
               <span>{{ commandSceneLabel }}</span>
@@ -1152,6 +1509,16 @@ onBeforeUnmount(() => {
               <input v-model.number="imageWorkbenchStore.quantity" type="number" min="1" />
             </label>
             <button
+              class="image-workbench-command-chip image-workbench-command-queue-chip"
+              type="button"
+              :class="{ 'is-warning': providerQueueNeedsConcurrency }"
+              :title="providerQueueStatusTitle"
+              @click="handleOpenCommandSettings"
+            >
+              <Gauge class="h-3.5 w-3.5" />
+              <span>{{ providerQueueStatusLabel }}</span>
+            </button>
+            <button
               class="image-workbench-command-chip"
               type="button"
               :class="{ 'is-active': commandSettingsOpen }"
@@ -1212,7 +1579,8 @@ onBeforeUnmount(() => {
                 :aria-label="primaryActionTitle"
                 @click="handleGenerate"
               >
-                <Play class="h-3.5 w-3.5" />
+                <Clapperboard v-if="isStoryboardTask" class="h-3.5 w-3.5" />
+                <Play v-else class="h-3.5 w-3.5" />
                 {{ primaryActionLabel }}
               </button>
               <button
@@ -1249,6 +1617,26 @@ onBeforeUnmount(() => {
               class="image-workbench-protocol-note image-workbench-protocol-note--advanced"
             >
               {{ imageWorkbenchStore.imageModeProtocolNotice }}
+            </div>
+            <div
+              class="image-workbench-concurrency-panel"
+              :class="{ 'is-serial': imageWorkbenchStore.imageProviderQueueIsSerial }"
+            >
+              <div>
+                <span>{{ t("imageWorkbench.input.queueMode") }}</span>
+                <strong>{{ providerQueueStatusLabel }}</strong>
+                <small>{{ providerQueueStatusTitle }}</small>
+              </div>
+              <button
+                v-if="imageWorkbenchStore.imageProviderQueueNeedsUpgrade"
+                class="image-workbench-secondary"
+                type="button"
+                :disabled="imageWorkbenchStore.loading"
+                @click="handleEnableImageProviderConcurrency"
+              >
+                <Gauge class="h-3.5 w-3.5" />
+                {{ t("imageWorkbench.input.enableConcurrentQueue") }}
+              </button>
             </div>
             <label v-if="showsSizeInput" class="image-workbench-size-field">
               <span>{{ t("imageWorkbench.input.size") }}</span>
@@ -1303,7 +1691,7 @@ onBeforeUnmount(() => {
                 </select>
               </label>
             </div>
-            <small v-if="imageWorkbenchStore.shouldConfirmLargeGeneration" class="image-workbench-large-batch-hint">
+            <small v-if="shouldConfirmCurrentGeneration" class="image-workbench-large-batch-hint">
               {{ largeBatchHint }}
             </small>
             <details class="image-workbench-advanced-management">
@@ -1374,8 +1762,12 @@ onBeforeUnmount(() => {
         <ImageWorkbenchInspector
           :asset-shelf-view="assetShelfView"
           :asset-shelf-dialog-open="assetShelfDialogOpen"
+          :active-task-entry="activeTaskEntry"
           @preview="openAssetPreview"
+          @review-asset="handleReviewAssetFromShelf"
           @toggle-reference="handleToggleReferenceFromShelf"
+          @select-source="handleStartSourceSelect"
+          @prepare-quality-fix="handlePrepareQualityFixFromShelf"
           @update:asset-shelf-view="assetShelfView = $event"
           @update:asset-shelf-dialog-open="assetShelfDialogOpen = $event"
           @sync-task-entry="handleInspectorTaskEntrySync"

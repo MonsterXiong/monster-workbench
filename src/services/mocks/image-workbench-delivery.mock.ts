@@ -3,6 +3,7 @@ import { getCurrentTimestampMs, mapValuesToArray } from "../../utils";
 type ImageWorkbenchDeliveryMockContext = {
   jobs: Map<string, any>;
   assets: Map<string, any>;
+  groups: Map<string, any>;
   getSnapshot: (jobId: string) => any;
 };
 
@@ -28,6 +29,31 @@ export function exportMockImageWorkbenchAsset(
     throw new Error("[ERR_IPC_BROWSER] 浏览器 Mock 未找到图片工作台资产");
   }
   return `C:\\Users\\MockUser\\.monster-tools\\ai\\image-workbench\\exports\\${assetId}-${getCurrentTimestampMs()}`;
+}
+
+export function exportMockImageWorkbenchGroup(
+  context: ImageWorkbenchDeliveryMockContext,
+  args: Record<string, unknown>
+) {
+  const request = args.request as any;
+  const groupId = String(request?.groupId || "").trim();
+  const groupName = String(request?.groupName || "").trim();
+  if (!groupId && !groupName) {
+    throw new Error("[ERR_IPC_BROWSER] 图片群组标记不能为空");
+  }
+  const groupIds = new Set(
+    groupId
+      ? [groupId]
+      : mapValuesToArray(context.groups)
+          .filter((group) => group.name === groupName)
+          .map((group) => group.id)
+  );
+  const assets = mapValuesToArray(context.assets).filter((asset) => groupIds.has(asset.groupId));
+  if (!assets.length) {
+    throw new Error("[ERR_IPC_BROWSER] 图片群组暂无可导出的图片");
+  }
+  const marker = groupName || groupId || "group";
+  return `C:\\Users\\MockUser\\.monster-tools\\ai\\image-workbench\\exports\\group-${marker}-${getCurrentTimestampMs()}`;
 }
 
 export function cleanupMockImageWorkbenchDeletedAssets(

@@ -177,7 +177,6 @@ pub(crate) fn query_assets(
              SELECT id
              FROM image_workbench_jobs
              WHERE deleted_at_ms IS NULL
-               AND archived_at_ms IS NULL
          )",
     );
 
@@ -244,6 +243,66 @@ pub(crate) fn list_groups(conn: &Connection, job_id: &str) -> AppResult<Vec<Imag
          ORDER BY created_at_ms ASC",
     )?;
     let rows = stmt.query_map(params![job_id], map_group)?;
+    collect_rows(rows)
+}
+
+pub(crate) fn list_assets_by_group_marker(
+    conn: &Connection,
+    group_id: Option<&str>,
+    group_name: Option<&str>,
+) -> AppResult<Vec<ImageWorkbenchAsset>> {
+    let mut sql = String::from(
+        "SELECT a.id, a.job_id, a.task_id, a.file_path, a.thumbnail_path, a.width, a.height,
+                a.mime_type, a.size_bytes, a.favorite, a.created_at_ms,
+                a.group_id, a.rating, a.parent_asset_id, a.root_asset_id, a.version_index,
+                a.delivery_status, a.quality_issues_json, COALESCE(a.integrity_status, 'ok'),
+                a.integrity_error, a.integrity_checked_at_ms
+         FROM image_workbench_assets a
+         INNER JOIN image_workbench_groups g ON g.id = a.group_id
+         INNER JOIN image_workbench_jobs j ON j.id = a.job_id
+         WHERE j.deleted_at_ms IS NULL",
+    );
+    let mut binds: Vec<Value> = Vec::new();
+    if let Some(group_id) = group_id.map(str::trim).filter(|value| !value.is_empty()) {
+        sql.push_str(" AND a.group_id = ?");
+        binds.push(Value::Text(group_id.to_string()));
+    } else if let Some(group_name) = group_name.map(str::trim).filter(|value| !value.is_empty()) {
+        sql.push_str(" AND g.name = ?");
+        binds.push(Value::Text(group_name.to_string()));
+    } else {
+        return Ok(Vec::new());
+    }
+    sql.push_str(" ORDER BY g.updated_at_ms DESC, a.created_at_ms ASC");
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(rusqlite::params_from_iter(binds), map_asset)?;
+    collect_rows(rows)
+}
+
+pub(crate) fn list_groups_by_marker(
+    conn: &Connection,
+    group_id: Option<&str>,
+    group_name: Option<&str>,
+) -> AppResult<Vec<ImageWorkbenchGroup>> {
+    let mut sql = String::from(
+        "SELECT g.id, g.job_id, g.source_id, g.name, g.type, g.agent_preset, g.agent_ids_json,
+                g.base_prompt, g.count, g.created_at_ms, g.updated_at_ms
+         FROM image_workbench_groups g
+         INNER JOIN image_workbench_jobs j ON j.id = g.job_id
+         WHERE j.deleted_at_ms IS NULL",
+    );
+    let mut binds: Vec<Value> = Vec::new();
+    if let Some(group_id) = group_id.map(str::trim).filter(|value| !value.is_empty()) {
+        sql.push_str(" AND g.id = ?");
+        binds.push(Value::Text(group_id.to_string()));
+    } else if let Some(group_name) = group_name.map(str::trim).filter(|value| !value.is_empty()) {
+        sql.push_str(" AND g.name = ?");
+        binds.push(Value::Text(group_name.to_string()));
+    } else {
+        return Ok(Vec::new());
+    }
+    sql.push_str(" ORDER BY g.updated_at_ms DESC, g.created_at_ms DESC");
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(rusqlite::params_from_iter(binds), map_group)?;
     collect_rows(rows)
 }
 

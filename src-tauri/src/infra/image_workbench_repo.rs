@@ -26,10 +26,255 @@ use crate::infra::image_workbench_types::{
     ImageWorkbenchTaskStatusPatch, ImageWorkbenchTemplate, NewImageWorkbenchAsset,
     NewImageWorkbenchGroup, NewImageWorkbenchJob, NewImageWorkbenchMetadata,
     NewImageWorkbenchModelRun, NewImageWorkbenchTemplate,
+    ReplanImageWorkbenchStoryboardGroupInput,
+    TagImageWorkbenchAssetsGroupInput, TagImageWorkbenchAssetsGroupResult,
 };
+use serde::Deserialize;
+use std::collections::HashMap;
 
 pub struct ImageWorkbenchRepo {
     db_path: PathBuf,
+}
+
+#[derive(Debug, Clone)]
+struct ResolvedImageWorkbenchTaskGroup {
+    id: String,
+    source_id: Option<String>,
+    name: Option<String>,
+    r#type: String,
+    agent_preset: Option<String>,
+    agent_ids_json: Option<String>,
+    base_prompt: String,
+    count: u32,
+}
+
+#[derive(Debug, Clone)]
+struct ResolvedImageWorkbenchTaskGroups {
+    groups: Vec<ResolvedImageWorkbenchTaskGroup>,
+    task_group_ids: Vec<String>,
+    task_variant_indexes: Vec<u32>,
+}
+
+impl ResolvedImageWorkbenchTaskGroups {
+    fn task_group_id(&self, index: u32) -> &str {
+        self.task_group_ids
+            .get(index as usize)
+            .map(String::as_str)
+            .unwrap_or_else(|| self.groups[0].id.as_str())
+    }
+
+    fn task_variant_index(&self, index: u32) -> u32 {
+        self.task_variant_indexes
+            .get(index as usize)
+            .copied()
+            .unwrap_or(index)
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct StoryboardGenerationOptionsEnvelope {
+    storyboard: Option<StoryboardGenerationOptions>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct StoryboardGenerationOptions {
+    scenes: Vec<StoryboardGenerationScene>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct StoryboardGenerationScene {
+    index: Option<u32>,
+    title: Option<String>,
+    task_start_index: Option<u32>,
+    task_count: Option<u32>,
+    reference_prompt: Option<String>,
+}
+
+fn resolve_task_groups_for_job(
+    input: &NewImageWorkbenchJob,
+    job_id: &str,
+) -> ResolvedImageWorkbenchTaskGroups {
+    resolve_storyboard_task_groups(input, job_id).unwrap_or_else(|| resolve_default_task_group(input))
+}
+
+fn resolve_default_task_group(input: &NewImageWorkbenchJob) -> ResolvedImageWorkbenchTaskGroups {
+    let group_id = next_id("iw-group");
+    let group_type = if input.source_asset_id.is_some() {
+        "rerun"
+    } else {
+        "fresh"
+    };
+    ResolvedImageWorkbenchTaskGroups {
+        groups: vec![ResolvedImageWorkbenchTaskGroup {
+            id: group_id.clone(),
+            source_id: input.source_asset_id.clone(),
+            name: None,
+            r#type: group_type.to_string(),
+            agent_preset: None,
+            agent_ids_json: None,
+            base_prompt: input.prompt.clone(),
+            count: input.quantity,
+        }],
+        task_group_ids: vec![group_id; input.quantity as usize],
+        task_variant_indexes: (0..input.quantity).collect(),
+    }
+}
+
+fn resolve_storyboard_task_groups(
+    input: &NewImageWorkbenchJob,
+    _job_id: &str,
+) -> Option<ResolvedImageWorkbenchTaskGroups> {
+    let raw_json = input.generation_options_json.as_deref()?.trim();
+    if raw_json.is_empty() {
+        return None;
+    }
+    let envelope = serde_json::from_str::<StoryboardGenerationOptionsEnvelope>(raw_json).ok()?;
+    let storyboard = envelope.storyboard?;
+    if storyboard.scenes.is_empty() || input.quantity == 0 {
+        return None;
+    }
+
+    let mut groups = Vec::new();
+    let mut task_group_ids = vec![String::new(); input.quantity as usize];
+    let mut task_variant_indexes = vec![0; input.quantity as usize];
+
+    let mut next_start_index = 0_u32;
+    for (fallback_index, scene) in storyboard.scenes.iter().enumerate() {
+        let start = scene
+            .task_start_index
+            .unwrap_or(next_start_index)
+            .min(input.quantity);
+        let count = scene.task_count.unwrap_or(1).clamp(1, input.quantity);
+        if start >= input.quantity {
+            continue;
+        }
+        let end = start.saturating_add(count).min(input.quantity);
+        if end <= start {
+            continue;
+        }
+        next_start_index = end;
+
+        let scene_index = scene.index.unwrap_or((fallback_index + 1) as u32).clamp(1, 999);
+        let title = normalize_storyboard_group_title(
+            scene.title.as_deref(),
+            scene_index,
+        );
+        let reference_prompt = truncate_chars(scene.reference_prompt.as_deref().unwrap_or(""), 256);
+        let group_id = next_id("iw-group");
+        let base_prompt = input
+            .task_prompts
+            .get(start as usize)
+            .cloned()
+            .unwrap_or_else(|| input.prompt.clone());
+        let agent_ids_json = if reference_prompt.is_empty() {
+            None
+        } else {
+            serde_json::to_string(&serde_json::json!({
+                "referencePrompt": reference_prompt,
+            }))
+            .ok()
+        };
+
+        groups.push(ResolvedImageWorkbenchTaskGroup {
+            id: group_id.clone(),
+            source_id: Some(format!("storyboard-scene-{}", scene_index)),
+            name: Some(title),
+            r#type: "storyboard".to_string(),
+            agent_preset: Some("storyboard".to_string()),
+            agent_ids_json,
+            base_prompt,
+            count: end - start,
+        });
+
+        for task_index in start..end {
+            task_group_ids[task_index as usize] = group_id.clone();
+            task_variant_indexes[task_index as usize] = task_index - start;
+        }
+    }
+
+    if groups.is_empty() {
+        return None;
+    }
+
+    let fallback_group_id = groups[0].id.clone();
+    for task_index in 0..input.quantity {
+        if task_group_ids[task_index as usize].is_empty() {
+            task_group_ids[task_index as usize] = fallback_group_id.clone();
+            task_variant_indexes[task_index as usize] = task_index;
+        }
+    }
+
+    Some(ResolvedImageWorkbenchTaskGroups {
+        groups,
+        task_group_ids,
+        task_variant_indexes,
+    })
+}
+
+fn normalize_storyboard_group_title(title: Option<&str>, index: u32) -> String {
+    let clean = title
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("未命名分镜");
+    format!("分镜 {:02}｜{}", index, truncate_chars(clean, 80))
+}
+
+fn build_storyboard_replan_base_prompt(
+    base_prompt: &str,
+    scene_name: Option<&str>,
+    batch_id: &str,
+) -> String {
+    let scene_label = scene_name
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("当前分镜");
+    format!(
+        "{} 分镜重规划批次：{}。基于「{}」重新规划该分镜，不复用上一轮失败的构图或随机细节；保持参考图人物为同一张脸、同一五官比例、同一气质神韵，保留原分镜核心故事瞬间，重新组织服装纹理、情绪细节、动作姿态、镜头构图、光影层次、前中后景和场景道具，输出新的高质量候选图。",
+        base_prompt.trim(),
+        batch_id,
+        scene_label
+    )
+}
+
+fn build_storyboard_replan_task_prompt(base_prompt: &str, variant_index: u32, variants: u32) -> String {
+    format!(
+        "{} 新候选图 {}/{}：保持同一分镜设定与参考图人物一致，允许表情微差、衣袖发丝动态、景深、光影和构图产生新的可筛选变化。",
+        base_prompt.trim(),
+        variant_index,
+        variants
+    )
+}
+
+fn build_storyboard_replan_agent_ids_json(
+    original: Option<&str>,
+    source_group_id: &str,
+    batch_id: &str,
+    now: i64,
+) -> Option<String> {
+    let mut object = original
+        .and_then(|value| serde_json::from_str::<serde_json::Value>(value).ok())
+        .and_then(|value| value.as_object().cloned())
+        .unwrap_or_default();
+    object.insert(
+        "sourceGroupId".to_string(),
+        serde_json::Value::String(source_group_id.to_string()),
+    );
+    object.insert(
+        "replanBatchId".to_string(),
+        serde_json::Value::String(batch_id.to_string()),
+    );
+    object.insert(
+        "replannedAtMs".to_string(),
+        serde_json::Value::Number(now.into()),
+    );
+    serde_json::to_string(&object).ok()
+}
+
+fn truncate_chars(value: &str, max_chars: usize) -> String {
+    value.trim().chars().take(max_chars).collect::<String>()
 }
 
 impl ImageWorkbenchRepo {
@@ -83,30 +328,28 @@ impl ImageWorkbenchRepo {
             ],
         )?;
 
-        // 一 job 一 group：该作业的 N 张变体全部挂这个资产组，variant_index = 0..N。
-        // source_asset_id 有值视为复跑（rerun），否则为全新生成（fresh）。
-        let group_id = next_id("iw-group");
-        let group_type = if input.source_asset_id.is_some() {
-            "rerun"
-        } else {
-            "fresh"
-        };
-        tx.execute(
-            "INSERT INTO image_workbench_groups
-                (id, job_id, source_id, name, type, agent_preset, agent_ids_json, base_prompt,
-                 count, created_at_ms, updated_at_ms)
-             VALUES (?, ?, ?, NULL, ?, NULL, NULL, ?, ?, ?, ?)",
-            params![
-                group_id,
-                job_id,
-                input.source_asset_id,
-                group_type,
-                input.prompt,
-                input.quantity as i64,
-                now,
-                now
-            ],
-        )?;
+        let task_groups = resolve_task_groups_for_job(&input, &job_id);
+        for group in task_groups.groups.iter() {
+            tx.execute(
+                "INSERT INTO image_workbench_groups
+                    (id, job_id, source_id, name, type, agent_preset, agent_ids_json, base_prompt,
+                     count, created_at_ms, updated_at_ms)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                params![
+                    group.id.as_str(),
+                    job_id.as_str(),
+                    group.source_id.as_deref(),
+                    group.name.as_deref(),
+                    group.r#type.as_str(),
+                    group.agent_preset.as_deref(),
+                    group.agent_ids_json.as_deref(),
+                    group.base_prompt.as_str(),
+                    group.count as i64,
+                    now,
+                    now
+                ],
+            )?;
+        }
 
         let reference_count = count_reference_assets(input.reference_asset_ids_json.as_deref());
         let prompt_context = ImageWorkbenchPromptBuildContext {
@@ -137,8 +380,8 @@ impl ImageWorkbenchRepo {
                     task_prompt,
                     now,
                     now,
-                    group_id,
-                    index as i64
+                    task_groups.task_group_id(index),
+                    task_groups.task_variant_index(index) as i64
                 ],
             )?;
         }
@@ -277,6 +520,87 @@ impl ImageWorkbenchRepo {
         Ok(())
     }
 
+    pub fn remove_job_from_queue(&self, job_id: &str) -> AppResult<()> {
+        let mut conn = self.connect()?;
+        let job = image_workbench_query::get_job(&conn, job_id)?;
+        if job.deleted_at_ms.is_some() || job.archived_at_ms.is_some() {
+            return Ok(());
+        }
+        let now = now_ms();
+        let tx = conn.transaction()?;
+        tx.execute(
+            "UPDATE image_workbench_jobs
+             SET archived_at_ms = COALESCE(archived_at_ms, ?),
+                 updated_at_ms = ?
+             WHERE id = ?",
+            params![now, now, job_id],
+        )?;
+        tx.execute(
+            "UPDATE image_workbench_tasks
+             SET status = 'cancelled',
+                 error = COALESCE(error, 'job removed from queue'),
+                 failure_type = 'cancelled',
+                 failure_hint = 'job removed from queue',
+                 claim_token = NULL,
+                 leased_until_ms = NULL,
+                 finished_at_ms = COALESCE(finished_at_ms, ?),
+                 updated_at_ms = ?
+             WHERE job_id = ?
+               AND status IN ('queued', 'running', 'validating', 'retrying')",
+            params![now, now, job_id],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn delete_assets_by_ids(&self, asset_ids: &[String]) -> AppResult<u32> {
+        if asset_ids.is_empty() {
+            return Ok(0);
+        }
+
+        let mut conn = self.connect()?;
+        let mut assets = Vec::new();
+        for asset_id in asset_ids {
+            if let Ok(asset) = image_workbench_query::get_asset(&conn, asset_id) {
+                assets.push(asset);
+            }
+        }
+        if assets.is_empty() {
+            return Ok(0);
+        }
+
+        let now = now_ms();
+        let tx = conn.transaction()?;
+        for asset in &assets {
+            tx.execute(
+                "UPDATE image_workbench_assets
+                 SET parent_asset_id = NULL,
+                     root_asset_id = NULL,
+                     delivery_status = NULL
+                 WHERE parent_asset_id = ?
+                    OR root_asset_id = ?",
+                params![asset.id, asset.id],
+            )?;
+        }
+        for asset in &assets {
+            tx.execute(
+                "DELETE FROM image_workbench_assets WHERE id = ?",
+                params![asset.id],
+            )?;
+            tx.execute(
+                "UPDATE image_workbench_jobs
+                 SET updated_at_ms = ?
+                 WHERE id = ?",
+                params![now, asset.job_id],
+            )?;
+            if let Some(parent_asset_id) = &asset.parent_asset_id {
+                refresh_asset_delivery_status(&tx, parent_asset_id)?;
+            }
+        }
+        tx.commit()?;
+        Ok(assets.len() as u32)
+    }
+
     #[allow(dead_code)]
     pub fn set_job_archived(&self, job_id: &str, archived: bool) -> AppResult<()> {
         let conn = self.connect()?;
@@ -367,6 +691,133 @@ impl ImageWorkbenchRepo {
         }
         self.recalculate_job_status(&conn, job_id, now)?;
         self.get_snapshot(job_id)
+    }
+
+    pub fn replan_storyboard_group(
+        &self,
+        input: ReplanImageWorkbenchStoryboardGroupInput,
+    ) -> AppResult<ImageWorkbenchSnapshot> {
+        let mut conn = self.connect()?;
+        let now = now_ms();
+        let job_id = {
+            let tx = conn.transaction()?;
+            let group = image_workbench_query::get_group(&tx, &input.group_id)?;
+            let job = image_workbench_query::get_job(&tx, &group.job_id)?;
+            if job.deleted_at_ms.is_some() || job.archived_at_ms.is_some() {
+                return Err(AppError::Config(
+                    "图片工作台作业已移除，不能重新规划分镜".to_string(),
+                ));
+            }
+            let is_storyboard_group = group.r#type.as_deref() == Some("storyboard")
+                || group.agent_preset.as_deref() == Some("storyboard");
+            if !is_storyboard_group {
+                return Err(AppError::Config("只能重新规划分镜任务组".to_string()));
+            }
+
+            let tasks = image_workbench_query::list_tasks(&tx, &job.id)?;
+            let source_tasks = tasks
+                .iter()
+                .filter(|task| task.group_id.as_deref() == Some(group.id.as_str()))
+                .collect::<Vec<_>>();
+            let fallback_count = if group.count > 0 {
+                group.count
+            } else if !source_tasks.is_empty() {
+                source_tasks.len() as u32
+            } else {
+                4
+            };
+            let variants = input
+                .variants_per_scene
+                .unwrap_or(fallback_count)
+                .clamp(1, 8);
+            let next_quantity = job.quantity.checked_add(variants).ok_or_else(|| {
+                AppError::Config("图片工作台任务数量过大，无法继续追加分镜".to_string())
+            })?;
+            let next_queue_index = tasks
+                .iter()
+                .map(|task| task.queue_index)
+                .max()
+                .map(|index| index.saturating_add(1))
+                .unwrap_or(0);
+            let source_base_prompt = group
+                .base_prompt
+                .clone()
+                .filter(|value| !value.trim().is_empty())
+                .or_else(|| source_tasks.first().and_then(|task| task.prompt.clone()))
+                .unwrap_or_else(|| job.prompt.clone());
+            let replan_batch_id = next_id("iw-replan");
+            let replan_group_id = next_id("iw-group");
+            let replan_base_prompt = build_storyboard_replan_base_prompt(
+                &source_base_prompt,
+                group.name.as_deref(),
+                &replan_batch_id,
+            );
+            let source_id_base = group.source_id.as_deref().unwrap_or(group.id.as_str());
+            let group_name = group
+                .name
+                .clone()
+                .map(|name| format!("{} · 重新规划", name))
+                .or_else(|| Some("分镜 · 重新规划".to_string()));
+            let agent_ids_json = build_storyboard_replan_agent_ids_json(
+                group.agent_ids_json.as_deref(),
+                &group.id,
+                &replan_batch_id,
+                now,
+            );
+
+            tx.execute(
+                "INSERT INTO image_workbench_groups
+                    (id, job_id, source_id, name, type, agent_preset, agent_ids_json, base_prompt,
+                     count, created_at_ms, updated_at_ms)
+                 VALUES (?, ?, ?, ?, 'storyboard', 'storyboard', ?, ?, ?, ?, ?)",
+                params![
+                    replan_group_id.as_str(),
+                    job.id.as_str(),
+                    format!("{}-replan-{}", source_id_base, replan_batch_id),
+                    group_name.as_deref(),
+                    agent_ids_json.as_deref(),
+                    replan_base_prompt.as_str(),
+                    variants as i64,
+                    now,
+                    now
+                ],
+            )?;
+
+            for offset in 0..variants {
+                let task_prompt =
+                    build_storyboard_replan_task_prompt(&replan_base_prompt, offset + 1, variants);
+                tx.execute(
+                    "INSERT INTO image_workbench_tasks
+                        (id, job_id, queue_index, status, retry_count, max_retries, prompt,
+                         created_at_ms, updated_at_ms, group_id, variant_index)
+                     VALUES (?, ?, ?, 'queued', 0, 1, ?, ?, ?, ?, ?)",
+                    params![
+                        next_id("iw-task"),
+                        job.id.as_str(),
+                        next_queue_index.saturating_add(offset) as i64,
+                        task_prompt,
+                        now,
+                        now,
+                        replan_group_id.as_str(),
+                        offset as i64
+                    ],
+                )?;
+            }
+
+            tx.execute(
+                "UPDATE image_workbench_jobs
+                 SET quantity = ?,
+                     queued_at_ms = COALESCE(queued_at_ms, ?),
+                     finished_at_ms = NULL,
+                     updated_at_ms = ?
+                 WHERE id = ?",
+                params![next_quantity as i64, now, now, job.id.as_str()],
+            )?;
+            tx.commit()?;
+            job.id
+        };
+        self.recalculate_job_status(&conn, &job_id, now)?;
+        self.get_snapshot(&job_id)
     }
 
     pub fn recover_interrupted_jobs(&self, _reason: &str) -> AppResult<u32> {
@@ -777,6 +1228,112 @@ impl ImageWorkbenchRepo {
         image_workbench_query::get_group(&conn, &group_id)
     }
 
+    pub fn tag_assets_group(
+        &self,
+        input: TagImageWorkbenchAssetsGroupInput,
+    ) -> AppResult<TagImageWorkbenchAssetsGroupResult> {
+        if input.asset_ids.is_empty() {
+            return Ok(TagImageWorkbenchAssetsGroupResult {
+                tagged_assets: 0,
+                groups: Vec::new(),
+            });
+        }
+
+        let mut conn = self.connect()?;
+        let mut assets = Vec::new();
+        for asset_id in input.asset_ids {
+            if assets.iter().any(|asset: &ImageWorkbenchAsset| asset.id == asset_id) {
+                continue;
+            }
+            if let Ok(asset) = image_workbench_query::get_asset(&conn, &asset_id) {
+                assets.push(asset);
+            }
+        }
+        if assets.is_empty() {
+            return Ok(TagImageWorkbenchAssetsGroupResult {
+                tagged_assets: 0,
+                groups: Vec::new(),
+            });
+        }
+
+        let now = now_ms();
+        let tx = conn.transaction()?;
+        let mut target_group_by_job = HashMap::<String, String>::new();
+        if let Some(group_id) = input.group_id.filter(|value| !value.trim().is_empty()) {
+            let group = image_workbench_query::get_group(&tx, group_id.trim())?;
+            for asset in &assets {
+                if asset.job_id != group.job_id {
+                    return Err(AppError::Config(
+                        "Cannot move assets from different jobs into one existing group".to_string(),
+                    ));
+                }
+            }
+            target_group_by_job.insert(group.job_id, group.id);
+        } else {
+            let group_name = input
+                .group_name
+                .map(|value| truncate_chars(&value, 80))
+                .filter(|value| !value.trim().is_empty())
+                .ok_or_else(|| AppError::Config("Image group name cannot be empty".to_string()))?;
+            for asset in &assets {
+                if target_group_by_job.contains_key(&asset.job_id) {
+                    continue;
+                }
+                let group_id = next_id("iw-group");
+                tx.execute(
+                    "INSERT INTO image_workbench_groups
+                        (id, job_id, source_id, name, type, agent_preset, agent_ids_json, base_prompt,
+                         count, created_at_ms, updated_at_ms)
+                     VALUES (?, ?, NULL, ?, 'manual', NULL, NULL, NULL, 0, ?, ?)",
+                    params![group_id, asset.job_id, group_name, now, now],
+                )?;
+                target_group_by_job.insert(asset.job_id.clone(), group_id);
+            }
+        }
+
+        for asset in &assets {
+            let Some(group_id) = target_group_by_job.get(&asset.job_id) else {
+                continue;
+            };
+            tx.execute(
+                "UPDATE image_workbench_assets
+                 SET group_id = ?
+                 WHERE id = ?",
+                params![group_id, asset.id],
+            )?;
+            tx.execute(
+                "UPDATE image_workbench_jobs
+                 SET updated_at_ms = ?
+                 WHERE id = ?",
+                params![now, asset.job_id],
+            )?;
+        }
+
+        for group_id in target_group_by_job.values() {
+            tx.execute(
+                "UPDATE image_workbench_groups
+                 SET count = (
+                         SELECT COUNT(*)
+                         FROM image_workbench_assets
+                         WHERE group_id = ?
+                     ),
+                     updated_at_ms = ?
+                 WHERE id = ?",
+                params![group_id, now, group_id],
+            )?;
+        }
+
+        let groups = target_group_by_job
+            .values()
+            .filter_map(|group_id| image_workbench_query::get_group(&tx, group_id).ok())
+            .collect::<Vec<_>>();
+        tx.commit()?;
+        Ok(TagImageWorkbenchAssetsGroupResult {
+            tagged_assets: assets.len() as u32,
+            groups,
+        })
+    }
+
     #[allow(dead_code)]
     pub fn list_groups(&self, job_id: &str) -> AppResult<Vec<ImageWorkbenchGroup>> {
         let conn = self.connect()?;
@@ -787,6 +1344,24 @@ impl ImageWorkbenchRepo {
     pub fn get_group_by_id(&self, group_id: &str) -> AppResult<ImageWorkbenchGroup> {
         let conn = self.connect()?;
         image_workbench_query::get_group(&conn, group_id)
+    }
+
+    pub fn list_assets_by_group_marker(
+        &self,
+        group_id: Option<&str>,
+        group_name: Option<&str>,
+    ) -> AppResult<Vec<ImageWorkbenchAsset>> {
+        let conn = self.connect()?;
+        image_workbench_query::list_assets_by_group_marker(&conn, group_id, group_name)
+    }
+
+    pub fn list_groups_by_marker(
+        &self,
+        group_id: Option<&str>,
+        group_name: Option<&str>,
+    ) -> AppResult<Vec<ImageWorkbenchGroup>> {
+        let conn = self.connect()?;
+        image_workbench_query::list_groups_by_marker(&conn, group_id, group_name)
     }
 
     pub fn list_templates(&self) -> AppResult<Vec<ImageWorkbenchTemplate>> {

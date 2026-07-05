@@ -196,6 +196,7 @@ export interface CreateImageWorkbenchJobRequest {
   mode: ImageWorkbenchMode;
   prompt: string;
   negativePrompt?: string | null;
+  taskPrompts?: string[];
   quantity: number;
   providerConfigId?: string | null;
   model?: string | null;
@@ -323,6 +324,11 @@ export interface UpdateImageWorkbenchTaskStatusRequest {
   modelRun?: RecordImageWorkbenchModelRunInput | null;
 }
 
+export interface ReplanImageWorkbenchStoryboardGroupRequest {
+  groupId: string;
+  variantsPerScene?: number | null;
+}
+
 export interface RecordImageWorkbenchMetadataInput {
   originalPrompt?: string | null;
   expandedPrompt?: string | null;
@@ -380,4 +386,38 @@ export interface SetImageWorkbenchAssetRatingRequest {
 export interface SetImageWorkbenchAssetQualityIssuesRequest {
   assetId: string;
   qualityIssues: ImageWorkbenchQualityIssue[];
+}
+
+export interface DeleteImageWorkbenchAssetsRequest {
+  assetIds: string[];
+  deleteFiles?: boolean;
+}
+
+export interface DeleteImageWorkbenchAssetsResult {
+  deletedAssets: number;
+  deletedFiles: number;
+  skippedFiles: number;
+}
+
+export interface DeleteImageWorkbenchJobResult {
+  removedJob: boolean;
+  deletedAssets: number;
+  deletedFiles: number;
+  skippedFiles: number;
+}
+
+export interface TagImageWorkbenchAssetsGroupRequest {
+  assetIds: string[];
+  groupId?: string | null;
+  groupName?: string | null;
+}
+
+export interface TagImageWorkbenchAssetsGroupResult {
+  taggedAssets: number;
+  groups: ImageWorkbenchGroup[];
+}
+
+export interface ExportImageWorkbenchGroupRequest {
+  groupId?: string | null;
+  groupName?: string | null;
 }

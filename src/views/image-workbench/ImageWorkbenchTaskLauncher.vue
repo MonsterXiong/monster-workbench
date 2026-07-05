@@ -10,6 +10,7 @@ import {
 
 const props = withDefaults(defineProps<{
   activeKey: ImageWorkbenchTaskEntryKey;
+  activePresetKey?: ImageWorkbenchTaskPresetKey | null;
   showPresets?: boolean;
 }>(), {
   showPresets: true,
@@ -85,9 +86,17 @@ watch(
             v-for="preset in group.presets"
             :key="preset.key"
             type="button"
+            class="image-workbench-task-preset"
+            :class="{
+              'has-example': preset.exampleImageSrc,
+              'is-active': activePresetKey === preset.key,
+            }"
             @click="emit('applyPreset', preset.key)"
           >
-            {{ preset.label }}
+            <span v-if="preset.exampleImageSrc" class="image-workbench-task-preset__thumb">
+              <img :src="preset.exampleImageSrc" alt="" />
+            </span>
+            <span class="image-workbench-task-preset__label">{{ preset.label }}</span>
           </button>
         </div>
         <button

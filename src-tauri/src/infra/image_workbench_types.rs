@@ -159,6 +159,26 @@ pub struct NewImageWorkbenchGroup {
     pub count: u32,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct ReplanImageWorkbenchStoryboardGroupInput {
+    pub group_id: String,
+    pub variants_per_scene: Option<u32>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct TagImageWorkbenchAssetsGroupInput {
+    pub asset_ids: Vec<String>,
+    pub group_id: Option<String>,
+    pub group_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TagImageWorkbenchAssetsGroupResult {
+    pub tagged_assets: u32,
+    pub groups: Vec<ImageWorkbenchGroup>,
+}
+
 /// 跨作业资产库查询条件。本轮先在 repo 落地分页 / 筛选 / 排序能力并由单测覆盖，
 /// command 层仍只暴露 limit（薄包装委托给本结构），前端接入留后续轮次。
 #[derive(Debug, Clone)]

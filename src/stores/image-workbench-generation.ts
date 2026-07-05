@@ -20,7 +20,7 @@ export function createImageWorkbenchGenerationState(options: {
   t: (key: string) => string;
 }) {
   const generationQuantity = computed(() =>
-    options.mode.value.startsWith("upscale_")
+    options.mode.value === "inpaint" || options.mode.value.startsWith("upscale_")
       ? 1
       : normalizePositiveImageWorkbenchQuantity(options.quantity.value, 1)
   );

@@ -16,6 +16,7 @@ export type ImageWorkbenchGallerySection = {
   title: string;
   description: string;
   selected?: boolean;
+  expectedCount?: number;
   highlights?: Array<{
     key: string;
     label: string;
@@ -23,7 +24,7 @@ export type ImageWorkbenchGallerySection = {
   items: ImageWorkbenchAssetCard[];
 };
 
-export type ImageWorkbenchLibraryFilter = "recent" | "favorite" | "person" | "style" | "delivery";
+export type ImageWorkbenchLibraryFilter = "recent" | "favorite" | "needsFix" | "person" | "style" | "delivery";
 export type ImageWorkbenchAssetShelfView = "recent" | "library";
 
 export type ImageWorkbenchAssetBadge = {
@@ -448,7 +449,7 @@ function buildCurrentGroupSections(options: {
   t: (key: string) => string;
 }) {
   const { currentAssets, currentGroups, currentJob, selectedAssetId, t } = options;
-  if (!currentAssets.length) {
+  if (!currentAssets.length && !currentGroups.length) {
     return [] as ImageWorkbenchGallerySection[];
   }
 
@@ -478,6 +479,7 @@ function buildCurrentGroupSections(options: {
       title: group.name || t("imageWorkbench.groups.defaultName"),
       description: buildGroupDescription(group, currentJob, items.length, t),
       selected,
+      expectedCount: group.count,
       highlights: [
         ...(selected
           ? [
@@ -507,7 +509,7 @@ function buildCurrentGroupSections(options: {
     });
   }
 
-  return sections.filter((section) => section.items.length);
+  return currentGroups.length ? sections : sections.filter((section) => section.items.length);
 }
 
 function buildGroupDescription(
@@ -653,6 +655,14 @@ export function buildAssetBadges(options: {
       key: "delivery",
       label: t("imageWorkbench.gallerySections.badges.delivery"),
       tone: "success",
+    });
+  }
+
+  if (asset.qualityIssues?.length) {
+    badges.push({
+      key: "needs-fix",
+      label: t("imageWorkbench.gallerySections.badges.needsFix"),
+      tone: "warning",
     });
   }
 

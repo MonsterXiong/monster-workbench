@@ -1,6 +1,6 @@
 use crate::infra::image_workbench_types::{
     ImageWorkbenchAsset, ImageWorkbenchGroup, ImageWorkbenchJob, ImageWorkbenchSnapshot,
-    ImageWorkbenchTemplate,
+    ImageWorkbenchTemplate, TagImageWorkbenchAssetsGroupResult,
 };
 use crate::services::ai_service::AiProviderService;
 use crate::services::image_workbench_cleanup::{
@@ -14,9 +14,14 @@ use crate::services::image_workbench_mask::{
 };
 use crate::services::image_workbench_service::{
     CreateImageWorkbenchJobRequest, ImageWorkbenchContractSummary, ImageWorkbenchService,
-    ImportImageWorkbenchReferenceRequest, ImportImageWorkbenchReferenceResult,
-    QueryImageWorkbenchAssetsRequest, RecordImageWorkbenchAssetRequest,
-    SaveImageWorkbenchTemplateRequest, SetImageWorkbenchAssetFavoriteRequest,
+    DeleteImageWorkbenchAssetsRequest, DeleteImageWorkbenchAssetsResult,
+    DeleteImageWorkbenchJobResult, ExportImageWorkbenchGroupRequest,
+    ImportImageWorkbenchReferenceRequest,
+    ImportImageWorkbenchReferenceResult, TagImageWorkbenchAssetsGroupRequest,
+    QueryImageWorkbenchAssetsRequest,
+    RecordImageWorkbenchAssetRequest, ReplanImageWorkbenchStoryboardGroupRequest,
+    SaveImageWorkbenchTemplateRequest,
+    SetImageWorkbenchAssetFavoriteRequest,
     SetImageWorkbenchAssetQualityIssuesRequest, SetImageWorkbenchAssetRatingRequest,
     UpdateImageWorkbenchTaskStatusRequest,
 };
@@ -196,6 +201,25 @@ pub fn retry_image_workbench_failed_tasks(
 }
 
 #[tauri::command]
+pub fn replan_image_workbench_storyboard_group(
+    request: ReplanImageWorkbenchStoryboardGroupRequest,
+    app_handle: AppHandle,
+    state: ImageWorkbenchState<'_>,
+    worker_identity: WorkerIdentityState<'_>,
+) -> Result<ImageWorkbenchSnapshot, String> {
+    let service = state.lock().unwrap_or_else(|e| e.into_inner());
+    let worker_id = worker_identity.worker_id.clone();
+    let snapshot = service
+        .replan_storyboard_group(request)
+        .map_err(|e| e.to_json_string())?;
+    let job_id = snapshot.job.id.clone();
+    service
+        .start_job_runner(app_handle, &job_id, worker_id)
+        .map_err(|e| e.to_json_string())?;
+    Ok(snapshot)
+}
+
+#[tauri::command]
 pub fn recover_image_workbench_interrupted_jobs(
     state: ImageWorkbenchState<'_>,
 ) -> Result<u32, String> {
@@ -208,18 +232,19 @@ pub fn recover_image_workbench_interrupted_jobs(
 #[tauri::command]
 pub fn delete_image_workbench_job(
     job_id: String,
+    delete_assets: Option<bool>,
     state: ImageWorkbenchState<'_>,
     ai_state: AiProviderState<'_>,
-) -> Result<(), String> {
-    let task_ids = {
+) -> Result<DeleteImageWorkbenchJobResult, String> {
+    let (task_ids, result) = {
         let service = state.lock().unwrap_or_else(|e| e.into_inner());
         let snapshot = service
             .get_snapshot(&job_id)
             .map_err(|e| e.to_json_string())?;
-        service
-            .delete_job(&job_id)
+        let result = service
+            .delete_job(&job_id, delete_assets.unwrap_or(false))
             .map_err(|e| e.to_json_string())?;
-        snapshot
+        let task_ids = snapshot
             .tasks
             .iter()
             .filter(|task| {
@@ -229,13 +254,14 @@ pub fn delete_image_workbench_job(
                 )
             })
             .map(|task| task.id.clone())
-            .collect::<Vec<_>>()
+            .collect::<Vec<_>>();
+        (task_ids, result)
     };
     let ai_service = ai_state.lock().unwrap_or_else(|e| e.into_inner());
     for task_id in task_ids {
         let _ = ai_service.cancel_generation_task(&task_id);
     }
-    Ok(())
+    Ok(result)
 }
 
 #[tauri::command]
@@ -255,6 +281,39 @@ pub fn export_image_workbench_asset(
     let service = state.lock().unwrap_or_else(|e| e.into_inner());
     service
         .export_asset(&asset_id)
+        .map_err(|e| e.to_json_string())
+}
+
+#[tauri::command]
+pub fn export_image_workbench_group(
+    request: ExportImageWorkbenchGroupRequest,
+    state: ImageWorkbenchState<'_>,
+) -> Result<String, String> {
+    let service = state.lock().unwrap_or_else(|e| e.into_inner());
+    service
+        .export_group(request)
+        .map_err(|e| e.to_json_string())
+}
+
+#[tauri::command]
+pub fn delete_image_workbench_assets(
+    request: DeleteImageWorkbenchAssetsRequest,
+    state: ImageWorkbenchState<'_>,
+) -> Result<DeleteImageWorkbenchAssetsResult, String> {
+    let service = state.lock().unwrap_or_else(|e| e.into_inner());
+    service
+        .delete_assets(request)
+        .map_err(|e| e.to_json_string())
+}
+
+#[tauri::command]
+pub fn tag_image_workbench_assets_group(
+    request: TagImageWorkbenchAssetsGroupRequest,
+    state: ImageWorkbenchState<'_>,
+) -> Result<TagImageWorkbenchAssetsGroupResult, String> {
+    let service = state.lock().unwrap_or_else(|e| e.into_inner());
+    service
+        .tag_assets_group(request)
         .map_err(|e| e.to_json_string())
 }
 

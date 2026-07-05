@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { Ban, ListChecks, Square } from "lucide-vue-next";
+import { Ban, ListChecks, RotateCcw, Square, Trash2 } from "lucide-vue-next";
+import { useConfirm } from "../../composables/useConfirm";
 import { useI18n } from "../../composables/useI18n";
 import { useImageWorkbenchStore } from "../../stores/image-workbench";
 import { formatTemplate } from "../../utils";
 import type { ImageWorkbenchJob, ImageWorkbenchTask } from "../../types/image-workbench";
 
 const { t } = useI18n();
+const { confirm } = useConfirm();
 const imageWorkbenchStore = useImageWorkbenchStore();
 
 const jobQueueItems = computed(() => {
@@ -87,6 +89,35 @@ const failedTaskReasons = computed(() =>
     }))
 );
 const primaryFailureReason = computed(() => failedTaskReasons.value[0]);
+const storyboardTaskGroups = computed(() =>
+  imageWorkbenchStore.currentGroups
+    .filter((group) => group.type === "storyboard" || group.agentPreset === "storyboard")
+    .map((group) => {
+      const tasks = imageWorkbenchStore.tasks
+        .filter((task) => task.groupId === group.id)
+        .sort((left, right) =>
+          Number(left.variantIndex ?? left.queueIndex) - Number(right.variantIndex ?? right.queueIndex)
+        );
+      const counts = summarizeTasks(tasks);
+      const finished = counts.finished;
+      const total = counts.total || group.count || 0;
+      const active = counts.queued + counts.running + counts.retrying;
+      return {
+        id: group.id,
+        title: group.name || t("imageWorkbench.groups.defaultName"),
+        referencePrompt: parseStoryboardReferencePrompt(group.agentIdsJson),
+        tasks,
+        counts,
+        replanCount: Math.max(1, Math.min(8, counts.total || group.count || 4)),
+        canReplan: active === 0 && !imageWorkbenchStore.loading,
+        percent: total ? Math.round((finished / total) * 100) : 0,
+        progressLabel: formatTemplate(t("imageWorkbench.taskbar.storyboardGroupProgress"), {
+          finished,
+          total,
+        }),
+      };
+    })
+);
 const selectedCancelableTask = computed(() =>
   [...imageWorkbenchStore.tasks]
     .filter((task) => isCancellableTask(task))
@@ -160,6 +191,32 @@ function summarizeTasks(tasks: ImageWorkbenchTask[]) {
     done,
     finished: failed + done,
   };
+}
+
+function taskStatusTone(task: ImageWorkbenchTask) {
+  if (task.status === "failed") return "failed";
+  if (["running", "validating"].includes(task.status)) return "running";
+  if (["succeeded", "cancelled"].includes(task.status)) return "done";
+  return "queued";
+}
+
+function storyboardVariantLabel(task: ImageWorkbenchTask) {
+  return formatTemplate(t("imageWorkbench.taskbar.storyboardVariant"), {
+    index: Number(task.variantIndex ?? task.queueIndex) + 1,
+  });
+}
+
+function parseStoryboardReferencePrompt(rawJson: string | null | undefined) {
+  if (!rawJson) {
+    return "";
+  }
+  try {
+    const parsed = JSON.parse(rawJson) as Record<string, unknown>;
+    const value = parsed.referencePrompt;
+    return typeof value === "string" ? value.trim() : "";
+  } catch {
+    return "";
+  }
 }
 
 function failureTypeLabel(task: ImageWorkbenchTask) {
@@ -269,10 +326,51 @@ function cancelJob(job: ImageWorkbenchJob) {
   void imageWorkbenchStore.cancelJob(job.id);
 }
 
+async function deleteJobOnly(job: ImageWorkbenchJob) {
+  const ok = await confirm({
+    title: t("imageWorkbench.assetGroup.deleteJobOnlyTitle"),
+    message: t("imageWorkbench.assetGroup.deleteJobOnlyConfirm"),
+    confirmText: t("imageWorkbench.assetGroup.deleteJobOnlyAction"),
+    cancelText: t("common.cancel"),
+    danger: true,
+  });
+  if (ok) {
+    await imageWorkbenchStore.deleteJobById(job.id, false);
+  }
+}
+
+async function deleteJobWithAssets(job: ImageWorkbenchJob) {
+  const ok = await confirm({
+    title: t("imageWorkbench.assetGroup.deleteJobWithAssetsTitle"),
+    message: t("imageWorkbench.assetGroup.deleteJobWithAssetsConfirm"),
+    confirmText: t("imageWorkbench.assetGroup.deleteJobWithAssetsAction"),
+    cancelText: t("common.cancel"),
+    danger: true,
+  });
+  if (ok) {
+    await imageWorkbenchStore.deleteJobById(job.id, true);
+  }
+}
+
 function cancelSelectedTask() {
   const taskId = selectedCancelableTask.value?.id;
   if (taskId) {
     void imageWorkbenchStore.cancelTask(taskId);
+  }
+}
+
+async function replanStoryboardGroup(group: { id: string; title: string; replanCount: number }) {
+  const ok = await confirm({
+    title: t("imageWorkbench.taskbar.storyboardReplanTitle"),
+    message: formatTemplate(t("imageWorkbench.taskbar.storyboardReplanConfirm"), {
+      title: group.title,
+      count: group.replanCount,
+    }),
+    confirmText: t("imageWorkbench.taskbar.storyboardReplan"),
+    cancelText: t("common.cancel"),
+  });
+  if (ok) {
+    await imageWorkbenchStore.replanStoryboardGroup(group.id, group.replanCount);
   }
 }
 </script>
@@ -317,6 +415,16 @@ function cancelSelectedTask() {
             {{ t("imageWorkbench.taskbar.cancelJob") }}
           </button>
         </div>
+        <div class="image-workbench-task-job__actions">
+          <button type="button" @click.stop="deleteJobOnly(job)">
+            <Trash2 class="h-3.5 w-3.5" />
+            {{ t("imageWorkbench.assetGroup.deleteJobOnly") }}
+          </button>
+          <button type="button" class="is-danger" @click.stop="deleteJobWithAssets(job)">
+            <Trash2 class="h-3.5 w-3.5" />
+            {{ t("imageWorkbench.assetGroup.deleteJobWithAssets") }}
+          </button>
+        </div>
         <div v-if="job.id === imageWorkbenchStore.selectedJobId" class="image-workbench-task-job__details">
           <template v-if="imageWorkbenchStore.tasks.length">
             <div class="image-workbench-task-overview">
@@ -334,6 +442,52 @@ function cancelSelectedTask() {
                 <Square class="h-3.5 w-3.5" />
                 {{ t("imageWorkbench.taskbar.stopTask") }}
               </button>
+            </div>
+            <div v-if="storyboardTaskGroups.length" class="image-workbench-storyboard-task-groups">
+              <div class="image-workbench-storyboard-task-groups__head">
+                <span>{{ t("imageWorkbench.taskbar.storyboardGroupsTitle") }}</span>
+                <small>
+                  {{ formatTemplate(t("imageWorkbench.taskbar.storyboardGroupsCount"), { count: storyboardTaskGroups.length }) }}
+                </small>
+              </div>
+              <article
+                v-for="group in storyboardTaskGroups"
+                :key="group.id"
+                class="image-workbench-storyboard-task-group"
+              >
+                <div class="image-workbench-storyboard-task-group__head">
+                  <div class="image-workbench-storyboard-task-group__head-main">
+                    <strong :title="group.title">{{ group.title }}</strong>
+                    <span>{{ group.progressLabel }}</span>
+                  </div>
+                  <button
+                    type="button"
+                    class="image-workbench-storyboard-task-group__replan"
+                    :disabled="!group.canReplan"
+                    @click.stop="replanStoryboardGroup(group)"
+                  >
+                    <RotateCcw class="h-3.5 w-3.5" />
+                    {{ t("imageWorkbench.taskbar.storyboardReplan") }}
+                  </button>
+                </div>
+                <div class="image-workbench-storyboard-task-group__progress">
+                  <span :style="{ width: `${group.percent}%` }"></span>
+                </div>
+                <p v-if="group.referencePrompt" :title="group.referencePrompt">
+                  {{ t("imageWorkbench.taskbar.storyboardReference") }}{{ group.referencePrompt }}
+                </p>
+                <div class="image-workbench-storyboard-task-group__variants">
+                  <span
+                    v-for="task in group.tasks"
+                    :key="task.id"
+                    class="image-workbench-storyboard-task-variant"
+                    :class="`is-${taskStatusTone(task)}`"
+                    :title="task.prompt || group.title"
+                  >
+                    {{ storyboardVariantLabel(task) }} · {{ t(`imageWorkbench.taskStatuses.${task.status}`) }}
+                  </span>
+                </div>
+              </article>
             </div>
             <div v-if="primaryFailureReason" class="image-workbench-task-failure">
               <span>{{ t("imageWorkbench.taskbar.failureReasonTitle") }}</span>

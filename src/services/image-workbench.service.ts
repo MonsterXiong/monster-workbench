@@ -3,6 +3,10 @@ import type {
   CleanupImageWorkbenchDeletedAssetsResult,
   CleanupImageWorkbenchInvalidAssetsResult,
   CreateImageWorkbenchJobRequest,
+  DeleteImageWorkbenchAssetsRequest,
+  DeleteImageWorkbenchAssetsResult,
+  DeleteImageWorkbenchJobResult,
+  ExportImageWorkbenchGroupRequest,
   ImageWorkbenchAsset,
   ImageWorkbenchContractSummary,
   ImageWorkbenchGroup,
@@ -17,10 +21,13 @@ import type {
   ImageWorkbenchSnapshot,
   ImageWorkbenchTemplate,
   RecordImageWorkbenchAssetRequest,
+  ReplanImageWorkbenchStoryboardGroupRequest,
   SaveImageWorkbenchTemplateRequest,
   SetImageWorkbenchAssetFavoriteRequest,
   SetImageWorkbenchAssetQualityIssuesRequest,
   SetImageWorkbenchAssetRatingRequest,
+  TagImageWorkbenchAssetsGroupRequest,
+  TagImageWorkbenchAssetsGroupResult,
   UpdateImageWorkbenchTaskStatusRequest,
 } from "../types/image-workbench";
 
@@ -97,8 +104,14 @@ export const imageWorkbenchService = {
     return callTauri<ImageWorkbenchSnapshot>("retry_image_workbench_failed_tasks", { jobId });
   },
 
-  async deleteJob(jobId: string): Promise<void> {
-    return callTauri<void>("delete_image_workbench_job", { jobId });
+  async replanStoryboardGroup(
+    request: ReplanImageWorkbenchStoryboardGroupRequest
+  ): Promise<ImageWorkbenchSnapshot> {
+    return callTauri<ImageWorkbenchSnapshot>("replan_image_workbench_storyboard_group", { request });
+  },
+
+  async deleteJob(jobId: string, deleteAssets = false): Promise<DeleteImageWorkbenchJobResult> {
+    return callTauri<DeleteImageWorkbenchJobResult>("delete_image_workbench_job", { jobId, deleteAssets });
   },
 
   async exportJob(jobId: string): Promise<string> {
@@ -107,6 +120,22 @@ export const imageWorkbenchService = {
 
   async exportAsset(assetId: string): Promise<string> {
     return callTauri<string>("export_image_workbench_asset", { assetId });
+  },
+
+  async exportGroup(request: ExportImageWorkbenchGroupRequest): Promise<string> {
+    return callTauri<string>("export_image_workbench_group", { request });
+  },
+
+  async deleteAssets(
+    request: DeleteImageWorkbenchAssetsRequest
+  ): Promise<DeleteImageWorkbenchAssetsResult> {
+    return callTauri<DeleteImageWorkbenchAssetsResult>("delete_image_workbench_assets", { request });
+  },
+
+  async tagAssetsGroup(
+    request: TagImageWorkbenchAssetsGroupRequest
+  ): Promise<TagImageWorkbenchAssetsGroupResult> {
+    return callTauri<TagImageWorkbenchAssetsGroupResult>("tag_image_workbench_assets_group", { request });
   },
 
   async cleanupDeletedAssets(): Promise<CleanupImageWorkbenchDeletedAssetsResult> {

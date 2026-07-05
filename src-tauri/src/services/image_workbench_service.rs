@@ -5,6 +5,8 @@ use crate::infra::image_workbench_types::{
     ImageWorkbenchJob, ImageWorkbenchSnapshot, ImageWorkbenchTaskStatusPatch,
     ImageWorkbenchTemplate, NewImageWorkbenchAsset, NewImageWorkbenchJob,
     NewImageWorkbenchMetadata, NewImageWorkbenchModelRun, NewImageWorkbenchTemplate,
+    ReplanImageWorkbenchStoryboardGroupInput,
+    TagImageWorkbenchAssetsGroupInput, TagImageWorkbenchAssetsGroupResult,
 };
 use crate::infra::path::PathProvider;
 use crate::infra::sensitive::sanitize_sensitive_text;
@@ -31,6 +33,7 @@ use crate::services::image_workbench_mask::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use tauri::AppHandle;
@@ -55,6 +58,8 @@ pub struct CreateImageWorkbenchJobRequest {
     pub mode: String,
     pub prompt: String,
     pub negative_prompt: Option<String>,
+    #[serde(default)]
+    pub task_prompts: Vec<String>,
     pub quantity: u32,
     pub provider_config_id: Option<String>,
     pub model: Option<String>,
@@ -80,6 +85,13 @@ pub struct UpdateImageWorkbenchTaskStatusRequest {
     pub failure_type: Option<String>,
     pub failure_hint: Option<String>,
     pub model_run: Option<RecordImageWorkbenchModelRunInput>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReplanImageWorkbenchStoryboardGroupRequest {
+    pub group_id: String,
+    pub variants_per_scene: Option<u32>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -154,6 +166,47 @@ pub struct SetImageWorkbenchAssetQualityIssuesRequest {
     pub asset_id: String,
     #[serde(default)]
     pub quality_issues: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeleteImageWorkbenchAssetsRequest {
+    #[serde(default)]
+    pub asset_ids: Vec<String>,
+    pub delete_files: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeleteImageWorkbenchAssetsResult {
+    pub deleted_assets: u32,
+    pub deleted_files: u32,
+    pub skipped_files: u32,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeleteImageWorkbenchJobResult {
+    pub removed_job: bool,
+    pub deleted_assets: u32,
+    pub deleted_files: u32,
+    pub skipped_files: u32,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TagImageWorkbenchAssetsGroupRequest {
+    #[serde(default)]
+    pub asset_ids: Vec<String>,
+    pub group_id: Option<String>,
+    pub group_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportImageWorkbenchGroupRequest {
+    pub group_id: Option<String>,
+    pub group_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -296,13 +349,14 @@ impl ImageWorkbenchService {
         if request.quantity == 0 {
             return Err(AppError::Config("图片工作台任务数量必须大于 0".to_string()));
         }
+        let task_prompts = normalize_task_prompts(request.task_prompts, request.quantity)?;
         let negative_prompt = merge_negative_prompt(&prompt, request.negative_prompt);
 
         self.repo()?.create_job(NewImageWorkbenchJob {
             mode: request.mode,
             prompt,
             negative_prompt,
-            task_prompts: Vec::new(),
+            task_prompts,
             quantity: request.quantity,
             provider_config_id: normalize_optional_string(request.provider_config_id),
             model: normalize_optional_string(request.model),
@@ -454,6 +508,21 @@ impl ImageWorkbenchService {
         self.repo()?.retry_failed_tasks(&job_id)
     }
 
+    pub fn replan_storyboard_group(
+        &self,
+        request: ReplanImageWorkbenchStoryboardGroupRequest,
+    ) -> AppResult<ImageWorkbenchSnapshot> {
+        let group_id = normalize_required_id("图片工作台分镜组 ID", &request.group_id)?;
+        self.repo()?.replan_storyboard_group(
+            ReplanImageWorkbenchStoryboardGroupInput {
+                group_id,
+                variants_per_scene: request
+                    .variants_per_scene
+                    .map(|value| value.clamp(1, 8)),
+            },
+        )
+    }
+
     pub fn start_job_runner(
         &self,
         app_handle: AppHandle,
@@ -518,15 +587,98 @@ impl ImageWorkbenchService {
             .recover_interrupted_jobs("应用重启后，未完成的图片工作台任务已中止")
     }
 
-    pub fn delete_job(&self, job_id: &str) -> AppResult<()> {
+    pub fn delete_job(
+        &self,
+        job_id: &str,
+        delete_assets: bool,
+    ) -> AppResult<DeleteImageWorkbenchJobResult> {
         let job_id = normalize_required_id("图片工作台作业 ID", job_id)?;
-        self.repo()?.delete_job(&job_id)
+        let snapshot = self.get_snapshot(&job_id)?;
+        let asset_ids = snapshot
+            .assets
+            .iter()
+            .map(|asset| asset.id.clone())
+            .collect::<Vec<_>>();
+        let mut deleted_assets = 0;
+        let mut deleted_files = 0;
+        let mut skipped_files = 0;
+
+        if delete_assets {
+            let file_result = self.delete_asset_files(&snapshot.assets)?;
+            deleted_files = file_result.deleted_files;
+            skipped_files = file_result.skipped_files;
+            deleted_assets = self.repo()?.delete_assets_by_ids(&asset_ids)?;
+            self.repo()?.delete_job(&job_id)?;
+        } else {
+            self.repo()?.remove_job_from_queue(&job_id)?;
+        }
+
+        Ok(DeleteImageWorkbenchJobResult {
+            removed_job: true,
+            deleted_assets,
+            deleted_files,
+            skipped_files,
+        })
     }
 
     pub fn cleanup_deleted_job_assets(
         &self,
     ) -> AppResult<CleanupImageWorkbenchDeletedAssetsResult> {
         cleanup_deleted_job_assets(&self.path_provider)
+    }
+
+    pub fn delete_assets(
+        &self,
+        request: DeleteImageWorkbenchAssetsRequest,
+    ) -> AppResult<DeleteImageWorkbenchAssetsResult> {
+        let asset_ids = normalize_asset_ids(request.asset_ids);
+        if asset_ids.is_empty() {
+            return Ok(DeleteImageWorkbenchAssetsResult {
+                deleted_assets: 0,
+                deleted_files: 0,
+                skipped_files: 0,
+            });
+        }
+
+        let repo = self.repo()?;
+        let assets = asset_ids
+            .iter()
+            .filter_map(|asset_id| repo.get_asset_by_id(asset_id).ok())
+            .collect::<Vec<_>>();
+        let file_result = if request.delete_files.unwrap_or(true) {
+            self.delete_asset_files(&assets)?
+        } else {
+            DeleteImageWorkbenchAssetsResult {
+                deleted_assets: 0,
+                deleted_files: 0,
+                skipped_files: 0,
+            }
+        };
+        let deleted_assets = self.repo()?.delete_assets_by_ids(&asset_ids)?;
+        Ok(DeleteImageWorkbenchAssetsResult {
+            deleted_assets,
+            deleted_files: file_result.deleted_files,
+            skipped_files: file_result.skipped_files,
+        })
+    }
+
+    pub fn tag_assets_group(
+        &self,
+        request: TagImageWorkbenchAssetsGroupRequest,
+    ) -> AppResult<TagImageWorkbenchAssetsGroupResult> {
+        self.repo()?.tag_assets_group(TagImageWorkbenchAssetsGroupInput {
+            asset_ids: normalize_asset_ids(request.asset_ids),
+            group_id: normalize_limited_optional_string(
+                "Image Workbench group id",
+                request.group_id,
+                IMAGE_WORKBENCH_SHORT_TEXT_MAX_CHARS,
+            )?,
+            group_name: normalize_limited_optional_string(
+                "Image Workbench group name",
+                request.group_name,
+                IMAGE_WORKBENCH_TEMPLATE_NAME_MAX_CHARS,
+            )?,
+        })
     }
 
     #[allow(dead_code)]
@@ -707,6 +859,92 @@ impl ImageWorkbenchService {
                     "images": "images/",
                     "prompts": "metadata/prompts.json",
                     "assetInfo": "metadata/asset_info.json"
+                }
+            }),
+        )?;
+
+        Ok(export_dir.to_string_lossy().to_string())
+    }
+
+    pub fn export_group(&self, request: ExportImageWorkbenchGroupRequest) -> AppResult<String> {
+        let group_id = normalize_limited_optional_string(
+            "Image Workbench group id",
+            request.group_id,
+            IMAGE_WORKBENCH_SHORT_TEXT_MAX_CHARS,
+        )?;
+        let group_name = normalize_limited_optional_string(
+            "Image Workbench group name",
+            request.group_name,
+            IMAGE_WORKBENCH_TEMPLATE_NAME_MAX_CHARS,
+        )?;
+        if group_id.is_none() && group_name.is_none() {
+            return Err(AppError::Config("Image Workbench group marker cannot be empty".to_string()));
+        }
+
+        let repo = self.repo()?;
+        let assets = repo.list_assets_by_group_marker(group_id.as_deref(), group_name.as_deref())?;
+        if assets.is_empty() {
+            return Err(AppError::Config("Image Workbench group has no exportable assets".to_string()));
+        }
+        let groups = repo.list_groups_by_marker(group_id.as_deref(), group_name.as_deref())?;
+        let marker = group_name
+            .clone()
+            .or_else(|| groups.first().and_then(|group| group.name.clone()))
+            .or(group_id.clone())
+            .unwrap_or_else(|| "group".to_string());
+        let export_dir = self
+            .path_provider
+            .get_app_local_data_dir()?
+            .join("ai")
+            .join("image-workbench")
+            .join("exports")
+            .join(format!(
+                "group-{}-{}",
+                sanitize_file_stem(&marker),
+                now_ms_for_export()
+            ));
+        let images_dir = export_dir.join("images");
+        let metadata_dir = export_dir.join("metadata");
+        fs::create_dir_all(&images_dir)?;
+        fs::create_dir_all(&metadata_dir)?;
+
+        let mut exported_images = Vec::new();
+        for (index, asset) in assets.iter().enumerate() {
+            let source = PathBuf::from(&asset.file_path);
+            if !source.is_file() {
+                continue;
+            }
+            let file_name = export_asset_file_name(index, asset, &source);
+            fs::copy(&source, images_dir.join(&file_name))?;
+            exported_images.push(json!({
+                "assetId": asset.id,
+                "jobId": asset.job_id,
+                "taskId": asset.task_id,
+                "groupId": asset.group_id,
+                "fileName": file_name,
+                "width": asset.width,
+                "height": asset.height,
+                "favorite": asset.favorite,
+                "rating": asset.rating,
+                "createdAtMs": asset.created_at_ms
+            }));
+        }
+        if exported_images.is_empty() {
+            return Err(AppError::Config("Image Workbench group image files are missing".to_string()));
+        }
+
+        write_pretty_json(
+            metadata_dir.join("group_info.json"),
+            &json!({
+                "groupId": group_id,
+                "groupName": group_name,
+                "groups": groups,
+                "images": exported_images,
+                "exportedAtMs": now_ms_for_export(),
+                "exportFormat": "folder",
+                "layout": {
+                    "images": "images/",
+                    "groupInfo": "metadata/group_info.json"
                 }
             }),
         )?;
@@ -1018,6 +1256,67 @@ impl ImageWorkbenchService {
         ))
     }
 
+    fn delete_asset_files(
+        &self,
+        assets: &[ImageWorkbenchAsset],
+    ) -> AppResult<DeleteImageWorkbenchAssetsResult> {
+        let asset_root = self
+            .path_provider
+            .get_app_local_data_dir()?
+            .join("ai")
+            .join("image-workbench")
+            .join("assets");
+        fs::create_dir_all(&asset_root)?;
+        let asset_root = asset_root.canonicalize().map_err(|error| {
+            AppError::Io(format!(
+                "Resolve Image Workbench asset root failed ({}): {}",
+                asset_root.display(),
+                error
+            ))
+        })?;
+        let mut seen = HashSet::<PathBuf>::new();
+        let mut deleted_files = 0;
+        let mut skipped_files = 0;
+
+        for asset in assets {
+            for raw_path in [&asset.file_path, asset.thumbnail_path.as_deref().unwrap_or("")]
+                .into_iter()
+                .filter(|path| !path.trim().is_empty())
+            {
+                let path = PathBuf::from(raw_path);
+                if !path.is_absolute() {
+                    skipped_files += 1;
+                    continue;
+                }
+                let Ok(canonical_path) = path.canonicalize() else {
+                    skipped_files += 1;
+                    continue;
+                };
+                if !canonical_path.starts_with(&asset_root) || !canonical_path.is_file() {
+                    skipped_files += 1;
+                    continue;
+                }
+                if !seen.insert(canonical_path.clone()) {
+                    continue;
+                }
+                fs::remove_file(&canonical_path).map_err(|error| {
+                    AppError::Io(format!(
+                        "Delete Image Workbench asset file failed ({}): {}",
+                        canonical_path.display(),
+                        error
+                    ))
+                })?;
+                deleted_files += 1;
+            }
+        }
+
+        Ok(DeleteImageWorkbenchAssetsResult {
+            deleted_assets: 0,
+            deleted_files,
+            skipped_files,
+        })
+    }
+
     fn refresh_snapshot_asset_integrity(
         &self,
         mut snapshot: ImageWorkbenchSnapshot,
@@ -1088,6 +1387,17 @@ fn normalize_optional_string(value: Option<String>) -> Option<String> {
     value
         .map(|item| item.trim().to_string())
         .filter(|item| !item.is_empty())
+}
+
+fn normalize_asset_ids(values: Vec<String>) -> Vec<String> {
+    let mut seen = HashSet::<String>::new();
+    values
+        .into_iter()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .filter(|value| seen.insert(value.clone()))
+        .take(500)
+        .collect()
 }
 
 fn parse_asset_query_sort(value: Option<String>) -> AppResult<ImageWorkbenchAssetSort> {
@@ -1208,6 +1518,10 @@ fn normalize_image_generation_options_json(raw_json: Option<String>) -> AppResul
         normalized.insert("moderation".to_string(), json!(moderation));
     }
 
+    if let Some(storyboard) = normalize_storyboard_generation_options(object.get("storyboard"))? {
+        normalized.insert("storyboard".to_string(), storyboard);
+    }
+
     if normalized.is_empty() {
         return Ok(None);
     }
@@ -1219,6 +1533,84 @@ fn normalize_image_generation_options_json(raw_json: Option<String>) -> AppResul
                 error
             ))
         })
+}
+
+fn normalize_storyboard_generation_options(
+    value: Option<&serde_json::Value>,
+) -> AppResult<Option<serde_json::Value>> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    let Some(object) = value.as_object() else {
+        return Err(AppError::Config(
+            "Image Workbench storyboard options 必须是 JSON 对象".to_string(),
+        ));
+    };
+    let Some(raw_scenes) = object.get("scenes").and_then(|item| item.as_array()) else {
+        return Ok(None);
+    };
+
+    let variants_per_scene = normalized_storyboard_u32(object.get("variantsPerScene"))
+        .or_else(|| normalized_storyboard_u32(object.get("variants_per_scene")))
+        .unwrap_or(4)
+        .clamp(1, 8);
+    let mut scenes = Vec::new();
+    for (fallback_index, scene) in raw_scenes.iter().take(80).enumerate() {
+        let Some(scene_object) = scene.as_object() else {
+            continue;
+        };
+        let index = normalized_storyboard_u32(scene_object.get("index"))
+            .unwrap_or((fallback_index + 1) as u32)
+            .clamp(1, 999);
+        let title = normalized_storyboard_text(scene_object.get("title"), 96)
+            .unwrap_or_else(|| format!("分镜 {}", index));
+        let task_start_index = normalized_storyboard_u32(scene_object.get("taskStartIndex"))
+            .or_else(|| normalized_storyboard_u32(scene_object.get("task_start_index")))
+            .unwrap_or((fallback_index as u32).saturating_mul(variants_per_scene));
+        let task_count = normalized_storyboard_u32(scene_object.get("taskCount"))
+            .or_else(|| normalized_storyboard_u32(scene_object.get("task_count")))
+            .unwrap_or(variants_per_scene)
+            .clamp(1, 32);
+        let reference_prompt = normalized_storyboard_text(scene_object.get("referencePrompt"), 256)
+            .or_else(|| normalized_storyboard_text(scene_object.get("reference_prompt"), 256))
+            .unwrap_or_default();
+        scenes.push(json!({
+            "index": index,
+            "title": title,
+            "taskStartIndex": task_start_index,
+            "taskCount": task_count,
+            "referencePrompt": reference_prompt,
+        }));
+    }
+
+    if scenes.is_empty() {
+        return Ok(None);
+    }
+
+    Ok(Some(json!({
+        "version": 1,
+        "type": "storyboard",
+        "variantsPerScene": variants_per_scene,
+        "sceneCount": scenes.len(),
+        "scenes": scenes,
+    })))
+}
+
+fn normalized_storyboard_u32(value: Option<&serde_json::Value>) -> Option<u32> {
+    value
+        .and_then(|item| {
+            item.as_u64()
+                .or_else(|| item.as_str().and_then(|text| text.trim().parse::<u64>().ok()))
+        })
+        .and_then(|number| u32::try_from(number).ok())
+}
+
+fn normalized_storyboard_text(value: Option<&serde_json::Value>, max_chars: usize) -> Option<String> {
+    let text = value?.as_str()?.trim();
+    if text.is_empty() {
+        return None;
+    }
+    Some(text.chars().take(max_chars).collect::<String>())
 }
 
 fn normalized_option_string(
@@ -1369,6 +1761,30 @@ fn normalize_job_prompt(
         "图片工作台暂不支持的任务模式: {}",
         mode
     )))
+}
+
+fn normalize_task_prompts(raw_prompts: Vec<String>, quantity: u32) -> AppResult<Vec<String>> {
+    if raw_prompts.is_empty() {
+        return Ok(Vec::new());
+    }
+    if raw_prompts.len() > quantity as usize {
+        return Err(AppError::Config(
+            "图片工作台任务提示词数量不能超过任务数量".to_string(),
+        ));
+    }
+
+    let mut prompts = Vec::with_capacity(raw_prompts.len());
+    for (index, raw_prompt) in raw_prompts.into_iter().enumerate() {
+        let label = format!("Image Workbench task prompt {}", index + 1);
+        let prompt = normalize_limited_optional_string(
+            &label,
+            Some(raw_prompt),
+            IMAGE_WORKBENCH_TEXT_MAX_CHARS,
+        )?
+        .unwrap_or_default();
+        prompts.push(prompt);
+    }
+    Ok(prompts)
 }
 
 pub(crate) fn normalize_required_id(label: &str, value: &str) -> AppResult<String> {

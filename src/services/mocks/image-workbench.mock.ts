@@ -12,8 +12,8 @@ import {
   mergeMockNegativePrompt,
   parseMockReferenceAssetIds,
 } from "./image-workbench-prompt.mock";
-import { listMockImageWorkbenchAssets, listMockImageWorkbenchGroups, queryMockImageWorkbenchAssets, refreshMockImageWorkbenchAssetDeliveryStatus, setMockImageWorkbenchAssetFavorite, setMockImageWorkbenchAssetQualityIssues, setMockImageWorkbenchAssetRating } from "./image-workbench-assets.mock";
-import { cleanupMockImageWorkbenchDeletedAssets, cleanupMockImageWorkbenchInvalidAssets, exportMockImageWorkbenchAsset, exportMockImageWorkbenchJob } from "./image-workbench-delivery.mock";
+import { deleteMockImageWorkbenchAssets, listMockImageWorkbenchAssets, listMockImageWorkbenchGroups, queryMockImageWorkbenchAssets, refreshMockImageWorkbenchAssetDeliveryStatus, setMockImageWorkbenchAssetFavorite, setMockImageWorkbenchAssetQualityIssues, setMockImageWorkbenchAssetRating, tagMockImageWorkbenchAssetsGroup } from "./image-workbench-assets.mock";
+import { cleanupMockImageWorkbenchDeletedAssets, cleanupMockImageWorkbenchInvalidAssets, exportMockImageWorkbenchAsset, exportMockImageWorkbenchGroup, exportMockImageWorkbenchJob } from "./image-workbench-delivery.mock";
 import { buildMockImageWorkbenchFailureFields } from "./image-workbench-failure.mock";
 import { importMockImageWorkbenchGeneratedAssets } from "./image-workbench-import.mock";
 
@@ -39,6 +39,7 @@ const MOCK_IMAGE_WORKBENCH_TASK_STATUSES = new Set([
   "failed",
   "cancelled",
 ]);
+const MOCK_IMAGE_WORKBENCH_JOB_WORKER_LIMIT = 4;
 
 function delay(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
@@ -299,6 +300,12 @@ function createImageWorkbenchJob(args: Record<string, unknown>) {
   }
   const now = getCurrentTimestampMs();
   const quantity = Math.floor(rawQuantity);
+  const taskPrompts = Array.isArray(request?.taskPrompts)
+    ? request.taskPrompts.map((item: unknown) => String(item || "").trim())
+    : [];
+  if (taskPrompts.length > quantity) {
+    throw new Error("[ERR_IPC_BROWSER] 图片工作台任务提示词数量不能超过任务数量");
+  }
   const jobId = createMockImageWorkbenchId("iw-job");
   const job = {
     id: jobId,
@@ -317,6 +324,7 @@ function createImageWorkbenchJob(args: Record<string, unknown>) {
     personContextJson: request?.personContextJson || null,
     upscaleScale: request?.upscaleScale || (mode === "upscale_4x" ? 4 : mode === "upscale_2x" ? 2 : null),
     fallbackPolicy: request?.fallbackPolicy || (mode === "txt2img" ? "native" : "txt2img_prompt_fallback"),
+    generationOptionsJson: request?.generationOptionsJson || null,
     createdAtMs: now,
     updatedAtMs: now,
     queuedAtMs: now,
@@ -327,26 +335,113 @@ function createImageWorkbenchJob(args: Record<string, unknown>) {
     deletedAtMs: null,
   };
   mockImageWorkbenchJobs.set(jobId, job);
-  // 一 job 一 group：对齐后端 image_workbench_groups 表，浏览器降级也产出组语义。
-  const groupId = createMockImageWorkbenchId("iw-group");
-  mockImageWorkbenchGroups.set(groupId, {
-    id: groupId, jobId, sourceId: job.sourceAssetId, name: null,
-    type: job.sourceAssetId ? "rerun" : "fresh", agentPreset: null,
-    agentIdsJson: null, basePrompt: job.prompt, count: quantity,
-    createdAtMs: now, updatedAtMs: now,
-  });
+  const taskGroups = resolveMockImageWorkbenchTaskGroups({ job, taskPrompts, quantity, now });
   for (let index = 0; index < quantity; index += 1) {
     const taskId = createMockImageWorkbenchId("iw-task");
+    const taskGroup = taskGroups.taskGroups[index] || taskGroups.taskGroups[0];
     mockImageWorkbenchTasks.set(taskId, {
       id: taskId, jobId, queueIndex: index, status: "queued",
       retryCount: 0, maxRetries: 1, claimToken: null, leasedUntilMs: null,
-      prompt: buildMockExpandedPrompt(job.prompt, index),
+      prompt: taskPrompts[index] || buildMockExpandedPrompt(job.prompt, index),
       createdAtMs: now, updatedAtMs: now, startedAtMs: null,
       finishedAtMs: null, error: null,
-      groupId, variantIndex: index, failureType: null, failureHint: null,
+      groupId: taskGroup.groupId, variantIndex: taskGroup.variantIndex, failureType: null, failureHint: null,
     });
   }
   return getMockImageWorkbenchSnapshot(jobId);
+}
+
+function resolveMockImageWorkbenchTaskGroups(options: {
+  job: any;
+  taskPrompts: string[];
+  quantity: number;
+  now: number;
+}) {
+  const storyboard = parseMockStoryboardGenerationOptions(options.job.generationOptionsJson);
+  if (!storyboard?.scenes?.length) {
+    const groupId = createMockImageWorkbenchId("iw-group");
+    mockImageWorkbenchGroups.set(groupId, {
+      id: groupId,
+      jobId: options.job.id,
+      sourceId: options.job.sourceAssetId,
+      name: null,
+      type: options.job.sourceAssetId ? "rerun" : "fresh",
+      agentPreset: null,
+      agentIdsJson: null,
+      basePrompt: options.job.prompt,
+      count: options.quantity,
+      createdAtMs: options.now,
+      updatedAtMs: options.now,
+    });
+    return {
+      taskGroups: Array.from({ length: options.quantity }, (_, index) => ({
+        groupId,
+        variantIndex: index,
+      })),
+    };
+  }
+
+  const taskGroups = Array.from({ length: options.quantity }, () => ({
+    groupId: "",
+    variantIndex: 0,
+  }));
+  let nextStartIndex = 0;
+  let createdGroupId = "";
+  storyboard.scenes.forEach((scene: any, fallbackIndex: number) => {
+    const sceneIndex = Math.max(1, Number(scene.index || fallbackIndex + 1));
+    const start = Math.max(0, Math.min(Number(scene.taskStartIndex ?? nextStartIndex), options.quantity));
+    const count = Math.max(1, Math.min(Number(scene.taskCount || storyboard.variantsPerScene || 4), options.quantity));
+    const end = Math.min(start + count, options.quantity);
+    if (end <= start) return;
+    nextStartIndex = end;
+    const groupId = createMockImageWorkbenchId("iw-group");
+    createdGroupId = createdGroupId || groupId;
+    const title = String(scene.title || `分镜 ${sceneIndex}`).trim();
+    const referencePrompt = String(scene.referencePrompt || "").trim();
+    mockImageWorkbenchGroups.set(groupId, {
+      id: groupId,
+      jobId: options.job.id,
+      sourceId: `storyboard-scene-${sceneIndex}`,
+      name: `分镜 ${String(sceneIndex).padStart(2, "0")}｜${title}`,
+      type: "storyboard",
+      agentPreset: "storyboard",
+      agentIdsJson: referencePrompt ? JSON.stringify({ referencePrompt }) : null,
+      basePrompt: options.taskPrompts[start] || options.job.prompt,
+      count: end - start,
+      createdAtMs: options.now,
+      updatedAtMs: options.now,
+    });
+    for (let index = start; index < end; index += 1) {
+      taskGroups[index] = {
+        groupId,
+        variantIndex: index - start,
+      };
+    }
+  });
+  if (!createdGroupId) {
+    return resolveMockImageWorkbenchTaskGroups({
+      ...options,
+      job: { ...options.job, generationOptionsJson: null },
+    });
+  }
+  const fallbackGroupId = taskGroups.find((item) => item.groupId)?.groupId || createdGroupId;
+  return {
+    taskGroups: taskGroups.map((item, index) => ({
+      groupId: item.groupId || fallbackGroupId,
+      variantIndex: item.groupId ? item.variantIndex : index,
+    })),
+  };
+}
+
+function parseMockStoryboardGenerationOptions(rawJson: unknown) {
+  try {
+    const parsed = JSON.parse(String(rawJson || "{}"));
+    return parsed?.storyboard && typeof parsed.storyboard === "object"
+      ? parsed.storyboard
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 function updateImageWorkbenchTaskStatus(args: Record<string, unknown>) {
@@ -476,6 +571,97 @@ function retryImageWorkbenchFailedTasks(args: Record<string, unknown>) {
   return getMockImageWorkbenchSnapshot(jobId);
 }
 
+function replanImageWorkbenchStoryboardGroup(args: Record<string, unknown>) {
+  const request = args.request as any;
+  const groupId = String(request?.groupId || "").trim();
+  const group = mockImageWorkbenchGroups.get(groupId);
+  if (!group) {
+    throw new Error("[ERR_IPC_BROWSER] 浏览器 Mock 未找到分镜任务组");
+  }
+  const job = mockImageWorkbenchJobs.get(group.jobId);
+  if (!job || !isActiveMockImageWorkbenchJob(job)) {
+    throw new Error("[ERR_IPC_BROWSER] 浏览器 Mock 分镜所属作业不可用");
+  }
+  if (group.type !== "storyboard" && group.agentPreset !== "storyboard") {
+    throw new Error("[ERR_IPC_BROWSER] 只能重新规划分镜任务组");
+  }
+
+  const now = getCurrentTimestampMs();
+  const groupTasks = sortByMany(
+    mapValuesToArray(mockImageWorkbenchTasks).filter((task) => task.groupId === groupId),
+    [{ getValue: (task) => task.queueIndex }]
+  );
+  const rawCount = Number(request?.variantsPerScene || group.count || groupTasks.length || 4);
+  const count = Math.max(1, Math.min(Math.floor(rawCount) || 4, 8));
+  const batchId = createMockImageWorkbenchId("iw-replan");
+  const newGroupId = createMockImageWorkbenchId("iw-group");
+  const basePrompt = String(group.basePrompt || groupTasks[0]?.prompt || job.prompt || "").trim();
+  const replanBasePrompt = `${basePrompt} 分镜重规划批次：${batchId}。保持参考图人物一致，重新规划服装纹理、情绪瞬间、动作姿态、镜头构图、光影层次和场景细节，不复用上一轮失败的构图。`;
+  const sourceId = String(group.sourceId || group.id);
+  const agentIds = parseMockGroupAgentIds(group.agentIdsJson);
+  agentIds.sourceGroupId = group.id;
+  agentIds.replanBatchId = batchId;
+  agentIds.replannedAtMs = now;
+  mockImageWorkbenchGroups.set(newGroupId, {
+    id: newGroupId,
+    jobId: job.id,
+    sourceId: `${sourceId}-replan-${batchId}`,
+    name: `${group.name || "分镜"} · 重新规划`,
+    type: "storyboard",
+    agentPreset: "storyboard",
+    agentIdsJson: JSON.stringify(agentIds),
+    basePrompt: replanBasePrompt,
+    count,
+    createdAtMs: now,
+    updatedAtMs: now,
+  });
+
+  const nextQueueIndex = mapValuesToArray(mockImageWorkbenchTasks)
+    .filter((task) => task.jobId === job.id)
+    .reduce((max, task) => Math.max(max, Number(task.queueIndex || 0)), -1) + 1;
+  for (let index = 0; index < count; index += 1) {
+    const taskId = createMockImageWorkbenchId("iw-task");
+    mockImageWorkbenchTasks.set(taskId, {
+      id: taskId,
+      jobId: job.id,
+      queueIndex: nextQueueIndex + index,
+      status: "queued",
+      retryCount: 0,
+      maxRetries: 1,
+      claimToken: null,
+      leasedUntilMs: null,
+      prompt: `${replanBasePrompt} 新候选图 ${index + 1}/${count}`,
+      createdAtMs: now,
+      updatedAtMs: now,
+      startedAtMs: null,
+      finishedAtMs: null,
+      error: null,
+      groupId: newGroupId,
+      variantIndex: index,
+      failureType: null,
+      failureHint: null,
+    });
+  }
+  mockImageWorkbenchJobs.set(job.id, {
+    ...job,
+    quantity: Number(job.quantity || 0) + count,
+    finishedAtMs: null,
+    updatedAtMs: now,
+  });
+  recalculateMockImageWorkbenchJob(job.id);
+  void runMockImageWorkbenchJob(job.id);
+  return getMockImageWorkbenchSnapshot(job.id);
+}
+
+function parseMockGroupAgentIds(rawJson: unknown) {
+  try {
+    const parsed = JSON.parse(String(rawJson || "{}"));
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
 function startImageWorkbenchJobRunner(args: Record<string, unknown>) {
   const jobId = String(args.jobId || "");
   const job = mockImageWorkbenchJobs.get(jobId);
@@ -495,7 +681,14 @@ function saveImageWorkbenchMask(args: Record<string, unknown>) {
 async function runMockImageWorkbenchJob(jobId: string) {
   const snapshot = getMockImageWorkbenchSnapshot(jobId);
   const tasks = snapshot.tasks.filter((task: any) => ["queued", "retrying"].includes(task.status));
-  for (const task of tasks) {
+  let nextTaskIndex = 0;
+  const workerCount = Math.min(MOCK_IMAGE_WORKBENCH_JOB_WORKER_LIMIT, tasks.length);
+  await Promise.all(Array.from({ length: workerCount }, async () => {
+    for (;;) {
+      const task = tasks[nextTaskIndex++];
+      if (!task) {
+        break;
+      }
     if (!isActiveMockImageWorkbenchJob(mockImageWorkbenchJobs.get(jobId))) {
       break;
     }
@@ -659,7 +852,8 @@ async function runMockImageWorkbenchJob(jobId: string) {
         });
       }
     }
-  }
+    }
+  }));
 }
 
 function deleteImageWorkbenchJob(args: Record<string, unknown>) {
@@ -812,6 +1006,8 @@ export function handleImageWorkbenchMock(command: string, args: Record<string, u
       return { handled: true, value: cancelImageWorkbenchTask(args) };
     case "retry_image_workbench_failed_tasks":
       return { handled: true, value: retryImageWorkbenchFailedTasks(args) };
+    case "replan_image_workbench_storyboard_group":
+      return { handled: true, value: replanImageWorkbenchStoryboardGroup(args) };
     case "recover_image_workbench_interrupted_jobs":
       return { handled: true, value: recoverImageWorkbenchInterruptedJobs() };
     case "delete_image_workbench_job":
@@ -820,6 +1016,12 @@ export function handleImageWorkbenchMock(command: string, args: Record<string, u
       return { handled: true, value: exportMockImageWorkbenchJob(getMockImageWorkbenchAssetContext(), args) };
     case "export_image_workbench_asset":
       return { handled: true, value: exportMockImageWorkbenchAsset(getMockImageWorkbenchAssetContext(), args) };
+    case "export_image_workbench_group":
+      return { handled: true, value: exportMockImageWorkbenchGroup(getMockImageWorkbenchAssetContext(), args) };
+    case "delete_image_workbench_assets":
+      return { handled: true, value: deleteMockImageWorkbenchAssets(getMockImageWorkbenchAssetContext(), args) };
+    case "tag_image_workbench_assets_group":
+      return { handled: true, value: tagMockImageWorkbenchAssetsGroup(getMockImageWorkbenchAssetContext(), args) };
     case "cleanup_image_workbench_deleted_assets":
       return { handled: true, value: cleanupMockImageWorkbenchDeletedAssets(getMockImageWorkbenchAssetContext()) };
     case "cleanup_image_workbench_invalid_assets":

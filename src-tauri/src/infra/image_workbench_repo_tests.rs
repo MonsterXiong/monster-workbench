@@ -76,6 +76,223 @@ fn image_workbench_create_job_uses_task_prompts() {
 }
 
 #[test]
+fn image_workbench_storyboard_job_builds_scene_groups_and_variant_indexes() {
+    let repo = test_repo();
+    let task_prompts = vec![
+        "分镜一候选 1".to_string(),
+        "分镜一候选 2".to_string(),
+        "分镜一候选 3".to_string(),
+        "分镜一候选 4".to_string(),
+        "分镜二候选 1".to_string(),
+        "分镜二候选 2".to_string(),
+        "分镜二候选 3".to_string(),
+        "分镜二候选 4".to_string(),
+    ];
+    let generation_options_json = serde_json::json!({
+        "storyboard": {
+            "version": 1,
+            "type": "storyboard",
+            "variantsPerScene": 4,
+            "sceneCount": 2,
+            "scenes": [
+                {
+                    "index": 1,
+                    "title": "初见",
+                    "taskStartIndex": 0,
+                    "taskCount": 4,
+                    "referencePrompt": "人物参考图为主，场景参考为江南水岸。"
+                },
+                {
+                    "index": 2,
+                    "title": "宫宴",
+                    "taskStartIndex": 4,
+                    "taskCount": 4,
+                    "referencePrompt": "人物参考图为主，服装参考为深红宫装。"
+                }
+            ]
+        }
+    })
+    .to_string();
+
+    let snapshot = repo
+        .create_job(NewImageWorkbenchJob {
+            mode: "person_consistency".to_string(),
+            prompt: "古风女主视觉分镜批量生成".to_string(),
+            negative_prompt: Some("不要换脸".to_string()),
+            task_prompts: task_prompts.clone(),
+            quantity: 8,
+            provider_config_id: None,
+            model: None,
+            size: None,
+            reference_asset_ids_json: Some("[\"iw-asset-person\"]".to_string()),
+            source_asset_id: None,
+            source_image_path: None,
+            mask_path: None,
+            person_context_json: None,
+            upscale_scale: None,
+            fallback_policy: None,
+            generation_options_json: Some(generation_options_json),
+        })
+        .expect("create storyboard job");
+
+    let groups = repo.list_groups(&snapshot.job.id).expect("list groups");
+    assert_eq!(groups.len(), 2);
+    let first_group = groups
+        .iter()
+        .find(|group| group.source_id.as_deref() == Some("storyboard-scene-1"))
+        .expect("first storyboard group");
+    let second_group = groups
+        .iter()
+        .find(|group| group.source_id.as_deref() == Some("storyboard-scene-2"))
+        .expect("second storyboard group");
+
+    assert_eq!(first_group.name.as_deref(), Some("分镜 01｜初见"));
+    assert_eq!(first_group.r#type.as_deref(), Some("storyboard"));
+    assert_eq!(first_group.agent_preset.as_deref(), Some("storyboard"));
+    assert_eq!(first_group.count, 4);
+    assert_eq!(first_group.base_prompt.as_deref(), Some("分镜一候选 1"));
+    assert!(first_group
+        .agent_ids_json
+        .as_deref()
+        .unwrap_or_default()
+        .contains("江南水岸"));
+    assert_eq!(second_group.name.as_deref(), Some("分镜 02｜宫宴"));
+    assert_eq!(second_group.count, 4);
+    assert_eq!(second_group.base_prompt.as_deref(), Some("分镜二候选 1"));
+
+    let mut tasks = snapshot.tasks.clone();
+    tasks.sort_by_key(|task| task.queue_index);
+    for (index, task) in tasks.iter().enumerate() {
+        assert_eq!(task.prompt.as_deref(), Some(task_prompts[index].as_str()));
+        if index < 4 {
+            assert_eq!(task.group_id.as_deref(), Some(first_group.id.as_str()));
+            assert_eq!(task.variant_index, Some(index as u32));
+        } else {
+            assert_eq!(task.group_id.as_deref(), Some(second_group.id.as_str()));
+            assert_eq!(task.variant_index, Some((index - 4) as u32));
+        }
+    }
+}
+
+#[test]
+fn image_workbench_replan_storyboard_group_appends_fresh_tasks() {
+    let repo = test_repo();
+    let task_prompts = vec![
+        "scene one candidate 1".to_string(),
+        "scene one candidate 2".to_string(),
+        "scene one candidate 3".to_string(),
+        "scene one candidate 4".to_string(),
+    ];
+    let generation_options_json = serde_json::json!({
+        "storyboard": {
+            "version": 1,
+            "type": "storyboard",
+            "variantsPerScene": 4,
+            "sceneCount": 1,
+            "scenes": [
+                {
+                    "index": 1,
+                    "title": "初见",
+                    "taskStartIndex": 0,
+                    "taskCount": 4,
+                    "referencePrompt": "person reference"
+                }
+            ]
+        }
+    })
+    .to_string();
+
+    let snapshot = repo
+        .create_job(NewImageWorkbenchJob {
+            mode: "person_consistency".to_string(),
+            prompt: "storyboard batch".to_string(),
+            negative_prompt: Some("no face swap".to_string()),
+            task_prompts: task_prompts.clone(),
+            quantity: 4,
+            provider_config_id: None,
+            model: None,
+            size: None,
+            reference_asset_ids_json: Some("[\"iw-asset-person\"]".to_string()),
+            source_asset_id: None,
+            source_image_path: None,
+            mask_path: None,
+            person_context_json: None,
+            upscale_scale: None,
+            fallback_policy: None,
+            generation_options_json: Some(generation_options_json),
+        })
+        .expect("create storyboard job");
+    let group = repo
+        .list_groups(&snapshot.job.id)
+        .expect("list groups")
+        .into_iter()
+        .find(|group| group.agent_preset.as_deref() == Some("storyboard"))
+        .expect("storyboard group");
+
+    for task in &snapshot.tasks {
+        repo.update_task_status(ImageWorkbenchTaskStatusPatch {
+            task_id: task.id.clone(),
+            status: "failed".to_string(),
+            error: Some("upstream failed".to_string()),
+            failure_type: Some("upstream".to_string()),
+            failure_hint: Some("upstream failed".to_string()),
+            model_run: None,
+        })
+        .expect("mark failed");
+    }
+
+    let replanned = repo
+        .replan_storyboard_group(ReplanImageWorkbenchStoryboardGroupInput {
+            group_id: group.id.clone(),
+            variants_per_scene: None,
+        })
+        .expect("replan storyboard group");
+
+    assert_eq!(replanned.job.id, snapshot.job.id);
+    assert_eq!(replanned.job.quantity, 8);
+    assert_eq!(replanned.job.status, "queued");
+    assert_eq!(replanned.tasks.len(), 8);
+    let groups = repo.list_groups(&snapshot.job.id).expect("list groups");
+    assert_eq!(groups.len(), 2);
+    let replan_group = groups
+        .iter()
+        .find(|item| item.id != group.id)
+        .expect("replan group");
+    assert_eq!(replan_group.r#type.as_deref(), Some("storyboard"));
+    assert_eq!(replan_group.agent_preset.as_deref(), Some("storyboard"));
+    assert_eq!(replan_group.count, 4);
+    assert!(replan_group
+        .source_id
+        .as_deref()
+        .unwrap_or_default()
+        .contains("replan"));
+    assert!(replan_group
+        .base_prompt
+        .as_deref()
+        .unwrap_or_default()
+        .contains("分镜重规划批次"));
+
+    let fresh_tasks = replanned
+        .tasks
+        .iter()
+        .filter(|task| task.group_id.as_deref() == Some(replan_group.id.as_str()))
+        .collect::<Vec<_>>();
+    assert_eq!(fresh_tasks.len(), 4);
+    assert!(fresh_tasks.iter().all(|task| task.status == "queued"));
+    assert!(fresh_tasks.iter().all(|task| task.retry_count == 0));
+    assert_eq!(
+        fresh_tasks
+            .iter()
+            .map(|task| task.variant_index)
+            .collect::<Vec<_>>(),
+        vec![Some(0), Some(1), Some(2), Some(3)]
+    );
+    for old_task in &snapshot.tasks {
+        assert!(fresh_tasks.iter().all(|fresh| fresh.id != old_task.id));
+    }
+}
+
+#[test]
 fn image_workbench_task_status_updates_job_status() {
     let repo = test_repo();
     let snapshot = repo

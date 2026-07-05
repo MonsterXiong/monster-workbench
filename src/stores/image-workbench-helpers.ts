@@ -291,13 +291,19 @@ export function buildImageWorkbenchGenerationOptionsJson(options: {
   outputCompression: number;
   background: ImageWorkbenchBackground;
   moderation: ImageWorkbenchModeration;
+  extra?: Record<string, unknown>;
 }) {
-  const payload: Record<string, string | number> = {
+  const payload: Record<string, unknown> = {
     quality: options.quality,
     outputFormat: options.outputFormat,
     background: options.background,
     moderation: options.moderation,
   };
+  Object.entries(options.extra || {}).forEach(([key, value]) => {
+    if (value !== undefined && value !== null) {
+      payload[key] = value;
+    }
+  });
   if (["jpeg", "webp"].includes(options.outputFormat)) {
     payload.outputCompression = Math.max(0, Math.min(100, Math.round(Number(options.outputCompression) || 100)));
   }

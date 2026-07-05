@@ -1,7 +1,15 @@
 import { markRaw, type Component } from "vue";
-import { BookTemplate, Eraser, ImagePlus, Images, Sparkles, Star } from "lucide-vue-next";
+import { BookTemplate, Clapperboard, Eraser, ImagePlus, Images, Sparkles, Star } from "lucide-vue-next";
+import { resolveImageWorkbenchPresetExample } from "./imageWorkbenchExampleAssets";
 
-export type ImageWorkbenchTaskEntryKey = "create" | "reference" | "edit" | "upscale" | "person" | "style";
+export type ImageWorkbenchTaskEntryKey =
+  | "create"
+  | "reference"
+  | "edit"
+  | "upscale"
+  | "person"
+  | "storyboard"
+  | "style";
 
 export type ImageWorkbenchTaskPresetGroupKey =
   | "business"
@@ -58,6 +66,7 @@ export interface ImageWorkbenchTaskPreset {
   groupKey: ImageWorkbenchTaskPresetGroupKey;
   groupLabel: string;
   promptKey: string;
+  exampleImageSrc?: string;
 }
 
 export interface ImageWorkbenchTaskPresetConfig {
@@ -87,6 +96,7 @@ const taskEntryIcons: Record<ImageWorkbenchTaskEntryKey, Component> = {
   edit: markRaw(Eraser),
   upscale: markRaw(Star),
   person: markRaw(Sparkles),
+  storyboard: markRaw(Clapperboard),
   style: markRaw(BookTemplate),
 };
 
@@ -317,6 +327,7 @@ export function buildImageWorkbenchTaskEntries(t: (key: string) => string): Imag
     "edit",
     "upscale",
     "person",
+    "storyboard",
     "style",
   ] satisfies ImageWorkbenchTaskEntryKey[]).map((key) => ({
     key,
@@ -339,6 +350,7 @@ export function buildImageWorkbenchTaskPresets(
       groupKey: preset.groupKey,
       groupLabel: t(`imageWorkbench.tasks.presetGroups.${preset.groupKey}`),
       promptKey: preset.promptKey,
+      exampleImageSrc: resolveImageWorkbenchPresetExample(preset)?.src,
     }));
 }
 
@@ -369,6 +381,9 @@ export function buildImageWorkbenchTaskGuidance(context: ImageWorkbenchTaskGuida
   if (activeKey === "person" && !hasReferenceImage && !canUseSelectedAssetAsReference) {
     return selectedAssetUnavailableReason || t("imageWorkbench.input.guidance.personNeedReference");
   }
+  if (activeKey === "storyboard" && !hasReferenceImage && !canUseSelectedAssetAsReference) {
+    return selectedAssetUnavailableReason || t("imageWorkbench.input.guidance.storyboardNeedReference");
+  }
   if (activeKey === "style" && !hasReferenceImage && !canUseSelectedAssetAsReference) {
     return selectedAssetUnavailableReason || t("imageWorkbench.input.guidance.styleNeedReference");
   }
@@ -385,12 +400,12 @@ export function isImageWorkbenchTaskGuidanceReady(context: ImageWorkbenchTaskGui
   if (context.activeKey === "reference") {
     return context.hasReferenceImage;
   }
-  if (context.activeKey === "person" || context.activeKey === "style") {
+  if (context.activeKey === "person" || context.activeKey === "storyboard" || context.activeKey === "style") {
     return context.hasReferenceImage || context.canUseSelectedAssetAsReference;
   }
   return false;
 }
 
 export function usesImageWorkbenchReferenceEntry(key: ImageWorkbenchTaskEntryKey) {
-  return key === "reference" || key === "person" || key === "style";
+  return key === "reference" || key === "person" || key === "storyboard" || key === "style";
 }

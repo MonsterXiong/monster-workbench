@@ -2,6 +2,7 @@ import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 import { getTranslation } from "../locales";
 import { imageWorkbenchService } from "../services/image-workbench.service";
+import { imageWorkbenchStoryboardAiService } from "../services/image-workbench-storyboard-ai.service";
 import {
   DEFAULT_IMAGE_WORKBENCH_HISTORY_LIMIT,
   buildImageWorkbenchGenerationOptionsJson,
@@ -21,6 +22,7 @@ import {
   useImageWorkbenchMaskState,
 } from "./image-workbench-helpers";
 import {
+  formatTemplate,
   normalizeImageGenerationSizeValue,
   validateImageGenerationSizeForModel,
 } from "../utils";
@@ -40,7 +42,11 @@ import { createImageWorkbenchImportActions } from "./image-workbench-import";
 import { createImageWorkbenchSnapshotPolling } from "./image-workbench-polling";
 import { createImageWorkbenchQualityState } from "./image-workbench-quality";
 import { createImageWorkbenchReferenceState } from "./image-workbench-reference";
-import { useAiProviderStore } from "./ai-provider";
+import {
+  parseImageWorkbenchStoryboardPrompt,
+  type ImageWorkbenchStoryboardGenerationOptions,
+} from "./image-workbench-storyboard";
+import { DEFAULT_AI_MAX_CONCURRENCY, useAiProviderStore } from "./ai-provider";
 import { useSettingStore } from "./settings";
 import type {
   CreateImageWorkbenchJobRequest, ImageWorkbenchAsset, ImageWorkbenchContractSummary, ImageWorkbenchJob,
@@ -50,6 +56,25 @@ import type {
 } from "../types/image-workbench";
 
 const QUALITY_FIX_PRIORITY: ImageWorkbenchQualityIssue[] = ["hands", "identity", "prop", "scene"];
+const IMAGE_WORKBENCH_PROVIDER_CONCURRENCY_TARGET = Math.max(DEFAULT_AI_MAX_CONCURRENCY, 2);
+
+interface RunImageWorkbenchBatchOptions {
+  mode?: ImageWorkbenchMode;
+  promptText?: string;
+  negativePromptText?: string;
+  quantity?: number;
+  taskPrompts?: string[];
+  generationOptionsExtra?: Record<string, unknown>;
+}
+
+interface RunImageWorkbenchStoryboardBatchOptions {
+  jobPrompt?: string;
+  negativePrompt?: string;
+  taskPrompts?: string[];
+  sceneCount?: number;
+  variantsPerScene?: number;
+  generationOptions?: ImageWorkbenchStoryboardGenerationOptions | null;
+}
 
 function formatAssetNativeSize(asset: ImageWorkbenchAsset | null) {
   return asset?.width && asset.height ? `${asset.width}x${asset.height}` : "";
@@ -60,6 +85,7 @@ export const useImageWorkbenchStore = defineStore("image-workbench", () => {
   const settingStore = useSettingStore();
   const t = (key: string) => getTranslation(key, settingStore.locale);
   const loading = ref(false);
+  const storyboardRecognitionLoading = ref(false);
   const error = ref("");
   const notice = ref("");
   const mode = ref<ImageWorkbenchMode>("txt2img");
@@ -112,6 +138,23 @@ export const useImageWorkbenchStore = defineStore("image-workbench", () => {
   );
   const imageModelConfigId = computed(() => activeImageConfig.value.id);
   const activeImageModelName = computed(() => getImageModelName(activeImageConfig.value) || model.value || "-");
+  const imageProviderQueueConcurrency = computed(() =>
+    activeImageConfig.value.queueMode === "concurrent"
+      ? Math.max(1, activeImageConfig.value.maxConcurrency || 1)
+      : 1
+  );
+  const imageProviderQueueIsSerial = computed(() => imageProviderQueueConcurrency.value <= 1);
+  const imageProviderQueueTargetConcurrency = computed(() =>
+    Math.max(
+      IMAGE_WORKBENCH_PROVIDER_CONCURRENCY_TARGET,
+      activeImageConfig.value.maxConcurrency || 1,
+      2
+    )
+  );
+  const imageProviderQueueNeedsUpgrade = computed(() =>
+    activeImageConfig.value.queueMode !== "concurrent" ||
+    imageProviderQueueConcurrency.value < imageProviderQueueTargetConcurrency.value
+  );
   const supportedModes = computed(() => contract.value?.supportedModes ?? ["txt2img"]);
   const deferredModes = computed(() => contract.value?.deferredModes ?? []);
   const isModeSupported = computed(() => supportedModes.value.includes(mode.value));
@@ -282,6 +325,16 @@ export const useImageWorkbenchStore = defineStore("image-workbench", () => {
     supportsModeForConfig(activeImageConfig.value, "upscale_4x") &&
     !loading.value
   );
+  const storyboardBatchPreview = computed(() => parseImageWorkbenchStoryboardPrompt(prompt.value));
+  const storyboardBatchSceneCount = computed(() => storyboardBatchPreview.value.scenes.length);
+  const storyboardBatchTaskCount = computed(() => storyboardBatchPreview.value.taskPrompts.length);
+  const canRunStoryboardBatch = computed(() =>
+    storyboardBatchTaskCount.value > 0 &&
+    (hasUsableReferenceImage.value || selectedAssetUsable.value) &&
+    supportsModeForConfig(activeImageConfig.value, "person_consistency") &&
+    !imageSizeError.value &&
+    !loading.value
+  );
 
   async function runWithLoading<T>(runner: () => Promise<T>): Promise<T> {
     loading.value = true;
@@ -326,6 +379,108 @@ export const useImageWorkbenchStore = defineStore("image-workbench", () => {
     return contract.value;
   }
 
+  async function ensureImageProviderConcurrency() {
+    await aiProviderStore.loadConfig();
+    syncImageModelConfig();
+    if (!imageProviderQueueNeedsUpgrade.value) {
+      return false;
+    }
+    const configId = imageModelConfigId.value;
+    const nextConcurrency = imageProviderQueueTargetConcurrency.value;
+    aiProviderStore.patchModelConfig(configId, {
+      queueMode: "concurrent",
+      maxConcurrency: nextConcurrency,
+    });
+    await aiProviderStore.saveConfig();
+    syncImageModelConfig(configId, false);
+    notice.value = formatTemplate(t("imageWorkbench.input.concurrencyEnabledNotice"), {
+      count: nextConcurrency,
+    });
+    return true;
+  }
+
+  async function enableImageProviderConcurrency() {
+    await runWithLoading(async () => {
+      await ensureImageProviderConcurrency();
+    });
+  }
+
+  async function recognizeStoryboardPromptWithAi(rawText = prompt.value) {
+    error.value = "";
+    notice.value = "";
+    try {
+      const cleanPrompt = rawText.trim();
+      if (!cleanPrompt) {
+        throw new Error(t("imageWorkbench.errors.storyboardSmartPromptRequired"));
+      }
+
+      await aiProviderStore.loadConfig();
+      const configId = aiProviderStore.getActiveModelConfigIdForCapability("chat");
+      const modelConfig = aiProviderStore.getModelConfig(configId);
+      if (!aiProviderStore.modelConfigSupportsCapability(configId, "chat")) {
+        throw new Error(t("imageWorkbench.errors.storyboardSmartProviderRequired"));
+      }
+
+      storyboardRecognitionLoading.value = true;
+      notice.value = t("imageWorkbench.storyboardDraft.smartRecognizing");
+      const result = await imageWorkbenchStoryboardAiService.recognizeStoryboard({
+        rawText: cleanPrompt,
+        providerConfigId: modelConfig.id,
+        model: modelConfig.model,
+      });
+      if (!result.scenes.length) {
+        throw new Error(t("imageWorkbench.errors.storyboardSmartNoScenes"));
+      }
+      notice.value = formatTemplate(t("imageWorkbench.storyboardDraft.smartSuccess"), {
+        count: result.scenes.length,
+      });
+      return result;
+    } catch (err) {
+      error.value = err instanceof Error ? err.message : String(err);
+      throw err;
+    } finally {
+      storyboardRecognitionLoading.value = false;
+    }
+  }
+
+  async function generateStoryboardPromptWithAi(directionText = prompt.value) {
+    error.value = "";
+    notice.value = "";
+    try {
+      const cleanDirection = directionText.trim();
+      if (!cleanDirection) {
+        throw new Error(t("imageWorkbench.errors.storyboardGenerateDirectionRequired"));
+      }
+
+      await aiProviderStore.loadConfig();
+      const configId = aiProviderStore.getActiveModelConfigIdForCapability("chat");
+      const modelConfig = aiProviderStore.getModelConfig(configId);
+      if (!aiProviderStore.modelConfigSupportsCapability(configId, "chat")) {
+        throw new Error(t("imageWorkbench.errors.storyboardSmartProviderRequired"));
+      }
+
+      storyboardRecognitionLoading.value = true;
+      notice.value = t("imageWorkbench.storyboardDraft.generatingStory");
+      const result = await imageWorkbenchStoryboardAiService.generateStoryboard({
+        direction: cleanDirection,
+        providerConfigId: modelConfig.id,
+        model: modelConfig.model,
+      });
+      if (!result.scenes.length) {
+        throw new Error(t("imageWorkbench.errors.storyboardSmartNoScenes"));
+      }
+      notice.value = formatTemplate(t("imageWorkbench.storyboardDraft.generateStorySuccess"), {
+        count: result.scenes.length,
+      });
+      return result;
+    } catch (err) {
+      error.value = err instanceof Error ? err.message : String(err);
+      throw err;
+    } finally {
+      storyboardRecognitionLoading.value = false;
+    }
+  }
+
   async function refreshWorkbenchLists() {
     const [jobResults, , templateResults] = await Promise.all([
       imageWorkbenchService.listJobs(DEFAULT_IMAGE_WORKBENCH_HISTORY_LIMIT),
@@ -366,6 +521,7 @@ export const useImageWorkbenchStore = defineStore("image-workbench", () => {
     openSelectedAssetLocation,
     exportCurrentJob,
     exportSelectedAsset,
+    exportGroup,
     cleanupDeletedAssets,
     cleanupInvalidAssets,
   } = createImageWorkbenchDeliveryActions({
@@ -402,17 +558,23 @@ export const useImageWorkbenchStore = defineStore("image-workbench", () => {
     return currentSnapshot.value;
   }
 
-  async function runTxt2imgBatch() {
+  async function runTxt2imgBatch(options: RunImageWorkbenchBatchOptions = {}) {
+    if (options.mode) {
+      mode.value = options.mode;
+    }
     await aiProviderStore.loadConfig();
     syncImageModelConfig();
     if (!supportsCurrentProviderMode.value || currentModeContextUnavailableReason.value) {
       throw new Error(modeUnavailableReason.value || t("imageWorkbench.errors.modeUnsupportedByProvider"));
     }
 
-    const cleanPrompt = prompt.value.trim();
-    if (!isPromptReadyForMode(mode.value, prompt.value)) {
+    const cleanPrompt = (options.promptText ?? prompt.value).trim();
+    if (!isPromptReadyForMode(mode.value, cleanPrompt)) {
       throw new Error(t("imageWorkbench.errors.promptRequired"));
     }
+    const taskPrompts = (options.taskPrompts || [])
+      .map((item) => item.trim())
+      .filter(Boolean);
 
     loading.value = true;
     error.value = "";
@@ -420,6 +582,7 @@ export const useImageWorkbenchStore = defineStore("image-workbench", () => {
     cancelRequested.value = false;
     let startedJobId = "";
     try {
+      await ensureImageProviderConcurrency();
       const config = activeImageConfig.value;
       const targetModel = model.value.trim() || getImageModelName(config);
       const rawTargetSize = mode.value === "inpaint"
@@ -430,9 +593,15 @@ export const useImageWorkbenchStore = defineStore("image-workbench", () => {
         throw new Error(formatImageSizeValidationError(targetSizeValidation, t));
       }
       const targetSize = targetSizeValidation.normalizedSize || normalizeImageGenerationSizeValue(rawTargetSize);
-      const targetQuantity = mode.value.startsWith("upscale_")
+      const singleSourceImageMode = mode.value === "inpaint" || mode.value.startsWith("upscale_");
+      let targetQuantity = singleSourceImageMode
         ? 1
-        : generationQuantity.value;
+        : options.quantity
+          ? normalizePositiveImageWorkbenchQuantity(options.quantity, generationQuantity.value)
+          : generationQuantity.value;
+      if (!singleSourceImageMode && taskPrompts.length) {
+        targetQuantity = taskPrompts.length;
+      }
       let snapshot = await imageWorkbenchService.createJob({
         ...buildImageWorkbenchJobContext({
           mode: mode.value,
@@ -447,7 +616,8 @@ export const useImageWorkbenchStore = defineStore("image-workbench", () => {
         }),
         mode: mode.value,
         prompt: cleanPrompt,
-        negativePrompt: negativePrompt.value,
+        negativePrompt: options.negativePromptText ?? negativePrompt.value,
+        taskPrompts,
         quantity: targetQuantity,
         providerConfigId: config.id,
         model: targetModel,
@@ -458,6 +628,7 @@ export const useImageWorkbenchStore = defineStore("image-workbench", () => {
           outputCompression: outputCompression.value,
           background: outputBackground.value,
           moderation: outputModeration.value,
+          extra: options.generationOptionsExtra,
         }),
       });
       currentSnapshot.value = snapshot;
@@ -480,6 +651,54 @@ export const useImageWorkbenchStore = defineStore("image-workbench", () => {
     } finally {
       loading.value = false;
     }
+  }
+
+  async function runStoryboardPromptBatch(options: RunImageWorkbenchStoryboardBatchOptions = {}) {
+    const parsedStoryboard = parseImageWorkbenchStoryboardPrompt(prompt.value);
+    const taskPrompts = (options.taskPrompts?.length ? options.taskPrompts : parsedStoryboard.taskPrompts)
+      .map((item) => item.trim())
+      .filter(Boolean);
+    const sceneCount = options.sceneCount || parsedStoryboard.scenes.length;
+    const variantsPerScene = options.variantsPerScene || parsedStoryboard.variantsPerScene;
+    if (!taskPrompts.length) {
+      throw new Error(t("imageWorkbench.errors.storyboardPromptRequired"));
+    }
+    if (!hasUsableReferenceImage.value && selectedAssetUsable.value && selectedAsset.value) {
+      if (!setSingleAssetReference(selectedAsset.value.id)) {
+        throw new Error(error.value || t("imageWorkbench.errors.invalidReferenceAsset"));
+      }
+    }
+    if (!hasUsableReferenceImage.value) {
+      throw new Error(t("imageWorkbench.errors.noReferenceImage"));
+    }
+    if (!supportsModeForConfig(activeImageConfig.value, "person_consistency")) {
+      throw new Error(t("imageWorkbench.errors.modeUnsupportedByProvider"));
+    }
+
+    inpaintEditorActive.value = false;
+    mode.value = "person_consistency";
+    quantity.value = taskPrompts.length;
+    const mergedNegativePrompt = mergePromptClause(
+      negativePrompt.value,
+      options.negativePrompt || parsedStoryboard.negativePrompt
+    );
+    negativePrompt.value = mergedNegativePrompt;
+    const snapshot = await runTxt2imgBatch({
+      mode: "person_consistency",
+      promptText: options.jobPrompt || parsedStoryboard.jobPrompt,
+      negativePromptText: mergedNegativePrompt,
+      quantity: taskPrompts.length,
+      taskPrompts,
+      generationOptionsExtra: options.generationOptions
+        ? { storyboard: options.generationOptions }
+        : undefined,
+    });
+    notice.value = formatTemplate(t("imageWorkbench.input.storyboardBatchNotice"), {
+      scenes: sceneCount,
+      variants: variantsPerScene,
+      count: taskPrompts.length,
+    });
+    return snapshot;
   }
 
   async function retryFailedTasks() {
@@ -513,6 +732,45 @@ export const useImageWorkbenchStore = defineStore("image-workbench", () => {
     }
   }
 
+  async function replanStoryboardGroup(groupId: string, variantsPerScene?: number | null) {
+    const cleanGroupId = groupId.trim();
+    if (!cleanGroupId) {
+      return null;
+    }
+    loading.value = true;
+    error.value = "";
+    notice.value = "";
+    cancelRequested.value = false;
+    let startedJobId = "";
+    try {
+      const snapshot = await imageWorkbenchService.replanStoryboardGroup({
+        groupId: cleanGroupId,
+        variantsPerScene: variantsPerScene ?? null,
+      });
+      currentSnapshot.value = snapshot;
+      selectedJobId.value = snapshot.job.id;
+      startedJobId = snapshot.job.id;
+      await syncCurrentGroups(snapshot.job.id);
+      startJobSnapshotPolling(snapshot.job.id);
+      await refreshWorkbenchLists().catch((err) => {
+        error.value = err instanceof Error ? err.message : String(err);
+      });
+      notice.value = formatTemplate(t("imageWorkbench.taskbar.storyboardReplanNotice"), {
+        count: variantsPerScene || 4,
+      });
+      return snapshot;
+    } catch (err) {
+      if (startedJobId) {
+        stopJobSnapshotPolling(startedJobId);
+      }
+      error.value = err instanceof Error ? err.message : String(err);
+      await refreshWorkbenchLists();
+      throw err;
+    } finally {
+      loading.value = false;
+    }
+  }
+
   async function resumeRunnableJobs(jobIds: string[]) {
     const startedJobIds: string[] = [];
     for (const jobId of jobIds) {
@@ -529,22 +787,89 @@ export const useImageWorkbenchStore = defineStore("image-workbench", () => {
     }
   }
 
-  async function deleteCurrentJob() {
+  async function deleteJobById(jobId: string, deleteAssets = false) {
+    if (!jobId) {
+      return;
+    }
+    await runWithLoading(async () => {
+      const result = await imageWorkbenchService.deleteJob(jobId, deleteAssets);
+      stopJobSnapshotPolling(jobId);
+      if (selectedJobId.value === jobId) {
+        inpaintEditorActive.value = false;
+        currentSnapshot.value = null;
+        clearCurrentGroups();
+        selectedJobId.value = "";
+        selectedAssetId.value = "";
+      }
+      await refreshWorkbenchLists();
+      if (!selectedJobId.value && jobs.value[0]) {
+        await selectJob(jobs.value[0].id);
+      }
+      notice.value = deleteAssets
+        ? formatTemplate(t("imageWorkbench.assetGroup.deleteJobWithAssetsNotice"), {
+            assets: result.deletedAssets,
+            files: result.deletedFiles,
+          })
+        : t("imageWorkbench.assetGroup.deleteJobOnlyNotice");
+    });
+  }
+
+  async function deleteCurrentJob(deleteAssets = false) {
     if (!currentJob.value) {
       return;
     }
-    const jobId = currentJob.value.id;
-    await runWithLoading(async () => {
-      await imageWorkbenchService.deleteJob(jobId);
-      inpaintEditorActive.value = false;
-      currentSnapshot.value = null;
-      clearCurrentGroups();
-      selectedJobId.value = "";
-      selectedAssetId.value = "";
-      await refreshWorkbenchLists();
-      if (jobs.value[0]) {
-        await selectJob(jobs.value[0].id);
+    await deleteJobById(currentJob.value.id, deleteAssets);
+  }
+
+  async function deleteAssetsByIds(assetIds: string[], deleteFiles = true) {
+    const ids = Array.from(new Set(assetIds.map((item) => item.trim()).filter(Boolean)));
+    if (!ids.length) {
+      return null;
+    }
+    const result = await runWithLoading(() =>
+      imageWorkbenchService.deleteAssets({ assetIds: ids, deleteFiles })
+    );
+    if (currentJob.value) {
+      currentSnapshot.value = await imageWorkbenchService.getJobSnapshot(currentJob.value.id).catch(() => currentSnapshot.value);
+      if (currentSnapshot.value) {
+        await syncCurrentGroups(currentSnapshot.value.job.id);
       }
+      syncSelectedAssetFromSnapshot();
+    }
+    await refreshWorkbenchLists();
+    notice.value = formatTemplate(t("imageWorkbench.assetGroup.deleteAssetsNotice"), {
+      assets: result.deletedAssets,
+      files: result.deletedFiles,
+    });
+    return result;
+  }
+
+  async function tagAssetsGroup(assetIds: string[], options: { groupId?: string | null; groupName?: string | null }) {
+    const ids = Array.from(new Set(assetIds.map((item) => item.trim()).filter(Boolean)));
+    if (!ids.length) {
+      return null;
+    }
+    const result = await runWithLoading(() =>
+      imageWorkbenchService.tagAssetsGroup({
+        assetIds: ids,
+        groupId: options.groupId || null,
+        groupName: options.groupName || null,
+      })
+    );
+    if (currentJob.value) {
+      await syncCurrentGroups(currentJob.value.id);
+    }
+    await refreshWorkbenchLists();
+    notice.value = formatTemplate(t("imageWorkbench.assetGroup.tagNotice"), {
+      count: result.taggedAssets,
+    });
+    return result;
+  }
+
+  async function exportAssetGroup(options: { groupId?: string | null; groupName?: string | null }) {
+    return exportGroup({
+      groupId: options.groupId || null,
+      groupName: options.groupName || null,
     });
   }
 
@@ -638,8 +963,8 @@ export const useImageWorkbenchStore = defineStore("image-workbench", () => {
       throw new Error(t("imageWorkbench.errors.noSelectedAsset"));
     }
     const nextPrompt =
-      source?.originalPrompt ||
       source?.expandedPrompt ||
+      source?.originalPrompt ||
       sourceJob?.prompt ||
       prompt.value;
     prompt.value = nextPrompt;
@@ -659,8 +984,8 @@ export const useImageWorkbenchStore = defineStore("image-workbench", () => {
       throw new Error(error.value || t("imageWorkbench.errors.invalidReferenceAsset"));
     }
     const rawPrompt =
-      source?.originalPrompt ||
       source?.expandedPrompt ||
+      source?.originalPrompt ||
       sourceJob?.prompt ||
       prompt.value;
     const styleSuffix = t("imageWorkbench.asset.stylePromptSuffix").trim();
@@ -724,6 +1049,7 @@ export const useImageWorkbenchStore = defineStore("image-workbench", () => {
     }
     clearReferenceImage();
     clearInpaintMask();
+    quantity.value = 1;
     syncSizeToSelectedAsset();
     inpaintEditorActive.value = true;
     return startInpaintSelectedAssetBase();
@@ -843,7 +1169,7 @@ export const useImageWorkbenchStore = defineStore("image-workbench", () => {
     }
     inpaintEditorActive.value = false;
     mode.value = (source?.mode as ImageWorkbenchMode) || sourceJob?.mode || "txt2img";
-    prompt.value = source?.originalPrompt || source?.expandedPrompt || sourceJob?.prompt || prompt.value;
+    prompt.value = source?.expandedPrompt || source?.originalPrompt || sourceJob?.prompt || prompt.value;
     negativePrompt.value = source?.negativePrompt || sourceJob?.negativePrompt || "";
     model.value = source?.model || sourceJob?.model || model.value;
   }
@@ -945,6 +1271,7 @@ export const useImageWorkbenchStore = defineStore("image-workbench", () => {
 
   return {
     loading,
+    storyboardRecognitionLoading,
     generating,
     error,
     notice,
@@ -985,6 +1312,10 @@ export const useImageWorkbenchStore = defineStore("image-workbench", () => {
     modelRuns,
     activeImageConfig,
     activeImageModelName,
+    imageProviderQueueConcurrency,
+    imageProviderQueueIsSerial,
+    imageProviderQueueTargetConcurrency,
+    imageProviderQueueNeedsUpgrade,
     imageModelConfigOptions,
     supportedModes,
     deferredModes,
@@ -1030,7 +1361,14 @@ export const useImageWorkbenchStore = defineStore("image-workbench", () => {
     canRunPersonConsistency,
     canRunUpscale2x,
     canRunUpscale4x,
+    storyboardBatchPreview,
+    storyboardBatchSceneCount,
+    storyboardBatchTaskCount,
+    canRunStoryboardBatch,
     loadInitialState,
+    enableImageProviderConcurrency,
+    recognizeStoryboardPromptWithAi,
+    generateStoryboardPromptWithAi,
     refreshWorkbenchLists,
     loadMoreAssetLibrary,
     createJob,
@@ -1039,11 +1377,17 @@ export const useImageWorkbenchStore = defineStore("image-workbench", () => {
     updateTaskStatus,
     recordTaskAsset,
     runTxt2imgBatch,
+    runStoryboardPromptBatch,
     retryFailedTasks,
+    replanStoryboardGroup,
     cancelJob,
     cancelTask,
     cancelCurrentJob,
+    deleteJobById,
     deleteCurrentJob,
+    deleteAssetsByIds,
+    tagAssetsGroup,
+    exportAssetGroup,
     toggleAssetFavorite,
     setAssetRating,
     getAssetQualityIssues,
@@ -1070,6 +1414,7 @@ export const useImageWorkbenchStore = defineStore("image-workbench", () => {
     openSelectedAssetLocation,
     exportCurrentJob,
     exportSelectedAsset,
+    exportGroup,
     cleanupDeletedAssets,
     cleanupInvalidAssets,
     copySelectedMetaPrompt,

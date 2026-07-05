@@ -12,6 +12,7 @@ import type { ImageWorkbenchAssetCard } from "./imageWorkbenchReview";
 
 const props = defineProps<{
   activeKey: ImageWorkbenchTaskEntryKey;
+  activePresetKey?: ImageWorkbenchTaskPresetKey | null;
   sourceAssets?: ImageWorkbenchAssetCard[];
 }>();
 
@@ -30,8 +31,15 @@ const activeTaskCard = computed(() =>
   taskEntries.value.find((item) => item.key === props.activeKey) || taskEntries.value[0]
 );
 const sourceAssets = computed(() => props.sourceAssets ?? []);
-const visibleSourceAssets = computed(() => sourceAssets.value.slice(0, 6));
-const showSourcePicker = computed(() => props.activeKey === "edit" && visibleSourceAssets.value.length > 0);
+const visibleSourceAssets = computed(() => sourceAssets.value.slice(0, 12));
+const showSourcePicker = computed(() =>
+  (props.activeKey === "edit" || props.activeKey === "upscale") && visibleSourceAssets.value.length > 0
+);
+const sourcePickerTitle = computed(() =>
+  props.activeKey === "upscale"
+    ? t("imageWorkbench.workspace.startSteps.upscale.first")
+    : t("imageWorkbench.workspace.startSteps.edit.first")
+);
 const startStepKeys = ["first", "second", "third"] as const;
 </script>
 
@@ -60,7 +68,7 @@ const startStepKeys = ["first", "second", "third"] as const;
         </div>
         <div v-if="showSourcePicker" class="image-workbench-start-source">
           <div class="image-workbench-start-source__head">
-            <strong>{{ t("imageWorkbench.workspace.startSteps.edit.first") }}</strong>
+            <strong>{{ sourcePickerTitle }}</strong>
             <small>{{ sourceAssets.length }}</small>
           </div>
           <div class="image-workbench-start-source__grid">
@@ -87,10 +95,24 @@ const startStepKeys = ["first", "second", "third"] as const;
             v-for="preset in taskPresets"
             :key="preset.key"
             type="button"
+            class="image-workbench-start-scene-card"
+            :class="{
+              'has-example': preset.exampleImageSrc,
+              'is-active': activePresetKey === preset.key,
+            }"
             @click="emit('applyPreset', preset.key)"
           >
-            <small>{{ preset.groupLabel }}</small>
-            <strong>{{ preset.label }}</strong>
+            <img
+              v-if="preset.exampleImageSrc"
+              class="image-workbench-start-scene-card__image"
+              :src="preset.exampleImageSrc"
+              alt=""
+            />
+            <span v-if="preset.exampleImageSrc" class="image-workbench-start-scene-card__shade" />
+            <span class="image-workbench-start-scene-card__content">
+              <small>{{ preset.groupLabel }}</small>
+              <strong>{{ preset.label }}</strong>
+            </span>
           </button>
         </div>
         <div class="image-workbench-start-steps" :aria-label="t('imageWorkbench.workspace.startStepsLabel')">

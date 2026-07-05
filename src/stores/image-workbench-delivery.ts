@@ -5,6 +5,7 @@ import { formatBytes, formatTemplate } from "../utils";
 import type {
   CleanupImageWorkbenchDeletedAssetsResult,
   CleanupImageWorkbenchInvalidAssetsResult,
+  ExportImageWorkbenchGroupRequest,
   ImageWorkbenchAsset,
   ImageWorkbenchJob,
 } from "../types/image-workbench";
@@ -56,6 +57,12 @@ export function createImageWorkbenchDeliveryActions({
     return exportPath;
   }
 
+  async function exportGroup(request: ExportImageWorkbenchGroupRequest) {
+    const exportPath = await runWithLoading(() => imageWorkbenchService.exportGroup(request));
+    await openExportPath(exportPath, notice, t);
+    return exportPath;
+  }
+
   async function cleanupDeletedAssets() {
     const result = await runWithLoading(() => imageWorkbenchService.cleanupDeletedAssets());
     await refreshWorkbenchLists();
@@ -74,6 +81,7 @@ export function createImageWorkbenchDeliveryActions({
     openSelectedAssetLocation,
     exportCurrentJob,
     exportSelectedAsset,
+    exportGroup,
     cleanupDeletedAssets,
     cleanupInvalidAssets,
   };

@@ -20,8 +20,8 @@ const mockAiQueueStatus = {
   pendingCount: 0,
   queueLimit: 16,
   runningCount: 0,
-  runningLimit: 6,
-  availableRunningSlots: 6,
+  runningLimit: 8,
+  availableRunningSlots: 8,
   availableSlots: 16,
   isSaturated: false,
   waitTimeoutMs: 90000,
@@ -226,12 +226,74 @@ function createMockAiGenerationResult(args: Record<string, unknown>) {
     };
   }
 
+  if (capability === "chat" && String(request?.prompt || "").includes("IMAGE_WORKBENCH_STORYBOARD_RECOGNITION_V1")) {
+    return {
+      ...base,
+      message: "浏览器 Mock 分镜智能识别成功",
+      text: createMockStoryboardRecognitionText(String(request?.prompt || "")),
+      artifacts: [],
+    };
+  }
+
+  if (capability === "chat" && String(request?.prompt || "").includes("IMAGE_WORKBENCH_STORYBOARD_GENERATION_V1")) {
+    return {
+      ...base,
+      message: "浏览器 Mock 短剧分镜生成成功",
+      text: createMockStoryboardGenerationText(String(request?.prompt || "")),
+      artifacts: [],
+    };
+  }
+
   return {
     ...base,
     message: "浏览器 Mock 对话生成成功",
     text: `Mock 回复：${String(request?.prompt || "ping").slice(0, 80)}`,
     artifacts: [],
   };
+}
+
+function createMockStoryboardRecognitionText(prompt: string) {
+  const sceneMatches = [...prompt.matchAll(/(?:^|\n)\s*(\d{1,3})\s*[｜|]\s*([^\n]+)/g)];
+  const scenes = sceneMatches.slice(0, 6).map((match, index) => ({
+    index: Number(match[1]) || index + 1,
+    title: match[2].trim(),
+    picturePrompt: `基于原文识别的画面：${match[2].trim()}，保留参考人物一致性。`,
+    cameraPrompt: "电影感中景，人物清晰，背景柔焦。",
+    emotionKeywords: "古风、故事感、情绪克制",
+    referencePrompt: "人物参考图为主，按标题语义补充场景、服装和道具参考。",
+  }));
+  const fallbackScenes = [
+    {
+      index: 1,
+      title: "智能识别示例",
+      picturePrompt: "根据粘贴文本整理出的古风人物分镜，保留参考图人物一致性，突出服装、情绪、动作和场景变化。",
+      cameraPrompt: "中近景，电影级光影，人物眼神作为画面中心。",
+      emotionKeywords: "古风、命运感、细腻、东方审美",
+      referencePrompt: "人物参考图为主，场景、服装、道具参考按文本语义辅助。",
+    },
+  ];
+  return JSON.stringify({
+    prefix: "参考图人物特征保持一致，保持同一张脸、同一五官比例、同一气质神韵。",
+    negativePrompt: "不要改变参考图人物五官，不要换脸，不要现代妆容，不要文字水印。",
+    scenes: scenes.length ? scenes : fallbackScenes,
+  }, null, 2);
+}
+
+function createMockStoryboardGenerationText(prompt: string) {
+  const direction = prompt.split("用户给的方向：").pop()?.trim().slice(0, 80) || "古风女主逆袭短剧";
+  const titles = ["开场钩子", "身份暗线", "雨夜危机", "反击前夜", "高台反转", "终章封面"];
+  return JSON.stringify({
+    prefix: "参考图人物特征保持一致，保持同一张脸、同一五官比例、同一气质神韵，短剧小说封面感，电影级画面，真实光影。",
+    negativePrompt: "不要改变参考图人物五官，不要换脸，不要现代妆容，不要低清晰度，不要文字水印，不要畸形手指。",
+    scenes: titles.map((title, index) => ({
+      index: index + 1,
+      title: `${String(index + 1).padStart(2, "0")}｜${title}`,
+      picturePrompt: `围绕“${direction}”生成的短剧小说分镜，主角保持参考图人物一致性，突出${title}的戏剧瞬间、服装变化、场景冲突和情绪张力。`,
+      cameraPrompt: index % 2 === 0 ? "电影感中近景，三分之二侧脸，前景遮挡，人物眼神作为画面中心。" : "广角叙事构图，低机位轻微仰拍，强轮廓光，背景层次清晰。",
+      emotionKeywords: "短剧、反转、命运感、东方审美、封面感",
+      referencePrompt: "人物参考图为主，按本镜补充场景、服装、道具和氛围参考。",
+    })),
+  }, null, 2);
 }
 
 function getMockAiGenerationDelayMs(capability: string, prompt: string) {

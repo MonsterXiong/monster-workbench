@@ -24,6 +24,7 @@ fn image_workbench_service_cancel_task_only_stops_selected_task() {
             mode: "txt2img".to_string(),
             prompt: "cancel one task".to_string(),
             negative_prompt: None,
+            task_prompts: Vec::new(),
             quantity: 2,
             provider_config_id: Some("model-config-1".to_string()),
             model: Some("gpt-image-2".to_string()),
@@ -82,6 +83,7 @@ fn create_single_task(service: &ImageWorkbenchService) -> String {
             mode: "txt2img".to_string(),
             prompt: "测试图片".to_string(),
             negative_prompt: None,
+            task_prompts: Vec::new(),
             quantity: 1,
             provider_config_id: None,
             model: Some("gpt-image-2".to_string()),
@@ -215,6 +217,7 @@ fn image_workbench_worker_records_inpaint_result_with_workbench_mask_path() {
             mode: "inpaint".to_string(),
             prompt: "fix hand".to_string(),
             negative_prompt: None,
+            task_prompts: Vec::new(),
             quantity: 1,
             provider_config_id: Some("model-config-1".to_string()),
             model: Some("gpt-image-2".to_string()),
@@ -330,6 +333,7 @@ fn image_workbench_service_expands_prompts_and_negative_constraints() {
             mode: "txt2img".to_string(),
             prompt: "雨夜森林小屋".to_string(),
             negative_prompt: None,
+            task_prompts: Vec::new(),
             quantity: 2,
             provider_config_id: None,
             model: Some("gpt-image-2".to_string()),
@@ -362,6 +366,45 @@ fn image_workbench_service_expands_prompts_and_negative_constraints() {
 }
 
 #[test]
+fn image_workbench_service_uses_task_prompts_when_provided() {
+    let (service, _app_dir) = test_service("task-prompts");
+    let snapshot = service
+        .create_job(CreateImageWorkbenchJobRequest {
+            mode: "txt2img".to_string(),
+            prompt: "古风女主分镜批量".to_string(),
+            negative_prompt: None,
+            task_prompts: vec![
+                "分镜一完整提示词".to_string(),
+                "分镜二完整提示词".to_string(),
+            ],
+            quantity: 2,
+            provider_config_id: None,
+            model: Some("gpt-image-2".to_string()),
+            size: Some("1024x1024".to_string()),
+            reference_asset_ids: Vec::new(),
+            reference_asset_ids_json: None,
+            source_asset_id: None,
+            source_image_path: None,
+            mask_path: None,
+            person_context_json: None,
+            upscale_scale: None,
+            fallback_policy: None,
+            generation_options_json: None,
+        })
+        .expect("job should create");
+
+    assert_eq!(snapshot.tasks.len(), 2);
+    assert_eq!(
+        snapshot.tasks[0].prompt.as_deref(),
+        Some("分镜一完整提示词")
+    );
+    assert_eq!(
+        snapshot.tasks[1].prompt.as_deref(),
+        Some("分镜二完整提示词")
+    );
+}
+
+#[test]
 fn image_workbench_service_adds_hand_negative_constraints() {
     let (service, _app_dir) = test_service("hand-negative-constraints");
     let snapshot = service
@@ -369,6 +412,7 @@ fn image_workbench_service_adds_hand_negative_constraints() {
             mode: "img2img".to_string(),
             prompt: "人物拿着道具".to_string(),
             negative_prompt: None,
+            task_prompts: Vec::new(),
             quantity: 1,
             provider_config_id: None,
             model: Some("gpt-image-2".to_string()),
@@ -406,6 +450,7 @@ fn image_workbench_service_allows_quantity_above_legacy_limit() {
             mode: "txt2img".to_string(),
             prompt: "批量生成测试".to_string(),
             negative_prompt: None,
+            task_prompts: Vec::new(),
             quantity: 17,
             provider_config_id: None,
             model: Some("gpt-image-2".to_string()),
@@ -507,6 +552,8 @@ fn image_workbench_service_cleans_deleted_job_asset_files() {
     assert!(persisted_path.is_file());
 
     service
+        .repo()
+        .expect("repo should resolve")
         .delete_job(&snapshot.job.id)
         .expect("job should soft delete");
     let result = service
@@ -642,6 +689,7 @@ fn image_workbench_service_creates_img2img_job_with_imported_reference_path() {
             mode: "img2img".to_string(),
             prompt: "".to_string(),
             negative_prompt: None,
+            task_prompts: Vec::new(),
             quantity: 1,
             provider_config_id: None,
             model: Some("gpt-image-2".to_string()),
@@ -696,6 +744,7 @@ fn image_workbench_service_worker_resolves_multiple_reference_asset_paths() {
             mode: "img2img".to_string(),
             prompt: "融合两张参考图".to_string(),
             negative_prompt: None,
+            task_prompts: Vec::new(),
             quantity: 1,
             provider_config_id: Some("model-config-1".to_string()),
             model: Some("gpt-image-2".to_string()),
@@ -778,6 +827,7 @@ fn image_workbench_service_worker_resolves_reference_paths_from_person_context()
             mode: "img2img".to_string(),
             prompt: "参考两张上传图生成".to_string(),
             negative_prompt: None,
+            task_prompts: Vec::new(),
             quantity: 1,
             provider_config_id: Some("model-config-1".to_string()),
             model: Some("gpt-image-2".to_string()),
@@ -1047,6 +1097,7 @@ fn image_workbench_worker_maps_generation_provider_unavailable_failure_kind() {
             mode: "txt2img".to_string(),
             prompt: "Provider 不可用测试".to_string(),
             negative_prompt: None,
+            task_prompts: Vec::new(),
             quantity: 1,
             provider_config_id: Some("model-config-1".to_string()),
             model: Some("gpt-image-2".to_string()),
@@ -1112,6 +1163,7 @@ fn image_workbench_worker_forwards_generation_output_options() {
             mode: "txt2img".to_string(),
             prompt: "输出参数测试".to_string(),
             negative_prompt: None,
+            task_prompts: Vec::new(),
             quantity: 1,
             provider_config_id: Some("model-config-1".to_string()),
             model: Some("gpt-image-2".to_string()),
@@ -1183,6 +1235,7 @@ fn image_workbench_service_worker_records_txt2img_result() {
             mode: "txt2img".to_string(),
             prompt: "后端 worker 测试".to_string(),
             negative_prompt: Some("低质量".to_string()),
+            task_prompts: Vec::new(),
             quantity: 1,
             provider_config_id: Some("model-config-1".to_string()),
             model: Some("gpt-image-2".to_string()),
@@ -1261,6 +1314,7 @@ fn image_workbench_worker_marks_task_failed_when_result_asset_cannot_be_recorded
             mode: "txt2img".to_string(),
             prompt: "asset failure".to_string(),
             negative_prompt: None,
+            task_prompts: Vec::new(),
             quantity: 1,
             provider_config_id: Some("model-config-1".to_string()),
             model: Some("gpt-image-2".to_string()),
@@ -1326,6 +1380,7 @@ fn image_workbench_service_worker_records_all_returned_image_artifacts() {
             mode: "txt2img".to_string(),
             prompt: "同一次调用返回两张候选图".to_string(),
             negative_prompt: None,
+            task_prompts: Vec::new(),
             quantity: 1,
             provider_config_id: Some("model-config-1".to_string()),
             model: Some("gpt-image-2".to_string()),
@@ -1464,6 +1519,7 @@ fn image_workbench_service_worker_writes_group_and_version_chain() {
             mode: "txt2img".to_string(),
             prompt: "初版".to_string(),
             negative_prompt: None,
+            task_prompts: Vec::new(),
             quantity: 1,
             provider_config_id: Some("model-config-1".to_string()),
             model: Some("gpt-image-2".to_string()),
@@ -1493,6 +1549,7 @@ fn image_workbench_service_worker_writes_group_and_version_chain() {
             mode: "img2img".to_string(),
             prompt: "复跑".to_string(),
             negative_prompt: None,
+            task_prompts: Vec::new(),
             quantity: 1,
             provider_config_id: Some("model-config-1".to_string()),
             model: Some("gpt-image-2".to_string()),
@@ -1523,6 +1580,7 @@ fn image_workbench_service_cancel_records_model_run_audit() {
             mode: "txt2img".to_string(),
             prompt: "取消审计测试".to_string(),
             negative_prompt: None,
+            task_prompts: Vec::new(),
             quantity: 1,
             provider_config_id: Some("model-config-1".to_string()),
             model: Some("gpt-image-2".to_string()),
