@@ -20,7 +20,6 @@ const props = defineProps<{
   asset: ImageWorkbenchAsset | null;
   displayUrl: string;
   hasSavedMask: boolean;
-  savedMaskPath: string;
 }>();
 
 const emit = defineEmits<{
@@ -74,6 +73,9 @@ const {
 void maskCanvasRef;
 
 const hasMaskPreview = computed(() => Boolean(maskPreviewDataUrl.value));
+const maskStatusLabel = computed(() =>
+  props.hasSavedMask ? t("imageWorkbench.mask.ready") : t("imageWorkbench.mask.empty")
+);
 const maskLayerStyle = computed(() => ({
   width: `${maskZoom.value * 100}%`,
   height: `${maskZoom.value * 100}%`,
@@ -105,7 +107,10 @@ function handleMaskStageImageLoad(event: Event) {
 <template>
   <div class="image-workbench-mask-workspace">
     <div class="image-workbench-mask-toolbar">
-      <span>{{ t("imageWorkbench.mask.title") }}</span>
+      <div class="image-workbench-mask-toolbar__title">
+        <span>{{ t("imageWorkbench.mask.title") }}</span>
+        <small :class="{ 'is-ready': hasSavedMask }">{{ maskStatusLabel }}</small>
+      </div>
       <div class="image-workbench-mask-tools">
         <button type="button" :class="{ 'is-active': maskTool === 'paint' }" @click="maskTool = 'paint'">
           <Paintbrush class="h-3.5 w-3.5" />
@@ -209,6 +214,9 @@ function handleMaskStageImageLoad(event: Event) {
             @pointerleave="finishMaskStroke"
           ></canvas>
         </div>
+        <div v-if="!hasMaskPreview && !hasSavedMask" class="image-workbench-mask-stage-hint">
+          {{ t("imageWorkbench.mask.empty") }}
+        </div>
       </div>
       <aside class="image-workbench-mask-preview-panel">
         <div class="image-workbench-mask-preview-grid">
@@ -236,21 +244,6 @@ function handleMaskStageImageLoad(event: Event) {
               <small v-if="!hasMaskFocusPoint">{{ t("imageWorkbench.mask.previewEmpty") }}</small>
             </div>
           </div>
-          <div class="image-workbench-mask-preview-tile">
-            <span>{{ t("imageWorkbench.mask.originalPreview") }}</span>
-            <img
-              :key="`original-${displayUrl}`"
-              :src="displayUrl"
-              alt=""
-              @load="handleImageLoad"
-              @error="handleImageLoadError($event, asset?.filePath)"
-            />
-          </div>
-          <div class="image-workbench-mask-preview-tile">
-            <span>{{ t("imageWorkbench.mask.maskPreview") }}</span>
-            <img v-if="hasMaskPreview" :src="maskPreviewDataUrl" alt="" />
-            <small v-else>{{ t("imageWorkbench.mask.previewEmpty") }}</small>
-          </div>
           <div class="image-workbench-mask-preview-tile image-workbench-mask-preview-tile--overlay">
             <span>{{ t("imageWorkbench.mask.overlayPreview") }}</span>
             <div>
@@ -266,10 +259,6 @@ function handleMaskStageImageLoad(event: Event) {
           </div>
         </div>
       </aside>
-    </div>
-    <div class="image-workbench-mask-footer">
-      <span>{{ hasSavedMask ? t("imageWorkbench.mask.ready") : t("imageWorkbench.mask.empty") }}</span>
-      <small v-if="savedMaskPath">{{ savedMaskPath }}</small>
     </div>
   </div>
 </template>

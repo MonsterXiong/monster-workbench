@@ -854,7 +854,7 @@ onBeforeUnmount(() => {
               </button>
             </div>
           </div>
-          <div v-if="currentJob && !showSceneGuide" class="image-workbench-job-context">
+          <div v-if="currentJob && !showSceneGuide && !isInpaintWorkspace" class="image-workbench-job-context">
             <div
               class="image-workbench-job-context__prompt"
               :title="currentJob.prompt || t('imageWorkbench.review.emptyPrompt')"
@@ -925,7 +925,6 @@ onBeforeUnmount(() => {
             :asset="selectedAsset"
             :display-url="selectedAssetDisplayUrl"
             :has-saved-mask="imageWorkbenchStore.hasInpaintMask"
-            :saved-mask-path="imageWorkbenchStore.inpaintMaskPath"
             @save="imageWorkbenchStore.saveInpaintMaskDraft"
             @clear="imageWorkbenchStore.clearInpaintMask"
           />
