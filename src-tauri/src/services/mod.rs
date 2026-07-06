@@ -20,6 +20,7 @@ pub(crate) mod image_workbench_cancel;
 pub(crate) mod image_workbench_cleanup;
 mod image_workbench_failure;
 mod image_workbench_generation_bridge;
+mod image_workbench_generation_options;
 pub(crate) mod image_workbench_import;
 pub(crate) mod image_workbench_mask;
 mod image_workbench_runner;
