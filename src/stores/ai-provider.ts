@@ -1,7 +1,20 @@
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
-import aiProviderRegistryJson from "../config/ai-provider-registry.json";
 import { patchAiPreferenceState, readAiPreferenceState } from "../services/ai-preferences";
+import {
+  AI_ACTIVE_CONFIG_KEYS,
+  AI_ACTIVE_MODEL_CONFIGS_KEY,
+  AI_IMAGE_REQUEST_TIMEOUT_MAX_MS,
+  AI_MODEL_CONFIGS_KEY,
+  AI_PROVIDER_CAPABILITIES,
+  AI_PROVIDER_CONFIG_KEY,
+  DEFAULT_AI_MAX_CONCURRENCY,
+  MAX_AI_MODEL_CONCURRENCY,
+  aiProviderAdapterDefaults,
+  aiProviderDefaults,
+  aiProviderRegistry,
+  defaultAiProviderConfig,
+} from "./ai-provider-config";
 import {
   applyObjectPatch,
   clampNumber,
@@ -25,62 +38,20 @@ import type {
   AiProviderType,
 } from "../types/ai";
 
-export const AI_PROVIDER_CONFIG_KEY = "aiProvider";
-export const AI_MODEL_CONFIGS_KEY = "aiModelConfigs";
-export const AI_ACTIVE_MODEL_CONFIGS_KEY = "aiActiveModelConfigs";
-export const DEFAULT_AI_MAX_CONCURRENCY = 8;
-export const MAX_AI_MODEL_CONCURRENCY = 8;
-export const AI_IMAGE_REQUEST_TIMEOUT_MS = 720_000;
-export const AI_IMAGE_REQUEST_TIMEOUT_MAX_MS = 900_000;
-
-type AiProviderRegistryAdapter = {
-  displayName: string;
-  capabilities: AiProviderCapability[];
-  baseUrlHostPatterns?: string[];
-};
-
-type AiProviderRegistryProvider = Pick<
-  AiProviderConfig,
-  "displayName" | "baseUrl" | "model" | "adapterId"
-> & {
-  capabilities?: AiProviderCapability[];
-};
-
-type AiProviderRegistry = {
-  defaultProviderId: AiProviderType;
-  defaultAdapterId: AiProviderAdapterId;
-  adapters: Record<AiProviderAdapterId, AiProviderRegistryAdapter>;
-  providers: Record<AiProviderType, AiProviderRegistryProvider>;
-};
-
-const aiProviderRegistry = aiProviderRegistryJson as AiProviderRegistry;
-
-export const AI_ACTIVE_CONFIG_KEYS: AiActiveConfigIdKey[] = [
-  "chat",
-  "image",
-  "txt2img",
-  "img2img",
-  "inpaint",
-  "upscale_2x",
-  "upscale_4x",
-  "person_consistency",
-  "audio",
-  "video",
-];
-
-export const AI_PROVIDER_CAPABILITIES: AiProviderCapability[] = [
-  "models",
-  "chat",
-  "image",
-  "txt2img",
-  "img2img",
-  "inpaint",
-  "upscale_2x",
-  "upscale_4x",
-  "person_consistency",
-  "audio",
-  "video",
-];
+export {
+  AI_ACTIVE_CONFIG_KEYS,
+  AI_ACTIVE_MODEL_CONFIGS_KEY,
+  AI_IMAGE_REQUEST_TIMEOUT_MAX_MS,
+  AI_IMAGE_REQUEST_TIMEOUT_MS,
+  AI_MODEL_CONFIGS_KEY,
+  AI_PROVIDER_CAPABILITIES,
+  AI_PROVIDER_CONFIG_KEY,
+  DEFAULT_AI_MAX_CONCURRENCY,
+  MAX_AI_MODEL_CONCURRENCY,
+  aiProviderAdapterDefaults,
+  aiProviderDefaults,
+  defaultAiProviderConfig,
+} from "./ai-provider-config";
 
 const GPT_IMAGE_NATIVE_CAPABILITIES = new Set<AiProviderCapability>(["img2img", "inpaint", "person_consistency"]);
 const OPENAI_COMPATIBLE_UNVERIFIED_CAPABILITIES = new Set<AiProviderCapability>(["upscale_2x", "upscale_4x"]);
@@ -95,34 +66,6 @@ const AI_ACTIVE_CONFIG_FALLBACKS: Record<AiActiveConfigIdKey, AiActiveConfigIdKe
   person_consistency: ["person_consistency", "image", "txt2img"],
   audio: ["audio", "chat"],
   video: ["video", "image", "txt2img"],
-};
-
-export const aiProviderDefaults: Record<
-  AiProviderType,
-  Pick<AiProviderConfig, "displayName" | "baseUrl" | "model" | "adapterId">
-> = { ...aiProviderRegistry.providers };
-
-export const aiProviderAdapterDefaults: Record<
-  AiProviderAdapterId,
-  Pick<AiProviderRegistryAdapter, "displayName" | "capabilities">
-> = { ...aiProviderRegistry.adapters };
-
-export const defaultAiProviderConfig: AiProviderConfig = {
-  provider: "custom",
-  adapterId: aiProviderDefaults.custom.adapterId,
-  displayName: aiProviderDefaults.custom.displayName,
-  baseUrl: aiProviderDefaults.custom.baseUrl,
-  apiKey: "",
-  rememberApiKey: false,
-  model: aiProviderDefaults.custom.model,
-  testPrompt: "请回复一句话：连接测试成功。",
-  imageModel: "gpt-image-2",
-  imagePrompt: "生成一张光线干净、主体明确的产品海报。",
-  imageSize: "1008x1792",
-  imageCount: 1,
-  timeoutMs: AI_IMAGE_REQUEST_TIMEOUT_MS,
-  queueMode: "concurrent",
-  maxConcurrency: DEFAULT_AI_MAX_CONCURRENCY,
 };
 
 const currentTime = () => getCurrentTimestampMs();

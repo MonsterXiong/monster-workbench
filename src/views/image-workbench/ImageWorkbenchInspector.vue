@@ -14,7 +14,7 @@ import {
 } from "lucide-vue-next";
 import { useI18n } from "../../composables/useI18n";
 import { useImageWorkbenchStore } from "../../stores/image-workbench";
-import { formatBytes, formatDateTime, formatTemplate } from "../../utils";
+import { formatTemplate } from "../../utils";
 import { useImageWorkbenchImageFallback } from "./useImageWorkbenchImageFallback";
 import ImageWorkbenchRecentPanel from "./ImageWorkbenchRecentPanel.vue";
 import {
@@ -29,13 +29,19 @@ import {
   type ImageWorkbenchAssetShelfView,
   type ImageWorkbenchAssetCard,
 } from "./imageWorkbenchReview";
+import {
+  formatImageWorkbenchAssetFileSize,
+  formatImageWorkbenchAssetUpdatedAt,
+  formatImageWorkbenchImageDimensions,
+  formatImageWorkbenchRatingButtonLabel,
+  formatImageWorkbenchReferenceRoleLabel,
+  isKnownImageWorkbenchSize,
+  normalizeImageWorkbenchImageSize,
+  resolveImageWorkbenchBranchTaskEntry,
+} from "./imageWorkbenchInspectorHelpers";
 import { buildImageWorkbenchJobReferenceViews } from "./imageWorkbenchReferences";
 import { buildImageWorkbenchHandlers } from "./useImageWorkbenchHandlers";
-import type {
-  ImageWorkbenchAsset,
-  ImageWorkbenchQualityIssue,
-  ImageWorkbenchReferenceRole,
-} from "../../types/image-workbench";
+import type { ImageWorkbenchQualityIssue } from "../../types/image-workbench";
 import type { ImageWorkbenchTaskEntryKey } from "./imageWorkbenchTaskLauncher";
 
 const { t } = useI18n();
@@ -78,15 +84,16 @@ const selectedAssetCard = computed(() =>
     .find((item: ImageWorkbenchAssetCard) => item.id === selectedAsset.value?.id) || null
 );
 const selectedAssetDisplayUrl = computed(() => selectedAssetCard.value?.displayUrl || "");
-const selectedImageDimensions = computed(() => formatImageDimensions(selectedAsset.value));
+const selectedImageDimensions = computed(() => formatImageWorkbenchImageDimensions(selectedAsset.value));
 const selectedRequestedSize = computed(() => selectedAssetJob.value?.size?.trim() || "-");
 const selectedGenerationDetails = computed(() =>
   buildSelectedGenerationDetails({ asset: selectedAsset.value, job: selectedAssetJob.value, t })
 );
 const hasImageSizeMismatch = computed(() =>
-  isKnownSize(selectedRequestedSize.value) &&
-  isKnownSize(selectedImageDimensions.value) &&
-  normalizeImageSize(selectedRequestedSize.value) !== normalizeImageSize(selectedImageDimensions.value)
+  isKnownImageWorkbenchSize(selectedRequestedSize.value) &&
+  isKnownImageWorkbenchSize(selectedImageDimensions.value) &&
+  normalizeImageWorkbenchImageSize(selectedRequestedSize.value) !==
+    normalizeImageWorkbenchImageSize(selectedImageDimensions.value)
 );
 const imageSizeMismatchText = computed(() =>
   formatTemplate(t("imageWorkbench.details.sizeMismatch"), {
@@ -98,14 +105,14 @@ const selectedAssetSummary = computed(() => {
   if (!selectedAsset.value) {
     return t("imageWorkbench.review.noSelection");
   }
-  return `${selectedImageDimensions.value} · ${formatAssetSize(selectedAsset.value)}`;
+  return `${selectedImageDimensions.value} · ${formatImageWorkbenchAssetFileSize(selectedAsset.value)}`;
 });
 const selectedJobReferenceViews = computed(() =>
   buildImageWorkbenchJobReferenceViews({
     job: selectedAssetJob.value,
     currentAssets: imageWorkbenchStore.currentAssetCards,
     libraryAssets: imageWorkbenchStore.libraryAssetCards,
-    referenceRoleLabel,
+    referenceRoleLabel: (role, index = 0) => formatImageWorkbenchReferenceRoleLabel(role, index, t),
     resolveDisplayUrl: imageWorkbenchStore.resolveReferenceDisplayUrl,
   })
 );
@@ -212,18 +219,6 @@ const {
   handlePrepareSelectedAssetQualityFix,
 } = buildImageWorkbenchHandlers(imageWorkbenchStore);
 
-function formatMs(ms?: number | null) {
-  return ms ? formatDateTime(new Date(ms)) : "-";
-}
-
-function formatAssetSize(asset: ImageWorkbenchAsset | null) {
-  return asset?.sizeBytes ? formatBytes(asset.sizeBytes, { decimals: 1 }) : "-";
-}
-
-function formatImageDimensions(asset: ImageWorkbenchAsset | null) {
-  return asset?.width && asset.height ? `${asset.width}x${asset.height}` : "-";
-}
-
 function selectedAssetActionDisabledReason(canRun: boolean, unavailableKey: string) {
   return buildSelectedAssetActionDisabledReason({
     selectedAsset: selectedAsset.value,
@@ -231,27 +226,6 @@ function selectedAssetActionDisabledReason(canRun: boolean, unavailableKey: stri
     unavailableKey,
     t,
   });
-}
-
-function normalizeImageSize(value: string) {
-  return value.trim().toLowerCase().replace("×", "x");
-}
-
-function isKnownSize(value: string) {
-  return Boolean(value && value !== "-");
-}
-
-function referenceRoleLabel(role: ImageWorkbenchReferenceRole | undefined, index = 0) {
-  const normalized = role && ["person", "prop", "scene", "style"].includes(role)
-    ? role
-    : (["person", "prop", "scene", "style"] as const)[index] || "style";
-  return t(`imageWorkbench.reference.roles.${normalized}`);
-}
-
-function ratingButtonLabel(rating: number) {
-  return rating === 0
-    ? t("imageWorkbench.asset.clearRating")
-    : formatTemplate(t("imageWorkbench.asset.setRating"), { rating });
 }
 
 function isQualityIssueActive(issue: ImageWorkbenchQualityIssue) {
@@ -278,7 +252,7 @@ function handleRegenerateClick() {
 }
 
 function handleBranchActionClick(actionKey: string) {
-  const taskEntry = branchActionTaskEntry(actionKey);
+  const taskEntry = resolveImageWorkbenchBranchTaskEntry(actionKey);
   if (taskEntry) {
     emit("prepare-task-entry", taskEntry);
   }
@@ -289,22 +263,6 @@ function handleQualityFixClick() {
   if (issue) {
     emit("task-entry-change", issue === "identity" ? "person" : "edit");
   }
-}
-
-function branchActionTaskEntry(actionKey: string): ImageWorkbenchTaskEntryKey | "" {
-  if (actionKey === "continue-style") {
-    return "style";
-  }
-  if (actionKey === "inpaint") {
-    return "edit";
-  }
-  if (actionKey === "person") {
-    return "person";
-  }
-  if (actionKey === "upscale") {
-    return "upscale";
-  }
-  return "";
 }
 
 </script>
@@ -451,7 +409,7 @@ function branchActionTaskEntry(actionKey: string): ImageWorkbenchTaskEntryKey | 
                 :key="rating"
                 type="button"
                 :class="{ 'is-active': (selectedAsset.rating || 0) === rating }"
-                :title="ratingButtonLabel(rating)"
+                :title="formatImageWorkbenchRatingButtonLabel(rating, t)"
                 @click="handleSetAssetRating(selectedAsset, rating === 0 ? null : rating)"
               >
                 <span v-if="rating === 0">0</span>
@@ -611,7 +569,7 @@ function branchActionTaskEntry(actionKey: string): ImageWorkbenchTaskEntryKey | 
             </div>
             <div>
               <dt>{{ t("imageWorkbench.details.assetSize") }}</dt>
-              <dd>{{ formatAssetSize(selectedAsset) }}</dd>
+              <dd>{{ formatImageWorkbenchAssetFileSize(selectedAsset) }}</dd>
             </div>
             <div>
               <dt>{{ t("imageWorkbench.details.integrity") }}</dt>
@@ -641,7 +599,7 @@ function branchActionTaskEntry(actionKey: string): ImageWorkbenchTaskEntryKey | 
             </div>
             <div>
               <dt>{{ t("imageWorkbench.details.createdAt") }}</dt>
-              <dd>{{ formatMs(selectedAsset.createdAtMs) }}</dd>
+              <dd>{{ formatImageWorkbenchAssetUpdatedAt(selectedAsset.createdAtMs) }}</dd>
             </div>
             <div>
               <dt>{{ t("imageWorkbench.details.prompt") }}</dt>
