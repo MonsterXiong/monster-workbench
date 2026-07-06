@@ -1,13 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted } from "vue";
+import { computed, onMounted, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { Image, MessageSquareText, Puzzle, ScrollText, SlidersHorizontal } from "lucide-vue-next";
+import { ScrollText, SlidersHorizontal } from "lucide-vue-next";
 import { useI18n } from "../../composables/useI18n";
 import { useToast } from "../../composables/useToast";
 import { useAiStore } from "../../stores/ai";
-import AiChatPanel from "./components/AiChatPanel.vue";
-import AiFeaturePanel from "./components/AiFeaturePanel.vue";
-import AiImagePanel from "./components/AiImagePanel.vue";
 import AiPromptPanel from "./components/AiPromptPanel.vue";
 import AiProviderPanel from "./components/AiProviderPanel.vue";
 import { getQueryParamEnum } from "../../utils";
@@ -18,15 +15,12 @@ const aiStore = useAiStore();
 const route = useRoute();
 const router = useRouter();
 
-const AI_TAB_VALUES = ["config", "chat", "image", "prompts", "features"] as const;
+const AI_TAB_VALUES = ["config", "prompts"] as const;
 type AiTab = typeof AI_TAB_VALUES[number];
 
 const tabs = [
   { key: "config", labelKey: "aiPage.tabs.config", icon: SlidersHorizontal },
-  { key: "chat", labelKey: "aiPage.tabs.chat", icon: MessageSquareText },
-  { key: "image", labelKey: "aiPage.tabs.image", icon: Image },
   { key: "prompts", labelKey: "aiPage.tabs.prompts", icon: ScrollText },
-  { key: "features", labelKey: "aiPage.tabs.features", icon: Puzzle },
 ] as const;
 
 function normalizeTab(value: unknown): AiTab {
@@ -45,6 +39,23 @@ const activeTab = computed<AiTab>({
   },
 });
 
+watch(
+  () => route.query.tab,
+  (value) => {
+    const current = Array.isArray(value) ? value[0] : value;
+    const normalized = normalizeTab(value);
+    if (current && current !== normalized) {
+      void router.replace({
+        query: {
+          ...route.query,
+          tab: normalized,
+        },
+      });
+    }
+  },
+  { immediate: true }
+);
+
 const handleSaved = () => {
   triggerToast(t("settings.aiProvider.saveSuccess"), "success");
 };
@@ -55,10 +66,6 @@ const handleTested = (ok: boolean, message: string) => {
 
 const handleFailed = (message: string) => {
   triggerToast(message, "error");
-};
-
-const handleUsePrompt = (type: "chat" | "image") => {
-  activeTab.value = type;
 };
 
 onMounted(() => {
@@ -92,17 +99,7 @@ onMounted(() => {
           @tested="handleTested"
           @failed="handleFailed"
         />
-        <AiChatPanel
-          v-else-if="activeTab === 'chat'"
-          @tested="handleTested"
-          @failed="handleFailed"
-        />
-        <AiImagePanel
-          v-else-if="activeTab === 'image'"
-          @failed="handleFailed"
-        />
-        <AiPromptPanel v-else-if="activeTab === 'prompts'" @use="handleUsePrompt" />
-        <AiFeaturePanel v-else />
+        <AiPromptPanel v-else />
       </div>
     </section>
   </main>

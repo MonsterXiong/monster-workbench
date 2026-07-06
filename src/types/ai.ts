@@ -38,10 +38,6 @@ export type AiProviderQueueMode = "serial" | "concurrent";
 export type AiProviderTestQueueStatus = "queued" | "running" | "success" | "failed" | "canceled";
 export type AiGenerationTaskStatus = "queued" | "running" | "success" | "failed" | "canceled";
 export type AiPromptType = "chat" | "image";
-export type AiSessionType = AiPromptType;
-export type AiSessionMessageRole = "user" | "assistant" | "error";
-export type AiSessionMessageStatus = "success" | "failed" | "pending" | "canceled";
-export type AiChatExportFormat = "markdown" | "txt" | "json";
 export type AiImageFailureKind =
   | "unsupported_size"
   | "timeout"
@@ -278,43 +274,6 @@ export interface AiPromptInput {
   categoryName?: string;
   title: string;
   content: string;
-}
-
-export interface AiSessionMessage {
-  id: string;
-  role: AiSessionMessageRole;
-  status: AiSessionMessageStatus;
-  content: string;
-  requestId?: string;
-  modelConfigId: string;
-  model: string;
-  error?: string;
-  latencyMs?: number;
-  queueWaitMs?: number | null;
-  totalLatencyMs?: number | null;
-  imageSize?: string;
-  apiImageSize?: string;
-  requestedImageSize?: string;
-  actualImageSize?: string;
-  fallbackImageSize?: string;
-  imageAttempts?: number;
-  imageCount?: number;
-  failureKind?: AiImageFailureKind;
-  imageUrls?: string[];
-  imagePaths?: string[];
-  savedFiles?: AiProviderSavedFile[];
-  createdAt: number;
-}
-
-export interface AiConversationSession {
-  id: string;
-  type: AiSessionType;
-  title: string;
-  modelConfigId: string;
-  imageSize?: string;
-  createdAt: number;
-  updatedAt: number;
-  messages: AiSessionMessage[];
 }
 
 export type AiActiveConfigIds = Record<AiActiveConfigIdKey, string>;

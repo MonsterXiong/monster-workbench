@@ -80,7 +80,7 @@ export const defaultAiProviderConfig: AiProviderConfig = {
   displayName: aiProviderDefaults.custom.displayName,
   baseUrl: aiProviderDefaults.custom.baseUrl,
   apiKey: "",
-  rememberApiKey: false,
+  rememberApiKey: true,
   model: aiProviderDefaults.custom.model,
   testPrompt: "请回复一句话：连接测试成功。",
   imageModel: "gpt-image-2",

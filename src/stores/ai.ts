@@ -1,61 +1,36 @@
 import { defineStore, storeToRefs } from "pinia";
 import { firstItem } from "../utils";
 import type {
-  AiChatExportFormat,
   AiActiveConfigIdKey,
-  AiConversationSession,
   AiProviderCapability,
   AiProviderTestAction,
   AiProviderTestQueueItem,
   AiProviderTestTask,
 } from "../types/ai";
 import { useAiProviderStore } from "./ai-provider";
-import { useAiChatRuntimeStore } from "./ai-chat-runtime";
 import { useAiProviderRuntimeStore } from "./ai-provider-runtime";
-import { useAiSessionRuntimeStore } from "./ai-session-runtime";
-import { useAiSessionStore } from "./ai-session";
 import { useAiQueueStore } from "./ai-queue";
 import { useAiPromptLibraryStore } from "./ai-prompt-library";
-import { useAiImageStore } from "./ai-image";
-import { useAiImageRuntimeStore } from "./ai-image-runtime";
-import { useAiGenerationStore } from "./ai-generation";
 
 export const useAiStore = defineStore("ai", () => {
   const aiProviderStore = useAiProviderStore();
-  const aiChatRuntimeStore = useAiChatRuntimeStore();
   const aiProviderRuntimeStore = useAiProviderRuntimeStore();
-  const aiSessionRuntimeStore = useAiSessionRuntimeStore();
-  const aiSessionStore = useAiSessionStore();
   const aiQueueStore = useAiQueueStore();
   const aiPromptLibraryStore = useAiPromptLibraryStore();
-  const aiImageStore = useAiImageStore();
-  const aiImageRuntimeStore = useAiImageRuntimeStore();
-  const aiGenerationStore = useAiGenerationStore();
 
   const {
     config,
     selectedConfigId,
     modelConfigs,
     activeModelConfigIds,
+    isLoaded,
     providerOptions,
     adapterOptions,
     modelConfigOptions,
     selectedModelConfig,
-    activeChatConfig,
-    activeImageConfig,
     activeCapabilityConfigMap,
     selectedConfigCapabilities,
-    activeChatConfigCapabilities,
-    activeImageConfigCapabilities,
   } = storeToRefs(aiProviderStore);
-  const {
-    sessions,
-    activeSessionIds,
-    chatSessions,
-    imageSessions,
-    activeChatSession,
-    activeImageSession,
-  } = storeToRefs(aiSessionStore);
   const {
     isTesting,
     activeAction,
@@ -67,28 +42,8 @@ export const useAiStore = defineStore("ai", () => {
   } = storeToRefs(aiQueueStore);
   const {
     promptLibrary,
-    pendingPrompt,
     promptTypeOptions,
   } = storeToRefs(aiPromptLibraryStore);
-  const { imageDraftSize } = storeToRefs(aiImageStore);
-  const { isLoaded } = storeToRefs(aiSessionRuntimeStore);
-  const {
-    prompts: generationPrompts,
-    modelOverrides: generationModelOverrides,
-    imageSize: generationImageSize,
-    imageCount: generationImageCount,
-    audioVoice: generationAudioVoice,
-    audioFormat: generationAudioFormat,
-    videoSize: generationVideoSize,
-    videoDurationSeconds: generationVideoDurationSeconds,
-    isGenerating: isGeneratingAtomicContent,
-    isCancelling: isCancellingAtomicContent,
-    activeCapability: activeGenerationCapability,
-    activeRequestId: activeGenerationRequestId,
-    lastResult: lastGenerationResult,
-    lastError: lastGenerationError,
-    generationCapabilities,
-  } = storeToRefs(aiGenerationStore);
 
   function isActionBusy(
     action: AiProviderTestAction,
@@ -101,41 +56,14 @@ export const useAiStore = defineStore("ai", () => {
     return aiProviderStore.modelConfigSupportsCapability(configId, capability);
   }
 
-  function createSession(
-    type: AiConversationSession["type"],
-    options: { persist?: boolean } = {}
-  ) {
-    return aiSessionRuntimeStore.createSession(type, options);
-  }
-
-  function selectSession(type: AiConversationSession["type"], sessionId: string) {
-    return aiSessionRuntimeStore.selectSession(type, sessionId);
-  }
-
-  async function deleteSession(sessionId: string) {
-    await aiSessionRuntimeStore.deleteSession(sessionId);
-  }
-
-  async function renameSession(sessionId: string, title: string) {
-    await aiSessionRuntimeStore.renameSession(sessionId, title);
-  }
-
-  async function duplicateSession(sessionId: string) {
-    return await aiSessionRuntimeStore.duplicateSession(sessionId);
-  }
-
-  async function exportChatSession(
-    sessionId: string,
-    format: AiChatExportFormat
-  ) {
-    return await aiChatRuntimeStore.exportChatSession(sessionId, format);
-  }
-
   function setActiveModelConfig(
     type: AiActiveConfigIdKey,
     configId: string
   ) {
-    aiSessionRuntimeStore.setActiveModelConfig(type, configId);
+    aiProviderStore.setActiveCapabilityModelConfig(type, configId);
+    void aiProviderStore.saveConfig().catch((error) => {
+      console.error("[ERR_AI_ACTIVE_MODEL_PERSIST]", error);
+    });
   }
 
   function createModelConfig() {
@@ -163,15 +91,7 @@ export const useAiStore = defineStore("ai", () => {
       }
     });
 
-    for (const session of sessions.value) {
-      if (session.modelConfigId === configId) {
-        session.modelConfigId = fallbackId;
-        session.updatedAt = Date.now();
-      }
-    }
-
     await aiProviderStore.saveConfig();
-    await aiSessionRuntimeStore.persistSessions();
   }
 
   async function cancelBackendQueuedTests() {
@@ -198,23 +118,12 @@ export const useAiStore = defineStore("ai", () => {
     return await aiProviderRuntimeStore.testProvider(action, options);
   }
 
-  async function sendChatMessage(
-    content: string,
-    configId = activeModelConfigIds.value.chat
-  ) {
-    return await aiChatRuntimeStore.sendChatMessage(content, configId);
-  }
-
-  async function cancelChatMessage(messageId: string) {
-    return await aiChatRuntimeStore.cancelChatMessage(messageId);
-  }
-
   async function refreshBackendQueueStatus() {
     await aiProviderRuntimeStore.refreshBackendQueueStatus();
   }
 
   async function loadConfig() {
-    await aiSessionRuntimeStore.loadConfig();
+    await aiProviderStore.loadConfig();
   }
 
   async function saveConfig() {
@@ -226,10 +135,6 @@ export const useAiStore = defineStore("ai", () => {
     selectedConfigId,
     modelConfigs,
     activeModelConfigIds,
-    sessions,
-    activeSessionIds,
-    pendingPrompt,
-    imageDraftSize,
     isLoaded,
     isTesting,
     activeAction,
@@ -241,31 +146,8 @@ export const useAiStore = defineStore("ai", () => {
     pendingQueueCount,
     modelConfigOptions,
     selectedModelConfig,
-    activeChatConfig,
-    activeImageConfig,
     activeCapabilityConfigMap,
     selectedConfigCapabilities,
-    activeChatConfigCapabilities,
-    activeImageConfigCapabilities,
-    generationPrompts,
-    generationModelOverrides,
-    generationImageSize,
-    generationImageCount,
-    generationAudioVoice,
-    generationAudioFormat,
-    generationVideoSize,
-    generationVideoDurationSeconds,
-    isGeneratingAtomicContent,
-    isCancellingAtomicContent,
-    activeGenerationCapability,
-    activeGenerationRequestId,
-    lastGenerationResult,
-    lastGenerationError,
-    generationCapabilities,
-    chatSessions,
-    imageSessions,
-    activeChatSession,
-    activeImageSession,
     providerOptions,
     adapterOptions,
     promptTypeOptions,
@@ -273,18 +155,6 @@ export const useAiStore = defineStore("ai", () => {
     modelConfigSupportsCapability,
     getActiveModelConfigIdForCapability: aiProviderStore.getActiveModelConfigIdForCapability,
     getActiveModelConfigForCapability: aiProviderStore.getActiveModelConfigForCapability,
-    getGenerationModel: aiGenerationStore.getModelForCapability,
-    isGenerationCapabilitySupported: aiGenerationStore.isCapabilitySupported,
-    isGenerationCapabilityReady: aiGenerationStore.isCapabilityReady,
-    getGenerationCapabilityUnavailableReason: aiGenerationStore.getCapabilityUnavailableReason,
-    getGenerationModelConfigId: aiGenerationStore.getModelConfigIdForCapability,
-    getGenerationModelConfig: aiGenerationStore.getModelConfigForCapability,
-    generationModelConfigSupportsCapability: aiGenerationStore.modelConfigSupportsGenerationCapability,
-    selectGenerationModelConfig: aiGenerationStore.selectModelConfigForCapability,
-    patchGenerationPrompt: aiGenerationStore.patchPrompt,
-    patchGenerationModelOverride: aiGenerationStore.patchModelOverride,
-    generateAtomicContent: aiGenerationStore.generate,
-    cancelAtomicContent: aiGenerationStore.cancelActiveGeneration,
     getActionQueueStatus: aiQueueStore.getActionQueueStatus,
     getPromptCategories: aiPromptLibraryStore.getPromptCategories,
     getPromptCategoryOptions: aiPromptLibraryStore.getPromptCategoryOptions,
@@ -294,13 +164,9 @@ export const useAiStore = defineStore("ai", () => {
     addPromptCategory: aiPromptLibraryStore.addPromptCategory,
     savePrompt: aiPromptLibraryStore.savePrompt,
     deletePrompt: aiPromptLibraryStore.deletePrompt,
-    applyPrompt: aiPromptLibraryStore.applyPrompt,
-    consumePendingPrompt: aiPromptLibraryStore.consumePendingPrompt,
     refreshBackendQueueStatus,
-    reconcilePendingImageMessages: aiImageRuntimeStore.reconcilePendingImageMessages,
     cancelBackendQueuedTests,
     cancelBackendQueuedTest,
-    cancelImageMessage: aiImageRuntimeStore.cancelImageMessage,
     loadConfig,
     patchConfig: aiProviderStore.patchConfig,
     createModelConfig,
@@ -308,18 +174,8 @@ export const useAiStore = defineStore("ai", () => {
     selectModelConfig: aiProviderStore.selectModelConfig,
     setActiveModelConfig,
     setActiveCapabilityModelConfig: aiProviderStore.setActiveCapabilityModelConfig,
-    createSession,
-    selectSession,
-    deleteSession,
-    renameSession,
-    duplicateSession,
-    exportChatSession,
-    openImageSavedFileLocation: aiImageRuntimeStore.openImageSavedFileLocation,
     saveConfig,
     testProvider,
-    cancelChatMessage,
-    sendChatMessage,
-    generateImageMessage: aiImageRuntimeStore.generateImageMessage,
     clearFinishedTests: aiQueueStore.clearFinishedTests,
     resetTestQueue: aiQueueStore.resetTestQueue,
   };

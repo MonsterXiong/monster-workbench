@@ -1,5 +1,6 @@
 import { isTauriRuntime } from "./runtime";
-import { callTauri, convertFileSrc } from "./tauri";
+import { callTauri } from "./tauri";
+import { resolveDisplayImageSrc } from "./image-source.service";
 import { includesAllText, sleep, stringifyErrorMessage, toError, tryJsonParseObject } from "../utils";
 import type {
   AiBusinessGenerationRequest,
@@ -35,7 +36,7 @@ function normalizeAiResultImages(result: AiProviderTestResult): AiProviderTestRe
   if (result.imagePaths?.length) {
     return {
       ...result,
-      imageUrls: result.imagePaths.map((path) => convertFileSrc(path)),
+      imageUrls: result.imagePaths.map((path) => resolveDisplayImageSrc(path)),
     };
   }
   return result;
@@ -45,7 +46,7 @@ function normalizeAiArtifact(artifact: AiGenerationArtifact): AiGenerationArtifa
   if (artifact.path && !artifact.url) {
     return {
       ...artifact,
-      url: convertFileSrc(artifact.path),
+      url: resolveDisplayImageSrc(artifact.path),
     };
   }
   return artifact;

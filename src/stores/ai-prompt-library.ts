@@ -250,7 +250,6 @@ function normalizePromptLibrary(raw: Partial<AiPromptLibrary> | null | undefined
 
 export const useAiPromptLibraryStore = defineStore("ai-prompt-library", () => {
   const promptLibrary = ref<AiPromptLibrary>(normalizePromptLibrary(defaultPromptLibrary));
-  const pendingPrompt = ref<{ type: AiPromptType; content: string } | null>(null);
 
   const promptTypeOptions = computed(() => [
     { label: "对话", value: "chat" as const },
@@ -381,30 +380,8 @@ export const useAiPromptLibraryStore = defineStore("ai-prompt-library", () => {
     await savePromptLibrary();
   }
 
-  async function applyPrompt(promptId: string) {
-    const prompt = findPrompt(promptId);
-    if (!prompt) {
-      throw new Error("提示词不存在或已被删除");
-    }
-    pendingPrompt.value = {
-      type: prompt.type,
-      content: prompt.content,
-    };
-    return prompt;
-  }
-
-  function consumePendingPrompt(type: AiPromptType) {
-    if (!pendingPrompt.value || pendingPrompt.value.type !== type) {
-      return "";
-    }
-    const content = pendingPrompt.value.content;
-    pendingPrompt.value = null;
-    return content;
-  }
-
   return {
     promptLibrary,
-    pendingPrompt,
     promptTypeOptions,
     hydratePromptLibrary,
     getPromptCategories,
@@ -415,8 +392,6 @@ export const useAiPromptLibraryStore = defineStore("ai-prompt-library", () => {
     addPromptCategory,
     savePrompt,
     deletePrompt,
-    applyPrompt,
-    consumePendingPrompt,
     savePromptLibrary,
   };
 });

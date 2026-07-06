@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted } from "vue";
-import { Bot, CheckCircle2, Gauge, KeyRound, Link, ListChecks, Plus, Save, TestTube2, Trash2 } from "lucide-vue-next";
+import { CheckCircle2, Gauge, KeyRound, Link, ListChecks, Plus, Save, TestTube2, Trash2 } from "lucide-vue-next";
 import {
   AI_PROVIDER_CAPABILITIES,
   DEFAULT_AI_MAX_CONCURRENCY,
@@ -18,7 +18,6 @@ import {
   millisecondsToSeconds,
   roundTo,
   secondsToMilliseconds,
-  takeRightReversed,
   type IntervalHandle,
 } from "../../../utils";
 
@@ -27,8 +26,6 @@ const { t } = useI18n();
 let queuePollTimer: IntervalHandle | null = null;
 
 const config = computed(() => aiStore.config);
-const selectedConfig = computed(() => aiStore.selectedModelConfig);
-const queueItems = computed(() => takeRightReversed(aiStore.testQueue, 6));
 const queueModeOptions = computed(() => [
   { label: t("settings.aiProvider.queueModeSerial"), value: "serial" },
   { label: t("settings.aiProvider.queueModeConcurrent"), value: "concurrent" },
@@ -46,18 +43,20 @@ const capabilityLabelKeys: Record<AiProviderCapability, string> = {
   audio: "settings.aiProvider.capabilityAudio",
   video: "settings.aiProvider.capabilityVideo",
 };
-const selectedCapabilityItems = computed(() =>
-  aiStore.selectedConfigCapabilities.map((capability) => ({
-    key: capability,
-    label: getCapabilityLabel(capability),
-  }))
-);
 const capabilityOptions = computed(() =>
   AI_PROVIDER_CAPABILITIES.map((capability) => ({
     key: capability,
     label: getCapabilityLabel(capability),
     checked: aiStore.selectedConfigCapabilities.includes(capability),
   }))
+);
+const activeCapabilityLabels = computed(() =>
+  capabilityOptions.value.filter((item) => item.checked).map((item) => item.label)
+);
+const capabilitySummary = computed(() =>
+  activeCapabilityLabels.value.length
+    ? activeCapabilityLabels.value.join(" / ")
+    : t("settings.aiProvider.capabilityLabel")
 );
 
 const emit = defineEmits<{
@@ -82,12 +81,11 @@ onUnmounted(() => {
 });
 
 function actionBusy(action: AiProviderTestAction) {
-  const configId = action === "image" ? aiStore.activeModelConfigIds.image : aiStore.selectedConfigId;
-  return aiStore.isActionBusy(action, configId);
+  return aiStore.isActionBusy(action, actionConfigId(action));
 }
 
-function actionConfigId(action: AiProviderTestAction) {
-  return action === "image" ? aiStore.activeModelConfigIds.image : aiStore.selectedConfigId;
+function actionConfigId(_action: AiProviderTestAction) {
+  return aiStore.selectedConfigId;
 }
 
 function actionSupported(action: AiProviderTestAction) {
@@ -164,8 +162,9 @@ async function handleImageTest() {
       return;
     }
     const result = await aiStore.testProvider("image", {
-      configId: aiStore.activeModelConfigIds.image,
-      imageSize: aiStore.imageDraftSize,
+      configId: aiStore.selectedConfigId,
+      imageSize: config.value.imageSize,
+      imageCount: config.value.imageCount,
     });
     emit("tested", result.ok, result.message);
   } catch (err) {
@@ -206,16 +205,6 @@ async function handleDeleteConfig() {
     </aside>
 
     <div class="provider-workspace">
-      <header class="provider-header">
-        <div class="provider-header__icon">
-          <Bot class="h-4.5 w-4.5" />
-        </div>
-        <div class="min-w-0">
-          <h3>{{ t("settings.aiProvider.title") }}</h3>
-          <p>{{ selectedConfig?.name || selectedConfig?.displayName }}</p>
-        </div>
-      </header>
-
       <div class="provider-grid">
         <label class="field-block">
           <span class="field-label">{{ t("settings.aiProvider.providerLabel") }}</span>
@@ -235,8 +224,12 @@ async function handleDeleteConfig() {
           />
         </label>
 
-        <div class="capability-row">
-          <span class="field-label">{{ t("settings.aiProvider.capabilityLabel") }}</span>
+        <details class="capability-row">
+          <summary>
+            <span class="field-label">{{ t("settings.aiProvider.capabilityLabel") }}</span>
+            <strong :title="capabilitySummary">{{ capabilitySummary }}</strong>
+            <small>{{ activeCapabilityLabels.length }}</small>
+          </summary>
           <div class="capability-editor">
             <BaseCheckbox
               v-for="item in capabilityOptions"
@@ -248,12 +241,7 @@ async function handleDeleteConfig() {
               @update:model-value="handleCapabilityToggle(item.key, $event)"
             />
           </div>
-          <div class="capability-list" aria-live="polite">
-            <span v-for="item in selectedCapabilityItems" :key="item.key" class="capability-chip">
-              {{ item.label }}
-            </span>
-          </div>
-        </div>
+        </details>
 
         <label class="field-block">
           <span class="field-label">{{ t("settings.aiProvider.displayNameLabel") }}</span>
@@ -299,6 +287,15 @@ async function handleDeleteConfig() {
           />
         </label>
 
+        <label v-if="actionSupported('image')" class="field-block">
+          <span class="field-label">{{ t("settings.aiProvider.imageModelLabel") }}</span>
+          <BaseInput
+            :model-value="config.imageModel"
+            :placeholder="t('settings.aiProvider.imageModelPlaceholder')"
+            @update:model-value="aiStore.patchConfig({ imageModel: String($event) })"
+          />
+        </label>
+
         <label class="field-block">
           <span class="field-label">{{ t("settings.aiProvider.timeoutLabel") }}</span>
           <BaseInput
@@ -335,21 +332,6 @@ async function handleDeleteConfig() {
             @update:model-value="aiStore.patchConfig({ maxConcurrency: clampNumber($event, 1, MAX_AI_MODEL_CONCURRENCY, DEFAULT_AI_MAX_CONCURRENCY, 0) })"
           />
         </label>
-
-        <div class="remember-row">
-          <div class="min-w-0">
-            <div class="field-label">{{ t("settings.aiProvider.rememberKeyLabel") }}</div>
-            <div class="field-desc">{{ t("settings.aiProvider.rememberKeyDesc") }}</div>
-          </div>
-          <button
-            type="button"
-            class="switch-btn"
-            :class="{ 'switch-btn--active': config.rememberApiKey }"
-            @click="aiStore.patchConfig({ rememberApiKey: !config.rememberApiKey })"
-          >
-            <span />
-          </button>
-        </div>
 
         <label class="field-block xl:col-span-2">
           <span class="field-label">{{ t("settings.aiProvider.promptLabel") }}</span>
@@ -397,23 +379,25 @@ async function handleDeleteConfig() {
         </div>
       </div>
 
-      <div v-if="queueItems.length" class="queue-list">
-        <div v-for="item in queueItems" :key="item.id" class="queue-item">
-          <span class="queue-item__title">{{ t(`settings.aiProvider.queueStatus.${item.status}`) }}</span>
-          <span class="queue-item__meta">{{ item.result?.message || item.message || item.error || item.action }}</span>
-        </div>
-      </div>
-
       <div v-if="aiStore.testResult?.models?.length" class="model-list">
-        <button
-          v-for="modelName in aiStore.testResult.models"
-          :key="modelName"
-          type="button"
-          class="model-chip"
-          @click="aiStore.patchConfig({ model: modelName })"
-        >
-          {{ modelName }}
-        </button>
+        <div class="model-list__head">
+          <span>{{ t("settings.aiProvider.capabilityModels") }}</span>
+          <small>{{ aiStore.testResult.models.length }}</small>
+        </div>
+        <div class="model-list__body" role="list">
+          <button
+            v-for="modelName in aiStore.testResult.models"
+            :key="modelName"
+            type="button"
+            class="model-chip"
+            :class="{ 'is-active': modelName === config.model }"
+            :title="modelName"
+            role="listitem"
+            @click="aiStore.patchConfig({ model: modelName })"
+          >
+            <span>{{ modelName }}</span>
+          </button>
+        </div>
       </div>
     </div>
   </section>
@@ -421,10 +405,11 @@ async function handleDeleteConfig() {
 
 <style scoped>
 .provider-panel {
-  @apply grid min-h-full grid-cols-1 gap-4 lg:grid-cols-[240px_minmax(0,1fr)];
+  @apply grid h-full min-h-0 grid-cols-1 gap-4 overflow-hidden lg:grid-cols-[240px_minmax(0,1fr)];
 }
 .provider-list {
-  @apply flex min-h-0 flex-col gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-800/30;
+  @apply flex min-h-0 flex-col gap-2 overflow-y-auto rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-800/30;
+  scrollbar-width: thin;
 }
 .provider-list__head {
   @apply flex h-8 items-center justify-between text-[11px] font-black uppercase tracking-wider text-slate-700 dark:text-slate-300;
@@ -445,19 +430,8 @@ async function handleDeleteConfig() {
   @apply truncate text-[10px] font-bold text-slate-500 dark:text-slate-400;
 }
 .provider-workspace {
-  @apply flex min-w-0 flex-col gap-4 rounded-2xl border border-slate-200 bg-slate-50/50 p-4 dark:border-slate-800 dark:bg-slate-800/30;
-}
-.provider-header {
-  @apply flex items-center gap-3;
-}
-.provider-header__icon {
-  @apply flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary;
-}
-.provider-header h3 {
-  @apply text-xs font-black uppercase tracking-wider text-slate-800 dark:text-slate-200;
-}
-.provider-header p {
-  @apply mt-0.5 truncate text-[10px] font-semibold text-slate-500 dark:text-slate-400;
+  @apply flex min-h-0 min-w-0 flex-col gap-4 overflow-y-auto rounded-2xl border border-slate-200 bg-slate-50/50 p-4 dark:border-slate-800 dark:bg-slate-800/30;
+  scrollbar-width: thin;
 }
 .provider-grid {
   @apply grid grid-cols-1 gap-3 xl:grid-cols-2;
@@ -468,35 +442,23 @@ async function handleDeleteConfig() {
 .field-label {
   @apply flex items-center gap-1.5 text-[11px] font-black text-slate-700 dark:text-slate-300;
 }
-.field-desc {
-  @apply mt-1 text-[10px] font-semibold text-slate-500 dark:text-slate-400;
-}
-.remember-row {
-  @apply flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2 dark:border-slate-800 dark:bg-slate-900;
-}
 .capability-row {
-  @apply flex flex-col gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 dark:border-slate-800 dark:bg-slate-900;
+  @apply rounded-xl border border-slate-200 bg-white px-3 py-2 dark:border-slate-800 dark:bg-slate-900;
 }
-.capability-list {
-  @apply flex flex-wrap gap-1.5;
+.capability-row summary {
+  @apply flex cursor-pointer select-none items-center gap-2;
+}
+.capability-row summary::-webkit-details-marker {
+  display: none;
+}
+.capability-row summary strong {
+  @apply min-w-0 flex-1 truncate text-[11px] font-bold text-slate-600 dark:text-slate-300;
+}
+.capability-row summary small {
+  @apply inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-primary/10 px-1.5 text-[10px] font-black text-primary;
 }
 .capability-editor {
-  @apply grid grid-cols-2 gap-1.5 md:grid-cols-3;
-}
-.capability-chip {
-  @apply inline-flex h-6 items-center rounded-full border border-primary/20 bg-primary/5 px-2.5 text-[10px] font-black text-primary dark:bg-primary/10;
-}
-.switch-btn {
-  @apply relative inline-flex h-5 w-9 shrink-0 rounded-full bg-slate-200 transition-colors dark:bg-slate-700;
-}
-.switch-btn span {
-  @apply inline-block h-5 w-5 rounded-full bg-white shadow transition-transform;
-}
-.switch-btn--active {
-  @apply bg-primary;
-}
-.switch-btn--active span {
-  @apply translate-x-4;
+  @apply mt-2 grid grid-cols-2 gap-1.5 md:grid-cols-3;
 }
 .provider-actions {
   @apply flex flex-col justify-between gap-3 lg:flex-row lg:items-center;
@@ -516,22 +478,27 @@ async function handleDeleteConfig() {
 .result-box--fail {
   @apply border-rose-500 bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-300;
 }
-.queue-list {
-  @apply grid grid-cols-1 gap-2 lg:grid-cols-2;
-}
-.queue-item {
-  @apply flex min-w-0 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 dark:border-slate-800 dark:bg-slate-950;
-}
-.queue-item__title {
-  @apply shrink-0 text-[11px] font-black text-slate-700 dark:text-slate-300;
-}
-.queue-item__meta {
-  @apply min-w-0 truncate text-[10px] font-semibold text-slate-500 dark:text-slate-400;
-}
 .model-list {
-  @apply flex flex-wrap gap-2 rounded-2xl border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-950;
+  @apply flex min-h-0 flex-col gap-2 overflow-hidden rounded-2xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-800 dark:bg-slate-950;
+  max-height: min(320px, 34vh);
+}
+.model-list__head {
+  @apply flex h-8 shrink-0 items-center justify-between gap-2 border-b border-slate-100 pb-2 text-[11px] font-black text-slate-700 dark:border-slate-800 dark:text-slate-300;
+}
+.model-list__head small {
+  @apply inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-primary/10 px-1.5 text-[10px] font-black text-primary;
+}
+.model-list__body {
+  @apply grid min-h-0 grid-cols-1 gap-2 overflow-y-auto pr-1 sm:grid-cols-2 xl:grid-cols-3;
+  scrollbar-width: thin;
 }
 .model-chip {
-  @apply rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] font-bold text-slate-700 transition-colors hover:border-primary hover:text-primary dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300;
+  @apply min-w-0 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 text-left text-[11px] font-bold text-slate-700 transition-colors hover:border-primary hover:bg-primary/5 hover:text-primary dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-primary/10;
+}
+.model-chip span {
+  @apply block truncate;
+}
+.model-chip.is-active {
+  @apply border-primary bg-primary/10 text-primary;
 }
 </style>

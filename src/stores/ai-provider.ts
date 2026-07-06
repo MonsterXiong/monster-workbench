@@ -255,6 +255,7 @@ export function normalizeAiProviderConfig(
     adapterId,
     displayName: raw?.displayName || preset.displayName,
     baseUrl,
+    rememberApiKey: true,
     model:
       normalizeProviderModel(provider, baseUrl, raw?.model || preset.model) ||
       preset.model,
@@ -318,7 +319,8 @@ export function toPersistedAiModelConfig(modelConfig: AiModelConfig): AiModelCon
   const { queueKey: _queueKey, ...persistedConfig } = modelConfig;
   return {
     ...persistedConfig,
-    apiKey: modelConfig.rememberApiKey ? modelConfig.apiKey : "",
+    rememberApiKey: true,
+    apiKey: modelConfig.apiKey,
   };
 }
 

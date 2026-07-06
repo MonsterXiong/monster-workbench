@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from "vue";
-import { Check, FilePenLine, Plus, ScrollText, Sparkles, Trash2 } from "lucide-vue-next";
+import { FilePenLine, Plus, ScrollText, Sparkles, Trash2 } from "lucide-vue-next";
 import { useAiPromptLibraryStore } from "../../../stores/ai-prompt-library";
 import { useI18n } from "../../../composables/useI18n";
 import { useToast } from "../../../composables/useToast";
@@ -22,10 +22,6 @@ const draft = reactive({
   newCategoryName: "",
   content: "",
 });
-
-const emit = defineEmits<{
-  (e: "use", type: AiPromptType): void;
-}>();
 
 const typeOptions = computed(() =>
   promptStore.promptTypeOptions.map((option) => ({
@@ -112,22 +108,21 @@ async function deletePrompt(promptId: string) {
   }
 }
 
-async function usePrompt(promptId: string) {
-  try {
-    const prompt = await promptStore.applyPrompt(promptId);
-    triggerToast(t("aiPage.prompts.applied"), "success");
-    emit("use", prompt.type);
-  } catch (err) {
-    triggerToast(getErrorMessage(err, t("aiPage.prompts.applyFailed")), "error");
-  }
-}
 </script>
 
 <template>
   <section class="prompt-panel">
     <aside class="prompt-sidebar">
       <div class="prompt-sidebar__top">
-        <BaseSegmented :model-value="activeType" :options="typeOptions" size="sm" @update:model-value="setActiveType" />
+        <BaseSegmented
+          :model-value="activeType"
+          :options="typeOptions"
+          class="prompt-type-segmented"
+          size="sm"
+          compact
+          block
+          @update:model-value="setActiveType"
+        />
         <button type="button" class="prompt-add" @click="openCreate">
           <Plus class="h-4 w-4" />
         </button>
@@ -187,10 +182,7 @@ async function usePrompt(promptId: string) {
             <template #icon><Trash2 class="h-3.5 w-3.5" /></template>
             {{ t("common.delete") }}
           </BaseButton>
-          <BaseButton type="primary" size="sm" @click="usePrompt(selectedPrompt.id)">
-            <template #icon><Check class="h-3.5 w-3.5" /></template>
-            {{ t("aiPage.prompts.apply") }}
-          </BaseButton>
+          <BaseCopyButton :text="selectedPrompt.content" :label="t('common.copy')" size="sm" />
         </footer>
       </template>
       <div v-else class="prompt-detail-empty">
@@ -241,16 +233,36 @@ async function usePrompt(promptId: string) {
 
 <style scoped>
 .prompt-panel {
-  @apply grid min-h-full grid-cols-1 gap-4 lg:grid-cols-[320px_minmax(0,1fr)];
+  @apply grid h-full min-h-0 grid-cols-1 gap-4 overflow-hidden lg:grid-cols-[320px_minmax(0,1fr)];
 }
 .prompt-sidebar {
-  @apply flex min-h-0 flex-col gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-800/30;
+  @apply flex min-h-0 flex-col gap-3 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-800/30;
 }
 .prompt-sidebar__top {
   @apply flex items-center gap-2;
 }
 .prompt-sidebar__top :deep(.base-segmented) {
   @apply min-w-0 flex-1;
+}
+.prompt-sidebar__top :deep(.prompt-type-segmented.base-segmented--native) {
+  --el-segmented-bg-color: transparent;
+  --el-segmented-item-selected-bg-color: rgb(var(--color-primary) / 0.1);
+  --el-segmented-item-selected-color: rgb(var(--color-primary));
+  --el-segmented-item-hover-bg-color: rgb(241 245 249);
+  --el-segmented-item-hover-color: rgb(30 41 59);
+  --el-segmented-item-active-bg-color: rgb(226 232 240);
+  @apply rounded-lg border border-slate-200 bg-white p-0.5 shadow-sm dark:border-slate-800 dark:bg-slate-950;
+}
+.prompt-sidebar__top :deep(.prompt-type-segmented .el-segmented__item) {
+  @apply h-7 rounded-md text-[11px] font-black;
+}
+.prompt-sidebar__top :deep(.prompt-type-segmented .el-segmented__item.is-selected) {
+  @apply shadow-none;
+}
+:global(.dark) .prompt-sidebar__top :deep(.prompt-type-segmented.base-segmented--native) {
+  --el-segmented-item-hover-bg-color: rgb(30 41 59);
+  --el-segmented-item-hover-color: rgb(226 232 240);
+  --el-segmented-item-active-bg-color: rgb(51 65 85);
 }
 .prompt-add {
   @apply flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 transition-colors hover:border-violet-500 hover:text-violet-600 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-400;

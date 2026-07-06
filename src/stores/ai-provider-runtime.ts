@@ -9,7 +9,6 @@ import {
   waitForProviderBackendTask,
 } from "./ai-provider-task-runtime";
 import { useAiQueueStore } from "./ai-queue";
-import { useAiImageRuntimeStore } from "./ai-image-runtime";
 import {
   clampNumber,
   findByValue,
@@ -47,7 +46,6 @@ function createId(prefix: string) {
 export const useAiProviderRuntimeStore = defineStore("ai-provider-runtime", () => {
   const aiProviderStore = useAiProviderStore();
   const aiQueueStore = useAiQueueStore();
-  const aiImageRuntimeStore = useAiImageRuntimeStore();
 
   const {
     selectedConfigId,
@@ -200,10 +198,6 @@ export const useAiProviderRuntimeStore = defineStore("ai-provider-runtime", () =
           applyBackendTask: aiQueueStore.applyBackendTask,
           applyGenerationTask: aiQueueStore.applyGenerationTask,
           updateTestingState: aiQueueStore.updateTestingState,
-        },
-        {
-          afterSync: () =>
-            aiImageRuntimeStore.reconcilePendingImageMessages({ checkBackend: false }),
         }
       );
     } catch (error) {
