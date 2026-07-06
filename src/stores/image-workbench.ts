@@ -37,6 +37,7 @@ import { createImageWorkbenchGenerationState, normalizePositiveImageWorkbenchQua
 import { createImageWorkbenchGroupState } from "./image-workbench-groups";
 import { createImageWorkbenchImportActions } from "./image-workbench-import";
 import { createImageWorkbenchSnapshotPolling } from "./image-workbench-polling";
+import { createImageWorkbenchProviderActions } from "./image-workbench-provider-actions";
 import { createImageWorkbenchQualityState } from "./image-workbench-quality";
 import { createImageWorkbenchReferenceState } from "./image-workbench-reference";
 import { createImageWorkbenchSelectedActions } from "./image-workbench-selected-actions";
@@ -360,31 +361,19 @@ export const useImageWorkbenchStore = defineStore("image-workbench", () => {
     return contract.value;
   }
 
-  async function ensureImageProviderConcurrency() {
-    await aiProviderStore.loadConfig();
-    syncImageModelConfig();
-    if (!imageProviderQueueNeedsUpgrade.value) {
-      return false;
-    }
-    const configId = imageModelConfigId.value;
-    const nextConcurrency = imageProviderQueueTargetConcurrency.value;
-    aiProviderStore.patchModelConfig(configId, {
-      queueMode: "concurrent",
-      maxConcurrency: nextConcurrency,
-    });
-    await aiProviderStore.saveConfig();
-    syncImageModelConfig(configId, false);
-    notice.value = formatTemplate(t("imageWorkbench.input.concurrencyEnabledNotice"), {
-      count: nextConcurrency,
-    });
-    return true;
-  }
-
-  async function enableImageProviderConcurrency() {
-    await runWithLoading(async () => {
-      await ensureImageProviderConcurrency();
-    });
-  }
+  const {
+    enableImageProviderConcurrency,
+    ensureImageProviderConcurrency,
+  } = createImageWorkbenchProviderActions({
+    aiProviderStore,
+    imageModelConfigId,
+    imageProviderQueueNeedsUpgrade,
+    imageProviderQueueTargetConcurrency,
+    notice,
+    runWithLoading,
+    syncImageModelConfig,
+    t,
+  });
 
   const {
     generateStoryboardPromptWithAi,
