@@ -42,7 +42,10 @@ impl ImageWorkbenchRepo {
                 params![now, asset.job_id],
             )?;
             if let Some(parent_asset_id) = &asset.parent_asset_id {
-                refresh_asset_delivery_status(&tx, parent_asset_id)?;
+                super::image_workbench_repo_assets::refresh_asset_delivery_status(
+                    &tx,
+                    parent_asset_id,
+                )?;
             }
         }
         tx.commit()?;
