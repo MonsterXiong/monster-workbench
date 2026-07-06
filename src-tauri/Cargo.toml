@@ -1,6 +1,6 @@
 [package]
 name = "monster-tools"
-version = "0.0.5"
+version = "0.0.6"
 description = "Monster Tools desktop app"
 authors = ["Monster Tools"]
 edition = "2021"
