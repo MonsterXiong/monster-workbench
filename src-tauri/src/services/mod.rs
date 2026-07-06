@@ -23,6 +23,7 @@ mod image_workbench_generation_bridge;
 mod image_workbench_generation_options;
 pub(crate) mod image_workbench_import;
 pub(crate) mod image_workbench_mask;
+mod image_workbench_mode;
 mod image_workbench_runner;
 pub mod image_workbench_service;
 mod image_workbench_service_types;
