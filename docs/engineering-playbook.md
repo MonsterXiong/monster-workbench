@@ -9,7 +9,7 @@
 - 小步交付：一次任务只解决一个明确问题，避免顺手重构无关模块。
 - 先读事实：修改前先读 `AGENTS.md`、相关专题文档和现有代码实现。
 - 分层推进：新增能力默认走 `Page/Component -> Store -> Service -> callTauri -> Rust Command -> Rust Service -> Repo/DB`。
-- 组件化审查：Page、组件、Store、Service、Mock、Rust Service/Repo 都有体量提醒；行数不是硬失败条件，但功能完成后必须审查职责边界和复杂度，必要时拆分，避免继续沉淀巨型文件。
+- 组件化审查：不使用固定行数作为体量限制；功能完成后必须审查 Page、组件、Store、Service、Mock、Rust Service/Repo 的职责边界和复杂度，必要时拆分，避免继续沉淀巨型文件。
 - 浏览器可预览：所有 Tauri 原生能力必须有浏览器降级或 Mock，不让 `http://localhost:1420` 直接崩溃。
 - 文案可切换：用户可见文本进入 `locales/`，日志和异常保持 `[ERR_*] 中文描述`。
 - 验证前置：每次代码变更后至少运行 `npm run typecheck`，涉及分层边界时运行 `npm run check:architecture`。
@@ -143,11 +143,11 @@ AI 不应做：
 
 AI 能力开发规则：
 
-- 业务入口、模型对话、模型生图默认调用 `aiService.runBusinessGenerationTask()`，即先走 `enqueue_ai_business_generation` 入队，再轮询 generation task registry 收敛结果；`aiService.generateBusinessContent` 只保留给后端 runner 或明确需要同步阻塞返回的服务层场景；有专属持久数据模型的工作台（如图片工作台）应先创建业务 job/task，再通过后端 runner 调用原子能力并写入自身 asset / metadata / model_run；`/ai?tab=features` 原子能力测试可调用 `aiService.generateDirectContent`，Provider 测试运行时可调用 `testProvider` / `enqueueProviderTest`，不得把业务生成伪装成 Provider 诊断任务。
+- 业务入口与 AI 辅助能力默认调用 `aiService.runBusinessGenerationTask()`，即先走 `enqueue_ai_business_generation` 入队，再轮询 generation task registry 收敛结果；`aiService.generateBusinessContent` 只保留给后端 runner 或明确需要同步阻塞返回的服务层场景；有专属持久数据模型的工作台（如图片工作台）应先创建业务 job/task，再通过后端 runner 调用原子能力并写入自身 asset / metadata / model_run；`aiService.generateDirectContent` 只用于明确的原子能力诊断或服务级测试，Provider 测试运行时可调用 `testProvider` / `enqueueProviderTest`，不得把业务生成伪装成 Provider 诊断任务。
 - Provider 面板只承担配置、连接、模型列表和最小诊断；业务能力不足时扩展原子能力 schema、降级规则、队列/取消和 artifact 合同。
 - 浏览器 mock 应尽量复用桌面端真实配置形状；需要同步模型配置时运行 `npm run mock:sync-config`，只生成脱敏 seed，不把 API Key、token、password、secret 写入浏览器 mock 文件或 Git。
 - active model config 统一走 capability binding；Rust 业务生成解析 `config.json` active binding 时允许按文件修改时间和长度缓存，配置保存后必须自动失效重读。新增 `img2img`、`inpaint`、`upscale_*`、`person_consistency`、`audio`、`video` 等能力时，同步补绑定、校验、UI 禁用原因和持久化兼容。
-- 长任务先创建 job/task，再由 Rust 后端 runner、generation task registry 或 backend worker 推进；前端状态树只保存 requestId、状态和 artifact metadata/path，不保存大图、音频或视频正文。图片工作台已使用 DB task claim/lease、Tauri 启动恢复和页面初始化兜底恢复；`/ai` Chat/Image 业务生成已写入 `ai_generation_tasks` 持久任务表并在 Tauri 启动时恢复 queued/running 业务请求，完成/失败应先写持久表再发布内存 task 终态。直连原子能力测试不持久化完整 Provider config，避免把 API Key 写入任务表。
+- 长任务先创建 job/task，再由 Rust 后端 runner、generation task registry 或 backend worker 推进；前端状态树只保存 requestId、状态和 artifact metadata/path，不保存大图、音频或视频正文。图片工作台已使用 DB task claim/lease、Tauri 启动恢复和页面初始化兜底恢复；业务 generation task 写入 `ai_generation_tasks` 持久任务表并在 Tauri 启动时恢复 queued/running 业务请求，完成/失败应先写持久表再发布内存 task 终态。直连原子能力测试不持久化完整 Provider config，避免把 API Key 写入任务表。
 - Python sidecar 当前只作为短生命周期脚本被 Rust 受控调用；升级成长驻 worker 或 `externalBin` 二进制前，必须先满足同一套运行时合同：仍由 Rust Service 独占启动、停止、超时、取消、并发槽位和日志脱敏；worker 只能接收脱敏后的结构化请求和受控 artifact 输出目录，不能直接读写主库、偏好配置、用户任意文件或 Tauri capability；长任务必须有 heartbeat / lease / stale recovery，异常退出必须回写业务 job/task 或 generation task 终态；新增生产 sidecar 模块或二进制资源必须纳入 `tauri.conf.json` bundle resources / externalBin，并通过 `npm run check:architecture`、`npm run test:ai-sidecar` 和必要 Rust 测试。
 
 ---
@@ -156,7 +156,7 @@ AI 能力开发规则：
 
 | 命令 | 使用场景 |
 |------|----------|
-| `npm run check:architecture` | 检查 Tauri / IPC / fetch / SQLite 是否越层，防止 SQL/FS 插件、capability 与宽 HOME asset scope 回引，并输出组件化体量审查提醒 |
+| `npm run check:architecture` | 检查 Tauri / IPC / fetch / SQLite 是否越层，防止 SQL/FS 插件、capability 与宽 HOME asset scope 回引 |
 | `npm run check:commit-message` | 检查最近一次 commit 是否符合 `类型：中文概要` |
 | `npm run setup:git-hooks` | 将本仓库 Git hooks 指向 `.githooks`，启用 commit-msg 自动拦截 |
 | `npm run typecheck` | 每次 TS / Vue 代码变更后必须运行 |

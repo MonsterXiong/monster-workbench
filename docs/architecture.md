@@ -44,7 +44,7 @@ src/
   - Page 入口只做页面装配；复杂输入区、列表区、详情区、弹窗和工具栏应拆到当前模块 `components/`，复用状态和生命周期逻辑拆到当前模块 composable。
   - Pinia Store 只保留轻量业务编排；任务轮询、结果 patch、消息构造、恢复和取消流程应拆成 runtime/helper 文件。
   - 前端 Service / Mock 按领域拆分；Rust Service / Repo 按 command 编排、状态机、query、mutation、row mapper、asset policy 等职责拆分。
-  - `npm run check:architecture` 会输出文件体量提醒，但不把行数作为硬失败条件；功能完成后按职责、复杂度和复用边界审查是否拆分，避免继续沉淀巨型文件。
+  - 不使用固定行数作为体量限制；功能完成后按职责、复杂度、复用边界和维护风险审查是否拆分，避免继续沉淀巨型文件。
 - **页面级间距规范**：
   - 正常的业务页面在开发时不应当自行声明上下左右的外边距或内边距（如页面级 `p-4`、`p-5`、`m-4` 等），且宽度一律保持 `w-full`（100% 铺满）。
   - 页面四周的间距统一由外层全局布局组件 `AppContent.vue` 的全局边距（如 `p-5`）进行集中统筹，确保所有页面在视觉上具有完全统一的边界和对齐感。
@@ -93,7 +93,6 @@ npm run check:architecture
 - 禁止前端 SQLite 直驱，禁止回引 `@tauri-apps/plugin-sql`、`tauri-plugin-sql`、SQL capability。
 - 禁止直接依赖、注册或开放前端文件系统插件和 `fs:default`，文件读写必须走受限 Rust Command。
 - 禁止将 `assetProtocol.scope` 放宽到整个 `$HOME/**/*`。
-- Page / Vue 组件 / Store / Service / Mock / Rust Service / Rust Repo 的文件体量提醒和热点文件债务基线，作为完成后拆分审查信号，防止组件化规则只停留在文档里。
 
 说明：存量页面/组件中的 service 直连已经纳入迁移对象；新增或修改业务模块必须按标准链路落地，不再扩大 UI 层直连 service 的范围。通用路径选择、图片上传等组件也必须走 Store -> Service 适配。
 

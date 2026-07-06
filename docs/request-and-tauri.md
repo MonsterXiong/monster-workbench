@@ -42,9 +42,10 @@ npm run check:architecture
 
 ---
 
-## 3. 开发环境 Mock 机制
+## 3. 开发环境真实数据桥接与 Mock 机制
 
-为了支持脱离底座容器在普通浏览器中的敏捷调试与自动化测试，系统引入了离线 Mock 机制：
+为了支持浏览器前端调试与桌面端行为一致，开发期普通浏览器优先走真实数据桥接，再按能力边界降级：
 
-- **IPC 拦截重定向**：核心中介 [tauri.ts](../src/services/tauri.ts) 在检测到 `!isTauriRuntime() && import.meta.env.DEV` 时，会自动将底层调用重定向到 Mock 路由。
-- **Mock 同步维护**：当在后端新增任何底座 Rust Commands 时，**必须同步**浏览器 Mock，防止普通浏览器预览因未注册命令报错。小命令可直接放 [tauri.mock.ts](../src/services/tauri.mock.ts)；成组领域命令优先放 `src/services/mocks/*.mock.ts`，再由 `tauri.mock.ts` 统一分发。
+- **真实数据优先**：核心中介 [tauri.ts](../src/services/tauri.ts) 在检测到 `!isTauriRuntime() && import.meta.env.DEV` 时，会先尝试通过 [tauri.dev-bridge.ts](../src/services/tauri.dev-bridge.ts) 访问调试底座。桥接服务只在 Rust `debug_assertions` 下启动，并限制来源为 `http://localhost:1420` / `http://127.0.0.1:1420`。
+- **能力边界保留**：浏览器端不支持原生文件/目录选择、窗口控制、更新器、任意系统路径打开、任意文件读写、进程强杀等桌面专属能力。这类能力必须继续由 service 层显式降级或提示不可用，不能通过桥接放宽。
+- **Mock 兜底**：真实数据桥接不可用或命令未纳入安全白名单时，开发期会继续落到 [tauri.mock.ts](../src/services/tauri.mock.ts)。当在后端新增 Rust Commands 时，若该命令需要浏览器调试真实数据，应同步加入桥接白名单与 Rust 调度；若仍需离线预览，也要同步浏览器 Mock。

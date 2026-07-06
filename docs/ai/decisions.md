@@ -74,7 +74,7 @@
 
 - **日期**：2026 年 06 月
 - **背景**：AI 工作台同时包含 Provider 配置诊断、原子能力测试、模型对话、模型生图和图片工作台。若业务页面直接调用 Provider、直接持有完整模型配置或让 Python sidecar 自管任务状态，会导致 API Key 暴露、取消/恢复不一致、大图视频进入前端状态树、Provider 差异扩散到页面层。
-- **决策**：全局统一为 `AI Provider -> 模型配置 -> capability binding -> 原子能力 / 业务 generation task -> 业务 job/task`。Provider 面板和 `/ai?tab=features` 只承担诊断与原子测试；业务入口默认走 `enqueue_ai_business_generation` 或工作台后端 runner。Python sidecar 当前保持短生命周期脚本，后续可升级成长驻 worker 或 `externalBin` 二进制，但必须继续由 Rust Service 独占调度，统一控制启动、停止、超时、取消、并发槽位、heartbeat/lease、artifact 输出目录、脱敏日志和恢复状态。
+- **决策**：全局统一为 `AI Provider -> 模型配置 -> capability binding -> 原子能力 / 业务 generation task -> 业务 job/task`。Provider 配置面板只承担配置诊断与原子测试；业务入口默认走 `enqueue_ai_business_generation` 或工作台后端 runner。Python sidecar 当前保持短生命周期脚本，后续可升级成长驻 worker 或 `externalBin` 二进制，但必须继续由 Rust Service 独占调度，统一控制启动、停止、超时、取消、并发槽位、heartbeat/lease、artifact 输出目录、脱敏日志和恢复状态。
 - **后果**：
   - ✅ 业务页面不携带完整 Provider config/API Key，降低泄露和越层风险
   - ✅ 队列、取消、并发、恢复、审计和 artifact 管理统一收敛，后续扩展 `img2img`、`inpaint`、`upscale`、音视频时只扩原子能力合同

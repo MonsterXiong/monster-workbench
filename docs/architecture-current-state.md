@@ -1,6 +1,6 @@
 # Monster Workbench 当前架构说明
 
-> 更新日期：2026-06-14
+> 更新日期：2026-07-06
 > 定位：只记录当前有效架构事实、边界和后续风险点；已删除的旧独立创作工作台、任务队列、资产库和常驻运行时不再作为当前项目事实。
 
 ## 1. 架构摘要
@@ -9,7 +9,7 @@
 
 - 前端：Vue 3、Pinia、Vue Router、Vite、TailwindCSS、Element Plus 与项目内 `Base*` 组件。
 - 桌面控制面：Rust / Tauri command、service、infra、SQLite、本地文件、系统能力和更新机制。
-- AI 能力：保留 `/ai` 工作台、AI Provider 配置诊断、队列与取消；只有 Provider 配置诊断与 `/ai?tab=features` 原子能力测试允许直连 `generate_ai_content`，`/ai` 对话/生图和 `/image-workbench` 图片工作台统一走不携带完整 provider config 的业务生成入口；Rust 侧新增 generation task registry 与 `ai_generation_tasks` 持久任务表，业务可通过 `enqueue_ai_business_generation` 提交轻量任务并用 `get_ai_generation_task` 轮询结果，取消走 `cancel_ai_generation_task`，Tauri 启动会恢复 queued/running 业务生成；`/image-workbench` 文生图由 `start_image_workbench_job_runner` 启动 Rust 后端 runner，通过 DB task claim/lease 推进持久 job/task，并写入受控 asset / metadata / model_run；当前已完成 job/task/asset/metadata/template/model_run 合约、历史/资产库/模板/收藏/取消/重试工作台骨架、浏览器/mock 文生图闭环、真实 Tauri 失败/取消路径、DB 租约恢复/失败审计补强、Provider 可达性诊断和真实 Provider 成功资产落库闭环；Python 只作为 provider tester / adapter 脚本被 Rust 调用。
+- AI 能力：当前只保留一套公共 AI Provider 底座；`/ai` 页面承担模型配置、Provider 诊断和提示词库，不再承载旧独立对话、生图和能力测试工作台。Provider 配置诊断可使用 `test_ai_provider` / `enqueue_ai_provider_test`；业务生成统一走不携带完整 provider config 的 `enqueue_ai_business_generation` / `get_ai_generation_task`，取消走 `cancel_ai_generation_task`。`/image-workbench` 文生图由 `start_image_workbench_job_runner` 启动 Rust 后端 runner，通过 DB task claim/lease 推进持久 job/task，并写入受控 asset / metadata / model_run；分镜识别/生成等 AI 辅助能力通过 `aiService.runBusinessGenerationTask()` 消费同一 AI Provider 底座。Python 只作为 provider tester / adapter 脚本被 Rust 调用。
 - 数据与文件：应用配置、上传文件、日志、导航库、AI 生成文件和测试日志继续使用既有本地目录；前端只通过受控 service 访问。
 
 标准调用链：
@@ -52,7 +52,7 @@ Vue Page / Component
 | `/system` | `views/system/SystemPage.vue` | 系统状态、日志、错误监控 |
 | `/tools` | `views/tools/ToolsPage.vue` | 工具箱 |
 | `/navigation` | `views/navigation/NavigationPage.vue` | 导航收藏 |
-| `/ai` | `views/ai/AiPage.vue` | AI Provider / Chat / Image / Prompt 工作台 |
+| `/ai` | `views/ai/AiPage.vue` | AI 模型配置、Provider 诊断与提示词库 |
 | `/image-workbench` | `views/image-workbench/ImageWorkbenchPage.vue` | 图片工作台，通过共享 AI Provider 能力执行文生图，并管理历史作业、任务状态、持久资产、模板和模型调用审计 |
 | `/settings` | `views/settings/SettingsPage.vue` | 设置与诊断 |
 | `/file-manager` | `views/file-manager/FileManagerPage.vue` | 上传文件管理 |
@@ -67,7 +67,7 @@ Store 是前端业务编排层，可以调用模块 service，但不能直接导
 
 | 区域 | 当前事实 | 后续注意 |
 |---|---|---|
-| AI | `src/stores/ai.ts` 是 facade，分域 store 包括 provider、session、queue、prompt、chat runtime、image runtime、provider task runtime；Provider task runtime 和 `/ai?tab=features` 只承接测试/诊断直连，Chat/Image 业务生成默认走 `aiService.runBusinessGenerationTask()`，即 `enqueue_ai_business_generation` 入队后轮询 `get_ai_generation_task` | 新 runtime 逻辑继续放到分域 store / helper，避免回流到 facade |
+| AI | `src/stores/ai.ts` 是 facade，分域 store 保留 provider、queue、prompt 与 provider task runtime；旧对话/生图会话 runtime 已移除。Provider 诊断走 `test_ai_provider` / `enqueue_ai_provider_test`，业务 AI 能力由具体业务 Store/Service 调用 `aiService.runBusinessGenerationTask()` 或后端 runner 消费同一 Provider 底座 | 新 runtime 逻辑继续放到分域 store / helper，避免回流到 facade；不要重新引入独立对话/生图工作台状态机 |
 | Image Workbench | `src/stores/image-workbench.ts` 通过 `image-workbench.service.ts` 访问 Tauri contract、job/history/asset/template、task 状态和资产记录，并通过 `start_image_workbench_job_runner` 启动 Rust 后端 runner 执行 `txt2img` 业务生成 | 后续下载、导入参考图、后台 worker 和增强能力不得绕过 Store -> Service -> callTauri |
 | Background task | `background-task` 只监听公共 `task-progress` 事件，当前主要服务更新下载进度展示 | 不重新承载创作任务状态机 |
 | Native event | `native-event` 只封装 Tauri event listener | 页面通过 store 消费事件，不直接监听底座 |
@@ -211,21 +211,19 @@ AI Provider 工作台是当前保留的 AI 能力入口，也是公共 AI 原子
 - `src/config/ai-provider-registry.json` 是 provider preset、adapter id 与 `models/chat/image/txt2img/audio/video` capability 的共享静态 registry。
 - 前端与 Rust 入口按 capability 做最小动作拦截；chat-only 协议不进入生图、音频、视频或模型列表测试。
 - `generate_ai_content` 当前统一暴露 `chat/image/audio/video` 直连测试能力：chat 返回文本，image 复用既有生图保存链路，audio 按 OpenAI-compatible `/audio/speech` 保存二进制产物，video 按 `/videos` 创建、先立即轮询一次再按间隔等待，并从同源 `/videos/{id}/content` 下载；该入口只允许 Provider 测试/原子能力测试使用。
-- Provider 配置面板的连接、模型列表、聊天和生图按钮继续使用 `test_ai_provider` / `enqueue_ai_provider_test` 做诊断；`/ai?tab=features` 使用 `aiService.generateDirectContent` 做原子能力测试；业务生成入口 `/ai?tab=chat`、`/ai?tab=image` 默认走 `aiService.runBusinessGenerationTask()`，由 `enqueue_ai_business_generation` 提交轻量 generation task，再轮询 `get_ai_generation_task` 收敛结果；`/image-workbench` 走 `imageWorkbenchService.startJobRunner()` -> `start_image_workbench_job_runner`，由 Rust 后端 runner 调用业务生成入口并写入图片工作台专属表。前端只传 `providerConfigId`、prompt、model、options 和 requestId，不携带完整 provider config。
-- `src/services/ai-provider-queue-sync.ts` 同步 Provider 诊断任务时也会同步 generation task，`/ai` Chat/Image runtime 和 `/ai?tab=features` 原子测试任务不再依赖旧 `AiProviderTestTask` polling 才能更新队列状态。
+- Provider 配置面板的连接、模型列表、聊天和生图按钮继续使用 `test_ai_provider` / `enqueue_ai_provider_test` 做诊断；当前 `/ai` 页面只保留配置与提示词库，不再提供独立对话/生图/能力测试业务面板。业务生成由具体业务入口消费同一底座：分镜 AI 辅助走 `aiService.runBusinessGenerationTask()`，`/image-workbench` 走 `imageWorkbenchService.startJobRunner()` -> `start_image_workbench_job_runner`，由 Rust 后端 runner 调用业务生成入口并写入图片工作台专属表。前端只传 `providerConfigId`、prompt、model、options 和 requestId，不携带完整 provider config。
+- `src/services/ai-provider-queue-sync.ts` 同步 Provider 诊断任务时也会同步 generation task，确保业务 generation task 能进入同一队列状态视图；当前没有独立 `/ai` 对话/生图 runtime。
 - 前端类型合同区分 `AiProviderTestAction` 与 `AiProviderRuntimeAction`：旧 Provider 诊断按钮只允许 `models/chat/image`，但 sidecar 结果、本地队列项和后端队列状态必须能表达 `chat/image/audio/video` 原子生成 action，避免业务消费队列状态时丢失音频/视频任务语义。
 - 原子能力校验按 capability 收敛必要字段：非生图能力不依赖 `imageCount`；OpenAI-compatible 音频 `format` 只允许 `mp3/wav/opus/aac/flac/pcm`，异常值回退到 `mp3`，避免业务复用时把不可信格式带入请求或落盘扩展名。
 - 音频/视频 artifact 落盘前会校验响应 `Content-Type`，并嗅探首块响应体：拒绝 `application/json`、`text/*`、HTML/XML 等非媒体响应，也拒绝伪装成 `audio/*` / `video/*` 的 JSON/HTML/XML 错误体，避免 Provider 以 HTTP 200 返回错误信息时被保存为媒体文件；`npm run test:ai-sidecar` 已覆盖音频和视频 JSON 媒体响应与 MIME 伪装失败契约。
-- Rust 内保留内存队列、取消、并发、超时、输出限制和脱敏；当前已拆为 `ai_provider_queue.rs`、`ai_provider_task.rs`、`ai_generation_task.rs`、`ai_provider_config.rs`、`ai_provider_process.rs`、`ai_provider_output.rs` 等内部模块。直连 `generate_ai_content` 和业务入口 `generate_ai_business_content` 都会使用请求 `requestId` 注册 generation task 与 cancel token；`/ai` Chat/Image 业务生成还会写入 `ai_generation_tasks`，只持久 providerConfigId、prompt、model、options、requestId、结果和 artifact metadata，不持久完整 Provider config/API Key；业务 generation 完成/失败先落持久表再发布内存 task 终态，避免 UI 已见完成但 DB 仍为 running；业务取消语义走 `cancel_ai_generation_task(requestId)`，Provider 配置诊断取消继续走 `cancel_ai_provider_test_task(requestId)`。
-- `/ai?tab=features` 测试面板通过 `src/stores/ai-generation.ts` 保存当前原子生成 `requestId`，取消按钮走 `aiService.cancelGeneration()` / `cancel_ai_generation_task(requestId)`；页面仍只调用聚合 Store，不直接导入 service。新原子请求开始时会清理上一条结果，避免取消或失败后误显示旧 artifact；浏览器/mock 已用 `cancel-smoke` 长任务验证取消按钮、取消提示和无成功 artifact 回落。
-- 原子生成开始、成功、失败和取消时会同步写入前端本地队列项，`AiProviderRuntimeAction` 可在 Provider 队列面板里展示 `chat/image/audio/video` runtime action、完成消息和错误信息；`/ai` Chat/Image runtime 业务任务与 `/ai?tab=features` 测试任务不再依赖旧 `AiProviderTestTask` polling 才能收敛 UI 状态。
-- `/ai` Chat/Image pending 恢复接入 generation task：会话加载时，Chat pending assistant 消息会通过 `get_ai_generation_task` 回填成功文本、失败或取消状态；Image pending 恢复同样优先查 generation task，再以旧 Provider test task 兜底。浏览器/mock 已验证完成的 Chat generation task 可把 pending assistant 消息恢复为 success。
+- Rust 内保留内存队列、取消、并发、超时、输出限制和脱敏；当前已拆为 `ai_provider_queue.rs`、`ai_provider_task.rs`、`ai_generation_task.rs`、`ai_provider_config.rs`、`ai_provider_process.rs`、`ai_provider_output.rs` 等内部模块。直连 `generate_ai_content` 和业务入口 `generate_ai_business_content` 都会使用请求 `requestId` 注册 generation task 与 cancel token；业务 generation task 只持久 providerConfigId、prompt、model、options、requestId、结果和 artifact metadata，不持久完整 Provider config/API Key；业务 generation 完成/失败先落持久表再发布内存 task 终态，避免 UI 已见完成但 DB 仍为 running；业务取消语义走 `cancel_ai_generation_task(requestId)`，Provider 配置诊断取消继续走 `cancel_ai_provider_test_task(requestId)`。
+- 原子生成开始、成功、失败和取消时会同步写入前端本地队列项，`AiProviderRuntimeAction` 可在 Provider 队列面板里展示 `chat/image/audio/video` runtime action、完成消息和错误信息；当前原子能力不再有独立能力测试页面。
 - generation task 终态必须跨内存和持久表保持幂等：同 `requestId` 的 `success/failed/canceled` 不允许被重新排队或被后续 `complete/fail/cancel` 覆盖。业务生成 service 在进入内存 registry / Provider queue 前会先读取 `ai_generation_tasks` 返回的既有终态；阻塞式业务生成遇到已持久化成功结果会直接返回该结果，遇到失败/取消则返回对应错误。图片 pending message 首次持久化时即携带 `requestId`，避免刷新恢复和取消同步出现无请求 ID 的短窗口。
 - `ai_service_generation_tests.rs` 使用本地 mock Provider 覆盖 Rust `AiProviderService.generate_content` 到 Python sidecar 的 `chat/image/audio/video` 端到端链路，验证请求参数、文本返回、图片/音频/视频 artifact 本地落盘、generation 取消入口的 running/queued 中止，以及业务 active binding 缓存按 `config.json` 修改失效。
-- 2026-06-13 已用真实 Tauri WebView2 + localhost OpenAI-compatible mock Provider（无 API Key）通过 `/ai?tab=features` 页面上下文触发 Pinia Store -> `aiService.generateDirectContent` -> Tauri command -> Rust service -> Python sidecar -> Provider：`chat/image/audio/video` 均返回结构化结果，图片、音频和视频 artifact 均落盘并转换为 WebView 可访问 URL；视频 mock 只验证二进制保存、MIME 和同源 `/videos/{id}/content` 下载，不代表真实视频播放能力已验证。
+- 2026-06-13 已用真实 Tauri WebView2 + localhost OpenAI-compatible mock Provider（无 API Key）验证 Pinia Store -> `aiService.generateDirectContent` -> Tauri command -> Rust service -> Python sidecar -> Provider：`chat/image/audio/video` 均返回结构化结果，图片、音频和视频 artifact 均落盘并转换为 WebView 可访问 URL；视频 mock 只验证二进制保存、MIME 和同源 `/videos/{id}/content` 下载，不代表真实视频播放能力已验证。当前 UI 已移除独立 Features 面板，后续原子能力测试以 Provider 诊断或服务级测试为准。
 - 2026-06-14 Windows Computer Use 已复核真实 `Monster Tools` 桌面窗口可启动并进入 `AI 模型工作台`，真实模型配置与 `Codex Local Gateway` / `localhost:4444/v1` 可见，API Key 为掩码显示；当前 Computer Use 对该 WebView 的坐标点击/滚动绑定不稳定，因此复杂 UI 点击流仍优先走 WebView2 CDP、浏览器 mock 或服务级测试复核。
 - AI Provider 原子能力只输出结构化 `AiGenerationResult` 和 artifact，不写旧工作台任务、资产或模型审计表；需要业务持久化时由上层业务 Store/Service/Rust command 自己写入专属表。直连原子能力测试不写 `ai_generation_tasks` request_json，避免持久化完整 Provider config。
-- 2026-06-14 起，前端 active config 缓存从旧 `chat/image` 扩展为 `AiActiveConfigIds` capability binding：`chat/image/txt2img/img2img/inpaint/upscale_2x/upscale_4x/person_consistency/audio/video` 均可绑定模型配置；`txt2img` 与旧 `image` 互为兼容，增强图片能力在未单独绑定时回落到图片配置。Rust 业务生成解析 active binding 时会按 `config.json` 修改时间和长度缓存偏好配置，配置保存后自动失效重读。`/ai?tab=features` 先选择模型配置再可选覆盖模型名，`/image-workbench` 使用 `txt2img` binding。
+- 2026-06-14 起，前端 active config 缓存从旧 `chat/image` 扩展为 `AiActiveConfigIds` capability binding：`chat/image/txt2img/img2img/inpaint/upscale_2x/upscale_4x/person_consistency/audio/video` 均可绑定模型配置；`txt2img` 与旧 `image` 互为兼容，增强图片能力在未单独绑定时回落到图片配置。Rust 业务生成解析 active binding 时会按 `config.json` 修改时间和长度缓存偏好配置，配置保存后自动失效重读。`/image-workbench` 使用 `txt2img` binding。
 - 业务取消语义在前端统一为 `aiService.cancelGeneration(requestId)`；底层 Rust command 为 `cancel_ai_generation_task(requestId)`，会取消排队或 running sidecar 的生成请求并同步 generation task registry 终态。Provider 配置诊断继续保留 `cancelProviderTestTask` / `cancel_ai_provider_test_task` 语义。
 - sidecar / worker 升级边界：当前短生命周期脚本继续通过 Rust `AiProviderService` 受控调用；如果引入长驻 worker、worker 池或二进制 sidecar，不能新增前端直连通道，也不能让 worker 自管业务状态。升级前必须定义 requestId、capability、heartbeat、lease/stale recovery、cancel ack、artifact path、stdout/stderr 输出上限和脱敏错误合同，并让业务 job/task 或 `ai_generation_tasks` 成为唯一可恢复事实源。
 
@@ -241,7 +239,7 @@ AI Provider 工作台是当前保留的 AI 能力入口，也是公共 AI 原子
 - 队列状态边界：task 状态机已限制合法转移，终态不能直接回流到 running/queued；failed -> retrying 会消耗 retry 次数；asset / metadata / model_run 使用事务写入。
 - 恢复与审计边界：Tauri 启动和 Store 初始化都会调用恢复逻辑；Rust 将重启后遗留的 running/validating task 清租约并重排为 queued，queued/retrying task 保持可领取，再由后端 runner 继续推进。Provider 调用失败时也会写入脱敏后的 model_run，保留 provider/model/capability/status/latency/request/response/error 审计线索。当前真实 DB 已同时存在 cancelled、failed 和 succeeded job，其中 succeeded 链路包含真实 asset、metadata 和 model_run。
 - 真实环境结论：2026-06-13 已启动真实 Tauri dev 并确认 `monster_workbench.db` 中 `image_workbench_*` 表存在；当前 root anyrouter 仍对 `/images/generations` 返回 404，但 active image config `localhost:4444` 的 `gpt-image-2` 已成功生成 PNG，并由 `ImageWorkbenchService` 复制到 `~/.monster-tools/ai/image-workbench/assets` 后写入真实 DB。2026-06-14 Windows Computer Use 可截图真实 `Monster Tools` 窗口并用键盘进入 AI 工作台，但坐标点击/滚动接口对 WebView 绑定不稳定，窗口视觉与交互复核作为单独观感项处理。
-- 2026-06-14 起，`runTxt2imgBatch()` / `retryFailedTasks()` 先创建或恢复持久 job/task 快照，然后调用 `start_image_workbench_job_runner` 启动 Rust 后端 runner；页面点击不等待整批任务结束，前端只轮询轻量 snapshot。图片工作台 task 已有 DB claim_token / leased_until_ms 防重复领取，Tauri 启动和页面初始化会恢复未完成 job 并启动 runner；通用 `/ai` Chat/Image 业务生成已有 `ai_generation_tasks` 持久任务表和 Tauri 启动恢复，服务级测试已覆盖从持久 queued 任务恢复并继续生成，直连原子测试仍保持非持久。
+- 2026-06-14 起，`runTxt2imgBatch()` / `retryFailedTasks()` 先创建或恢复持久 job/task 快照，然后调用 `start_image_workbench_job_runner` 启动 Rust 后端 runner；页面点击不等待整批任务结束，前端只轮询轻量 snapshot。图片工作台 task 已有 DB claim_token / leased_until_ms 防重复领取，Tauri 启动和页面初始化会恢复未完成 job 并启动 runner；通用业务 generation task 已有 `ai_generation_tasks` 持久任务表和 Tauri 启动恢复，服务级测试已覆盖从持久 queued 任务恢复并继续生成，直连原子测试仍保持非持久。
 - Worker heartbeat / lease 巡检已分阶段闭环（设计文档 `agent/worker-heartbeat-design.md` 已并入实现并删除）：
     - **Schema**：`image_workbench_tasks` 与 `ai_generation_tasks` 均含 `worker_id` / `claim_token` / `claimed_at_ms` / `leased_until_ms` / `last_heartbeat_ms` 列与 `(status, leased_until_ms)` 索引；迁移走 `ensure_*_runtime_columns`，新列均可空，旧记录 NULL 兼容。
     - **Janitor**：`services/runtime_janitor.rs` 在 Tauri 启动期立即跑一次三段巡检（跨进程残留 / 过期 lease / 6h 真挂死兜底），随后每 30s 一轮；`STUCK_RUNNING_MAX_MS = 6h` 是兜底标 failed 阈值，常规长任务由 heartbeat 续租覆盖。
@@ -258,18 +256,15 @@ AI Provider 工作台是当前保留的 AI 能力入口，也是公共 AI 原子
 
 | 优先级 | 文件 | 当前体量 | 判断 | 建议方向 |
 |---|---:|---:|---|---|
-| P2 | `src/stores/ai-image-runtime.ts` | 约 288 行 | 已拆出 result patch、message builders、pending recovery 与 cancel sync；Store 只保留生成主编排、runtime config 和后端 task wait | 新增恢复/取消语义前继续放入 `ai-image-pending-recovery.ts` / `ai-image-cancel-sync.ts` |
-| P2 | `src/views/ai/components/AiImagePanel.vue` | 约 634 行 | 已抽出尺寸规则、提示词草稿规则、消息展示元数据、预览弹窗 state、会话动作、生成 actions、草稿 state 和 pending state；父组件以装配为主 | 新增生图 UI 功能时优先扩展现有 helper，避免回流父组件 |
 | P2 | `src-tauri/sidecars/python/ai_provider_tester.py` | 约 113 行 | 已拆出 artifact、input parser、result/error builder、action handlers；当前是 sidecar 主入口 | 新增 action 时先放到 `ai_provider_actions.py`，输出合同放到 `ai_provider_results.py` |
 | P1 | `src-tauri/sidecars/python/provider_adapters.py` | 约 647 行 | 已拆出 `provider_anthropic_adapter.py`；当前保留 registry、共享请求工具和 OpenAI-compatible adapter | 新增非 OpenAI-compatible 协议前继续按 adapter family 拆分 |
 | 不手拆 | `src/views/utils-docs/utilsDocsContent.ts` | 约 1784 行 | 已确认为 `scripts/generate-utils-docs.cjs` 更新的内容型生成产物，并由 `check:utils-docs` 做质量与 sandbox 检查 | 维护生成脚本、JSDoc 源和检查脚本，不按行数手工拆内容 |
 | P1 | `src-tauri/src/infra/image_workbench_repo.rs` | 约 967 行 | 已拆出 `image_workbench_types.rs` 与 `image_workbench_repo_tests.rs`；当前只保留 DB 连接、mutation/query、状态重算和 row mapper，并已进入体量债务基线 | 后续增加搜索、模板、资产清理或 worker heartbeat 前，再按 query / mutations / row mapper 继续拆 |
 | P1 | `src-tauri/src/services/image_workbench_service.rs` | 约 1463 行 | 已拆出 `image_workbench_asset_policy.rs` 与外置 service tests；当前仍是图片工作台后端热点，并已进入体量债务基线 | 引入长驻 worker、取消/重试/恢复 UI 扩展前，继续拆 task transition、asset recording builder |
-| P2 | `src/views/ai/components/image/AiImageMessageList.vue` | 约 792 行 | 新拆出的 message/result display 仍偏宽，并已进入体量债务基线 | 后续拆 result card、gallery、pending/failed card |
 | P2 | `src/components/common/BaseDateRange.vue` 等 `Base*` 基础组件 | 约 402-1042 行 | 公共组件 API 稳定、交互完整，行数偏大但不都代表职责失控 | 只在触碰功能时按 preset、validation、panel UI、data adapter 等自然边界拆 |
 | P2 | `src/utils/object/diff.ts`、`src/utils/tree/lookup.ts` 等 utils | 约 748-904 行 | 工具函数偏算法/集合型，当前更适合靠测试与文档保护 | 不为行数机械拆；新增能力前先补用例，再按算法边界拆 |
 
-`src/services/tauri.mock.ts` 已从约 880 行降到约 445 行，AI Provider 与 Image Workbench mock 已拆到 `src/services/mocks/ai-provider.mock.ts` 和 `src/services/mocks/image-workbench.mock.ts`；后续新增成组 command 时继续走分域 handler。`src-tauri/src/services/ai_service.rs` 已从约 2577 行降到约 967 行，并额外拆出 437 行的 `ai_generation_support.rs`；`ai_provider_queue.rs` 生产代码与队列测试已分离。`ImageWorkbenchRepo` 已拆出类型与测试，`ImageWorkbenchService` 已拆出资产路径 policy 和外置 service tests。`ai-image-runtime.ts` 已拆出图片尺寸、提示词尺寸指令、结果 patch、消息构造、pending recovery 与 cancel sync 到 `src/stores/ai-image-*.ts` helper。`ai_provider_tester.py` 已拆出 artifact、input parser、result builder 和 action handlers；相关新模块已加入 Tauri bundle resources。`provider_adapters.py` 已拆出 Anthropic Messages family 到 `provider_anthropic_adapter.py`。`AiImagePanel.vue` 已把尺寸选项、提示词草稿规则、消息元数据、预览弹窗 state、会话动作、生成 actions、草稿 state 和 pending state 拆到 `src/views/ai/components/image/aiImage*.ts` / `useAiImage*.ts` helper。
+`src/services/tauri.mock.ts` 已从约 880 行降到约 445 行，AI Provider 与 Image Workbench mock 已拆到 `src/services/mocks/ai-provider.mock.ts` 和 `src/services/mocks/image-workbench.mock.ts`；后续新增成组 command 时继续走分域 handler。`src-tauri/src/services/ai_service.rs` 已从约 2577 行降到约 967 行，并额外拆出 437 行的 `ai_generation_support.rs`；`ai_provider_queue.rs` 生产代码与队列测试已分离。`ImageWorkbenchRepo` 已拆出类型与测试，`ImageWorkbenchService` 已拆出资产路径 policy 和外置 service tests。旧 AI 对话/生图会话页面与 runtime 已移除，当前 `/ai` 只保留配置、Provider 诊断和提示词库。`ai_provider_tester.py` 已拆出 artifact、input parser、result builder 和 action handlers；相关新模块已加入 Tauri bundle resources。`provider_adapters.py` 已拆出 Anthropic Messages family 到 `provider_anthropic_adapter.py`。
 
 ## 8. 已移除范围
 
@@ -288,12 +283,12 @@ AI Provider 工作台是当前保留的 AI 能力入口，也是公共 AI 原子
 
 1. AI Provider 后端已完成当前 P0 拆分；后续改动要保护 `ai_service.rs`、`ai_provider_queue.rs`、`ai_provider_task.rs`、`ai_provider_config.rs`、`ai_provider_process.rs`、`ai_provider_output.rs` 之间的内部 contract。
 2. `/image-workbench` 已完成 schema / repo / command / service / store / route、浏览器/mock 文生图闭环、历史/资产库/模板/收藏/取消/重试、路径白名单、持久资产复制、状态机、事务写入、Rust 后端 runner、DB claim/lease、重启孤儿任务恢复、失败 model_run 审计、真实 Provider 成功落图落库；repo 类型/测试与 service 资产路径 policy 已完成首轮拆分；worker_id / heartbeat / janitor / GLOBAL_WORKER_LIMIT permit 已落地；后续增强能力接入前必须继续保护 Provider 调用边界，并保留 `services/runtime_constants.rs` 集中调参口径。
-3. AI 生图前端热点已有 UI、helper、预览 state、会话动作和生成 actions 拆分；继续加功能前应保持新增草稿/pending 状态逻辑先抽 helper。
-4. AI runtime helper 已拆出 image result patch、message builders、pending recovery 和 cancel sync；后续新增恢复/取消语义时继续放入对应 helper。
+3. 旧 AI 对话/生图会话 runtime 已移除；不要再围绕 `/ai` 新建业务生成状态机，业务生成应落到具体业务工作台或后端 runner。
+4. `/ai` 页面只保留模型配置、Provider 诊断和提示词库；新增 Provider 诊断能力时仍放在 provider runtime / queue / prompt 分域中，不要回流到旧会话模型。
 5. Browser mock 必须继续跟 Tauri contract 对齐，避免只在浏览器成立。
 6. Python provider tester / adapter 改动后必须运行 `npm run check:architecture` 和 `npm run test:ai-sidecar`；新增生产 sidecar 模块必须同步加入 `tauri.conf.json` 的 bundle resources。
-7. 业务生成必须走 `generate_ai_business_content` 或 `enqueue_ai_business_generation`，禁止前端业务 Store 调用 `generate_ai_content` 或携带完整 provider config；`npm run check:architecture` 已限制 `aiService.generateDirectContent` 只能出现在 AI 功能测试面板 Store，`aiService.testProvider` / `aiService.enqueueProviderTest` 只能出现在 Provider 测试运行时。
-8. 业务生成请求不写旧 `AiProviderTestTask` 注册表；页面内完成/取消靠 generation task registry 与业务自身 job/task 收敛。`/ai` Chat/Image 业务生成通过 `ai_generation_tasks` 持久化 request/result 并在 Tauri 启动恢复 queued/running 任务；同 requestId 的终态任务必须幂等返回，不得重排队或覆盖终态；图片工作台通过自身 DB job/task、claim/lease 和启动恢复收敛。直连原子测试仍只做当前进程诊断，不持久化完整 Provider config。
+7. 业务生成必须走 `generate_ai_business_content` 或 `enqueue_ai_business_generation`，禁止前端业务 Store 调用 `generate_ai_content` 或携带完整 provider config；`npm run check:architecture` 已限制 `aiService.generateDirectContent` 不得进入前端业务层，`aiService.testProvider` / `aiService.enqueueProviderTest` 只能出现在 Provider 测试运行时。
+8. 业务生成请求不写旧 `AiProviderTestTask` 注册表；页面内完成/取消靠 generation task registry 与业务自身 job/task 收敛。通用业务 generation task 通过 `ai_generation_tasks` 持久化 request/result 并在 Tauri 启动恢复 queued/running 任务；同 requestId 的终态任务必须幂等返回，不得重排队或覆盖终态；图片工作台通过自身 DB job/task、claim/lease 和启动恢复收敛。直连原子测试仍只做当前进程诊断，不持久化完整 Provider config。
 9. 文档不得继续引用已删除的旧 Creative 体系；未闭环事项写入 `agent/open-loops.md`。
 
 ## 10. 质量门禁
