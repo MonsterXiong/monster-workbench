@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { Check, Download, Images, Link, ListChecks, ListFilter, Sparkles, Tags, Trash2, X } from "lucide-vue-next";
+import { Check, Download, Images, Link, ListChecks, ListFilter, Plus, Sparkles, Tags, Trash2, X } from "lucide-vue-next";
 import { useConfirm } from "../../composables/useConfirm";
 import { useI18n } from "../../composables/useI18n";
 import { useImageWorkbenchStore } from "../../stores/image-workbench";
@@ -49,6 +49,7 @@ const assetDialogRenderLimit = ref(ASSET_DIALOG_RENDER_BATCH);
 const selectedDialogAssetIds = ref<string[]>([]);
 const assetGroupFilterId = ref("");
 const assetGroupName = ref("");
+const assetGroupDraftName = ref("");
 
 const activeLibraryFilter = computed({
   get: () => props.activeLibraryFilter,
@@ -94,7 +95,7 @@ const assetGroupFilterOptions = computed(() => {
     if (!isManualImageWorkbenchGroup(group)) {
       return;
     }
-    const groupName = (group.name || "").replace(/\s+/g, " ").trim();
+    const groupName = normalizeAssetGroupName(group.name || "");
     if (!groupName) {
       return;
     }
@@ -159,11 +160,11 @@ const selectedDialogGroupMarker = computed(() => {
     .find((group) => isManualImageWorkbenchGroup(group))?.name || "";
   return {
     groupId: "",
-    groupName: assetGroupName.value.trim() || selectedGroupName || assetGroupFilterId.value,
+    groupName: normalizeAssetGroupName(assetGroupName.value) || selectedGroupName || assetGroupFilterId.value,
   };
 });
 const selectedDialogTagTarget = computed(() => {
-  const groupName = assetGroupName.value.trim();
+  const groupName = normalizeAssetGroupName(assetGroupName.value);
   if (groupName) {
     return {
       groupId: "",
@@ -178,9 +179,16 @@ const selectedDialogTagTarget = computed(() => {
   }
   return {
     groupId: "",
-    groupName: assetGroupName.value.trim(),
+    groupName: normalizeAssetGroupName(assetGroupName.value),
   };
 });
+const selectedDialogTargetName = computed(() =>
+  selectedDialogTagTarget.value.groupName || selectedDialogTagTarget.value.groupId || ""
+);
+const selectedDialogTargetText = computed(() =>
+  selectedDialogTargetName.value || t("imageWorkbench.assetGroup.groupTargetEmpty")
+);
+const canCreateAssetGroupDraft = computed(() => Boolean(normalizeAssetGroupName(assetGroupDraftName.value)));
 const canTagSelectedAssetsGroup = computed(() =>
   Boolean(
     selectedDialogCount.value &&
@@ -225,6 +233,10 @@ function assetGroupLabel(asset: ImageWorkbenchAssetCard) {
   return getImageWorkbenchAssetGroupLabel(asset, currentGroupById.value);
 }
 
+function normalizeAssetGroupName(value: string) {
+  return value.replace(/\s+/g, " ").trim();
+}
+
 function libraryFilterLabel(key: ImageWorkbenchLibraryFilter) {
   const translationKey = `imageWorkbench.workspace.libraryFilters.${key}`;
   const label = t(translationKey);
@@ -251,6 +263,15 @@ function handleSelectLibraryFilter(key: ImageWorkbenchLibraryFilter) {
 
 function handleSelectGroupFilter(value: string) {
   assetGroupFilterId.value = value;
+}
+
+function handleCreateAssetGroupDraft() {
+  const groupName = normalizeAssetGroupName(assetGroupDraftName.value);
+  if (!groupName) {
+    return;
+  }
+  assetGroupName.value = groupName;
+  assetGroupDraftName.value = "";
 }
 
 function canUseAsReference(asset: ImageWorkbenchAssetCard) {
@@ -450,6 +471,31 @@ watch(assetGroupFilterOptions, (options) => {
               <Tags class="h-3.5 w-3.5" />
               {{ t("imageWorkbench.assetGroup.groupFilterLabel") }}
             </span>
+            <div class="image-workbench-asset-shelf-dialog__group-create">
+              <input
+                v-model="assetGroupDraftName"
+                :placeholder="t('imageWorkbench.assetGroup.newGroupPlaceholder')"
+                @keydown.enter.prevent="handleCreateAssetGroupDraft"
+              />
+              <button
+                type="button"
+                :disabled="!canCreateAssetGroupDraft"
+                :title="t('imageWorkbench.assetGroup.createGroup')"
+                :aria-label="t('imageWorkbench.assetGroup.createGroup')"
+                @click="handleCreateAssetGroupDraft"
+              >
+                <Plus class="h-3.5 w-3.5" />
+              </button>
+            </div>
+            <p
+              class="image-workbench-asset-shelf-dialog__group-target"
+              :class="{ 'is-empty': !selectedDialogTargetName }"
+            >
+              <Tags class="h-3 w-3" />
+              <span>
+                {{ formatTemplate(t("imageWorkbench.assetGroup.groupTarget"), { name: selectedDialogTargetText }) }}
+              </span>
+            </p>
             <button
               type="button"
               class="image-workbench-asset-shelf-dialog__tree-item"
@@ -491,6 +537,10 @@ watch(assetGroupFilterOptions, (options) => {
             </button>
             <span>
               {{ formatTemplate(t("imageWorkbench.assetGroup.selectedCount"), { count: selectedDialogCount }) }}
+            </span>
+            <span class="image-workbench-asset-shelf-dialog__target">
+              <Tags class="h-3.5 w-3.5" />
+              {{ formatTemplate(t("imageWorkbench.assetGroup.groupTarget"), { name: selectedDialogTargetText }) }}
             </span>
             <label>
               <Tags class="h-3.5 w-3.5" />

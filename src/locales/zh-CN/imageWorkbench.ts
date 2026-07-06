@@ -468,9 +468,13 @@ export default {
   assetGroup: {
     tagged: "已标记群组",
     namePlaceholder: "输入群组名称",
+    newGroupPlaceholder: "新增群组名称",
+    createGroup: "新增群组",
     groupFilterLabel: "群组筛选",
     groupFilterAll: "全部群组",
     groupFilterUngrouped: "未分组",
+    groupTarget: "目标：{name}",
+    groupTargetEmpty: "未选择",
     selectedCount: "已选 {count} 张",
     selectVisible: "选择当前页",
     unselectVisible: "取消当前页",

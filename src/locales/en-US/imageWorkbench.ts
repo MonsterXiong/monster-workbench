@@ -468,9 +468,13 @@ export default {
   assetGroup: {
     tagged: "Grouped",
     namePlaceholder: "Group name",
+    newGroupPlaceholder: "New group name",
+    createGroup: "Create group",
     groupFilterLabel: "Group filter",
     groupFilterAll: "All groups",
     groupFilterUngrouped: "Ungrouped",
+    groupTarget: "Target: {name}",
+    groupTargetEmpty: "None",
     selectedCount: "{count} selected",
     selectVisible: "Select visible",
     unselectVisible: "Unselect visible",
