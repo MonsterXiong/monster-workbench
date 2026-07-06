@@ -8,7 +8,6 @@ import {
   buildImageWorkbenchGenerationOptionsJson,
   buildImageWorkbenchJobProgress,
   buildImageWorkbenchJobContext,
-  buildSelectedMetaPromptText,
   getImageModelName,
   getModeContextUnavailableReason,
   isJobRunnable,
@@ -30,11 +29,9 @@ import { createImageWorkbenchAssetLibraryState } from "./image-workbench-assets"
 import { createImageWorkbenchCancelActions } from "./image-workbench-cancel";
 import { createImageWorkbenchDeliveryActions } from "./image-workbench-delivery";
 import {
-  buildStyleContinuationPrompt,
   formatImageSizeValidationError,
   mergePromptClause,
   parseGenerationOptionsJson,
-  resolveUpscaleTargetSize,
 } from "./image-workbench-draft";
 import { createImageWorkbenchGenerationState, normalizePositiveImageWorkbenchQuantity } from "./image-workbench-generation";
 import { createImageWorkbenchGroupState } from "./image-workbench-groups";
@@ -42,6 +39,7 @@ import { createImageWorkbenchImportActions } from "./image-workbench-import";
 import { createImageWorkbenchSnapshotPolling } from "./image-workbench-polling";
 import { createImageWorkbenchQualityState } from "./image-workbench-quality";
 import { createImageWorkbenchReferenceState } from "./image-workbench-reference";
+import { createImageWorkbenchSelectedActions } from "./image-workbench-selected-actions";
 import {
   parseImageWorkbenchStoryboardPrompt,
   type ImageWorkbenchStoryboardGenerationOptions,
@@ -943,236 +941,46 @@ export const useImageWorkbenchStore = defineStore("image-workbench", () => {
     selectedAssetId.value = "";
   }
 
-  async function copySelectedMetaPrompt() {
-    const text = buildSelectedMetaPromptText({
-      source: selectedAssetMetadata.value,
-      run: selectedAssetModelRuns.value[0] ?? null,
-      currentJob: selectedAssetJob.value,
-    });
-    if (!text) {
-      throw new Error(t("imageWorkbench.errors.noSelectedAsset"));
-    }
-    await navigator.clipboard?.writeText(text);
-    return text;
-  }
-
-  async function regenerateSelectedAsset() {
-    const source = selectedAssetMetadata.value;
-    const sourceJob = selectedAssetJob.value ?? currentJob.value;
-    if (!selectedAsset.value && !source && !sourceJob) {
-      throw new Error(t("imageWorkbench.errors.noSelectedAsset"));
-    }
-    const nextPrompt =
-      source?.expandedPrompt ||
-      source?.originalPrompt ||
-      sourceJob?.prompt ||
-      prompt.value;
-    prompt.value = nextPrompt;
-    quantity.value = 1;
-    inpaintEditorActive.value = false;
-    mode.value = "txt2img";
-    return runTxt2imgBatch();
-  }
-
-  async function continueSelectedStyle() {
-    const source = selectedAssetMetadata.value;
-    const sourceJob = selectedAssetJob.value ?? currentJob.value;
-    if (!selectedAsset.value && !source && !sourceJob) {
-      throw new Error(t("imageWorkbench.errors.noSelectedAsset"));
-    }
-    if (selectedAsset.value && !setSingleAssetReference(selectedAsset.value.id)) {
-      throw new Error(error.value || t("imageWorkbench.errors.invalidReferenceAsset"));
-    }
-    const rawPrompt =
-      source?.expandedPrompt ||
-      source?.originalPrompt ||
-      sourceJob?.prompt ||
-      prompt.value;
-    const styleSuffix = t("imageWorkbench.asset.stylePromptSuffix").trim();
-    prompt.value = buildStyleContinuationPrompt(
-      rawPrompt,
-      styleSuffix,
-      t("imageWorkbench.asset.styleDefaultPrompt")
-    );
-    inpaintEditorActive.value = false;
-    mode.value = selectedAsset.value ? "img2img" : "txt2img";
-    return runTxt2imgBatch();
-  }
-
-  async function continueSelectedPerson() {
-    if (!selectedAsset.value && !hasReferenceImage.value) {
-      throw new Error(t("imageWorkbench.errors.noReferenceImage"));
-    }
-    if (!supportsModeForConfig(activeImageConfig.value, "person_consistency")) {
-      throw new Error(t("imageWorkbench.errors.modeUnsupportedByProvider"));
-    }
-    const shouldUseDefaultPrompt = !prompt.value.trim() || mode.value !== "person_consistency";
-    if (selectedAsset.value && !setSingleAssetReference(selectedAsset.value.id)) {
-      throw new Error(error.value || t("imageWorkbench.errors.invalidReferenceAsset"));
-    }
-    inpaintEditorActive.value = false;
-    mode.value = "person_consistency";
-    quantity.value = normalizePositiveImageWorkbenchQuantity(quantity.value, 4);
-    if (shouldUseDefaultPrompt) {
-      prompt.value = t("imageWorkbench.asset.personDefaultPrompt");
-    }
-    return runTxt2imgBatch();
-  }
-
-  async function upscaleSelectedAsset(scale: 2 | 4 = 2) {
-    const asset = selectedAsset.value;
-    if (!asset) {
-      throw new Error(t("imageWorkbench.errors.noSelectedAsset"));
-    }
-    const targetMode = scale === 4 ? "upscale_4x" : "upscale_2x";
-    const supportsNativeUpscale = supportsModeForConfig(activeImageConfig.value, targetMode);
-    if (!supportsNativeUpscale) {
-      throw new Error(t(scale === 4 ? "imageWorkbench.errors.upscale4Unsupported" : "imageWorkbench.errors.upscaleDeferred"));
-    }
-    clearReferenceImage();
-    clearInpaintMask();
-    inpaintEditorActive.value = false;
-    const targetModel = model.value.trim() || getImageModelName(activeImageConfig.value);
-    const upscaleSize = resolveUpscaleTargetSize(asset, scale, targetModel);
-    if (upscaleSize) {
-      size.value = upscaleSize;
-    }
-    quantity.value = 1;
-    prompt.value = t("imageWorkbench.asset.upscaleDefaultPrompt");
-    mode.value = targetMode;
-    return runTxt2imgBatch();
-  }
-
-  function startInpaintSelectedAsset() {
-    if (!selectedAsset.value) {
-      throw new Error(t("imageWorkbench.errors.noSelectedAsset"));
-    }
-    clearReferenceImage();
-    clearInpaintMask();
-    quantity.value = 1;
-    syncSizeToSelectedAsset();
-    inpaintEditorActive.value = true;
-    return startInpaintSelectedAssetBase();
-  }
-
-  function startFixHandsSelectedAsset() {
-    if (!selectedAsset.value) {
-      throw new Error(t("imageWorkbench.errors.noSelectedAsset"));
-    }
-    clearReferenceImage();
-    clearInpaintMask();
-    prompt.value = t("imageWorkbench.asset.fixHandsPrompt");
-    negativePrompt.value = mergePromptClause(
-      negativePrompt.value,
-      t("imageWorkbench.asset.fixHandsNegativePrompt")
-    );
-    quantity.value = 1;
-    syncSizeToSelectedAsset();
-    void addSelectedAssetQualityIssue("hands");
-    inpaintEditorActive.value = true;
-    startInpaintSelectedAssetBase();
-    notice.value = t("imageWorkbench.mask.fixHandsNotice");
-  }
-
-  function prepareSelectedAssetQualityFix() {
-    if (!selectedAsset.value) {
-      throw new Error(t("imageWorkbench.errors.noSelectedAsset"));
-    }
-    const issue = selectedAssetPrimaryQualityIssue.value;
-    if (!issue) {
-      throw new Error(t("imageWorkbench.errors.noQualityIssue"));
-    }
-    if (issue === "hands") {
-      startFixHandsSelectedAsset();
-      return issue;
-    }
-    if (issue === "prop") {
-      startLocalQualityFix("imageWorkbench.asset.propFixPrompt", "imageWorkbench.mask.localFixNotice");
-      return issue;
-    }
-    if (issue === "identity") {
-      prepareIdentityQualityFix();
-      return issue;
-    }
-    startLocalQualityFix("imageWorkbench.asset.sceneFixPrompt", "imageWorkbench.mask.localFixNotice");
-    return issue;
-  }
-
-  function startLocalQualityFix(promptKey: string, noticeKey: string) {
-    if (!selectedAsset.value) {
-      throw new Error(t("imageWorkbench.errors.noSelectedAsset"));
-    }
-    clearReferenceImage();
-    clearInpaintMask();
-    prompt.value = t(promptKey);
-    quantity.value = 1;
-    syncSizeToSelectedAsset();
-    inpaintEditorActive.value = true;
-    startInpaintSelectedAssetBase();
-    notice.value = t(noticeKey);
-  }
-
-  function syncSizeToSelectedAsset() {
-    const nativeSize = selectedAssetNativeSize.value;
-    if (nativeSize) {
-      size.value = nativeSize;
-    }
-  }
-
-  function prepareIdentityQualityFix() {
-    const targetAsset = selectedAsset.value;
-    if (!targetAsset) {
-      throw new Error(t("imageWorkbench.errors.noSelectedAsset"));
-    }
-    if (!supportsModeForConfig(activeImageConfig.value, "person_consistency")) {
-      throw new Error(t("imageWorkbench.errors.modeUnsupportedByProvider"));
-    }
-    const identityAsset = resolveIdentityReferenceAsset(targetAsset);
-    clearReferenceImage();
-    const referenceIds = identityAsset && identityAsset.id !== targetAsset.id
-      ? [targetAsset.id, identityAsset.id]
-      : [targetAsset.id];
-    if (!setAssetReferences(referenceIds)) {
-      throw new Error(error.value || t("imageWorkbench.errors.invalidReferenceAsset"));
-    }
-    setReferenceRole(targetAsset.id, identityAsset ? "scene" : "person");
-    if (identityAsset && identityAsset.id !== targetAsset.id) {
-      setReferenceRole(identityAsset.id, "person");
-    }
-    clearInpaintMask();
-    inpaintEditorActive.value = false;
-    mode.value = "person_consistency";
-    quantity.value = 1;
-    prompt.value = t("imageWorkbench.asset.identityFixPrompt");
-    notice.value = t("imageWorkbench.asset.identityFixNotice");
-  }
-
-  function resolveIdentityReferenceAsset(asset: ImageWorkbenchAsset) {
-    const sourceIds = [asset.rootAssetId, asset.parentAssetId].filter(Boolean) as string[];
-    for (const sourceId of sourceIds) {
-      const source = findKnownAsset(sourceId);
-      if (source && (!source.integrityStatus || source.integrityStatus === "ok")) {
-        return source;
-      }
-    }
-    return null;
-  }
-
-  function reuseSelectedAssetPrompt() {
-    const source = selectedAssetMetadata.value;
-    const sourceJob = selectedAssetJob.value;
-    if (!source && !sourceJob) {
-      return;
-    }
-    if (sourceJob?.providerConfigId) {
-      syncImageModelConfig(sourceJob.providerConfigId, false);
-    }
-    inpaintEditorActive.value = false;
-    mode.value = (source?.mode as ImageWorkbenchMode) || sourceJob?.mode || "txt2img";
-    prompt.value = source?.expandedPrompt || source?.originalPrompt || sourceJob?.prompt || prompt.value;
-    negativePrompt.value = source?.negativePrompt || sourceJob?.negativePrompt || "";
-    model.value = source?.model || sourceJob?.model || model.value;
-  }
+  const {
+    continueSelectedPerson,
+    continueSelectedStyle,
+    copySelectedMetaPrompt,
+    prepareSelectedAssetQualityFix,
+    regenerateSelectedAsset,
+    reuseSelectedAssetPrompt,
+    startInpaintSelectedAsset,
+    upscaleSelectedAsset,
+  } = createImageWorkbenchSelectedActions({
+    activeImageConfig,
+    currentJob,
+    error,
+    hasReferenceImage,
+    inpaintEditorActive,
+    model,
+    mode,
+    negativePrompt,
+    notice,
+    prompt,
+    quantity,
+    selectedAsset,
+    selectedAssetJob,
+    selectedAssetMetadata,
+    selectedAssetModelRuns,
+    selectedAssetNativeSize,
+    selectedAssetPrimaryQualityIssue,
+    size,
+    t,
+    addSelectedAssetQualityIssue,
+    clearInpaintMask,
+    clearReferenceImage,
+    findKnownAsset,
+    runTxt2imgBatch,
+    setAssetReferences,
+    setReferenceRole,
+    setSingleAssetReference,
+    startInpaintSelectedAssetBase,
+    syncImageModelConfig,
+  });
 
   function syncDraftFromJob(job: ImageWorkbenchJob) {
     inpaintEditorActive.value = false;
