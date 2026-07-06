@@ -19,7 +19,7 @@ import type {
   SaveImageWorkbenchMaskRequest,
 } from "../types/image-workbench";
 
-export const DEFAULT_IMAGE_WORKBENCH_HISTORY_LIMIT = 50;
+export const DEFAULT_IMAGE_WORKBENCH_HISTORY_LIMIT = 100;
 export const DEFAULT_IMAGE_WORKBENCH_ASSET_LIMIT = 120;
 export const IMAGE_WORKBENCH_LARGE_BATCH_THRESHOLD = 32;
 export const IMAGE_WORKBENCH_TASK_PREVIEW_LIMIT = 120;

@@ -64,7 +64,8 @@ pub(super) fn resolve_task_groups_for_job(
     input: &NewImageWorkbenchJob,
     job_id: &str,
 ) -> ResolvedImageWorkbenchTaskGroups {
-    resolve_storyboard_task_groups(input, job_id).unwrap_or_else(|| resolve_default_task_group(input))
+    resolve_storyboard_task_groups(input, job_id)
+        .unwrap_or_else(|| resolve_default_task_group(input))
 }
 
 fn resolve_default_task_group(input: &NewImageWorkbenchJob) -> ResolvedImageWorkbenchTaskGroups {
@@ -124,7 +125,10 @@ fn resolve_storyboard_task_groups(
         }
         next_start_index = end;
 
-        let scene_index = scene.index.unwrap_or((fallback_index + 1) as u32).clamp(1, 999);
+        let scene_index = scene
+            .index
+            .unwrap_or((fallback_index + 1) as u32)
+            .clamp(1, 999);
         let title = normalize_storyboard_group_title(scene.title.as_deref(), scene_index);
         let reference_prompt = truncate_chars(scene.reference_prompt.as_deref().unwrap_or(""), 256);
         let group_id = next_id("iw-group");
@@ -196,7 +200,7 @@ pub(super) fn build_storyboard_replan_base_prompt(
         .filter(|value| !value.is_empty())
         .unwrap_or("当前分镜");
     format!(
-        "{} 分镜重规划批次：{}。基于「{}」重新规划该分镜，不复用上一轮失败的构图或随机细节；保持参考图人物为同一张脸、同一五官比例、同一气质神韵，保留原分镜核心故事瞬间，重新组织服装纹理、情绪细节、动作姿态、镜头构图、光影层次、前中后景和场景道具，输出新的高质量候选图。",
+        "{} 分镜重规划批次：{}。基于「{}」重新规划该分镜，不复用上一轮失败的构图或随机细节；参考图人物只用于主角身份识别，脸型、五官比例、发型、年龄感和整体气质保持一致，但不要复制参考图或上一轮的固定表情、眼神和姿态；保留原分镜核心故事瞬间，重新组织表情神情、服装纹理、动作姿态、镜头景别、拍摄手法、光影层次、前中后景和场景道具，输出新的高质量候选图。",
         base_prompt.trim(),
         batch_id,
         scene_label
@@ -209,7 +213,7 @@ pub(super) fn build_storyboard_replan_task_prompt(
     variants: u32,
 ) -> String {
     format!(
-        "{} 新候选图 {}/{}：保持同一分镜设定与参考图人物一致，允许表情微差、衣袖发丝动态、景深、光影和构图产生新的可筛选变化。",
+        "{} 新候选图 {}/{}：保持同一分镜设定与主角身份一致，但不要锁定参考图表情；根据本镜情绪调整表情、眼神、姿态、服装细节、场景道具、景别、光影、景深和构图，产生新的可筛选变化。",
         base_prompt.trim(),
         variant_index,
         variants

@@ -273,8 +273,8 @@ function createMockStoryboardRecognitionText(prompt: string) {
     },
   ];
   return JSON.stringify({
-    prefix: "参考图人物特征保持一致，保持同一张脸、同一五官比例、同一气质神韵。",
-    negativePrompt: "不要改变参考图人物五官，不要换脸，不要现代妆容，不要文字水印。",
+    prefix: "参考图只用于主角身份识别：脸型、五官比例、发型、年龄感和整体气质保持一致，不复制参考图固定表情和姿态。",
+    negativePrompt: "不要改变参考图人物五官，不要换脸，不要现代妆容，不要表情僵硬，不要所有分镜同一表情同一姿态，不要文字水印。",
     scenes: scenes.length ? scenes : fallbackScenes,
   }, null, 2);
 }
@@ -283,12 +283,12 @@ function createMockStoryboardGenerationText(prompt: string) {
   const direction = prompt.split("用户给的方向：").pop()?.trim().slice(0, 80) || "古风女主逆袭短剧";
   const titles = ["开场钩子", "身份暗线", "雨夜危机", "反击前夜", "高台反转", "终章封面"];
   return JSON.stringify({
-    prefix: "参考图人物特征保持一致，保持同一张脸、同一五官比例、同一气质神韵，短剧小说封面感，电影级画面，真实光影。",
-    negativePrompt: "不要改变参考图人物五官，不要换脸，不要现代妆容，不要低清晰度，不要文字水印，不要畸形手指。",
+    prefix: "参考图只用于主角身份识别：脸型、五官比例、发型、年龄感和整体气质保持一致，不复制参考图固定表情和姿态，短剧小说封面感，电影级画面，真实光影。",
+    negativePrompt: "不要改变参考图人物五官，不要换脸，不要现代妆容，不要表情僵硬，不要所有分镜同一表情同一姿态，不要低清晰度，不要文字水印，不要畸形手指。",
     scenes: titles.map((title, index) => ({
       index: index + 1,
       title: `${String(index + 1).padStart(2, "0")}｜${title}`,
-      picturePrompt: `围绕“${direction}”生成的短剧小说分镜，主角保持参考图人物一致性，突出${title}的戏剧瞬间、服装变化、场景冲突和情绪张力。`,
+      picturePrompt: `围绕“${direction}”生成的短剧小说分镜，主角保持参考图人物身份一致，表情、神情、姿态和服装随“${title}”的戏剧瞬间自然变化，突出场景冲突和情绪张力。`,
       cameraPrompt: index % 2 === 0 ? "电影感中近景，三分之二侧脸，前景遮挡，人物眼神作为画面中心。" : "广角叙事构图，低机位轻微仰拍，强轮廓光，背景层次清晰。",
       emotionKeywords: "短剧、反转、命运感、东方审美、封面感",
       referencePrompt: "人物参考图为主，按本镜补充场景、服装、道具和氛围参考。",

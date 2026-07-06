@@ -27,6 +27,7 @@ interface CreateImageWorkbenchAssetActionsOptions {
   refreshWorkbenchLists: () => Promise<void>;
   runWithLoading: <T>(runner: () => Promise<T>) => Promise<T>;
   syncCurrentGroups: (jobId: string) => Promise<unknown>;
+  syncLibraryGroupsForJobIds: (jobIds: string[], force?: boolean) => Promise<unknown>;
   syncSelectedAssetFromSnapshot: (preferredAssetId?: string) => void;
 }
 
@@ -73,6 +74,7 @@ export function createImageWorkbenchAssetActions(options: CreateImageWorkbenchAs
         groupName: groupOptions.groupName || null,
       })
     );
+    await options.syncLibraryGroupsForJobIds(result.groups.map((group) => group.jobId), true);
     if (options.currentJob.value) {
       await options.syncCurrentGroups(options.currentJob.value.id);
     }

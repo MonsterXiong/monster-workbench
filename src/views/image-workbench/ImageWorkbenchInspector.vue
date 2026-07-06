@@ -39,7 +39,11 @@ import {
   normalizeImageWorkbenchImageSize,
   resolveImageWorkbenchBranchTaskEntry,
 } from "./imageWorkbenchInspectorHelpers";
-import { buildImageWorkbenchJobReferenceViews } from "./imageWorkbenchReferences";
+import {
+  buildImageWorkbenchJobReferenceViews,
+  buildImageWorkbenchReferencePreviewAsset,
+  type ImageWorkbenchReferencePreviewSource,
+} from "./imageWorkbenchReferences";
 import { buildImageWorkbenchHandlers } from "./useImageWorkbenchHandlers";
 import type { ImageWorkbenchQualityIssue } from "../../types/image-workbench";
 import type { ImageWorkbenchTaskEntryKey } from "./imageWorkbenchTaskLauncher";
@@ -67,6 +71,7 @@ const emit = defineEmits<{
   (event: "prepare-task-entry", key: ImageWorkbenchTaskEntryKey): void;
   (event: "clear-selection"): void;
 }>();
+const selectionPromptPreviewMaxLength = 88;
 
 const selectedAsset = computed(() => imageWorkbenchStore.selectedAsset);
 const inspectorTitle = computed(() =>
@@ -106,6 +111,19 @@ const selectedAssetSummary = computed(() => {
     return t("imageWorkbench.review.noSelection");
   }
   return `${selectedImageDimensions.value} · ${formatImageWorkbenchAssetFileSize(selectedAsset.value)}`;
+});
+const selectedPromptText = computed(() =>
+  selectedMetadata.value?.expandedPrompt ||
+  selectedMetadata.value?.originalPrompt ||
+  selectedAssetJob.value?.prompt ||
+  t("imageWorkbench.review.emptyPrompt")
+);
+const selectedPromptPreview = computed(() => {
+  const prompt = selectedPromptText.value.replace(/\s+/g, " ").trim();
+  if (prompt.length <= selectionPromptPreviewMaxLength) {
+    return prompt;
+  }
+  return `${prompt.slice(0, selectionPromptPreviewMaxLength).trimEnd()}...`;
 });
 const selectedJobReferenceViews = computed(() =>
   buildImageWorkbenchJobReferenceViews({
@@ -236,6 +254,10 @@ function openAssetPreview(asset: ImageWorkbenchAssetCard | null) {
   emit("preview", asset);
 }
 
+function openReferencePreview(reference: ImageWorkbenchReferencePreviewSource) {
+  openAssetPreview(buildImageWorkbenchReferencePreviewAsset(reference));
+}
+
 function handleUseSelectedAsReferenceClick() {
   handleUseSelectedAssetAsReference();
   emit("task-entry-change", "reference");
@@ -269,7 +291,7 @@ function handleQualityFixClick() {
 
 <template>
   <aside class="image-workbench-panel image-workbench-panel--details">
-    <div class="image-workbench-section__head">
+    <div v-if="selectedAsset" class="image-workbench-section__head">
       <Info class="h-4 w-4" />
       <span>{{ inspectorTitle }}</span>
       <button
@@ -296,7 +318,7 @@ function handleQualityFixClick() {
         />
       </div>
       <div class="image-workbench-selection-summary">
-        <strong>{{ selectedMetadata?.expandedPrompt || selectedMetadata?.originalPrompt || t("imageWorkbench.review.emptyPrompt") }}</strong>
+        <strong>{{ selectedPromptPreview }}</strong>
         <small>{{ selectedAssetSummary }}</small>
         <div class="image-workbench-selection-summary__tags">
           <span :class="{ 'is-ready': selectedDeliveryReady }">{{ selectedDeliveryStatusLabel }}</span>
@@ -311,10 +333,10 @@ function handleQualityFixClick() {
           v-for="reference in selectedJobReferenceViews"
           :key="reference.key"
           type="button"
-          :class="{ 'is-missing': !reference.asset }"
-          :disabled="!reference.asset"
+          :class="{ 'is-missing': !reference.displayUrl }"
+          :disabled="!reference.displayUrl"
           :title="reference.sourcePath || reference.label"
-          @click="openAssetPreview(reference.asset)"
+          @click="openReferencePreview(reference)"
         >
           <img
             v-if="reference.displayUrl"
@@ -603,7 +625,7 @@ function handleQualityFixClick() {
             </div>
             <div>
               <dt>{{ t("imageWorkbench.details.prompt") }}</dt>
-              <dd>{{ selectedMetadata?.expandedPrompt || selectedMetadata?.originalPrompt || selectedAssetJob?.prompt || "-" }}</dd>
+              <dd>{{ selectedPromptText }}</dd>
             </div>
             <div>
               <dt>{{ t("imageWorkbench.details.negativePrompt") }}</dt>

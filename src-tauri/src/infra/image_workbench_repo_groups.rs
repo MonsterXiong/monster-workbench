@@ -1,4 +1,5 @@
 use super::*;
+use rusqlite::OptionalExtension;
 
 impl ImageWorkbenchRepo {
     /// 创建资产组。本轮仅落存储与读写，grouped job 业务编排留后续轮次。
@@ -45,7 +46,10 @@ impl ImageWorkbenchRepo {
         let mut conn = self.connect()?;
         let mut assets = Vec::new();
         for asset_id in input.asset_ids {
-            if assets.iter().any(|asset: &ImageWorkbenchAsset| asset.id == asset_id) {
+            if assets
+                .iter()
+                .any(|asset: &ImageWorkbenchAsset| asset.id == asset_id)
+            {
                 continue;
             }
             if let Ok(asset) = image_workbench_query::get_asset(&conn, &asset_id) {
@@ -62,12 +66,20 @@ impl ImageWorkbenchRepo {
         let now = now_ms();
         let tx = conn.transaction()?;
         let mut target_group_by_job = HashMap::<String, String>::new();
+        let mut affected_group_ids = HashSet::<String>::new();
+        assets
+            .iter()
+            .filter_map(|asset| asset.group_id.clone())
+            .for_each(|group_id| {
+                affected_group_ids.insert(group_id);
+            });
         if let Some(group_id) = input.group_id.filter(|value| !value.trim().is_empty()) {
             let group = image_workbench_query::get_group(&tx, group_id.trim())?;
             for asset in &assets {
                 if asset.job_id != group.job_id {
                     return Err(AppError::Config(
-                        "Cannot move assets from different jobs into one existing group".to_string(),
+                        "Cannot move assets from different jobs into one existing group"
+                            .to_string(),
                     ));
                 }
             }
@@ -82,14 +94,32 @@ impl ImageWorkbenchRepo {
                 if target_group_by_job.contains_key(&asset.job_id) {
                     continue;
                 }
-                let group_id = next_id("iw-group");
-                tx.execute(
-                    "INSERT INTO image_workbench_groups
-                        (id, job_id, source_id, name, type, agent_preset, agent_ids_json, base_prompt,
-                         count, created_at_ms, updated_at_ms)
-                     VALUES (?, ?, NULL, ?, 'manual', NULL, NULL, NULL, 0, ?, ?)",
-                    params![group_id, asset.job_id, group_name, now, now],
-                )?;
+                let existing_group_id = tx
+                    .query_row(
+                        "SELECT id
+                         FROM image_workbench_groups
+                         WHERE job_id = ?
+                           AND name = ?
+                           AND type = 'manual'
+                         ORDER BY updated_at_ms DESC, created_at_ms DESC
+                         LIMIT 1",
+                        params![asset.job_id, group_name],
+                        |row| row.get::<_, String>(0),
+                    )
+                    .optional()?;
+                let group_id = if let Some(group_id) = existing_group_id {
+                    group_id
+                } else {
+                    let group_id = next_id("iw-group");
+                    tx.execute(
+                        "INSERT INTO image_workbench_groups
+                            (id, job_id, source_id, name, type, agent_preset, agent_ids_json, base_prompt,
+                             count, created_at_ms, updated_at_ms)
+                         VALUES (?, ?, NULL, ?, 'manual', NULL, NULL, NULL, 0, ?, ?)",
+                        params![group_id, asset.job_id, group_name, now, now],
+                    )?;
+                    group_id
+                };
                 target_group_by_job.insert(asset.job_id.clone(), group_id);
             }
         }
@@ -112,7 +142,10 @@ impl ImageWorkbenchRepo {
             )?;
         }
 
-        for group_id in target_group_by_job.values() {
+        target_group_by_job.values().for_each(|group_id| {
+            affected_group_ids.insert(group_id.clone());
+        });
+        for group_id in &affected_group_ids {
             tx.execute(
                 "UPDATE image_workbench_groups
                  SET count = (

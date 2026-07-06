@@ -41,7 +41,7 @@ use crate::infra::image_workbench_types::{
     NewImageWorkbenchModelRun, NewImageWorkbenchTemplate, ReplanImageWorkbenchStoryboardGroupInput,
     TagImageWorkbenchAssetsGroupInput, TagImageWorkbenchAssetsGroupResult,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 pub struct ImageWorkbenchRepo {
     db_path: PathBuf,

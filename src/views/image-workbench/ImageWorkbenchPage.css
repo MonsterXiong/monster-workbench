@@ -36,12 +36,8 @@
   @apply w-8 px-0;
 }
 
-.image-workbench-error {
-  @apply rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs font-bold text-red-700 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-300;
-}
-
 .image-workbench-layout {
-  @apply grid min-h-0 flex-1 gap-3 overflow-hidden p-3;
+  @apply grid min-h-0 flex-1 gap-3 overflow-hidden;
   grid-template-columns: 260px minmax(620px, 1fr) 320px;
 }
 
@@ -793,109 +789,73 @@
 }
 
 .image-workbench-task-job__actions {
-  @apply flex flex-wrap justify-end gap-1.5 px-3 pb-2;
+  @apply flex flex-nowrap justify-end gap-1.5 px-3 pb-2;
 }
 
 .image-workbench-task-job__actions button,
-.image-workbench-task-controls button {
-  @apply inline-flex h-7 items-center justify-center gap-1.5 rounded-md border border-slate-200 bg-slate-50 px-2 text-[11px] font-black text-slate-600 transition hover:bg-slate-100 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800;
+.image-workbench-task-stop {
+  @apply inline-flex h-7 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md border border-slate-200 bg-slate-50 px-2 text-[11px] font-black text-slate-600 transition hover:bg-slate-100 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800;
+}
+
+.image-workbench-task-job__actions button span {
+  @apply min-w-0 truncate;
 }
 
 .image-workbench-task-job__actions button.is-danger,
-.image-workbench-task-controls button {
+.image-workbench-task-stop {
   @apply border-red-200 bg-red-50 text-red-600 hover:bg-red-100 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-950/50;
 }
 
-.image-workbench-task-overview {
-  @apply flex flex-wrap gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 dark:border-slate-800 dark:bg-slate-950;
+.image-workbench-task-job__context-menu {
+  @apply fixed z-50 grid min-w-44 gap-1 rounded-lg border border-slate-200 bg-white p-1.5 shadow-2xl dark:border-slate-800 dark:bg-slate-950;
 }
 
-.image-workbench-task-chip {
-  @apply inline-flex h-6 items-center rounded-full bg-slate-100 px-2 text-[10px] font-black text-slate-500 dark:bg-slate-900 dark:text-slate-300;
+.image-workbench-task-job__context-menu button {
+  @apply inline-flex h-8 min-w-0 items-center gap-2 rounded-md px-2.5 text-left text-[11px] font-black text-slate-600 transition hover:bg-slate-100 focus:bg-slate-100 focus:outline-none dark:text-slate-300 dark:hover:bg-slate-900 dark:focus:bg-slate-900;
 }
 
-.image-workbench-task-chip.is-running {
-  @apply bg-sky-50 text-sky-700 dark:bg-sky-950/40 dark:text-sky-300;
+.image-workbench-task-job__context-menu button.is-danger {
+  @apply text-red-600 hover:bg-red-50 focus:bg-red-50 dark:text-red-300 dark:hover:bg-red-950/40 dark:focus:bg-red-950/40;
 }
 
-.image-workbench-task-chip.is-failed {
-  @apply bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-300;
-}
-
-.image-workbench-task-chip.is-done {
-  @apply bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300;
-}
-
-.image-workbench-task-controls {
-  @apply flex justify-end;
+.image-workbench-task-inline {
+  @apply grid min-w-0 gap-1.5;
 }
 
 .image-workbench-storyboard-task-groups {
-  @apply grid gap-2 rounded-md border border-slate-200 bg-white p-2 dark:border-slate-800 dark:bg-slate-950;
+  @apply flex min-w-0 flex-1 flex-col gap-1.5 rounded-md border border-slate-200 bg-slate-50 px-1.5 py-1.5 dark:border-slate-800 dark:bg-slate-900;
 }
 
-.image-workbench-storyboard-task-groups__head {
-  @apply flex items-center justify-between gap-2 text-[10px] font-black uppercase tracking-wide text-slate-400 dark:text-slate-500;
-}
-
-.image-workbench-storyboard-task-groups__head small {
-  @apply shrink-0 normal-case tracking-normal;
+.image-workbench-storyboard-task-groups__strip {
+  @apply grid min-w-0 flex-1 gap-1;
 }
 
 .image-workbench-storyboard-task-group {
-  @apply min-w-0 rounded-md border border-slate-100 bg-slate-50 p-2 dark:border-slate-800 dark:bg-slate-900/60;
+  @apply flex min-h-6 min-w-0 items-center justify-between gap-1.5 rounded-md border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-black text-slate-600 transition dark:border-slate-800 dark:bg-slate-950 dark:text-slate-200;
 }
 
-.image-workbench-storyboard-task-group__head {
-  @apply flex min-w-0 items-start justify-between gap-2;
-}
-
-.image-workbench-storyboard-task-group__head-main {
-  @apply grid min-w-0 gap-1;
-}
-
-.image-workbench-storyboard-task-group__head strong {
-  @apply min-w-0 truncate text-[11px] font-black text-slate-700 dark:text-slate-100;
-}
-
-.image-workbench-storyboard-task-group__head span {
-  @apply shrink-0 text-[10px] font-black text-slate-400 dark:text-slate-500;
+.image-workbench-storyboard-task-group__title {
+  @apply min-w-0 flex-1 truncate whitespace-nowrap;
 }
 
 .image-workbench-storyboard-task-group__replan {
-  @apply inline-flex h-7 shrink-0 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 text-[10px] font-black text-slate-600 transition hover:border-primary/40 hover:text-primary disabled:cursor-not-allowed disabled:opacity-45 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300;
+  @apply inline-flex h-5 shrink-0 items-center justify-center gap-1 rounded border border-red-200 bg-white px-1.5 text-[10px] font-black text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-900/60 dark:bg-slate-950 dark:text-red-300 dark:hover:bg-red-950/30;
 }
 
-.image-workbench-storyboard-task-group__progress {
-  @apply mt-2 h-1.5 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800;
+.image-workbench-storyboard-task-group__replan span {
+  @apply whitespace-nowrap;
 }
 
-.image-workbench-storyboard-task-group__progress span {
-  @apply block h-full rounded-full bg-primary transition-all;
+.image-workbench-storyboard-task-group.is-running {
+  @apply border-sky-200 bg-sky-50/60 dark:border-sky-900/60 dark:bg-sky-950/20;
 }
 
-.image-workbench-storyboard-task-group p {
-  @apply mt-1.5 line-clamp-2 text-[10px] font-semibold leading-4 text-slate-500 dark:text-slate-400;
+.image-workbench-storyboard-task-group.is-failed {
+  @apply border-red-200 bg-red-50/70 dark:border-red-900/60 dark:bg-red-950/20;
 }
 
-.image-workbench-storyboard-task-group__variants {
-  @apply mt-2 flex flex-wrap gap-1;
-}
-
-.image-workbench-storyboard-task-variant {
-  @apply inline-flex h-5 min-w-0 max-w-full items-center rounded-full bg-slate-100 px-1.5 text-[9px] font-black text-slate-500 dark:bg-slate-950 dark:text-slate-300;
-}
-
-.image-workbench-storyboard-task-variant.is-running {
-  @apply bg-sky-50 text-sky-700 dark:bg-sky-950/40 dark:text-sky-300;
-}
-
-.image-workbench-storyboard-task-variant.is-failed {
-  @apply bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-300;
-}
-
-.image-workbench-storyboard-task-variant.is-done {
-  @apply bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300;
+.image-workbench-storyboard-task-group.is-done {
+  @apply border-emerald-200 bg-emerald-50/60 dark:border-emerald-900/50 dark:bg-emerald-950/20;
 }
 
 .image-workbench-task-failure {
@@ -1023,38 +983,6 @@
 
 .image-workbench-compare-card strong {
   @apply mt-0.5 block text-[11px] font-black text-slate-800 dark:text-slate-100;
-}
-
-.image-workbench-gallery-head {
-  @apply flex shrink-0 items-center justify-between gap-3 border-b border-slate-100 bg-slate-50/80 px-3 py-2 dark:border-slate-800 dark:bg-slate-900/40;
-}
-
-.image-workbench-gallery-title {
-  @apply flex min-w-0 items-center gap-2;
-}
-
-.image-workbench-gallery-title > svg {
-  @apply shrink-0 text-primary;
-}
-
-.image-workbench-gallery-title span {
-  @apply min-w-0;
-}
-
-.image-workbench-gallery-title strong {
-  @apply block truncate text-xs font-black text-slate-800 dark:text-slate-100;
-}
-
-.image-workbench-gallery-title small {
-  @apply mt-0.5 block truncate text-[11px] font-semibold text-slate-500 dark:text-slate-400;
-}
-
-.image-workbench-gallery-tools {
-  @apply flex shrink-0 flex-wrap items-center justify-end gap-2;
-}
-
-.image-workbench-gallery-tools > .image-workbench-secondary {
-  @apply h-8 px-2 text-[11px];
 }
 
 .image-workbench-job-context {
@@ -1192,36 +1120,36 @@
   @apply col-span-full flex min-h-24 items-center justify-center gap-2 rounded-md border border-dashed border-slate-200 bg-slate-50 text-xs font-bold text-slate-400 dark:border-slate-800 dark:bg-slate-900/50 dark:text-slate-500;
 }
 
+.image-workbench-gallery-section__history {
+  @apply rounded-md border border-slate-200 bg-slate-50/70 p-2 dark:border-slate-800 dark:bg-slate-900/40;
+}
+
+.image-workbench-gallery-section__history summary {
+  @apply flex cursor-pointer select-none items-center gap-2 text-[11px] font-black text-slate-500 transition hover:text-primary dark:text-slate-400;
+}
+
+.image-workbench-gallery-section__history summary::-webkit-details-marker {
+  display: none;
+}
+
+.image-workbench-gallery-section__history[open] summary {
+  @apply mb-2 text-primary;
+}
+
+.image-workbench-grid--history {
+  @apply grid-cols-[repeat(auto-fill,minmax(132px,1fr))] gap-2;
+}
+
+.image-workbench-grid--history .image-workbench-asset-card {
+  @apply opacity-90;
+}
+
 .image-workbench-storyboard-draft {
   @apply relative flex min-h-0 flex-1 flex-col gap-3 overflow-hidden p-3;
 }
 
 .image-workbench-storyboard-draft.is-recognizing {
   @apply pointer-events-none;
-}
-
-.image-workbench-storyboard-draft__head {
-  @apply flex shrink-0 items-start justify-between gap-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-900/60;
-}
-
-.image-workbench-storyboard-draft__head > div:first-child {
-  @apply min-w-0;
-}
-
-.image-workbench-storyboard-draft__head span {
-  @apply flex min-w-0 items-center gap-1.5;
-}
-
-.image-workbench-storyboard-draft__head svg {
-  @apply shrink-0 text-primary;
-}
-
-.image-workbench-storyboard-draft__head strong {
-  @apply truncate text-xs font-black text-slate-800 dark:text-slate-100;
-}
-
-.image-workbench-storyboard-draft__head small {
-  @apply mt-1 block text-[11px] font-semibold leading-4 text-slate-500 dark:text-slate-400;
 }
 
 .image-workbench-storyboard-draft__side {
@@ -1383,39 +1311,6 @@
 
 .image-workbench-start-task-strip button.is-active {
   @apply border-primary bg-primary text-white;
-}
-
-.image-workbench-start-source {
-  @apply grid gap-2 rounded-md border border-slate-200 bg-white p-2 dark:border-slate-800 dark:bg-slate-950;
-}
-
-.image-workbench-start-source__head {
-  @apply flex items-center justify-between gap-2;
-}
-
-.image-workbench-start-source__head strong {
-  @apply text-xs font-black text-slate-700 dark:text-slate-200;
-}
-
-.image-workbench-start-source__head small {
-  @apply rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-black text-slate-500 dark:bg-slate-900 dark:text-slate-400;
-}
-
-.image-workbench-start-source__grid {
-  @apply grid gap-2;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
-}
-
-.image-workbench-start-source__grid button {
-  @apply relative aspect-square overflow-hidden rounded-md border border-slate-200 bg-slate-100 transition hover:border-primary hover:ring-2 hover:ring-primary/20 dark:border-slate-800 dark:bg-slate-900;
-}
-
-.image-workbench-start-source__grid img {
-  @apply h-full w-full object-cover;
-}
-
-.image-workbench-start-source__grid span {
-  @apply absolute bottom-1 left-1 rounded bg-slate-950/70 px-1.5 py-0.5 text-[10px] font-black text-white;
 }
 
 .image-workbench-start-scene-grid {
@@ -1791,62 +1686,6 @@
   @apply bg-white text-primary shadow-sm dark:bg-slate-950;
 }
 
-.image-workbench-review-overview {
-  @apply space-y-2 rounded-md border border-slate-200 bg-white p-2 shadow-sm dark:border-slate-800 dark:bg-slate-950;
-}
-
-.image-workbench-review-overview__head {
-  @apply flex items-center justify-between gap-2 px-0.5;
-}
-
-.image-workbench-review-overview__head strong {
-  @apply min-w-0 truncate text-xs font-black text-slate-800 dark:text-slate-100;
-}
-
-.image-workbench-review-overview__head small {
-  @apply shrink-0 text-[10px] font-black text-slate-400 dark:text-slate-500;
-}
-
-.image-workbench-review-overview__grid {
-  @apply grid gap-1.5;
-  grid-template-columns: repeat(auto-fit, minmax(58px, 1fr));
-}
-
-.image-workbench-review-overview-card {
-  @apply flex min-h-14 min-w-0 flex-col justify-between rounded-md border border-slate-200 bg-slate-50 p-2 text-left transition hover:border-primary/40 hover:bg-white disabled:cursor-not-allowed disabled:opacity-45 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-slate-950;
-}
-
-.image-workbench-review-overview-card.is-active {
-  @apply border-primary bg-primary/5 ring-2 ring-primary/10 dark:bg-primary/10;
-}
-
-.image-workbench-review-overview-card > span {
-  @apply flex min-w-0 items-center gap-1 truncate text-[10px] font-black text-slate-500 dark:text-slate-400;
-}
-
-.image-workbench-review-overview-card > span svg {
-  @apply shrink-0;
-}
-
-.image-workbench-review-overview-card > strong {
-  @apply text-lg font-black leading-none text-slate-800 dark:text-slate-100;
-}
-
-.image-workbench-review-overview-card.is-delivery > span,
-.image-workbench-review-overview-card.is-delivery > strong {
-  @apply text-emerald-600 dark:text-emerald-400;
-}
-
-.image-workbench-review-overview-card.is-needsFix > span,
-.image-workbench-review-overview-card.is-needsFix > strong {
-  @apply text-amber-600 dark:text-amber-400;
-}
-
-.image-workbench-review-overview-card.is-favorite > span,
-.image-workbench-review-overview-card.is-favorite > strong {
-  @apply text-sky-600 dark:text-sky-400;
-}
-
 .image-workbench-inspector-recent-grid {
   @apply grid grid-cols-2 gap-2;
 }
@@ -1867,17 +1706,13 @@
   @apply text-xs font-black text-slate-800 dark:text-slate-100;
 }
 
-.image-workbench-inspector-home__section-head small {
-  @apply text-[11px] font-black text-slate-400 dark:text-slate-500;
-}
-
 .image-workbench-inspector-home__section-head button {
   @apply ml-auto inline-flex h-6 shrink-0 items-center rounded-md border border-slate-200 bg-white px-2 text-[10px] font-black text-slate-500 transition hover:border-primary/30 hover:text-primary dark:border-slate-800 dark:bg-slate-950 dark:text-slate-400;
 }
 
 .image-workbench-inspector-library-filters,
 .image-workbench-asset-shelf-dialog__filters {
-  @apply flex flex-wrap gap-1.5;
+  @apply flex flex-wrap items-center gap-1.5;
 }
 
 .image-workbench-inspector-library-filters button,
@@ -1890,14 +1725,8 @@
   @apply border-primary bg-primary text-white;
 }
 
-.image-workbench-inspector-library-filters small,
-.image-workbench-asset-shelf-dialog__filters small {
-  @apply inline-flex min-w-4 justify-center rounded-full bg-white/70 px-1 text-[9px] dark:bg-slate-950/70;
-}
-
-.image-workbench-inspector-library-filters button.is-active small,
-.image-workbench-asset-shelf-dialog__filters button.is-active small {
-  @apply bg-white/20 text-white;
+.image-workbench-inspector-library-filters .image-workbench-inspector-library-more {
+  @apply ml-auto bg-white dark:bg-slate-950;
 }
 
 .image-workbench-inspector-recent-card {
@@ -1917,12 +1746,12 @@
   @apply h-full w-full object-cover;
 }
 
-.image-workbench-inspector-recent-card span {
-  @apply absolute bottom-1 left-1 right-1 inline-flex min-w-0 items-center justify-center gap-1 rounded bg-slate-950/65 px-1.5 py-1 text-[10px] font-black text-white backdrop-blur;
+.image-workbench-inspector-group-badge {
+  @apply absolute bottom-1 left-1 right-1 inline-flex min-w-0 items-center justify-center gap-1 truncate rounded bg-emerald-600/85 px-1.5 py-1 text-[10px] font-black text-white backdrop-blur;
 }
 
-.image-workbench-inspector-group-badge {
-  @apply absolute bottom-8 left-1 right-1 inline-flex min-w-0 items-center justify-center gap-1 truncate rounded bg-emerald-600/85 px-1.5 py-1 text-[10px] font-black text-white backdrop-blur;
+.image-workbench-inspector-home .image-workbench-inspector-group-badge {
+  @apply bottom-1;
 }
 
 .image-workbench-inspector-select-action {
@@ -1942,7 +1771,7 @@
 }
 
 .image-workbench-inspector-review-action {
-  @apply absolute left-9 top-1 inline-flex h-7 w-7 items-center justify-center rounded-md border border-white/60 bg-slate-950/65 text-white shadow-sm backdrop-blur transition hover:bg-indigo-500;
+  @apply absolute left-1 top-1 inline-flex h-7 w-7 items-center justify-center rounded-md border border-white/60 bg-slate-950/65 text-white shadow-sm backdrop-blur transition hover:bg-indigo-500;
 }
 
 .image-workbench-inspector-quality-action {
@@ -1956,13 +1785,14 @@
 }
 
 .image-workbench-asset-shelf-dialog {
-  @apply fixed inset-0 z-40 flex items-center justify-center bg-slate-950/45 p-6 backdrop-blur-sm;
+  @apply fixed inset-0 z-40 flex items-center justify-center bg-slate-950/45 p-3 backdrop-blur-sm sm:p-4;
 }
 
 .image-workbench-asset-shelf-dialog__panel {
-  @apply flex min-h-0 w-full max-w-6xl min-w-0 flex-col gap-3 rounded-lg border border-slate-200 bg-white p-4 shadow-2xl dark:border-slate-800 dark:bg-slate-950;
-  height: min(86vh, 820px);
-  max-height: calc(100vh - 2rem);
+  @apply flex min-h-0 w-full min-w-0 flex-col gap-3 rounded-lg border border-slate-200 bg-white p-4 shadow-2xl dark:border-slate-800 dark:bg-slate-950;
+  max-width: min(1680px, calc(100vw - 1rem));
+  height: min(96vh, 1040px);
+  max-height: calc(100vh - 0.75rem);
 }
 
 .image-workbench-asset-shelf-dialog__head {
@@ -1985,8 +1815,58 @@
   @apply inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-slate-50 text-slate-500 transition hover:border-primary/30 hover:text-primary dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300;
 }
 
+.image-workbench-asset-shelf-dialog__body {
+  @apply grid min-h-0 flex-1 gap-3;
+  grid-template-columns: minmax(13rem, 15rem) minmax(0, 1fr);
+}
+
+.image-workbench-asset-shelf-dialog__sidebar {
+  @apply min-h-0 overflow-y-auto rounded-md border border-slate-200 bg-slate-50 p-2 dark:border-slate-800 dark:bg-slate-900;
+  scrollbar-gutter: stable;
+}
+
+.image-workbench-asset-shelf-dialog__content {
+  @apply flex min-h-0 min-w-0 flex-col gap-3;
+}
+
+.image-workbench-asset-shelf-dialog__tree-section {
+  @apply flex flex-col gap-1.5;
+}
+
+.image-workbench-asset-shelf-dialog__tree-section + .image-workbench-asset-shelf-dialog__tree-section {
+  @apply mt-3 border-t border-slate-200 pt-3 dark:border-slate-800;
+}
+
+.image-workbench-asset-shelf-dialog__tree-title {
+  @apply mb-1 inline-flex min-w-0 items-center gap-1.5 px-1 text-[11px] font-black text-slate-500 dark:text-slate-400;
+}
+
+.image-workbench-asset-shelf-dialog__tree-item {
+  @apply flex h-8 w-full min-w-0 items-center justify-between gap-2 rounded-md px-2 text-left text-xs font-black text-slate-600 transition hover:bg-white hover:text-primary dark:text-slate-300 dark:hover:bg-slate-950;
+}
+
+.image-workbench-asset-shelf-dialog__tree-item.is-active {
+  @apply bg-primary text-white shadow-sm hover:bg-primary hover:text-white;
+}
+
+.image-workbench-asset-shelf-dialog__tree-item--child {
+  @apply pl-5;
+}
+
+.image-workbench-asset-shelf-dialog__tree-item span {
+  @apply min-w-0 truncate;
+}
+
+.image-workbench-asset-shelf-dialog__tree-item small {
+  @apply inline-flex min-w-5 shrink-0 justify-center rounded-full bg-white px-1.5 py-0.5 text-[10px] font-black text-slate-500 dark:bg-slate-950 dark:text-slate-400;
+}
+
+.image-workbench-asset-shelf-dialog__tree-item.is-active small {
+  @apply bg-white/20 text-white;
+}
+
 .image-workbench-asset-shelf-dialog__grid {
-  @apply grid min-h-0 flex-1 content-start items-start grid-cols-[repeat(auto-fill,minmax(156px,1fr))] gap-3 overflow-y-auto pr-1;
+  @apply grid min-h-0 flex-1 content-start items-start grid-cols-[repeat(auto-fill,minmax(148px,1fr))] gap-3 overflow-y-auto pr-1;
   grid-auto-rows: minmax(168px, auto);
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
@@ -1996,6 +1876,26 @@
   min-height: 10.5rem;
   content-visibility: auto;
   contain-intrinsic-size: 168px;
+}
+
+.image-workbench-asset-card-toolbar {
+  @apply pointer-events-none absolute left-1.5 right-1.5 top-1.5 z-20 flex items-start justify-between gap-1;
+}
+
+.image-workbench-asset-card-toolbar__actions {
+  @apply pointer-events-none flex max-w-[calc(100%-2.25rem)] flex-wrap justify-end gap-1;
+}
+
+.image-workbench-asset-card-toolbar button {
+  @apply pointer-events-auto;
+}
+
+.image-workbench-asset-shelf-dialog__grid .image-workbench-asset-card-toolbar .image-workbench-inspector-select-action,
+.image-workbench-asset-shelf-dialog__grid .image-workbench-asset-card-toolbar .image-workbench-inspector-review-action,
+.image-workbench-asset-shelf-dialog__grid .image-workbench-asset-card-toolbar .image-workbench-inspector-quality-action,
+.image-workbench-asset-shelf-dialog__grid .image-workbench-asset-card-toolbar .image-workbench-inspector-reference-action,
+.image-workbench-asset-shelf-dialog__grid .image-workbench-asset-card-toolbar .image-workbench-inspector-delete-action {
+  @apply static h-7 w-7 shrink-0;
 }
 
 .image-workbench-asset-shelf-dialog__bulk {
@@ -2009,10 +1909,16 @@
 .image-workbench-asset-shelf-dialog__bulk label {
   @apply inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2 text-xs font-bold text-slate-500 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-300;
   min-width: 12rem;
+  max-width: min(20rem, 100%);
 }
 
-.image-workbench-asset-shelf-dialog__bulk input {
+.image-workbench-asset-shelf-dialog__bulk input,
+.image-workbench-asset-shelf-dialog__bulk select {
   @apply min-w-0 flex-1 bg-transparent text-xs font-bold text-slate-700 outline-none placeholder:text-slate-400 dark:text-slate-100 dark:placeholder:text-slate-500;
+}
+
+.image-workbench-asset-shelf-dialog__bulk select {
+  @apply cursor-pointer;
 }
 
 .image-workbench-asset-shelf-dialog__bulk .image-workbench-secondary {
@@ -2027,12 +1933,26 @@
   @apply text-slate-500 dark:text-slate-400;
 }
 
+@media (max-width: 920px) {
+  .image-workbench-asset-shelf-dialog__panel {
+    @apply p-3;
+  }
+
+  .image-workbench-asset-shelf-dialog__body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .image-workbench-asset-shelf-dialog__sidebar {
+    @apply max-h-44;
+  }
+}
+
 .image-workbench-selection-summary {
   @apply rounded-md border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-900;
 }
 
 .image-workbench-selection-summary strong {
-  @apply block text-xs font-black leading-5 text-slate-800 dark:text-slate-100;
+  @apply line-clamp-2 text-xs font-black leading-5 text-slate-800 dark:text-slate-100;
 }
 
 .image-workbench-selection-summary small {
@@ -2433,10 +2353,6 @@
 
 .image-workbench-lightbox__strip img {
   @apply h-full w-full object-cover;
-}
-
-.image-workbench-lightbox__close {
-  @apply self-end inline-flex h-9 items-center gap-2 rounded-md bg-white px-3 text-xs font-black text-slate-700 shadow transition hover:bg-slate-100 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800;
 }
 
 @media (max-width: 1280px) {

@@ -271,6 +271,16 @@ fn image_workbench_replan_storyboard_group_appends_fresh_tasks() {
         .as_deref()
         .unwrap_or_default()
         .contains("分镜重规划批次"));
+    assert!(replan_group
+        .base_prompt
+        .as_deref()
+        .unwrap_or_default()
+        .contains("不要复制参考图或上一轮的固定表情"));
+    assert!(replan_group
+        .base_prompt
+        .as_deref()
+        .unwrap_or_default()
+        .contains("镜头景别、拍摄手法"));
 
     let fresh_tasks = replanned
         .tasks
@@ -287,6 +297,16 @@ fn image_workbench_replan_storyboard_group_appends_fresh_tasks() {
             .collect::<Vec<_>>(),
         vec![Some(0), Some(1), Some(2), Some(3)]
     );
+    assert!(fresh_tasks.iter().all(|task| task
+        .prompt
+        .as_deref()
+        .unwrap_or_default()
+        .contains("不要锁定参考图表情")));
+    assert!(fresh_tasks.iter().all(|task| task
+        .prompt
+        .as_deref()
+        .unwrap_or_default()
+        .contains("服装细节、场景道具、景别")));
     for old_task in &snapshot.tasks {
         assert!(fresh_tasks.iter().all(|fresh| fresh.id != old_task.id));
     }
@@ -1414,6 +1434,78 @@ fn image_workbench_create_and_list_groups_round_trip() {
         .expect("groups")
         .iter()
         .any(|g| g.id == group.id));
+}
+
+#[test]
+fn image_workbench_tag_assets_group_reuses_manual_group_for_batch() {
+    let (repo, job_id, task_id) = seed_job_with_task();
+    let first = repo
+        .record_asset(
+            NewImageWorkbenchAsset {
+                task_id: task_id.clone(),
+                file_path: "C:/mock/manual-a.png".to_string(),
+                ..Default::default()
+            },
+            None,
+            None,
+        )
+        .expect("record first asset")
+        .assets[0]
+        .id
+        .clone();
+    let second = repo
+        .record_asset(
+            NewImageWorkbenchAsset {
+                task_id,
+                file_path: "C:/mock/manual-b.png".to_string(),
+                ..Default::default()
+            },
+            None,
+            None,
+        )
+        .expect("record second asset")
+        .assets
+        .into_iter()
+        .find(|asset| asset.file_path.ends_with("manual-b.png"))
+        .expect("second asset")
+        .id;
+
+    let result = repo
+        .tag_assets_group(TagImageWorkbenchAssetsGroupInput {
+            asset_ids: vec![first.clone(), second.clone()],
+            group_id: None,
+            group_name: Some("manual-group".to_string()),
+        })
+        .expect("tag selected assets");
+
+    assert_eq!(result.tagged_assets, 2);
+    assert_eq!(result.groups.len(), 1);
+    let manual_group = &result.groups[0];
+    assert_eq!(manual_group.name.as_deref(), Some("manual-group"));
+    assert_eq!(manual_group.r#type.as_deref(), Some("manual"));
+    assert_eq!(manual_group.count, 2);
+    assert_eq!(
+        repo.get_asset_by_id(&first)
+            .expect("first asset")
+            .group_id
+            .as_deref(),
+        Some(manual_group.id.as_str())
+    );
+    assert_eq!(
+        repo.get_asset_by_id(&second)
+            .expect("second asset")
+            .group_id
+            .as_deref(),
+        Some(manual_group.id.as_str())
+    );
+
+    let manual_groups = repo
+        .list_groups(&job_id)
+        .expect("groups")
+        .into_iter()
+        .filter(|group| group.r#type.as_deref() == Some("manual") && group.name.as_deref() == Some("manual-group"))
+        .collect::<Vec<_>>();
+    assert_eq!(manual_groups.len(), 1);
 }
 
 #[test]

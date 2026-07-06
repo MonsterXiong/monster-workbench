@@ -38,7 +38,7 @@ export const useSettingStore = defineStore("settings", () => {
       autoCheckUpdate: getStorageBoolean("autoCheckUpdate", true),
     };
 
-    if (isTauriRuntime()) {
+    if (configService.canUsePreferenceConfigRuntime()) {
       try {
         const remoteCfgStr = await configService.getPreferenceConfig();
         const remoteCfg = safeJsonParseObject<Record<string, unknown>>(remoteCfgStr, {});
@@ -117,7 +117,7 @@ export const useSettingStore = defineStore("settings", () => {
   };
 
   const syncConfig = async () => {
-    if (isDesktopRuntime.value) {
+    if (configService.canUsePreferenceConfigRuntime()) {
       try {
         const cfg = {
           ...preferenceConfig.value,

@@ -43,7 +43,15 @@ export function createImageWorkbenchDeliveryActions({
     if (!currentJob.value) {
       throw new Error(t("imageWorkbench.errors.noCurrentJob"));
     }
-    const exportPath = await runWithLoading(() => imageWorkbenchService.exportJob(currentJob.value!.id));
+    return exportJobById(currentJob.value.id);
+  }
+
+  async function exportJobById(jobId: string) {
+    const cleanJobId = jobId.trim();
+    if (!cleanJobId) {
+      throw new Error(t("imageWorkbench.errors.noCurrentJob"));
+    }
+    const exportPath = await runWithLoading(() => imageWorkbenchService.exportJob(cleanJobId));
     await openExportPath(exportPath, notice, t);
     return exportPath;
   }
@@ -80,6 +88,7 @@ export function createImageWorkbenchDeliveryActions({
   return {
     openSelectedAssetLocation,
     exportCurrentJob,
+    exportJobById,
     exportSelectedAsset,
     exportGroup,
     cleanupDeletedAssets,

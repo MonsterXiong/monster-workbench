@@ -186,9 +186,11 @@ export function tagMockImageWorkbenchAssetsGroup(
       if (targetGroups.has(asset.jobId)) {
         return;
       }
-      const groupId = `iw-group-${now}-${Math.random().toString(36).slice(2, 8)}`;
-      const group = {
-        id: groupId,
+      const existingGroup = mapValuesToArray(context.groups)
+        .filter((group) => group.jobId === asset.jobId && group.type === "manual" && group.name === groupName)
+        .sort((left, right) => Number(right.updatedAtMs || 0) - Number(left.updatedAtMs || 0))[0];
+      const group = existingGroup || {
+        id: `iw-group-${now}-${Math.random().toString(36).slice(2, 8)}`,
         jobId: asset.jobId,
         sourceId: null,
         name: groupName,
@@ -200,17 +202,21 @@ export function tagMockImageWorkbenchAssetsGroup(
         createdAtMs: now,
         updatedAtMs: now,
       };
-      context.groups.set(groupId, group);
+      context.groups.set(group.id, group);
       targetGroups.set(asset.jobId, group);
     });
   }
 
   let taggedAssets = 0;
+  const affectedGroupIds = new Set(
+    assets.map((asset) => asset.groupId).filter((groupId): groupId is string => Boolean(groupId))
+  );
   assets.forEach((asset) => {
     const group = targetGroups.get(asset.jobId);
     if (!group) {
       return;
     }
+    affectedGroupIds.add(group.id);
     context.assets.set(asset.id, {
       ...asset,
       groupId: group.id,
@@ -219,12 +225,20 @@ export function tagMockImageWorkbenchAssetsGroup(
     touchMockImageWorkbenchJob(context.jobs, asset.jobId);
   });
 
-  const groups = Array.from(targetGroups.values()).map((group) => {
-    const count = mapValuesToArray(context.assets).filter((asset) => asset.groupId === group.id).length;
-    const nextGroup = { ...group, count, updatedAtMs: now };
-    context.groups.set(group.id, nextGroup);
-    return nextGroup;
+  affectedGroupIds.forEach((groupId) => {
+    const group = context.groups.get(groupId);
+    if (!group) {
+      return;
+    }
+    context.groups.set(group.id, {
+      ...group,
+      count: mapValuesToArray(context.assets).filter((asset) => asset.groupId === group.id).length,
+      updatedAtMs: now,
+    });
   });
+  const groups = Array.from(targetGroups.values())
+    .map((group) => context.groups.get(group.id))
+    .filter(Boolean);
   return { taggedAssets, groups };
 }
 

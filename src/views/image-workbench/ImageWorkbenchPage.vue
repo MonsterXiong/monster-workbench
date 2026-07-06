@@ -7,7 +7,6 @@ import {
   ChevronDown,
   Clapperboard,
   Clock3,
-  Download,
   Eraser,
   FolderOpen,
   Gauge,
@@ -24,8 +23,9 @@ import {
 } from "lucide-vue-next";
 import { useConfirm } from "../../composables/useConfirm";
 import { useI18n } from "../../composables/useI18n";
+import { useMessage } from "../../composables/useMessage";
 import { useImageWorkbenchStore } from "../../stores/image-workbench";
-import { buildImageSizeOption, buildImageSizeOptions } from "../ai/components/image/aiImageSizeOptions";
+import { buildImageSizeOption, buildImageSizeOptions } from "./imageWorkbenchSizeOptions";
 import { formatTemplate } from "../../utils";
 import {
   type ImageWorkbenchAssetCard,
@@ -51,6 +51,10 @@ import {
   type ImageWorkbenchTaskPresetKey,
 } from "./imageWorkbenchTaskLauncher";
 import { useImageWorkbenchAssetSelection } from "./useImageWorkbenchAssetSelection";
+import {
+  buildImageWorkbenchReferencePreviewAsset,
+  type ImageWorkbenchReferencePreviewSource,
+} from "./imageWorkbenchReferences";
 import { useImageWorkbenchReferenceControls } from "./useImageWorkbenchReferenceControls";
 import { useImageWorkbenchStoryboardDraft } from "./useImageWorkbenchStoryboardDraft";
 import { useImageWorkbenchTaskFlow } from "./useImageWorkbenchTaskFlow";
@@ -64,9 +68,11 @@ import type {
 
 const { t } = useI18n();
 const { confirm } = useConfirm();
+const { triggerMessage } = useMessage();
 const route = useRoute();
 const router = useRouter();
 const imageWorkbenchStore = useImageWorkbenchStore();
+const lastErrorMessage = ref("");
 const templatePickerOpen = ref(false);
 const sceneGuideOpen = ref(false);
 const commandSettingsOpen = ref(false);
@@ -124,42 +130,13 @@ const {
   store: imageWorkbenchStore,
 });
 const currentJob = computed(() => imageWorkbenchStore.currentJob);
-const latestJob = computed(() => imageWorkbenchStore.jobs[0] || null);
-const canReturnToLatestJob = computed(() =>
-  Boolean(latestJob.value && latestJob.value.id !== imageWorkbenchStore.selectedJobId)
-);
-const currentJobStatusText = computed(() => {
-  const status = currentJob.value?.status;
-  return status ? t(`imageWorkbench.jobStatuses.${status}`) : t("imageWorkbench.taskbar.waiting");
-});
 const visibleAssetCards = computed(() => imageWorkbenchStore.currentAssetCards);
 const hasCurrentGroupLayout = computed(() => imageWorkbenchStore.currentGroups.length > 0);
-const allAssetCards = computed(() => {
-  const map = new Map<string, ImageWorkbenchAssetCard>();
-  imageWorkbenchStore.currentAssetCards
-    .concat(imageWorkbenchStore.libraryAssetCards)
-    .forEach((asset) => map.set(asset.id, asset));
-  return [...map.values()].sort((left, right) => right.createdAtMs - left.createdAtMs);
-});
 const showWorkspaceStart = computed(() =>
   !visibleAssetCards.value.length && !hasCurrentGroupLayout.value && !isInpaintWorkspace.value
 );
 const showSceneGuide = computed(() =>
   !isInpaintWorkspace.value && (sceneGuideOpen.value || showWorkspaceStart.value)
-);
-const workspaceHeaderTitle = computed(() =>
-  isStoryboardTask.value && showSceneGuide.value
-    ? t("imageWorkbench.storyboardDraft.title")
-    : showSceneGuide.value
-    ? t("imageWorkbench.workspace.creationTitle")
-    : t("imageWorkbench.workspace.current")
-);
-const workspaceHeaderDesc = computed(() =>
-  isStoryboardTask.value && showSceneGuide.value
-    ? t("imageWorkbench.storyboardDraft.desc")
-    : showSceneGuide.value
-    ? t("imageWorkbench.workspace.creationDesc")
-    : workspaceSummary.value
 );
 const lightboxAssetCards = computed(() => {
   const map = new Map<string, ImageWorkbenchAssetCard>();
@@ -213,7 +190,6 @@ const {
   handlePickReferenceFromLibrary,
   handleReferenceRoleChange,
   handleSelectReferenceImageFromComposer,
-  insertReferencePrompt,
   normalizeReferenceRole,
   referenceRoleOptions,
   selectedAssetIsReference,
@@ -240,12 +216,6 @@ const gallerySections = computed(() =>
     t,
   })
 );
-const workspaceSummary = computed(() => {
-  if (currentJob.value) {
-    return `${currentJobStatusText.value} · ${currentJob.value.quantity} · ${currentJob.value.prompt || t("imageWorkbench.review.emptyPrompt")}`;
-  }
-  return t("imageWorkbench.workspace.emptyDesc");
-});
 const workspaceEmptyTitle = computed(() => t("imageWorkbench.workspace.emptyTitle"));
 const workspaceEmptyDesc = computed(() => t("imageWorkbench.workspace.emptyDesc"));
 const shouldConfirmCurrentGeneration = computed(() =>
@@ -409,6 +379,10 @@ function assetBadges(asset: ImageWorkbenchAssetCard) {
   });
 }
 
+function openReferencePreview(reference: ImageWorkbenchReferencePreviewSource) {
+  openAssetPreview(buildImageWorkbenchReferencePreviewAsset(reference));
+}
+
 function handleApplyTemplateFromPicker(template: ImageWorkbenchTemplate) {
   handleApplyTemplate(template);
   syncTaskEntryFromMode();
@@ -495,7 +469,6 @@ const {
   handleRemoveReferenceAsset,
   handleRemoveUploadedReferenceImage,
   handleRefresh,
-  handleExportJob,
   handleModelConfigChange,
 } = buildImageWorkbenchHandlers(imageWorkbenchStore);
 
@@ -580,18 +553,6 @@ function handlePrepareTaskEntry(key: ImageWorkbenchTaskEntryKey) {
   handleTaskEntrySelect(key, { useSelectedAsset: true });
 }
 
-async function handleReturnToLatestJob() {
-  if (!latestJob.value) {
-    return;
-  }
-  await imageWorkbenchStore.selectJob(latestJob.value.id);
-  handleClearSelectedAsset();
-}
-
-function handleRetryCurrentJob() {
-  handleRetry();
-}
-
 watch(
   () => imageWorkbenchStore.prompt,
   () => {
@@ -600,6 +561,24 @@ watch(
     }
     syncStoryboardDraftFromPrompt();
     sceneGuideOpen.value = true;
+  }
+);
+
+watch(
+  () => imageWorkbenchStore.error,
+  (message) => {
+    if (!message) {
+      lastErrorMessage.value = "";
+      return;
+    }
+    if (message === lastErrorMessage.value) {
+      return;
+    }
+    lastErrorMessage.value = message;
+    triggerMessage(message, "error", {
+      duration: 5000,
+      wrap: true,
+    });
   }
 );
 
@@ -628,9 +607,6 @@ onBeforeUnmount(() => {
 
 <template>
   <main class="image-workbench-page">
-    <section v-if="imageWorkbenchStore.error" class="image-workbench-error">
-      {{ imageWorkbenchStore.error }}
-    </section>
     <section class="image-workbench-layout" :class="{ 'is-inpaint-workspace': isInpaintWorkspace }">
       <aside class="image-workbench-panel image-workbench-panel--left">
         <section class="image-workbench-rail">
@@ -650,29 +626,6 @@ onBeforeUnmount(() => {
           class="image-workbench-panel image-workbench-panel--gallery"
           @click.self="handleCanvasBackgroundClick"
         >
-          <div class="image-workbench-gallery-head">
-            <div class="image-workbench-gallery-title">
-              <Images class="h-4 w-4" />
-              <span>
-                <strong>{{ workspaceHeaderTitle }}</strong>
-                <small>{{ workspaceHeaderDesc }}</small>
-              </span>
-            </div>
-            <div v-if="!showSceneGuide" class="image-workbench-gallery-tools">
-              <button v-if="canReturnToLatestJob && latestJob" class="image-workbench-secondary" type="button" @click="handleReturnToLatestJob">
-                <Clock3 class="h-3.5 w-3.5" />
-                {{ t("imageWorkbench.workspace.returnLatest") }}
-              </button>
-              <button v-if="imageWorkbenchStore.canRetryFailedTasks" class="image-workbench-secondary" type="button" @click="handleRetryCurrentJob">
-                <RotateCcw class="h-3.5 w-3.5" />
-                {{ t("imageWorkbench.toolbar.retry") }}
-              </button>
-              <button v-if="imageWorkbenchStore.canExportCurrentJob" class="image-workbench-secondary" type="button" @click="handleExportJob">
-                <Download class="h-3.5 w-3.5" />
-                {{ t("imageWorkbench.taskbar.exportAll") }}
-              </button>
-            </div>
-          </div>
           <div v-if="currentJob && !showSceneGuide && !isInpaintWorkspace" class="image-workbench-job-context">
             <div
               class="image-workbench-job-context__prompt"
@@ -687,10 +640,10 @@ onBeforeUnmount(() => {
                 v-for="reference in currentJobReferenceViews"
                 :key="reference.key"
                 type="button"
-                :class="{ 'is-missing': !reference.asset }"
-                :disabled="!reference.asset"
+                :class="{ 'is-missing': !reference.displayUrl }"
+                :disabled="!reference.displayUrl"
                 :title="reference.sourcePath || reference.label"
-                @click="openAssetPreview(reference.asset)"
+                @click="openReferencePreview(reference)"
               >
                 <img
                   v-if="reference.displayUrl"
@@ -772,10 +725,8 @@ onBeforeUnmount(() => {
             v-else-if="showSceneGuide"
             :active-key="activeTaskEntry"
             :active-preset-key="activeScenePreset"
-            :source-assets="allAssetCards"
             @select-task="handleSceneTaskSelect"
             @apply-preset="handleTaskPresetApply"
-            @select-source="handleStartSourceSelect"
           />
           <div
             v-else-if="gallerySections.length"
@@ -790,7 +741,7 @@ onBeforeUnmount(() => {
             >
               <div class="image-workbench-gallery-section__head">
                 <div>
-                  <strong>{{ section.title }}</strong>
+                  <strong :title="section.prompt || section.description">{{ section.title }}</strong>
                   <small>{{ section.description }}</small>
                   <div v-if="section.highlights?.length" class="image-workbench-gallery-section__highlights">
                     <span
@@ -856,6 +807,65 @@ onBeforeUnmount(() => {
                   </button>
                 </article>
               </div>
+              <details
+                v-if="section.historyItems?.length"
+                class="image-workbench-gallery-section__history"
+              >
+                <summary>
+                  <Clock3 class="h-3.5 w-3.5" />
+                  <span>
+                    {{ formatTemplate(t("imageWorkbench.gallerySections.historyToggle"), { count: section.historyItems.length }) }}
+                  </span>
+                </summary>
+                <div class="image-workbench-grid image-workbench-grid--history">
+                  <article
+                    v-for="asset in section.historyItems"
+                    :key="asset.id"
+                    class="image-workbench-asset-card"
+                    :class="{
+                      'is-active': asset.id === imageWorkbenchStore.selectedAssetId,
+                    }"
+                  >
+                    <button
+                      type="button"
+                      class="image-workbench-asset-card__select"
+                      :title="asset.filePath"
+                      @click="handleGalleryAssetClick(asset)"
+                    >
+                      <img
+                        :key="`${asset.id}:${asset.displayUrl}`"
+                        :src="asset.displayUrl"
+                        alt=""
+                        @load="handleImageLoad"
+                        @error="handleImageLoadError($event, asset.filePath)"
+                      />
+                      <div class="image-workbench-asset-card__badges">
+                        <span
+                          v-for="badge in assetBadges(asset)"
+                          :key="badge.key"
+                          class="image-workbench-asset-card__badge"
+                          :class="`is-${badge.tone}`"
+                        >
+                          {{ badge.label }}
+                        </span>
+                      </div>
+                      <span class="image-workbench-asset-card__meta">
+                        <Star v-if="asset.favorite" class="h-3.5 w-3.5" />
+                        {{ asset.width || "-" }}x{{ asset.height || "-" }}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      class="image-workbench-asset-card__preview"
+                      :title="t('imageWorkbench.asset.openPreview')"
+                      :aria-label="t('imageWorkbench.asset.openPreview')"
+                      @click.stop="handleOpenAssetPreview(asset)"
+                    >
+                      <Maximize2 class="h-3.5 w-3.5" />
+                    </button>
+                  </article>
+                </div>
+              </details>
             </section>
           </div>
           <div v-else class="image-workbench-empty">
@@ -892,7 +902,7 @@ onBeforeUnmount(() => {
                       type="button"
                       class="image-workbench-command-reference-token__main"
                       :title="item.label"
-                      @click="insertReferencePrompt(index)"
+                      @click="openReferencePreview(item)"
                     >
                       <img
                         :key="item.displayUrl"

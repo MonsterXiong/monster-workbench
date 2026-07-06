@@ -9,6 +9,14 @@ export interface ImageWorkbenchJobReferenceView {
   asset: ImageWorkbenchAssetCard | null;
 }
 
+export interface ImageWorkbenchReferencePreviewSource {
+  key: string;
+  label?: string;
+  sourcePath: string;
+  displayUrl: string;
+  asset?: ImageWorkbenchAssetCard | null;
+}
+
 interface BuildJobReferenceViewsOptions {
   job: ImageWorkbenchJob | null;
   currentAssets: ImageWorkbenchAssetCard[];
@@ -83,6 +91,33 @@ export function buildImageWorkbenchJobReferenceViews({
     index: views.length + 1,
   });
   return views.slice(0, 6);
+}
+
+export function buildImageWorkbenchReferencePreviewAsset(
+  source: ImageWorkbenchReferencePreviewSource
+): ImageWorkbenchAssetCard | null {
+  if (source.asset) {
+    return source.asset;
+  }
+  if (!source.displayUrl) {
+    return null;
+  }
+  const filePath = source.sourcePath || source.displayUrl;
+  return {
+    id: `reference:${source.key || filePath}`,
+    jobId: "",
+    taskId: "",
+    filePath,
+    thumbnailPath: null,
+    displayUrl: source.displayUrl,
+    width: null,
+    height: null,
+    mimeType: null,
+    sizeBytes: null,
+    favorite: false,
+    createdAtMs: 0,
+    integrityStatus: null,
+  };
 }
 
 function parseJobReferenceRoles(rawContext: string | null | undefined): Array<{

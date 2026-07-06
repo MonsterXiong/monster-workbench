@@ -555,7 +555,7 @@ function replanImageWorkbenchStoryboardGroup(args: Record<string, unknown>) {
   const batchId = createMockImageWorkbenchId("iw-replan");
   const newGroupId = createMockImageWorkbenchId("iw-group");
   const basePrompt = String(group.basePrompt || groupTasks[0]?.prompt || job.prompt || "").trim();
-  const replanBasePrompt = `${basePrompt} 分镜重规划批次：${batchId}。保持参考图人物一致，重新规划服装纹理、情绪瞬间、动作姿态、镜头构图、光影层次和场景细节，不复用上一轮失败的构图。`;
+  const replanBasePrompt = `${basePrompt} 分镜重规划批次：${batchId}。参考图只用于主角身份识别，脸型、五官比例、发型、年龄感和整体气质保持一致，但不要复制参考图或上一轮固定表情；重新规划表情神情、服装纹理、动作姿态、镜头景别、拍摄手法、光影层次和场景细节，不复用上一轮失败的构图。`;
   const sourceId = String(group.sourceId || group.id);
   const agentIds = parseMockGroupAgentIds(group.agentIdsJson);
   agentIds.sourceGroupId = group.id;
@@ -589,7 +589,7 @@ function replanImageWorkbenchStoryboardGroup(args: Record<string, unknown>) {
       maxRetries: 1,
       claimToken: null,
       leasedUntilMs: null,
-      prompt: `${replanBasePrompt} 新候选图 ${index + 1}/${count}`,
+      prompt: `${replanBasePrompt} 新候选图 ${index + 1}/${count}：主角身份一致，但表情、眼神、姿态、服装、场景道具和镜头语言随当前分镜自然变化。`,
       createdAtMs: now,
       updatedAtMs: now,
       startedAtMs: null,

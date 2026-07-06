@@ -1,15 +1,13 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
-import { Check, ChevronDown, Images, Link, ListChecks, Sparkles, Star, Tags } from "lucide-vue-next";
+import { computed, ref, watch } from "vue";
+import { Check, ChevronDown, Images, Link, ListChecks, MoreHorizontal, Sparkles, Tags } from "lucide-vue-next";
 import { useI18n } from "../../composables/useI18n";
 import { useImageWorkbenchStore } from "../../stores/image-workbench";
-import { formatTemplate } from "../../utils";
 import ImageWorkbenchAssetShelfDialog from "./ImageWorkbenchAssetShelfDialog.vue";
 import {
   buildImageWorkbenchSourceSelectionAssets,
   canPrepareImageWorkbenchQualityFix,
   canUseImageWorkbenchAssetAsReference,
-  formatImageWorkbenchAssetSize,
   getImageWorkbenchAssetGroupLabel,
   imageWorkbenchLibraryFilterKeys,
   matchesImageWorkbenchLibraryFilter,
@@ -39,7 +37,7 @@ const emit = defineEmits<{
   (event: "update:asset-shelf-dialog-open", open: boolean): void;
 }>();
 
-const { t } = useI18n();
+const { locale, t } = useI18n();
 const imageWorkbenchStore = useImageWorkbenchStore();
 const { handleImageLoad, handleImageLoadError } = useImageWorkbenchImageFallback();
 const activeLibraryFilter = ref<ImageWorkbenchLibraryFilter>("recent");
@@ -75,6 +73,9 @@ const sourceSelectionAssetCards = computed(() =>
 const selectableLibraryAssetCards = computed(() =>
   usesSourceAssetAction.value ? sourceSelectionAssetCards.value : libraryAssetCards.value
 );
+const selectableLibraryJobIds = computed(() =>
+  Array.from(new Set(selectableLibraryAssetCards.value.map((asset) => asset.jobId).filter(Boolean)))
+);
 const recentAssetCards = computed(() => {
   if (usesSourceAssetAction.value) {
     return sourceSelectionAssetCards.value;
@@ -93,51 +94,8 @@ const filteredLibraryAssetCards = computed(() =>
   )
 );
 const currentGroupById = computed(() => {
-  const map = new Map(imageWorkbenchStore.currentGroups.map((group) => [group.id, group]));
-  return map;
+  return imageWorkbenchStore.libraryGroupById;
 });
-const reviewStats = computed(() => {
-  const assets = selectableLibraryAssetCards.value;
-  const ratedAssets = assets.filter((asset) => typeof asset.rating === "number" && asset.rating > 0);
-  const ratingTotal = ratedAssets.reduce((sum, asset) => sum + (asset.rating || 0), 0);
-  return {
-    total: assets.length,
-    favorite: assets.filter((asset) => asset.favorite).length,
-    needsFix: assets.filter((asset) => asset.qualityIssues?.length).length,
-    delivery: assets.filter((asset) => asset.deliveryStatus === "ready").length,
-    averageRating: ratedAssets.length ? (ratingTotal / ratedAssets.length).toFixed(1) : t("imageWorkbench.review.overviewAverageEmpty"),
-  };
-});
-const reviewStatCards = computed(() => [
-  {
-    key: "total",
-    filter: "recent" as const,
-    label: t("imageWorkbench.review.overviewTotal"),
-    value: String(reviewStats.value.total),
-    disabled: !reviewStats.value.total,
-  },
-  {
-    key: "delivery",
-    filter: "delivery" as const,
-    label: t("imageWorkbench.review.overviewDelivery"),
-    value: String(reviewStats.value.delivery),
-    disabled: !reviewStats.value.delivery,
-  },
-  {
-    key: "needsFix",
-    filter: "needsFix" as const,
-    label: t("imageWorkbench.review.overviewNeedsFix"),
-    value: String(reviewStats.value.needsFix),
-    disabled: !reviewStats.value.needsFix,
-  },
-  {
-    key: "favorite",
-    filter: "favorite" as const,
-    label: t("imageWorkbench.review.overviewFavorite"),
-    value: String(reviewStats.value.favorite),
-    disabled: !reviewStats.value.favorite,
-  },
-]);
 const shelfAssetCards = computed(() =>
   props.assetShelfView === "library"
     ? filteredLibraryAssetCards.value
@@ -146,18 +104,6 @@ const shelfAssetCards = computed(() =>
 const showLibraryShelfFooter = computed(() =>
   props.assetShelfView === "library" &&
   (imageWorkbenchStore.assetLibraryHasMore || Boolean(libraryAssetCards.value.length))
-);
-const recentCountText = computed(() =>
-  formatTemplate(t("imageWorkbench.review.recentMeta"), {
-    count: recentAssetCards.value.length,
-  })
-);
-const shelfCountText = computed(() =>
-  props.assetShelfView === "library"
-    ? formatTemplate(t("imageWorkbench.review.recentMeta"), {
-        count: filteredLibraryAssetCards.value.length,
-      })
-    : recentCountText.value
 );
 const shelfEmptyTitle = computed(() =>
   props.assetShelfView === "library"
@@ -173,35 +119,30 @@ const shelfEmptyDesc = computed(() =>
       : t("imageWorkbench.workspace.libraryEmptyDesc")
     : t("imageWorkbench.review.recentEmptyDesc")
 );
-const libraryFilterOptions = computed(() => {
-  const counts: Record<ImageWorkbenchLibraryFilter, number> = {
-    recent: selectableLibraryAssetCards.value.length,
-    favorite: 0,
-    needsFix: 0,
-    person: 0,
-    style: 0,
-    delivery: 0,
-  };
-  selectableLibraryAssetCards.value.forEach((asset) => {
-    imageWorkbenchLibraryFilterKeys.forEach((key) => {
-      if (key !== "recent" && matchesImageWorkbenchLibraryFilter(asset, key, libraryJobById.value)) {
-        counts[key] += 1;
-      }
-    });
-  });
-  return imageWorkbenchLibraryFilterKeys.map((key) => ({
+const libraryFilterOptions = computed(() =>
+  imageWorkbenchLibraryFilterKeys.map((key) => ({
     key,
-    label: t(`imageWorkbench.workspace.libraryFilters.${key}`),
-    count: counts[key],
-  }));
-});
-
-function assetSizeLabel(asset: ImageWorkbenchAssetCard) {
-  return formatImageWorkbenchAssetSize(asset, t);
-}
+    label: libraryFilterLabel(key),
+  }))
+);
 
 function assetGroupLabel(asset: ImageWorkbenchAssetCard) {
-  return getImageWorkbenchAssetGroupLabel(asset, currentGroupById.value, t);
+  return getImageWorkbenchAssetGroupLabel(asset, currentGroupById.value);
+}
+
+function libraryFilterLabel(key: ImageWorkbenchLibraryFilter) {
+  const translationKey = `imageWorkbench.workspace.libraryFilters.${key}`;
+  const label = t(translationKey);
+  if (label !== translationKey) {
+    return label;
+  }
+  if (key === "featured") {
+    return locale.value === "en-US" ? "Featured" : "精选";
+  }
+  if (key === "favorite") {
+    return locale.value === "en-US" ? "Saved" : "收藏";
+  }
+  return locale.value === "en-US" ? "All" : "全部";
 }
 
 function canUseAsReference(asset: ImageWorkbenchAssetCard) {
@@ -244,11 +185,6 @@ function setShelfView(view: ImageWorkbenchAssetShelfView) {
   emit("update:asset-shelf-view", view);
 }
 
-function activateLibraryFilter(filter: ImageWorkbenchLibraryFilter) {
-  activeLibraryFilter.value = filter;
-  setShelfView("library");
-}
-
 function openAssetDialog() {
   emit("update:asset-shelf-view", "library");
   emit("update:asset-shelf-dialog-open", true);
@@ -257,6 +193,14 @@ function openAssetDialog() {
 async function handleLoadMoreAssets() {
   await imageWorkbenchStore.loadMoreAssetLibrary();
 }
+
+watch(
+  () => selectableLibraryJobIds.value.join("|"),
+  () => {
+    void imageWorkbenchStore.syncLibraryGroupsForJobIds(selectableLibraryJobIds.value);
+  },
+  { immediate: true }
+);
 </script>
 
 <template>
@@ -268,46 +212,6 @@ async function handleLoadMoreAssets() {
       <button type="button" :class="{ 'is-active': props.assetShelfView === 'library' }" @click="setShelfView('library')">
         {{ t("imageWorkbench.workspace.library") }}
       </button>
-    </div>
-
-    <section v-if="reviewStats.total" class="image-workbench-review-overview">
-      <div class="image-workbench-review-overview__head">
-        <strong>{{ t("imageWorkbench.review.overviewTitle") }}</strong>
-        <small>
-          {{ t("imageWorkbench.review.overviewAverage") }} · {{ reviewStats.averageRating }}
-        </small>
-      </div>
-      <div class="image-workbench-review-overview__grid">
-        <button
-          v-for="item in reviewStatCards"
-          :key="item.key"
-          type="button"
-          class="image-workbench-review-overview-card"
-          :class="[`is-${item.key}`, { 'is-active': props.assetShelfView === 'library' && activeLibraryFilter === item.filter }]"
-          :disabled="item.disabled"
-          :title="t('imageWorkbench.review.overviewOpenFilter')"
-          @click="activateLibraryFilter(item.filter)"
-        >
-          <span>
-            <Images v-if="item.key === 'total'" class="h-3.5 w-3.5" />
-            <Check v-else-if="item.key === 'delivery'" class="h-3.5 w-3.5" />
-            <Sparkles v-else-if="item.key === 'needsFix'" class="h-3.5 w-3.5" />
-            <Star v-else class="h-3.5 w-3.5" />
-            {{ item.label }}
-          </span>
-          <strong>{{ item.value }}</strong>
-        </button>
-      </div>
-    </section>
-
-    <div class="image-workbench-inspector-home__section-head">
-      <strong>
-        {{ props.assetShelfView === "library" ? t("imageWorkbench.workspace.library") : t("imageWorkbench.review.recentTitle") }}
-      </strong>
-      <button type="button" @click="openAssetDialog">
-        {{ t("imageWorkbench.review.moreAssets") }}
-      </button>
-      <small>{{ shelfCountText }}</small>
     </div>
 
     <div
@@ -324,7 +228,10 @@ async function handleLoadMoreAssets() {
         @click="activeLibraryFilter = item.key"
       >
         <span>{{ item.label }}</span>
-        <small>{{ item.count }}</small>
+      </button>
+      <button type="button" class="image-workbench-inspector-library-more" @click="openAssetDialog">
+        <MoreHorizontal class="h-3 w-3" />
+        <span>{{ t("imageWorkbench.review.moreAssets") }}</span>
       </button>
     </div>
 
@@ -345,10 +252,6 @@ async function handleLoadMoreAssets() {
             @load="handleImageLoad"
             @error="handleImageLoadError($event, asset.filePath)"
           />
-          <span>
-            <Star v-if="asset.favorite" class="h-3 w-3" />
-            {{ assetSizeLabel(asset) }}
-          </span>
           <small v-if="assetGroupLabel(asset)" class="image-workbench-inspector-group-badge">
             <Tags class="h-3 w-3" />
             {{ assetGroupLabel(asset) }}

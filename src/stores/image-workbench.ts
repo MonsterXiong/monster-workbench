@@ -85,7 +85,13 @@ export const useImageWorkbenchStore = defineStore("image-workbench", () => {
   const currentSnapshot = ref<ImageWorkbenchSnapshot | null>(null);
   const jobs = ref<ImageWorkbenchJob[]>([]);
   const templates = ref<ImageWorkbenchTemplate[]>([]);
-  const { assetLibrary, assetLibraryHasMore, assetLibraryLoadingMore, refreshAssetLibrary, loadMoreAssetLibrary } = createImageWorkbenchAssetLibraryState({ error });
+  const {
+    assetLibrary,
+    assetLibraryHasMore,
+    assetLibraryLoadingMore,
+    refreshAssetLibrary,
+    loadMoreAssetLibrary: loadMoreAssetLibraryBase,
+  } = createImageWorkbenchAssetLibraryState({ error });
 
   const currentJob = computed(() => currentSnapshot.value?.job ?? null);
   const generating = computed(() => activeJobIds.value.length > 0);
@@ -195,7 +201,16 @@ export const useImageWorkbenchStore = defineStore("image-workbench", () => {
     const allAssets = [...assets.value, ...assetLibrary.value];
     return assetId ? allAssets.find((asset) => asset.id === assetId) ?? null : null;
   }
-  const { currentGroups, selectedAssetGroup, currentJobPrimaryGroup, syncCurrentGroups, clearCurrentGroups } = createImageWorkbenchGroupState({ selectedAsset });
+  const {
+    currentGroups,
+    libraryGroups,
+    libraryGroupById,
+    selectedAssetGroup,
+    currentJobPrimaryGroup,
+    syncCurrentGroups,
+    syncLibraryGroupsForJobIds,
+    clearCurrentGroups,
+  } = createImageWorkbenchGroupState({ selectedAsset });
   const selectedAssetMetadata = computed(() => selectedAsset.value ? metadata.value.find((item) => item.assetId === selectedAsset.value?.id) ?? null : null);
   const selectedAssetModelRuns = computed(() => selectedAsset.value ? modelRuns.value.filter((item) => item.taskId === selectedAsset.value?.taskId) : []);
   const {
@@ -345,6 +360,7 @@ export const useImageWorkbenchStore = defineStore("image-workbench", () => {
       contract.value = contractResult;
       jobs.value = jobResults;
       templates.value = templateResults;
+      await syncLibraryGroupsForAssets(assetResults);
       resumableJobIds = jobResults.filter((job) => isJobRunnable(job.status)).map((job) => job.id);
       const initialJobId = resolveInitialImageWorkbenchJobId(jobResults, assetResults);
       if (!currentSnapshot.value && initialJobId) {
@@ -383,6 +399,10 @@ export const useImageWorkbenchStore = defineStore("image-workbench", () => {
     t,
   });
 
+  async function syncLibraryGroupsForAssets(items: ImageWorkbenchAsset[]) {
+    return syncLibraryGroupsForJobIds(items.map((asset) => asset.jobId));
+  }
+
   async function refreshWorkbenchLists() {
     const [jobResults, , templateResults] = await Promise.all([
       imageWorkbenchService.listJobs(DEFAULT_IMAGE_WORKBENCH_HISTORY_LIMIT),
@@ -391,6 +411,13 @@ export const useImageWorkbenchStore = defineStore("image-workbench", () => {
     ]);
     jobs.value = jobResults;
     templates.value = templateResults;
+    await syncLibraryGroupsForAssets(assetLibrary.value);
+  }
+
+  async function loadMoreAssetLibrary() {
+    const nextAssets = await loadMoreAssetLibraryBase();
+    await syncLibraryGroupsForAssets(nextAssets);
+    return nextAssets;
   }
 
   async function createJob(request: CreateImageWorkbenchJobRequest) {
@@ -422,6 +449,7 @@ export const useImageWorkbenchStore = defineStore("image-workbench", () => {
   const {
     openSelectedAssetLocation,
     exportCurrentJob,
+    exportJobById,
     exportSelectedAsset,
     exportGroup,
     cleanupDeletedAssets,
@@ -458,6 +486,7 @@ export const useImageWorkbenchStore = defineStore("image-workbench", () => {
     selectedAssetId,
     selectedJobId,
     syncCurrentGroups,
+    syncLibraryGroupsForJobIds,
     syncSelectedAssetFromSnapshot,
     templateDraftName,
     templates,
@@ -667,6 +696,8 @@ export const useImageWorkbenchStore = defineStore("image-workbench", () => {
     assetLibraryHasMore,
     assetLibraryLoadingMore,
     currentGroups,
+    libraryGroups,
+    libraryGroupById,
     templates,
     currentJob,
     tasks,
@@ -734,6 +765,7 @@ export const useImageWorkbenchStore = defineStore("image-workbench", () => {
     generateStoryboardPromptWithAi,
     refreshWorkbenchLists,
     loadMoreAssetLibrary,
+    syncLibraryGroupsForJobIds,
     createJob,
     selectJob,
     loadSnapshot,
@@ -776,6 +808,7 @@ export const useImageWorkbenchStore = defineStore("image-workbench", () => {
     clearSelectedAsset,
     openSelectedAssetLocation,
     exportCurrentJob,
+    exportJobById,
     exportSelectedAsset,
     exportGroup,
     cleanupDeletedAssets,

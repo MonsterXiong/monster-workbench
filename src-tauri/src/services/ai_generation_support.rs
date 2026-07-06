@@ -258,7 +258,7 @@ pub(crate) fn build_image_generation_prompt(
             parts.push("Edit only the masked area and preserve the unmasked image.".to_string());
         }
         "person_consistency" => {
-            parts.push("Use the reference image as the identity source. Keep the same person's face shape, hairstyle, age impression, and overall temperament; change only the requested expression, pose, scene, or style.".to_string());
+            parts.push("Use the reference image as the identity source only. Keep the same person's face shape, facial-feature proportions, hairstyle, age impression, and overall temperament; do not copy the reference facial expression, gaze, pose, composition, costume, scene, or props unless explicitly requested. Let expression, emotion, body pose, costume details, scene, props, shot size, lighting, and cinematography follow the current prompt naturally.".to_string());
         }
         "upscale_2x" | "upscale_4x" => {
             let scale = options
@@ -554,6 +554,20 @@ mod tests {
         assert!(prompt.contains("Reference image 2 path: C:/refs/style.png"));
         assert!(prompt.contains("Reference image 1 / 参考图1: use as person reference"));
         assert!(prompt.contains("Reference image 2 / 参考图2: use as style reference"));
+    }
+
+    #[test]
+    fn person_consistency_prompt_keeps_identity_without_locking_performance() {
+        let prompt = build_image_generation_prompt(
+            "person_consistency",
+            "分镜 03，女主震惊后退，广角低机位，雨夜宫门",
+            &AiGenerationOptions::default(),
+        );
+
+        assert!(prompt.contains("identity source only"));
+        assert!(prompt.contains("do not copy the reference facial expression"));
+        assert!(prompt.contains("shot size"));
+        assert!(prompt.contains("cinematography"));
     }
 
     #[test]

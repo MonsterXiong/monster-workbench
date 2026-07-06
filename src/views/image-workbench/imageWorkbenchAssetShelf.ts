@@ -3,11 +3,8 @@ import type { ImageWorkbenchAssetCard, ImageWorkbenchLibraryFilter } from "./ima
 
 export const imageWorkbenchLibraryFilterKeys: ImageWorkbenchLibraryFilter[] = [
   "recent",
+  "featured",
   "favorite",
-  "needsFix",
-  "person",
-  "style",
-  "delivery",
 ];
 
 export function sortImageWorkbenchAssetCardsByCreated(items: ImageWorkbenchAssetCard[]) {
@@ -26,43 +23,35 @@ export function buildImageWorkbenchSourceSelectionAssets(options: {
 export function matchesImageWorkbenchLibraryFilter(
   asset: ImageWorkbenchAssetCard,
   filter: ImageWorkbenchLibraryFilter,
-  jobById: Map<string, ImageWorkbenchJob>
+  _jobById: Map<string, ImageWorkbenchJob>
 ) {
   if (filter === "recent") {
     return true;
   }
+  if (filter === "featured") {
+    return Number(asset.rating || 0) > 0;
+  }
   if (filter === "favorite") {
     return asset.favorite;
   }
-  if (filter === "needsFix") {
-    return Boolean(asset.qualityIssues?.length);
-  }
-  if (filter === "delivery") {
-    return asset.deliveryStatus === "ready";
-  }
-  const jobMode = jobById.get(asset.jobId)?.mode;
-  if (filter === "person") {
-    return jobMode === "person_consistency";
-  }
-  return jobMode === "img2img";
-}
-
-export function formatImageWorkbenchAssetSize(
-  asset: ImageWorkbenchAssetCard,
-  t: (key: string) => string
-) {
-  return asset.width && asset.height ? `${asset.width}x${asset.height}` : t("imageWorkbench.review.emptyValue");
+  return false;
 }
 
 export function getImageWorkbenchAssetGroupLabel(
   asset: ImageWorkbenchAssetCard,
-  groupById: Map<string, ImageWorkbenchGroup>,
-  t: (key: string) => string
+  groupById: Map<string, ImageWorkbenchGroup>
 ) {
   if (!asset.groupId) {
     return "";
   }
-  return groupById.get(asset.groupId)?.name || t("imageWorkbench.assetGroup.tagged");
+  const group = groupById.get(asset.groupId);
+  return isManualImageWorkbenchGroup(group) ? group?.name || "" : "";
+}
+
+export function isManualImageWorkbenchGroup(
+  group: ImageWorkbenchGroup | null | undefined
+): group is ImageWorkbenchGroup {
+  return group?.type === "manual";
 }
 
 export function canUseImageWorkbenchAssetAsReference(asset: ImageWorkbenchAssetCard) {

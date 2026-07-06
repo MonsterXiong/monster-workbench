@@ -7,6 +7,7 @@ import type {
 } from "../../types/image-workbench";
 import { parseGenerationOptionsJson } from "../../stores/image-workbench-draft";
 import { toAssetCard } from "../../stores/image-workbench-helpers";
+import { formatTemplate } from "../../utils";
 
 export type ImageWorkbenchAssetCard = ReturnType<typeof toAssetCard>;
 export type ImageWorkbenchDeliveryUseKey = "original" | "avatar" | "cover" | "shortVideo" | "product" | "poster";
@@ -15,6 +16,7 @@ export type ImageWorkbenchGallerySection = {
   key: string;
   title: string;
   description: string;
+  prompt?: string;
   selected?: boolean;
   expectedCount?: number;
   highlights?: Array<{
@@ -22,9 +24,10 @@ export type ImageWorkbenchGallerySection = {
     label: string;
   }>;
   items: ImageWorkbenchAssetCard[];
+  historyItems?: ImageWorkbenchAssetCard[];
 };
 
-export type ImageWorkbenchLibraryFilter = "recent" | "favorite" | "needsFix" | "person" | "style" | "delivery";
+export type ImageWorkbenchLibraryFilter = "recent" | "featured" | "favorite";
 export type ImageWorkbenchAssetShelfView = "recent" | "library";
 
 export type ImageWorkbenchAssetBadge = {
@@ -461,25 +464,57 @@ function buildCurrentGroupSections(options: {
         description: currentJob
           ? `${t(`imageWorkbench.jobStatuses.${currentJob.status}`)} · ${currentAssets.length}`
           : t("imageWorkbench.gallerySections.currentDesc"),
+        prompt: currentJob?.prompt || "",
         items: currentAssets,
       },
     ];
   }
 
+  const storyboardGroups = currentGroups.filter(isStoryboardDisplayGroup);
+  if (!storyboardGroups.length) {
+    return [
+      {
+        key: "current-batch",
+        title: t("imageWorkbench.gallerySections.currentTitle"),
+        description: currentJob
+          ? `${t(`imageWorkbench.jobStatuses.${currentJob.status}`)} · ${currentAssets.length}`
+          : t("imageWorkbench.gallerySections.currentDesc"),
+        prompt: currentJob?.prompt || "",
+        items: currentAssets,
+      },
+    ].filter((section) => section.items.length);
+  }
+
   const selectedAsset = currentAssets.find((asset) => asset.id === selectedAssetId);
   const selectedGroupId = selectedAsset?.groupId || "";
-  const orderedGroups = selectedGroupId
-    ? [...currentGroups].sort((left, right) => Number(right.id === selectedGroupId) - Number(left.id === selectedGroupId))
-    : currentGroups;
-  const sections: ImageWorkbenchGallerySection[] = orderedGroups.map((group) => {
-    const items = currentAssets.filter((asset) => asset.groupId === group.id);
-    const selected = group.id === selectedGroupId;
+  const storyboardLayout = buildStoryboardGroupLayout(storyboardGroups, selectedGroupId);
+  const orderedRootIds = storyboardLayout.selectedRootId
+    ? [...storyboardLayout.rootIds].sort((left, right) =>
+        Number(right === storyboardLayout.selectedRootId) - Number(left === storyboardLayout.selectedRootId)
+      )
+    : storyboardLayout.rootIds;
+  const sections: ImageWorkbenchGallerySection[] = orderedRootIds.map((rootId) => {
+    const groups = storyboardLayout.groupsByRootId.get(rootId) || [];
+    const activeGroup = resolveActiveStoryboardDisplayGroup(groups, storyboardLayout.replanMetaByGroupId);
+    const rootGroup = storyboardLayout.groupById.get(rootId) || activeGroup;
+    const groupIds = new Set(groups.map((group) => group.id));
+    const items = currentAssets.filter((asset) => asset.groupId === activeGroup.id);
+    const historyItems = buildStoryboardHistoryItems({
+      currentAssets,
+      activeGroupId: activeGroup.id,
+      groupIds,
+      groups,
+      replanMetaByGroupId: storyboardLayout.replanMetaByGroupId,
+    });
+    const selected = groupIds.has(selectedGroupId);
+    const hasReplan = activeGroup.id !== rootGroup.id || Boolean(storyboardLayout.replanMetaByGroupId.get(activeGroup.id)?.replanBatchId);
     return {
-      key: `group-${group.id}`,
-      title: group.name || t("imageWorkbench.groups.defaultName"),
-      description: buildGroupDescription(group, currentJob, items.length, t),
+      key: `group-${rootId}`,
+      title: stripStoryboardReplanSuffix(rootGroup.name || activeGroup.name) || t("imageWorkbench.groups.defaultName"),
+      description: buildGroupDescription(activeGroup, currentJob, items.length, t),
+      prompt: activeGroup.basePrompt || rootGroup.basePrompt || currentJob?.prompt || "",
       selected,
-      expectedCount: group.count,
+      expectedCount: activeGroup.count,
       highlights: [
         ...(selected
           ? [
@@ -489,27 +524,43 @@ function buildCurrentGroupSections(options: {
               },
             ]
           : []),
-        {
-          key: "count",
-          label: `${t("imageWorkbench.groups.count")} ${items.length || group.count}`,
-        },
+        ...(hasReplan
+          ? [
+              {
+                key: "replanned",
+                label: t("imageWorkbench.gallerySections.replanned"),
+              },
+            ]
+          : []),
+        ...(historyItems.length
+          ? [
+              {
+                key: "history",
+                label: formatTemplate(t("imageWorkbench.gallerySections.historyCount"), {
+                  count: historyItems.length,
+                }),
+              },
+            ]
+          : []),
       ],
       items,
+      historyItems,
     };
   });
 
-  const groupedIds = new Set(currentGroups.map((group) => group.id));
+  const groupedIds = new Set(storyboardGroups.map((group) => group.id));
   const ungrouped = currentAssets.filter((asset) => !asset.groupId || !groupedIds.has(asset.groupId));
   if (ungrouped.length) {
     sections.push({
       key: "group-ungrouped",
       title: t("imageWorkbench.groups.ungrouped"),
       description: t("imageWorkbench.gallerySections.currentDesc"),
+      prompt: currentJob?.prompt || "",
       items: ungrouped,
     });
   }
 
-  return currentGroups.length ? sections : sections.filter((section) => section.items.length);
+  return storyboardGroups.length ? sections : sections.filter((section) => section.items.length);
 }
 
 function buildGroupDescription(
@@ -523,6 +574,141 @@ function buildGroupDescription(
   return [type, status, `${itemCount || group.count} ${t("imageWorkbench.groups.images")}`]
     .filter(Boolean)
     .join(" · ");
+}
+
+type StoryboardReplanMeta = {
+  sourceGroupId: string;
+  replanBatchId: string;
+  replannedAtMs: number;
+};
+
+function buildStoryboardGroupLayout(currentGroups: ImageWorkbenchGroup[], selectedGroupId: string) {
+  const groupById = new Map(currentGroups.map((group) => [group.id, group]));
+  const replanMetaByGroupId = new Map(
+    currentGroups.map((group) => [group.id, parseStoryboardReplanMeta(group.agentIdsJson)] as const)
+  );
+  const groupsByRootId = new Map<string, ImageWorkbenchGroup[]>();
+  const rootIds: string[] = [];
+  let selectedRootId = "";
+
+  currentGroups.forEach((group) => {
+    const rootId = resolveStoryboardRootGroupId(group, groupById, replanMetaByGroupId);
+    if (!groupsByRootId.has(rootId)) {
+      groupsByRootId.set(rootId, []);
+      rootIds.push(rootId);
+    }
+    groupsByRootId.get(rootId)?.push(group);
+    if (group.id === selectedGroupId) {
+      selectedRootId = rootId;
+    }
+  });
+
+  return {
+    groupById,
+    groupsByRootId,
+    rootIds,
+    selectedRootId,
+    replanMetaByGroupId,
+  };
+}
+
+function resolveStoryboardRootGroupId(
+  group: ImageWorkbenchGroup,
+  groupById: Map<string, ImageWorkbenchGroup>,
+  replanMetaByGroupId: Map<string, StoryboardReplanMeta>
+) {
+  if (!isStoryboardDisplayGroup(group)) {
+    return group.id;
+  }
+
+  let current = group;
+  const seen = new Set([group.id]);
+  while (true) {
+    const sourceGroupId = replanMetaByGroupId.get(current.id)?.sourceGroupId || "";
+    if (!sourceGroupId || seen.has(sourceGroupId)) {
+      return current.id;
+    }
+    const sourceGroup = groupById.get(sourceGroupId);
+    if (!sourceGroup || !isStoryboardDisplayGroup(sourceGroup)) {
+      return current.id;
+    }
+    current = sourceGroup;
+    seen.add(current.id);
+  }
+}
+
+function resolveActiveStoryboardDisplayGroup(
+  groups: ImageWorkbenchGroup[],
+  replanMetaByGroupId: Map<string, StoryboardReplanMeta>
+) {
+  return [...groups].sort(
+    (left, right) =>
+      storyboardGroupVersionMs(right, replanMetaByGroupId) -
+      storyboardGroupVersionMs(left, replanMetaByGroupId)
+  )[0] || groups[0];
+}
+
+function buildStoryboardHistoryItems(options: {
+  currentAssets: ImageWorkbenchAssetCard[];
+  activeGroupId: string;
+  groupIds: Set<string>;
+  groups: ImageWorkbenchGroup[];
+  replanMetaByGroupId: Map<string, StoryboardReplanMeta>;
+}) {
+  const groupById = new Map(options.groups.map((group) => [group.id, group]));
+  return options.currentAssets
+    .filter((asset) => asset.groupId && options.groupIds.has(asset.groupId) && asset.groupId !== options.activeGroupId)
+    .sort((left, right) => {
+      const leftGroup = left.groupId ? groupById.get(left.groupId) : null;
+      const rightGroup = right.groupId ? groupById.get(right.groupId) : null;
+      const groupPriority =
+        storyboardGroupVersionMs(rightGroup, options.replanMetaByGroupId) -
+        storyboardGroupVersionMs(leftGroup, options.replanMetaByGroupId);
+      return groupPriority || right.createdAtMs - left.createdAtMs;
+    });
+}
+
+function isStoryboardDisplayGroup(group: ImageWorkbenchGroup) {
+  return group.type === "storyboard" || group.agentPreset === "storyboard";
+}
+
+function storyboardGroupVersionMs(
+  group: ImageWorkbenchGroup | null | undefined,
+  replanMetaByGroupId: Map<string, StoryboardReplanMeta>
+) {
+  if (!group) {
+    return 0;
+  }
+  return replanMetaByGroupId.get(group.id)?.replannedAtMs || group.createdAtMs || group.updatedAtMs || 0;
+}
+
+function parseStoryboardReplanMeta(rawJson: string | null | undefined): StoryboardReplanMeta {
+  if (!rawJson) {
+    return {
+      sourceGroupId: "",
+      replanBatchId: "",
+      replannedAtMs: 0,
+    };
+  }
+  try {
+    const parsed = JSON.parse(rawJson) as Record<string, unknown>;
+    const replannedAtMs = Number(parsed.replannedAtMs);
+    return {
+      sourceGroupId: typeof parsed.sourceGroupId === "string" ? parsed.sourceGroupId : "",
+      replanBatchId: typeof parsed.replanBatchId === "string" ? parsed.replanBatchId : "",
+      replannedAtMs: Number.isFinite(replannedAtMs) ? replannedAtMs : 0,
+    };
+  } catch {
+    return {
+      sourceGroupId: "",
+      replanBatchId: "",
+      replannedAtMs: 0,
+    };
+  }
+}
+
+function stripStoryboardReplanSuffix(name: string | null | undefined) {
+  return (name || "").replace(/\s*(?:·|-|路)\s*(?:重新规划|Replan)\s*$/i, "").trim();
 }
 
 function buildSameGroupAssets(

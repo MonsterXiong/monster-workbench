@@ -56,42 +56,33 @@ function updateScene(index: number, patch: Partial<ImageWorkbenchStoryboardDraft
 
 <template>
   <section class="image-workbench-storyboard-draft" :class="{ 'is-recognizing': smartRecognizing }">
-    <div class="image-workbench-storyboard-draft__head">
-      <div>
-        <span>
-          <Clapperboard class="h-4 w-4" />
-          <strong>{{ t("imageWorkbench.storyboardDraft.title") }}</strong>
-        </span>
-        <small>{{ t("imageWorkbench.storyboardDraft.desc") }}</small>
+    <div v-if="scenes.length" class="image-workbench-storyboard-draft__side">
+      <div class="image-workbench-storyboard-draft__meta">
+        <span>{{ formatTemplate(t("imageWorkbench.storyboardDraft.sceneCount"), { count: scenes.length }) }}</span>
+        <span>{{ formatTemplate(t("imageWorkbench.storyboardDraft.taskCount"), { count: taskCount }) }}</span>
       </div>
-      <div class="image-workbench-storyboard-draft__side">
-        <div class="image-workbench-storyboard-draft__meta">
-          <span>{{ formatTemplate(t("imageWorkbench.storyboardDraft.sceneCount"), { count: scenes.length }) }}</span>
-          <span>{{ formatTemplate(t("imageWorkbench.storyboardDraft.taskCount"), { count: taskCount }) }}</span>
-        </div>
-        <button
-          v-if="hasRawPrompt || smartRecognizing"
-          type="button"
-          class="image-workbench-storyboard-draft__smart is-creative"
-          :disabled="!canSmartRecognize"
-          @click="emit('generate-storyboard')"
-        >
-          <LoaderCircle v-if="smartRecognizing && aiAction === 'generate'" class="h-3.5 w-3.5 animate-spin" />
-          <Sparkles v-else class="h-3.5 w-3.5" />
-          {{ smartRecognizing && aiAction === "generate" ? t("imageWorkbench.storyboardDraft.generatingStory") : t("imageWorkbench.storyboardDraft.generateStory") }}
-        </button>
-        <button
-          v-if="hasRawPrompt || smartRecognizing"
-          type="button"
-          class="image-workbench-storyboard-draft__smart"
-          :disabled="!canSmartRecognize"
-          @click="emit('smart-recognize')"
-        >
-          <LoaderCircle v-if="smartRecognizing && aiAction === 'recognize'" class="h-3.5 w-3.5 animate-spin" />
-          <Sparkles v-else class="h-3.5 w-3.5" />
-          {{ smartRecognizing && aiAction === "recognize" ? t("imageWorkbench.storyboardDraft.smartRecognizing") : t("imageWorkbench.storyboardDraft.smartRecognize") }}
-        </button>
-      </div>
+      <button
+        v-if="hasRawPrompt || smartRecognizing"
+        type="button"
+        class="image-workbench-storyboard-draft__smart is-creative"
+        :disabled="!canSmartRecognize"
+        @click="emit('generate-storyboard')"
+      >
+        <LoaderCircle v-if="smartRecognizing && aiAction === 'generate'" class="h-3.5 w-3.5 animate-spin" />
+        <Sparkles v-else class="h-3.5 w-3.5" />
+        {{ smartRecognizing && aiAction === "generate" ? t("imageWorkbench.storyboardDraft.generatingStory") : t("imageWorkbench.storyboardDraft.generateStory") }}
+      </button>
+      <button
+        v-if="hasRawPrompt || smartRecognizing"
+        type="button"
+        class="image-workbench-storyboard-draft__smart"
+        :disabled="!canSmartRecognize"
+        @click="emit('smart-recognize')"
+      >
+        <LoaderCircle v-if="smartRecognizing && aiAction === 'recognize'" class="h-3.5 w-3.5 animate-spin" />
+        <Sparkles v-else class="h-3.5 w-3.5" />
+        {{ smartRecognizing && aiAction === "recognize" ? t("imageWorkbench.storyboardDraft.smartRecognizing") : t("imageWorkbench.storyboardDraft.smartRecognize") }}
+      </button>
     </div>
 
     <div v-if="scenes.length" class="image-workbench-storyboard-global">

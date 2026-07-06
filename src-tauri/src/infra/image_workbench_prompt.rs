@@ -68,15 +68,15 @@ fn reference_requirements(context: &ImageWorkbenchPromptBuildContext<'_>) -> Vec
     }
     if mode == "person_consistency" {
         return vec![
-            "参考图1优先用于人物身份、脸型和五官，其他参考图只作为道具、场景或风格辅助，不替换人物主体".to_string(),
+            "参考图1优先用于人物身份锚点：骨相、脸型轮廓、五官间距与比例、发际线、发型、年龄感、肤色和整体气质；不锁定参考图原本的表情、眼神、头部角度和姿态，表情变化只能改变肌肉状态与情绪，不能改变身份锚点；其他参考图只作为道具、场景、服装或风格辅助，不替换人物主体".to_string(),
         ];
     }
     if reference_count >= 2 || context.person_context_json.is_some() {
         return vec![
-            "按参考图顺序理解角色：参考图1为主体，参考图2为道具或动作辅助，参考图3及以后为场景或风格辅助，避免互相替换".to_string(),
+            "按参考图顺序理解角色：参考图1为主体身份锚点，锁定骨相、脸型轮廓、五官比例、发型、年龄感和气质但不锁定表情、眼神、头部角度和姿态；参考图2为道具或动作辅助，参考图3及以后为场景、服装或风格辅助，镜头景别和拍摄手法优先服从当前分镜，避免互相替换".to_string(),
         ];
     }
-    vec!["保持参考图主体身份和主要结构，生成自然变化".to_string()]
+    vec!["保持参考图主体身份锚点和主要结构，不复制固定表情和姿态，表情、眼神、服装、场景、景别和拍摄手法按提示词自然变化".to_string()]
 }
 
 fn reference_role_requirements(person_context_json: Option<&str>) -> Vec<String> {
@@ -84,7 +84,7 @@ fn reference_role_requirements(person_context_json: Option<&str>) -> Vec<String>
         .into_iter()
         .map(|item| match item.role {
             ReferenceRole::Person => format!(
-                "参考图{}只用于人物身份、脸型、五官、发型和气质，不参考其背景",
+                "参考图{}只用于人物身份锚点：骨相、脸型轮廓、五官间距与比例、发际线、发型、年龄感、肤色和气质；不锁定表情、眼神、头部角度、姿态、服装和背景，分镜需要的情绪变化不能改写身份锚点",
                 item.index
             ),
             ReferenceRole::Prop => format!(
@@ -187,7 +187,10 @@ pub fn image_workbench_default_negative_constraints(prompt: &str) -> Vec<&'stati
         values.extend([
             "未成年感",
             "过度暴露",
+            "换脸",
+            "身份漂移",
             "脸部畸形",
+            "五官比例漂移",
             "多余手指",
             "多余手臂",
             "畸形手",
@@ -230,6 +233,9 @@ mod tests {
         );
 
         assert!(prompt.contains("参考图1优先用于人物身份"));
+        assert!(prompt.contains("骨相、脸型轮廓、五官间距与比例"));
+        assert!(prompt.contains("不锁定参考图原本的表情"));
+        assert!(prompt.contains("不能改变身份锚点"));
         assert!(prompt.contains("手部结构自然"));
         assert!(prompt.contains("避免多余手"));
     }
@@ -245,7 +251,9 @@ mod tests {
 
         let prompt = build_image_workbench_task_prompt("生成同风格变化", 1, &context);
 
-        assert!(prompt.contains("保持参考图主体身份和主要结构"));
+        assert!(prompt.contains("保持参考图主体身份锚点和主要结构"));
+        assert!(prompt.contains("不复制固定表情和姿态"));
+        assert!(prompt.contains("景别和拍摄手法按提示词自然变化"));
     }
 
     #[test]
@@ -271,6 +279,8 @@ mod tests {
         );
 
         assert!(prompt.contains("参考图1只用于人物身份"));
+        assert!(prompt.contains("分镜需要的情绪变化不能改写身份锚点"));
+        assert!(prompt.contains("不锁定表情"));
         assert!(prompt.contains("参考图2只用于道具外观"));
         assert!(prompt.contains("参考图3只用于场景空间"));
     }

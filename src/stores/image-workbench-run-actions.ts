@@ -260,8 +260,9 @@ export function createImageWorkbenchRunActions(options: CreateImageWorkbenchRunA
     return snapshot;
   }
 
-  async function retryFailedTasks() {
-    if (!options.currentJob.value) {
+  async function retryFailedTasks(jobId?: string) {
+    const targetJobId = (jobId || options.currentJob.value?.id || "").trim();
+    if (!targetJobId) {
       return null;
     }
     options.loading.value = true;
@@ -270,8 +271,9 @@ export function createImageWorkbenchRunActions(options: CreateImageWorkbenchRunA
     options.cancelRequested.value = false;
     let startedJobId = "";
     try {
-      const retrySnapshot = await imageWorkbenchService.retryFailedTasks(options.currentJob.value.id);
+      const retrySnapshot = await imageWorkbenchService.retryFailedTasks(targetJobId);
       options.currentSnapshot.value = retrySnapshot;
+      options.selectedJobId.value = retrySnapshot.job.id;
       startedJobId = retrySnapshot.job.id;
       await options.syncCurrentGroups(retrySnapshot.job.id);
       options.startJobSnapshotPolling(retrySnapshot.job.id);

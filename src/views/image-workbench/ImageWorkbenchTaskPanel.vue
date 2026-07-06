@@ -1,15 +1,31 @@
 <script setup lang="ts">
-import { computed } from "vue";
-import { Ban, ListChecks, RotateCcw, Square, Trash2 } from "lucide-vue-next";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
+import { Ban, Download, ListChecks, RotateCcw, Square, Trash2 } from "lucide-vue-next";
 import { useConfirm } from "../../composables/useConfirm";
 import { useI18n } from "../../composables/useI18n";
 import { useImageWorkbenchStore } from "../../stores/image-workbench";
-import { formatTemplate } from "../../utils";
+import { addDomEventListener, formatTemplate, isEscapeKey, type DomEventCleanup } from "../../utils";
 import type { ImageWorkbenchJob, ImageWorkbenchTask } from "../../types/image-workbench";
 
 const { t } = useI18n();
 const { confirm } = useConfirm();
 const imageWorkbenchStore = useImageWorkbenchStore();
+const taskContextMenuRef = ref<HTMLElement | null>(null);
+const taskContextMenu = ref<{
+  job: ImageWorkbenchJob;
+  x: number;
+  y: number;
+} | null>(null);
+let stopContextMenuListeners: DomEventCleanup | null = null;
+
+type StoryboardTaskGroupView = {
+  id: string;
+  title: string;
+  counts: ReturnType<typeof summarizeTasks>;
+  total: number;
+  variants: number;
+  tone: "queued" | "running" | "failed" | "done";
+};
 
 const jobQueueItems = computed(() => {
   const activeIds = new Set(imageWorkbenchStore.activeJobIds);
@@ -17,8 +33,6 @@ const jobQueueItems = computed(() => {
     .sort((left, right) => {
       const activePriority = Number(activeIds.has(right.id)) - Number(activeIds.has(left.id));
       if (activePriority !== 0) return activePriority;
-      const selectedPriority = Number(right.id === imageWorkbenchStore.selectedJobId) - Number(left.id === imageWorkbenchStore.selectedJobId);
-      if (selectedPriority !== 0) return selectedPriority;
       return right.updatedAtMs - left.updatedAtMs;
     });
 });
@@ -31,48 +45,6 @@ const progressLabel = computed(() =>
   })
 );
 
-const selectedTaskCounts = computed(() => summarizeTasks(imageWorkbenchStore.tasks));
-const selectedTaskChips = computed(() => {
-  const counts = selectedTaskCounts.value;
-  const active = counts.running + counts.retrying;
-  return [
-    {
-      key: "done",
-      tone: "done",
-      label: formatTemplate(t("imageWorkbench.taskbar.taskChipDone"), {
-        finished: counts.finished,
-        total: counts.total,
-      }),
-    },
-    counts.failed
-      ? {
-          key: "failed",
-          tone: "failed",
-          label: formatTemplate(t("imageWorkbench.taskbar.taskChipFailed"), {
-            count: counts.failed,
-          }),
-        }
-      : null,
-    active
-      ? {
-          key: "active",
-          tone: "running",
-          label: formatTemplate(t("imageWorkbench.taskbar.taskChipActive"), {
-            count: active,
-          }),
-        }
-      : null,
-    counts.queued
-      ? {
-          key: "queued",
-          tone: "queued",
-          label: formatTemplate(t("imageWorkbench.taskbar.taskChipQueued"), {
-            count: counts.queued,
-          }),
-        }
-      : null,
-  ].filter((item): item is { key: string; tone: string; label: string } => Boolean(item));
-});
 const failedTaskReasons = computed(() =>
   imageWorkbenchStore.tasks
     .filter((task) => task.status === "failed")
@@ -89,7 +61,7 @@ const failedTaskReasons = computed(() =>
     }))
 );
 const primaryFailureReason = computed(() => failedTaskReasons.value[0]);
-const storyboardTaskGroups = computed(() =>
+const storyboardTaskGroups = computed<StoryboardTaskGroupView[]>(() =>
   imageWorkbenchStore.currentGroups
     .filter((group) => group.type === "storyboard" || group.agentPreset === "storyboard")
     .map((group) => {
@@ -99,24 +71,19 @@ const storyboardTaskGroups = computed(() =>
           Number(left.variantIndex ?? left.queueIndex) - Number(right.variantIndex ?? right.queueIndex)
         );
       const counts = summarizeTasks(tasks);
-      const finished = counts.finished;
       const total = counts.total || group.count || 0;
-      const active = counts.queued + counts.running + counts.retrying;
       return {
         id: group.id,
         title: group.name || t("imageWorkbench.groups.defaultName"),
-        referencePrompt: parseStoryboardReferencePrompt(group.agentIdsJson),
-        tasks,
         counts,
-        replanCount: Math.max(1, Math.min(8, counts.total || group.count || 4)),
-        canReplan: active === 0 && !imageWorkbenchStore.loading,
-        percent: total ? Math.round((finished / total) * 100) : 0,
-        progressLabel: formatTemplate(t("imageWorkbench.taskbar.storyboardGroupProgress"), {
-          finished,
-          total,
-        }),
+        total,
+        variants: total || group.count || 4,
+        tone: storyboardGroupTone(counts, total),
       };
     })
+);
+const storyboardTaskGroupsTitle = computed(() =>
+  storyboardTaskGroups.value.map((group) => group.title).join("\n")
 );
 const selectedCancelableTask = computed(() =>
   [...imageWorkbenchStore.tasks]
@@ -157,6 +124,20 @@ function canCancelJob(job: ImageWorkbenchJob) {
   return isRunnableJob(job);
 }
 
+function canRetryJob(job: ImageWorkbenchJob) {
+  if (job.id === imageWorkbenchStore.currentJob?.id) {
+    return imageWorkbenchStore.tasks.some((task) => task.status === "failed") && !imageWorkbenchStore.loading;
+  }
+  return ["failed", "partial_succeeded"].includes(job.status) && !imageWorkbenchStore.loading;
+}
+
+function canExportJob(job: ImageWorkbenchJob) {
+  if (job.id === imageWorkbenchStore.currentJob?.id) {
+    return imageWorkbenchStore.assets.length > 0 && !imageWorkbenchStore.loading;
+  }
+  return ["succeeded", "partial_succeeded", "failed"].includes(job.status) && !imageWorkbenchStore.loading;
+}
+
 function jobProgress(job: ImageWorkbenchJob) {
   if (job.id === imageWorkbenchStore.currentJob?.id && imageWorkbenchStore.tasks.length) {
     return {
@@ -193,30 +174,12 @@ function summarizeTasks(tasks: ImageWorkbenchTask[]) {
   };
 }
 
-function taskStatusTone(task: ImageWorkbenchTask) {
-  if (task.status === "failed") return "failed";
-  if (["running", "validating"].includes(task.status)) return "running";
-  if (["succeeded", "cancelled"].includes(task.status)) return "done";
+function storyboardGroupTone(counts: ReturnType<typeof summarizeTasks>, total: number): StoryboardTaskGroupView["tone"] {
+  if (counts.failed) return "failed";
+  if (counts.running || counts.retrying) return "running";
+  if (counts.queued) return "queued";
+  if (total && counts.finished >= total) return "done";
   return "queued";
-}
-
-function storyboardVariantLabel(task: ImageWorkbenchTask) {
-  return formatTemplate(t("imageWorkbench.taskbar.storyboardVariant"), {
-    index: Number(task.variantIndex ?? task.queueIndex) + 1,
-  });
-}
-
-function parseStoryboardReferencePrompt(rawJson: string | null | undefined) {
-  if (!rawJson) {
-    return "";
-  }
-  try {
-    const parsed = JSON.parse(rawJson) as Record<string, unknown>;
-    const value = parsed.referencePrompt;
-    return typeof value === "string" ? value.trim() : "";
-  } catch {
-    return "";
-  }
 }
 
 function failureTypeLabel(task: ImageWorkbenchTask) {
@@ -322,8 +285,67 @@ async function selectTaskJob(job: ImageWorkbenchJob) {
   imageWorkbenchStore.clearSelectedAsset();
 }
 
-function cancelJob(job: ImageWorkbenchJob) {
-  void imageWorkbenchStore.cancelJob(job.id);
+async function cancelJob(job: ImageWorkbenchJob) {
+  const ok = await confirm({
+    title: t("imageWorkbench.taskbar.cancelJobTitle"),
+    message: formatTemplate(t("imageWorkbench.taskbar.cancelJobConfirm"), {
+      title: job.prompt || t("imageWorkbench.review.emptyPrompt"),
+    }),
+    confirmText: t("imageWorkbench.taskbar.cancelJobAction"),
+    cancelText: t("common.cancel"),
+    danger: true,
+  });
+  if (ok) {
+    await imageWorkbenchStore.cancelJob(job.id);
+  }
+}
+
+function closeTaskContextMenu() {
+  taskContextMenu.value = null;
+}
+
+async function positionTaskContextMenu() {
+  await nextTick();
+  const menu = taskContextMenuRef.value;
+  const state = taskContextMenu.value;
+  if (!menu || !state) {
+    return;
+  }
+  const padding = 8;
+  const rect = menu.getBoundingClientRect();
+  const maxX = Math.max(padding, window.innerWidth - rect.width - padding);
+  const maxY = Math.max(padding, window.innerHeight - rect.height - padding);
+  taskContextMenu.value = {
+    ...state,
+    x: Math.min(Math.max(padding, state.x), maxX),
+    y: Math.min(Math.max(padding, state.y), maxY),
+  };
+}
+
+function openTaskContextMenu(event: MouseEvent, job: ImageWorkbenchJob) {
+  event.preventDefault();
+  event.stopPropagation();
+  taskContextMenu.value = {
+    job,
+    x: event.clientX,
+    y: event.clientY,
+  };
+  void positionTaskContextMenu();
+}
+
+function openTaskContextMenuFromKeyboard(event: KeyboardEvent, job: ImageWorkbenchJob) {
+  if (event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10")) {
+    return;
+  }
+  event.preventDefault();
+  event.stopPropagation();
+  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+  taskContextMenu.value = {
+    job,
+    x: rect.left + Math.min(24, rect.width / 2),
+    y: rect.top + Math.min(24, rect.height / 2),
+  };
+  void positionTaskContextMenu();
 }
 
 async function deleteJobOnly(job: ImageWorkbenchJob) {
@@ -352,27 +374,82 @@ async function deleteJobWithAssets(job: ImageWorkbenchJob) {
   }
 }
 
-function cancelSelectedTask() {
+async function handleTaskContextAction(action: "retry" | "export" | "cancel" | "deleteOnly" | "deleteWithAssets") {
+  const job = taskContextMenu.value?.job;
+  closeTaskContextMenu();
+  if (!job) {
+    return;
+  }
+  if (action === "retry") {
+    await imageWorkbenchStore.retryFailedTasks(job.id);
+    return;
+  }
+  if (action === "export") {
+    await imageWorkbenchStore.exportJobById(job.id);
+    return;
+  }
+  if (action === "cancel") {
+    await cancelJob(job);
+    return;
+  }
+  if (action === "deleteOnly") {
+    await deleteJobOnly(job);
+    return;
+  }
+  await deleteJobWithAssets(job);
+}
+
+async function cancelSelectedTask() {
   const taskId = selectedCancelableTask.value?.id;
-  if (taskId) {
-    void imageWorkbenchStore.cancelTask(taskId);
+  if (!taskId) {
+    return;
+  }
+  const ok = await confirm({
+    title: t("imageWorkbench.taskbar.stopTaskTitle"),
+    message: t("imageWorkbench.taskbar.stopTaskConfirm"),
+    confirmText: t("imageWorkbench.taskbar.stopTaskAction"),
+    cancelText: t("common.cancel"),
+    danger: true,
+  });
+  if (ok) {
+    await imageWorkbenchStore.cancelTask(taskId);
   }
 }
 
-async function replanStoryboardGroup(group: { id: string; title: string; replanCount: number }) {
+async function handleReplanStoryboardGroup(group: StoryboardTaskGroupView) {
   const ok = await confirm({
     title: t("imageWorkbench.taskbar.storyboardReplanTitle"),
     message: formatTemplate(t("imageWorkbench.taskbar.storyboardReplanConfirm"), {
       title: group.title,
-      count: group.replanCount,
+      count: group.variants,
     }),
     confirmText: t("imageWorkbench.taskbar.storyboardReplan"),
     cancelText: t("common.cancel"),
   });
   if (ok) {
-    await imageWorkbenchStore.replanStoryboardGroup(group.id, group.replanCount);
+    await imageWorkbenchStore.replanStoryboardGroup(group.id, group.variants);
   }
 }
+
+onMounted(() => {
+  const stopClick = addDomEventListener(document, "click", closeTaskContextMenu);
+  const stopKeydown = addDomEventListener(document, "keydown", (event) => {
+    if (isEscapeKey(event)) {
+      closeTaskContextMenu();
+    }
+  });
+  const stopResize = addDomEventListener(window, "resize", closeTaskContextMenu);
+  stopContextMenuListeners = () => {
+    stopClick();
+    stopKeydown();
+    stopResize();
+  };
+});
+
+onBeforeUnmount(() => {
+  stopContextMenuListeners?.();
+  stopContextMenuListeners = null;
+});
 </script>
 
 <template>
@@ -393,12 +470,14 @@ async function replanStoryboardGroup(group: { id: string; title: string; replanC
         :key="job.id"
         class="image-workbench-task-job"
         :class="[`is-${jobProgress(job).tone}`, { 'is-active': job.id === imageWorkbenchStore.selectedJobId }]"
+        @contextmenu="openTaskContextMenu($event, job)"
       >
         <button
           type="button"
           class="image-workbench-task-job__button"
           :title="job.prompt"
           @click="selectTaskJob(job)"
+          @keydown="openTaskContextMenuFromKeyboard($event, job)"
         >
           <div class="image-workbench-task-job__copy">
             <strong>{{ job.prompt || t("imageWorkbench.review.emptyPrompt") }}</strong>
@@ -409,85 +488,59 @@ async function replanStoryboardGroup(group: { id: string; title: string; replanC
             <small>{{ formatTemplate(t("imageWorkbench.taskbar.jobQuantity"), { count: job.quantity }) }}</small>
           </div>
         </button>
-        <div v-if="canCancelJob(job)" class="image-workbench-task-job__actions">
-          <button type="button" @click.stop="cancelJob(job)">
+        <div
+          v-if="canCancelJob(job) || (job.id === imageWorkbenchStore.selectedJobId && selectedCancelableTask)"
+          class="image-workbench-task-job__actions"
+        >
+          <button
+            v-if="job.id === imageWorkbenchStore.selectedJobId && selectedCancelableTask"
+            type="button"
+            class="image-workbench-task-stop"
+            :title="t('imageWorkbench.taskbar.stopTaskTitle')"
+            @click.stop="cancelSelectedTask"
+          >
+            <Square class="h-3.5 w-3.5" />
+            <span>{{ t("imageWorkbench.taskbar.stopTask") }}</span>
+          </button>
+          <button v-if="canCancelJob(job)" type="button" @click.stop="cancelJob(job)">
             <Ban class="h-3.5 w-3.5" />
-            {{ t("imageWorkbench.taskbar.cancelJob") }}
-          </button>
-        </div>
-        <div class="image-workbench-task-job__actions">
-          <button type="button" @click.stop="deleteJobOnly(job)">
-            <Trash2 class="h-3.5 w-3.5" />
-            {{ t("imageWorkbench.assetGroup.deleteJobOnly") }}
-          </button>
-          <button type="button" class="is-danger" @click.stop="deleteJobWithAssets(job)">
-            <Trash2 class="h-3.5 w-3.5" />
-            {{ t("imageWorkbench.assetGroup.deleteJobWithAssets") }}
+            <span>{{ t("imageWorkbench.taskbar.cancelJob") }}</span>
           </button>
         </div>
         <div v-if="job.id === imageWorkbenchStore.selectedJobId" class="image-workbench-task-job__details">
           <template v-if="imageWorkbenchStore.tasks.length">
-            <div class="image-workbench-task-overview">
-              <span
-                v-for="chip in selectedTaskChips"
-                :key="chip.key"
-                class="image-workbench-task-chip"
-                :class="`is-${chip.tone}`"
+            <div
+              v-if="storyboardTaskGroups.length"
+              class="image-workbench-task-inline"
+            >
+              <div
+                v-if="storyboardTaskGroups.length"
+                class="image-workbench-storyboard-task-groups"
+                :title="storyboardTaskGroupsTitle"
               >
-                {{ chip.label }}
-              </span>
-            </div>
-            <div v-if="selectedCancelableTask" class="image-workbench-task-controls">
-              <button type="button" @click.stop="cancelSelectedTask">
-                <Square class="h-3.5 w-3.5" />
-                {{ t("imageWorkbench.taskbar.stopTask") }}
-              </button>
-            </div>
-            <div v-if="storyboardTaskGroups.length" class="image-workbench-storyboard-task-groups">
-              <div class="image-workbench-storyboard-task-groups__head">
-                <span>{{ t("imageWorkbench.taskbar.storyboardGroupsTitle") }}</span>
-                <small>
-                  {{ formatTemplate(t("imageWorkbench.taskbar.storyboardGroupsCount"), { count: storyboardTaskGroups.length }) }}
-                </small>
-              </div>
-              <article
-                v-for="group in storyboardTaskGroups"
-                :key="group.id"
-                class="image-workbench-storyboard-task-group"
-              >
-                <div class="image-workbench-storyboard-task-group__head">
-                  <div class="image-workbench-storyboard-task-group__head-main">
-                    <strong :title="group.title">{{ group.title }}</strong>
-                    <span>{{ group.progressLabel }}</span>
+                <div class="image-workbench-storyboard-task-groups__strip">
+                  <div
+                    v-for="group in storyboardTaskGroups"
+                    :key="group.id"
+                    class="image-workbench-storyboard-task-group"
+                    :class="`is-${group.tone}`"
+                    :title="group.title"
+                  >
+                    <span class="image-workbench-storyboard-task-group__title">{{ group.title }}</span>
+                    <button
+                      v-if="group.tone === 'failed'"
+                      type="button"
+                      class="image-workbench-storyboard-task-group__replan"
+                      :disabled="imageWorkbenchStore.loading"
+                      :title="t('imageWorkbench.taskbar.storyboardReplan')"
+                      @click.stop="handleReplanStoryboardGroup(group)"
+                    >
+                      <RotateCcw class="h-3 w-3" />
+                      <span>{{ t("imageWorkbench.taskbar.storyboardReplan") }}</span>
+                    </button>
                   </div>
-                  <button
-                    type="button"
-                    class="image-workbench-storyboard-task-group__replan"
-                    :disabled="!group.canReplan"
-                    @click.stop="replanStoryboardGroup(group)"
-                  >
-                    <RotateCcw class="h-3.5 w-3.5" />
-                    {{ t("imageWorkbench.taskbar.storyboardReplan") }}
-                  </button>
                 </div>
-                <div class="image-workbench-storyboard-task-group__progress">
-                  <span :style="{ width: `${group.percent}%` }"></span>
-                </div>
-                <p v-if="group.referencePrompt" :title="group.referencePrompt">
-                  {{ t("imageWorkbench.taskbar.storyboardReference") }}{{ group.referencePrompt }}
-                </p>
-                <div class="image-workbench-storyboard-task-group__variants">
-                  <span
-                    v-for="task in group.tasks"
-                    :key="task.id"
-                    class="image-workbench-storyboard-task-variant"
-                    :class="`is-${taskStatusTone(task)}`"
-                    :title="task.prompt || group.title"
-                  >
-                    {{ storyboardVariantLabel(task) }} · {{ t(`imageWorkbench.taskStatuses.${task.status}`) }}
-                  </span>
-                </div>
-              </article>
+              </div>
             </div>
             <div v-if="primaryFailureReason" class="image-workbench-task-failure">
               <span>{{ t("imageWorkbench.taskbar.failureReasonTitle") }}</span>
@@ -510,6 +563,57 @@ async function replanStoryboardGroup(group: { id: string; title: string; replanC
           </div>
         </div>
       </article>
+      <div
+        v-if="taskContextMenu"
+        ref="taskContextMenuRef"
+        class="image-workbench-task-job__context-menu"
+        :style="{ left: `${taskContextMenu.x}px`, top: `${taskContextMenu.y}px` }"
+        role="menu"
+        :aria-label="t('imageWorkbench.taskbar.taskActions')"
+        @click.stop
+        @contextmenu.prevent.stop
+      >
+        <button
+          v-if="canRetryJob(taskContextMenu.job)"
+          type="button"
+          role="menuitem"
+          @click="handleTaskContextAction('retry')"
+        >
+          <RotateCcw class="h-3.5 w-3.5" />
+          {{ t("imageWorkbench.taskbar.retryFailedForJob") }}
+        </button>
+        <button
+          v-if="canExportJob(taskContextMenu.job)"
+          type="button"
+          role="menuitem"
+          @click="handleTaskContextAction('export')"
+        >
+          <Download class="h-3.5 w-3.5" />
+          {{ t("imageWorkbench.taskbar.exportJobAssets") }}
+        </button>
+        <button
+          v-if="canCancelJob(taskContextMenu.job)"
+          type="button"
+          role="menuitem"
+          @click="handleTaskContextAction('cancel')"
+        >
+          <Ban class="h-3.5 w-3.5" />
+          {{ t("imageWorkbench.taskbar.cancelJobMenu") }}
+        </button>
+        <button type="button" role="menuitem" @click="handleTaskContextAction('deleteOnly')">
+          <Trash2 class="h-3.5 w-3.5" />
+          {{ t("imageWorkbench.assetGroup.deleteJobOnly") }}
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          class="is-danger"
+          @click="handleTaskContextAction('deleteWithAssets')"
+        >
+          <Trash2 class="h-3.5 w-3.5" />
+          {{ t("imageWorkbench.assetGroup.deleteJobWithAssets") }}
+        </button>
+      </div>
     </div>
   </section>
 </template>
