@@ -25,6 +25,7 @@ import {
   normalizeImageGenerationSizeValue,
   validateImageGenerationSizeForModel,
 } from "../utils";
+import { createImageWorkbenchAssetActions } from "./image-workbench-asset-actions";
 import { createImageWorkbenchAssetLibraryState } from "./image-workbench-assets";
 import { createImageWorkbenchCancelActions } from "./image-workbench-cancel";
 import { createImageWorkbenchDeliveryActions } from "./image-workbench-delivery";
@@ -50,7 +51,7 @@ import type {
   CreateImageWorkbenchJobRequest, ImageWorkbenchAsset, ImageWorkbenchContractSummary, ImageWorkbenchJob,
   ImageWorkbenchBackground, ImageWorkbenchGenerationQuality, ImageWorkbenchModeration, ImageWorkbenchMode,
   ImageWorkbenchOutputFormat, ImageWorkbenchQualityIssue, ImageWorkbenchSnapshot, ImageWorkbenchTask, ImageWorkbenchTemplate,
-  RecordImageWorkbenchAssetRequest, SaveImageWorkbenchTemplateRequest, UpdateImageWorkbenchTaskStatusRequest,
+  RecordImageWorkbenchAssetRequest, UpdateImageWorkbenchTaskStatusRequest,
 } from "../types/image-workbench";
 
 const QUALITY_FIX_PRIORITY: ImageWorkbenchQualityIssue[] = ["hands", "identity", "prop", "scene"];
@@ -218,24 +219,6 @@ export const useImageWorkbenchStore = defineStore("image-workbench", () => {
     const allAssets = [...assets.value, ...assetLibrary.value];
     return assetId ? allAssets.find((asset) => asset.id === assetId) ?? null : null;
   }
-  const {
-    selectedAssetQualityIssues,
-    getAssetQualityIssues,
-    hasAssetQualityIssue,
-    toggleSelectedAssetQualityIssue,
-    addSelectedAssetQualityIssue,
-    clearAssetQualityIssues,
-  } = createImageWorkbenchQualityState({
-    selectedAsset,
-    findAsset: findKnownAsset,
-    persistAssetQualityIssues,
-  });
-  const selectedAssetPrimaryQualityIssue = computed<ImageWorkbenchQualityIssue | null>(() =>
-    QUALITY_FIX_PRIORITY.find((issue) => selectedAssetQualityIssues.value.includes(issue)) ?? null
-  );
-  const canFixSelectedAssetByQuality = computed(() =>
-    Boolean(selectedAsset.value && selectedAssetPrimaryQualityIssue.value)
-  );
   const { currentGroups, selectedAssetGroup, currentJobPrimaryGroup, syncCurrentGroups, clearCurrentGroups } = createImageWorkbenchGroupState({ selectedAsset });
   const selectedAssetMetadata = computed(() => selectedAsset.value ? metadata.value.find((item) => item.assetId === selectedAsset.value?.id) ?? null : null);
   const selectedAssetModelRuns = computed(() => selectedAsset.value ? modelRuns.value.filter((item) => item.taskId === selectedAsset.value?.taskId) : []);
@@ -530,6 +513,53 @@ export const useImageWorkbenchStore = defineStore("image-workbench", () => {
     runWithLoading,
     t,
   });
+  const {
+    applyTemplate,
+    deleteAssetsByIds,
+    deleteTemplate,
+    exportAssetGroup,
+    persistAssetQualityIssues,
+    saveCurrentTemplate,
+    setAssetRating,
+    tagAssetsGroup,
+    toggleAssetFavorite,
+  } = createImageWorkbenchAssetActions({
+    currentJob,
+    currentSnapshot,
+    exportGroup,
+    inpaintEditorActive,
+    mode,
+    negativePrompt,
+    notice,
+    prompt,
+    refreshWorkbenchLists,
+    runWithLoading,
+    selectedAssetId,
+    selectedJobId,
+    syncCurrentGroups,
+    syncSelectedAssetFromSnapshot,
+    templateDraftName,
+    templates,
+    t,
+  });
+  const {
+    selectedAssetQualityIssues,
+    getAssetQualityIssues,
+    hasAssetQualityIssue,
+    toggleSelectedAssetQualityIssue,
+    addSelectedAssetQualityIssue,
+    clearAssetQualityIssues,
+  } = createImageWorkbenchQualityState({
+    selectedAsset,
+    findAsset: findKnownAsset,
+    persistAssetQualityIssues,
+  });
+  const selectedAssetPrimaryQualityIssue = computed<ImageWorkbenchQualityIssue | null>(() =>
+    QUALITY_FIX_PRIORITY.find((issue) => selectedAssetQualityIssues.value.includes(issue)) ?? null
+  );
+  const canFixSelectedAssetByQuality = computed(() =>
+    Boolean(selectedAsset.value && selectedAssetPrimaryQualityIssue.value)
+  );
 
   async function loadSnapshot(jobId: string) {
     inpaintEditorActive.value = false;
@@ -817,114 +847,6 @@ export const useImageWorkbenchStore = defineStore("image-workbench", () => {
       return;
     }
     await deleteJobById(currentJob.value.id, deleteAssets);
-  }
-
-  async function deleteAssetsByIds(assetIds: string[], deleteFiles = true) {
-    const ids = Array.from(new Set(assetIds.map((item) => item.trim()).filter(Boolean)));
-    if (!ids.length) {
-      return null;
-    }
-    const result = await runWithLoading(() =>
-      imageWorkbenchService.deleteAssets({ assetIds: ids, deleteFiles })
-    );
-    if (currentJob.value) {
-      currentSnapshot.value = await imageWorkbenchService.getJobSnapshot(currentJob.value.id).catch(() => currentSnapshot.value);
-      if (currentSnapshot.value) {
-        await syncCurrentGroups(currentSnapshot.value.job.id);
-      }
-      syncSelectedAssetFromSnapshot();
-    }
-    await refreshWorkbenchLists();
-    notice.value = formatTemplate(t("imageWorkbench.assetGroup.deleteAssetsNotice"), {
-      assets: result.deletedAssets,
-      files: result.deletedFiles,
-    });
-    return result;
-  }
-
-  async function tagAssetsGroup(assetIds: string[], options: { groupId?: string | null; groupName?: string | null }) {
-    const ids = Array.from(new Set(assetIds.map((item) => item.trim()).filter(Boolean)));
-    if (!ids.length) {
-      return null;
-    }
-    const result = await runWithLoading(() =>
-      imageWorkbenchService.tagAssetsGroup({
-        assetIds: ids,
-        groupId: options.groupId || null,
-        groupName: options.groupName || null,
-      })
-    );
-    if (currentJob.value) {
-      await syncCurrentGroups(currentJob.value.id);
-    }
-    await refreshWorkbenchLists();
-    notice.value = formatTemplate(t("imageWorkbench.assetGroup.tagNotice"), {
-      count: result.taggedAssets,
-    });
-    return result;
-  }
-
-  async function exportAssetGroup(options: { groupId?: string | null; groupName?: string | null }) {
-    return exportGroup({
-      groupId: options.groupId || null,
-      groupName: options.groupName || null,
-    });
-  }
-
-  async function toggleAssetFavorite(asset: ImageWorkbenchAsset) {
-    currentSnapshot.value = await runWithLoading(() => imageWorkbenchService.setAssetFavorite({ assetId: asset.id, favorite: !asset.favorite }));
-    selectedAssetId.value = asset.id;
-    selectedJobId.value = currentSnapshot.value.job.id;
-    await syncCurrentGroups(selectedJobId.value);
-    await refreshWorkbenchLists();
-    return currentSnapshot.value;
-  }
-
-  async function setAssetRating(asset: ImageWorkbenchAsset, rating: number | null) {
-    currentSnapshot.value = await runWithLoading(() => imageWorkbenchService.setAssetRating({ assetId: asset.id, rating }));
-    selectedAssetId.value = asset.id;
-    selectedJobId.value = currentSnapshot.value.job.id;
-    await syncCurrentGroups(selectedJobId.value);
-    await refreshWorkbenchLists();
-    return currentSnapshot.value;
-  }
-
-  async function persistAssetQualityIssues(assetId: string, qualityIssues: ImageWorkbenchQualityIssue[]) {
-    currentSnapshot.value = await runWithLoading(() =>
-      imageWorkbenchService.setAssetQualityIssues({ assetId, qualityIssues })
-    );
-    selectedAssetId.value = assetId;
-    selectedJobId.value = currentSnapshot.value.job.id;
-    await syncCurrentGroups(selectedJobId.value);
-    await refreshWorkbenchLists();
-  }
-
-  async function saveCurrentTemplate() {
-    const request: SaveImageWorkbenchTemplateRequest = {
-      name: templateDraftName.value.trim() || prompt.value.trim().slice(0, 32) || t("imageWorkbench.template.untitled"),
-      prompt: prompt.value,
-      negativePrompt: negativePrompt.value,
-      mode: mode.value,
-    };
-    await runWithLoading(async () => {
-      await imageWorkbenchService.saveTemplate(request);
-      templateDraftName.value = "";
-      templates.value = await imageWorkbenchService.listTemplates();
-    });
-  }
-
-  async function deleteTemplate(templateId: string) {
-    await runWithLoading(async () => {
-      await imageWorkbenchService.deleteTemplate(templateId);
-      templates.value = await imageWorkbenchService.listTemplates();
-    });
-  }
-
-  function applyTemplate(template: ImageWorkbenchTemplate) {
-    inpaintEditorActive.value = false;
-    mode.value = template.mode;
-    prompt.value = template.prompt;
-    negativePrompt.value = template.negativePrompt || "";
   }
 
   function selectAsset(assetId: string) {
