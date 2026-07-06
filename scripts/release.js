@@ -12,6 +12,7 @@ const releaseStagePaths = [
   "package-lock.json",
   "src-tauri/tauri.conf.json",
   "src-tauri/Cargo.toml",
+  "src-tauri/Cargo.lock",
   "CHANGELOG.md",
   "CHANGELOG.zh-CN.md",
   ".github/release-notes.md",
