@@ -34,8 +34,13 @@ import {
 } from "../utils";
 import { ensureBrowserMessage, isTauriRuntime } from "./runtime";
 import { callTauri } from "./tauri";
+import { canUseDevBridgeRuntime } from "./tauri.dev-bridge";
 
 const BROWSER_FILE_KEY = "monster-workbench-browser-file";
+
+function canUseRealDataRuntime() {
+  return isTauriRuntime() || canUseDevBridgeRuntime();
+}
 
 function isBrowserBackupStorageKey(key: string): boolean {
   return key.startsWith("monster-") || key === "monster_workbench_db_mock";
@@ -49,7 +54,7 @@ export const mockLogs = ref<string[]>([
 
 export const systemService = {
   async getAppDataDir(): Promise<string> {
-    if (!isTauriRuntime()) {
+    if (!canUseRealDataRuntime()) {
       return "Browser Preview Mode";
     }
 
@@ -57,14 +62,14 @@ export const systemService = {
   },
 
   async checkDbStatus(): Promise<void> {
-    if (!isTauriRuntime()) {
+    if (!canUseRealDataRuntime()) {
       return; // Browser mock ignores db check
     }
     return callTauri<void>("check_db_status");
   },
 
   async writeTestFile(content: string): Promise<string> {
-    if (!isTauriRuntime()) {
+    if (!canUseRealDataRuntime()) {
       setStorageItem(BROWSER_FILE_KEY, content);
       return "Browser Preview Cache";
     }
@@ -73,7 +78,7 @@ export const systemService = {
   },
 
   async readTestFile(): Promise<string> {
-    if (!isTauriRuntime()) {
+    if (!canUseRealDataRuntime()) {
       return getStorageItem(BROWSER_FILE_KEY, "No Content");
     }
 
@@ -272,7 +277,7 @@ export const systemService = {
   },
 
   async writeLogEntry(fileName: string, line: string): Promise<void> {
-    if (!isTauriRuntime()) {
+    if (!canUseRealDataRuntime()) {
       mockLogs.value = appendLimitedItem(mockLogs.value, line, 500);
       return;
     }
@@ -280,14 +285,14 @@ export const systemService = {
   },
 
   async readLogFile(fileName: string): Promise<string> {
-    if (!isTauriRuntime()) {
+    if (!canUseRealDataRuntime()) {
       return joinLines(mockLogs.value);
     }
     return callTauri<string>("read_log_file", { fileName });
   },
 
   async clearAllLogs(): Promise<void> {
-    if (!isTauriRuntime()) {
+    if (!canUseRealDataRuntime()) {
       mockLogs.value = [];
       return;
     }
@@ -297,7 +302,7 @@ export const systemService = {
   async exportLogFile(fileName: string, targetPath: string): Promise<void> {
     if (!isTauriRuntime()) {
       // 浏览器 Mock 导出日志
-      const logText = joinLines(mockLogs.value);
+      const logText = await systemService.readLogFile(fileName);
       downloadTextFile(fileName, logText, "text/plain");
       return;
     }

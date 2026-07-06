@@ -4,6 +4,7 @@
  */
 import { callTauri } from "./tauri";
 import { isTauriRuntime } from "./runtime";
+import { canUseDevBridgeRuntime, resolveDevBridgeAssetSrc } from "./tauri.dev-bridge";
 import { ref } from "vue";
 import { systemService } from "./system.service";
 import { navigationService } from "./navigation.service";
@@ -25,6 +26,10 @@ export const mockFiles = ref<UploadedFileInfo[]>([
   { rel_path: "uploads/files/2026/06/sample-report.pdf", file_name: "sample-report.pdf", file_size: 1024 * 1024 * 1.5, file_type: "file", modified: getCurrentUnixTimestamp() - 86400 }
 ]);
 
+function canUseFileDataRuntime() {
+  return isTauriRuntime() || canUseDevBridgeRuntime();
+}
+
 /**
  * 列出已上传的文件
  * @param fileType 筛选类型: 'image' | 'file' | undefined(全部)
@@ -32,7 +37,7 @@ export const mockFiles = ref<UploadedFileInfo[]>([
 export async function listUploadedFiles(
   fileType?: string
 ): Promise<UploadedFileInfo[]> {
-  if (!isTauriRuntime()) {
+  if (!canUseFileDataRuntime()) {
     if (!fileType) return mockFiles.value;
     return filterByValue(mockFiles.value, (file) => file.file_type, fileType);
   }
@@ -47,7 +52,7 @@ export async function listUploadedFiles(
  * @param relPath 相对于 .monster-tools/ 的路径
  */
 export async function deleteUploadedFile(relPath: string): Promise<void> {
-  if (!isTauriRuntime()) {
+  if (!canUseFileDataRuntime()) {
     mockFiles.value = removeByValue(mockFiles.value, (file) => file.rel_path, relPath);
     return;
   }
@@ -63,7 +68,7 @@ export async function isFileReferenced(
   appDataPath: string,
   relPath: string
 ): Promise<{ referenced: boolean; usage: string[] }> {
-  if (!isTauriRuntime()) {
+  if (!canUseFileDataRuntime()) {
     return { referenced: false, usage: [] };
   }
   try {
@@ -113,7 +118,8 @@ async function selectAndUploadImage(): Promise<string | null> {
 function buildPreviewUrl(appDataPath: string, relPath: string): string {
   if (!relPath) return "";
   if (!isTauriRuntime()) {
-    return buildUrlWithQuery("https://api.dicebear.com/7.x/identicon/svg", { params: { seed: relPath } });
+    return resolveDevBridgeAssetSrc(joinPathIfPresent(appDataPath, relPath)) ||
+      buildUrlWithQuery("https://api.dicebear.com/7.x/identicon/svg", { params: { seed: relPath } });
   }
 
   return convertFileSrc(joinPathIfPresent(appDataPath, relPath));

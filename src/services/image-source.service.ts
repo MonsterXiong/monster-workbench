@@ -1,4 +1,5 @@
 import { convertFileSrc } from "./tauri";
+import { resolveDevBridgeAssetSrc } from "./tauri.dev-bridge";
 import { isTauriRuntime } from "./runtime";
 import { createImagePlaceholderSrc } from "../utils/image-placeholder";
 
@@ -9,7 +10,7 @@ export function resolveDisplayImageSrc(path: string | null): string {
   }
   const localPath = normalizeLocalFilePathForAssetProtocol(path);
   if (!isTauriRuntime()) {
-    return createImagePlaceholderSrc(localPath);
+    return resolveDevBridgeAssetSrc(localPath) || createImagePlaceholderSrc(localPath);
   }
   return convertFileSrc(localPath);
 }

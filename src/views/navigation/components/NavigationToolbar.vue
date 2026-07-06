@@ -19,7 +19,7 @@ import {
   Sparkles,
   ListPlus,
 } from "lucide-vue-next";
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import { useNavigationStore } from "../../../stores/navigation";
 import { useClickOutside } from "../../../composables/useClickOutside";
 import { useConfirm } from "../../../composables/useConfirm";
@@ -64,6 +64,8 @@ useClickOutside(moreMenuContainer, () => {
   showMoreMenu.value = false;
 });
 
+const defaultCategoryKeys: readonly string[] = ["Utility", "Community", "Documentation", "Design", "Leisure"];
+
 const quickViews = [
   { key: "all", titleKey: "navigation.viewAll", icon: Compass },
   { key: "recent", titleKey: "navigation.viewRecent", icon: Clock3 },
@@ -72,18 +74,19 @@ const quickViews = [
   { key: "common", titleKey: "navigation.viewCommon", icon: Flame },
 ] as const;
 
+const visibleCategories = computed(() => {
+  const seenLabels = new Set<string>();
+  return navigationStore.categories.filter((cat) => {
+    const label = getCategoryName(cat).trim().toLowerCase();
+    if (!label) return false;
+    if (seenLabels.has(label) && navigationStore.category !== cat) return false;
+    seenLabels.add(label);
+    return true;
+  });
+});
+
 function changeCategory(cat: string) {
   navigationStore.category = cat;
-  navigationStore.page = 1;
-}
-
-function toggleFeatured() {
-  navigationStore.isFeatured = navigationStore.isFeatured === 1 ? undefined : 1;
-  navigationStore.page = 1;
-}
-
-function toggleHot() {
-  navigationStore.isHot = navigationStore.isHot === 1 ? undefined : 1;
   navigationStore.page = 1;
 }
 
@@ -141,6 +144,15 @@ async function handleDeleteCategory(cat: string) {
       <!-- 正常模式 -->
       <template v-if="!isBatchMode && !isSortMode">
         <div class="toolbar-action-group">
+          <BaseButton
+            type="warning"
+            size="sm"
+            class="toolbar-add-btn"
+            @click="emit('openAddModal')"
+          >
+            <template #icon><Plus class="h-3.5 w-3.5 mr-1" /></template>
+            {{ t('navigation.add') }}
+          </BaseButton>
           <div class="relative" ref="moreMenuContainer">
             <BaseButton
               type="neutral"
@@ -150,7 +162,7 @@ async function handleDeleteCategory(cat: string) {
               @click="showMoreMenu = !showMoreMenu"
             >
               <template #icon><MoreHorizontal class="h-3.5 w-3.5" /></template>
-              {{ t('navigation.moreManage') }}
+              {{ t('navigation.moreActions') }}
             </BaseButton>
             <transition
               enter-active-class="transition duration-100 ease-out"
@@ -162,7 +174,7 @@ async function handleDeleteCategory(cat: string) {
             >
               <div
                 v-if="showMoreMenu"
-                class="absolute right-0 top-full z-30 mt-2 w-48 rounded-2xl border border-slate-200 bg-white p-1.5 shadow-workbench-lg dark:border-slate-800 dark:bg-slate-900"
+                class="absolute right-0 top-full z-30 mt-2 w-48 rounded-lg border border-slate-200 bg-white p-1.5 shadow-workbench-lg dark:border-slate-800 dark:bg-slate-900"
               >
                 <button class="more-menu-item" @click="handleMoreAction(() => emit('importData'))">
                   <Upload class="h-3.5 w-3.5" />
@@ -187,15 +199,6 @@ async function handleDeleteCategory(cat: string) {
               </div>
             </transition>
           </div>
-          <BaseButton
-            type="warning"
-            size="sm"
-            class="toolbar-add-btn"
-            @click="emit('openAddModal')"
-          >
-            <template #icon><Plus class="h-3.5 w-3.5 mr-1" /></template>
-            {{ t('navigation.add') }}
-          </BaseButton>
         </div>
       </template>
       <!-- 排序模式 -->
@@ -250,69 +253,54 @@ async function handleDeleteCategory(cat: string) {
   </div>
 
   <!-- 2. 分类与筛选工具栏 -->
-  <div class="flex flex-col gap-3.5 mt-4 pb-1 shrink-0 transition-opacity duration-200" :class="{ 'opacity-40 pointer-events-none': isSortMode }">
+  <div class="navigation-filter-bar" :class="{ 'opacity-40 pointer-events-none': isSortMode }">
     <!-- 分类 Tabs -->
-    <div class="overflow-x-auto no-scrollbar flex shrink-0 select-none">
-      <div class="flex gap-2">
-        <div
-          role="button"
-          class="cat-tab-btn cursor-pointer"
-          :class="!navigationStore.category ? 'bg-primary text-white font-bold shadow-sm' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-700'"
+    <div class="navigation-category-strip">
+      <div class="flex gap-1.5">
+        <button
+          type="button"
+          class="cat-tab-btn"
+          :class="!navigationStore.category ? 'is-active' : ''"
           @click="changeCategory('')"
         >
           {{ t('navigation.all') }}
-        </div>
-        <div
-          v-for="cat in navigationStore.categories"
+        </button>
+        <button
+          v-for="cat in visibleCategories"
           :key="cat"
-          role="button"
-          class="cat-tab-btn flex items-center gap-1 cursor-pointer"
-          :class="navigationStore.category === cat ? 'bg-primary text-white font-bold shadow-sm' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-700'"
+          type="button"
+          class="cat-tab-btn"
+          :class="navigationStore.category === cat ? 'is-active' : ''"
           @click="changeCategory(cat)"
         >
           <span>{{ getCategoryName(cat) }}</span>
           <X
-            v-if="!hasItem(['Utility', 'Community', 'Documentation', 'Design', 'Leisure'], cat)"
+            v-if="!hasItem(defaultCategoryKeys, cat)"
             class="h-3.5 w-3.5 hover:text-red-500 transition-colors cursor-pointer rounded-full hover:bg-black/10 p-0.5 shrink-0"
             @click.stop="handleDeleteCategory(cat)"
           />
-        </div>
+        </button>
       </div>
     </div>
 
     <!-- 条件筛选栏 -->
-    <div class="flex flex-col md:flex-row md:items-center justify-between gap-3 shrink-0">
-      <div class="flex flex-wrap items-center gap-2 select-none">
+    <div class="navigation-filter-row">
+      <div class="navigation-view-strip">
         <button
           v-for="view in quickViews"
           :key="view.key"
-          class="filter-badge-btn cursor-pointer"
-          :class="activeView === view.key ? 'bg-primary/10 text-primary border border-primary/20 font-bold' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-700'"
+          type="button"
+          class="filter-badge-btn"
+          :class="activeView === view.key ? 'is-active' : ''"
           @click="emit('changeView', view.key)"
         >
           <component :is="view.icon" class="h-3.5 w-3.5" />
           {{ t(view.titleKey) }}
         </button>
-        <button
-          class="filter-badge-btn cursor-pointer"
-          :class="navigationStore.isFeatured === 1 ? 'bg-primary/10 text-primary border border-primary/20 font-bold' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-700'"
-          @click="toggleFeatured"
-        >
-          <Star class="h-3.5 w-3.5" :class="{ 'fill-primary': navigationStore.isFeatured === 1 }" />
-          {{ t('navigation.featured') }}
-        </button>
-        <button
-          class="filter-badge-btn cursor-pointer"
-          :class="navigationStore.isHot === 1 ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 font-bold' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-700'"
-          @click="toggleHot"
-        >
-          <Flame class="h-3.5 w-3.5" :class="{ 'fill-amber-500': navigationStore.isHot === 1 }" />
-          {{ t('navigation.common') }}
-        </button>
       </div>
 
       <!-- 搜索框 (改用 BaseInput) -->
-      <div class="relative w-full md:w-72">
+      <div class="navigation-search">
         <div class="pointer-events-none absolute inset-y-0 left-3 flex items-center text-slate-400 z-10">
           <Search class="h-3.5 w-3.5" />
         </div>
@@ -328,14 +316,15 @@ async function handleDeleteCategory(cat: string) {
       </div>
     </div>
 
-    <div v-if="tags.length > 0" class="flex items-center gap-2 overflow-x-auto no-scrollbar select-none">
-      <div class="flex items-center gap-1.5 text-[10px] font-black text-slate-400">
+    <div v-if="tags.length > 0" class="navigation-tag-strip">
+      <div class="navigation-tag-strip__label">
         <Sparkles class="h-3.5 w-3.5" />
         {{ t('navigation.tagsFilter') }}
       </div>
       <button
+        type="button"
         class="tag-filter-btn"
-        :class="!activeTag ? 'bg-primary/10 text-primary border-primary/20' : 'bg-slate-100 text-slate-500 border-slate-200 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-400'"
+        :class="!activeTag ? 'is-active' : ''"
         @click="emit('changeTag', '')"
       >
         {{ t('navigation.allTags') }}
@@ -343,8 +332,9 @@ async function handleDeleteCategory(cat: string) {
       <button
         v-for="tag in tags"
         :key="tag"
+        type="button"
         class="tag-filter-btn"
-        :class="activeTag === tag ? 'bg-primary/10 text-primary border-primary/20' : 'bg-slate-100 text-slate-500 border-slate-200 hover:bg-slate-200 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-700'"
+        :class="activeTag === tag ? 'is-active' : ''"
         @click="emit('changeTag', tag)"
       >
         #{{ tag }}
@@ -354,20 +344,50 @@ async function handleDeleteCategory(cat: string) {
 </template>
 
 <style scoped>
+.navigation-filter-bar {
+  @apply mt-3 flex shrink-0 flex-col gap-2 rounded-lg border border-slate-200 bg-slate-50 p-2 transition-opacity duration-200 dark:border-slate-800 dark:bg-slate-900;
+}
+.navigation-category-strip {
+  @apply flex min-w-0 shrink-0 overflow-x-auto select-none;
+}
+.navigation-filter-row {
+  @apply flex flex-col gap-2 md:flex-row md:items-center md:justify-between;
+}
+.navigation-view-strip {
+  @apply flex min-w-0 flex-wrap items-center gap-1.5 select-none;
+}
+.navigation-search {
+  @apply relative w-full md:w-72;
+}
+.navigation-tag-strip {
+  @apply flex min-w-0 items-center gap-1.5 overflow-x-auto border-t border-slate-200 pt-2 select-none dark:border-slate-800;
+}
+.navigation-tag-strip__label {
+  @apply flex shrink-0 items-center gap-1.5 px-1 text-[10px] font-black text-slate-400;
+}
 .cat-tab-btn {
-  @apply flex-shrink-0 px-4 py-1.5 text-[11px] font-extrabold rounded-full transition-all duration-200;
+  @apply flex h-7 flex-shrink-0 items-center gap-1 rounded-md border border-slate-200 bg-white px-3 text-[11px] font-extrabold text-slate-600 transition-all duration-200 hover:border-slate-300 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:bg-slate-800;
+}
+.cat-tab-btn.is-active {
+  @apply border-primary bg-primary text-white shadow-sm hover:bg-primary hover:text-white;
 }
 .filter-badge-btn {
-  @apply px-3 py-1.5 rounded-full text-[10px] font-bold transition flex items-center gap-1;
+  @apply flex h-7 items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 text-[10px] font-bold text-slate-500 transition hover:border-primary hover:text-primary dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:bg-slate-800;
+}
+.filter-badge-btn.is-active {
+  @apply border-primary bg-primary text-white hover:bg-primary hover:text-white;
 }
 .tag-filter-btn {
-  @apply flex-shrink-0 rounded-full border px-2.5 py-1 text-[10px] font-black transition;
+  @apply h-6 flex-shrink-0 rounded-md border border-slate-200 bg-white px-2 text-[10px] font-black text-slate-500 transition hover:border-primary hover:text-primary dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:bg-slate-800;
+}
+.tag-filter-btn.is-active {
+  @apply border-primary bg-primary text-white hover:bg-primary hover:text-white;
 }
 .more-menu-item {
-  @apply flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-xs font-bold text-slate-600 transition hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-slate-100;
+  @apply flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs font-bold text-slate-600 transition hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-slate-100;
 }
 .toolbar-action-group {
-  @apply flex flex-wrap items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50/90 px-1.5 py-1 shadow-sm dark:border-slate-800 dark:bg-slate-900/70;
+  @apply flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-1.5 py-1 shadow-sm dark:border-slate-800 dark:bg-slate-900;
 }
 :deep(.toolbar-icon-btn.el-button),
 :deep(.toolbar-ghost-btn.el-button) {

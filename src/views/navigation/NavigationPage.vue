@@ -27,7 +27,6 @@ import NavigationCardGrid from "./components/NavigationCardGrid.vue";
 import NavigationPagination from "./components/NavigationPagination.vue";
 import NavigationFormModal from "./components/NavigationFormModal.vue";
 import NavigationBatchPasteModal from "./components/NavigationBatchPasteModal.vue";
-import NavigationReviewPanel from "./components/NavigationReviewPanel.vue";
 
 const navigationStore = useNavigationStore();
 const { triggerToast } = useToast();
@@ -38,7 +37,7 @@ const { t } = useI18n();
 const isBatchMode = ref(false);
 const isSortMode = ref(false);
 const selectedIds = ref<number[]>([]);
-const reviewItems = ref<ReturnType<typeof useNavigationStore>["items"]>([]);
+const allNavigationItems = ref<ReturnType<typeof useNavigationStore>["items"]>([]);
 
 // 弹窗表单状态
 const showFormModal = ref(false);
@@ -58,16 +57,16 @@ const form = ref({
 });
 
 const allTags = computed(() => {
-  return uniqueArray([...reviewItems.value, ...navigationStore.items].flatMap((item) => item.tags || [])).slice(0, 16);
+  return uniqueArray([...allNavigationItems.value, ...navigationStore.items].flatMap((item) => item.tags || [])).slice(0, 16);
 });
 
-async function refreshReviewItems() {
-  reviewItems.value = await navigationStore.exportData();
+async function refreshAllNavigationItems() {
+  allNavigationItems.value = await navigationStore.exportData();
 }
 
 async function refreshNavigationData() {
   await navigationStore.fetchList();
-  await refreshReviewItems();
+  await refreshAllNavigationItems();
 }
 
 // 进入排序模式
@@ -159,7 +158,7 @@ async function handleImportData() {
     if (!ok) return;
 
     const importedCount = await navigationStore.importData(parsedData);
-    await refreshReviewItems();
+    await refreshAllNavigationItems();
     triggerToast(
       formatTemplate(t('navigation.restoreSuccess'), {
         imported: importedCount,
@@ -253,7 +252,7 @@ async function handleBatchDelete() {
     await navigationStore.batchDelete(selectedIds.value);
     triggerToast(t('navigation.batchDeleteSuccess'));
     exitBatchMode();
-    await refreshReviewItems();
+    await refreshAllNavigationItems();
   } catch {
     triggerToast(t('navigation.batchDeleteFailed'));
   }
@@ -261,6 +260,8 @@ async function handleBatchDelete() {
 
 function handleChangeView(view: typeof navigationStore.view) {
   navigationStore.view = view;
+  navigationStore.isFeatured = undefined;
+  navigationStore.isHot = undefined;
   navigationStore.page = 1;
 }
 
@@ -279,44 +280,10 @@ async function handleBatchPasteSubmit(items: any[]) {
     const imported = await navigationStore.addMany(items);
     showBatchPasteModal.value = false;
     triggerToast(formatTemplate(t('navigation.batchPasteSuccess'), { count: imported }), "success");
-    await refreshReviewItems();
+    await refreshAllNavigationItems();
   } catch (err) {
     triggerToast(getErrorMessage(err, t('navigation.saveFailed')), "error");
   }
-}
-
-async function handleFillDescriptions() {
-  const targets = reviewItems.value.filter((item) => item.id && !item.description?.trim());
-  if (targets.length === 0) {
-    triggerToast(formatTemplate(t('navigation.reviewFilledDescriptions'), { count: 0 }), "success");
-    return;
-  }
-  const updates = targets.map((item) => {
-    const suggestion = navigationStore.suggestFromUrl(item.url);
-    return {
-      ...item,
-      description: suggestion.description,
-      tags: item.tags || suggestion.tags,
-    };
-  });
-  await navigationStore.updateMany(updates);
-  triggerToast(formatTemplate(t('navigation.reviewFilledDescriptions'), { count: targets.length }), "success");
-  await refreshNavigationData();
-}
-
-async function handleMarkCommon() {
-  const targets = reviewItems.value.filter((item) => item.id && item.clicks >= 20 && item.is_hot !== 1);
-  if (targets.length === 0) {
-    triggerToast(formatTemplate(t('navigation.reviewMarkedCommon'), { count: 0 }), "success");
-    return;
-  }
-  const updates = targets.map((item) => ({
-    ...item,
-    is_hot: 1,
-  }));
-  await navigationStore.updateMany(updates);
-  triggerToast(formatTemplate(t('navigation.reviewMarkedCommon'), { count: targets.length }), "success");
-  await refreshNavigationData();
 }
 
 // 快速访问
@@ -327,7 +294,7 @@ async function handleVisit(item: any) {
   }
   await navigationStore.clickItem(item);
   triggerToast(formatTemplate(t('navigation.visiting'), { title: item.title }));
-  await refreshReviewItems();
+  await refreshAllNavigationItems();
 }
 
 // 打开新增弹窗
@@ -380,7 +347,7 @@ async function handleDelete(id: number, title: string, event: Event) {
   try {
     await navigationStore.delete(id);
     triggerToast(t('navigation.deleteSuccess'));
-    await refreshReviewItems();
+    await refreshAllNavigationItems();
   } catch {
     triggerToast(t('navigation.deleteFailed'));
   }
@@ -416,15 +383,6 @@ function changePage(newPage: number) {
       @open-batch-paste="showBatchPasteModal = true"
       @change-view="handleChangeView"
       @change-tag="handleChangeTag"
-    />
-
-    <NavigationReviewPanel
-      v-if="!isSortMode && reviewItems.length > 0"
-      class="mt-4"
-      :items="reviewItems"
-      @mark-common="handleMarkCommon"
-      @fill-descriptions="handleFillDescriptions"
-      @refresh="refreshReviewItems"
     />
 
     <!-- 卡片网格 -->

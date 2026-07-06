@@ -184,10 +184,7 @@ export async function mockCallTauri<T = unknown>(
       return "0.0.3-mock" as T;
 
     case "get_app_paths":
-      return {
-        appLocalDataDir: "C:\\Users\\MockUser\\.monster-tools",
-        dbFilePath: "C:\\Users\\MockUser\\AppData\\Roaming\\monster_workbench.db",
-      } as T;
+      return "C:\\Users\\MockUser\\.monster-tools" as T;
 
     case "get_preference_config":
       await ensureMockPreferenceConfigSeedLoaded();

@@ -1,7 +1,13 @@
 import { callTauri } from "./tauri";
+import { isTauriRuntime } from "./runtime";
+import { canUseDevBridgeRuntime } from "./tauri.dev-bridge";
 import { stripJsonBom } from "../utils";
 
 export const configService = {
+  canUsePreferenceConfigRuntime(): boolean {
+    return isTauriRuntime() || canUseDevBridgeRuntime();
+  },
+
   /**
    * 读取本地 config.json 的偏好配置
    */

@@ -71,6 +71,13 @@ fn main() {
             // worker_id 在进程启动时生成，全程不变；重启即换。janitor 据此区分跨进程残留。
             let worker_identity = WorkerIdentity::new();
 
+            #[cfg(debug_assertions)]
+            services::dev_http_bridge::spawn_dev_http_bridge(
+                handle.clone(),
+                path_provider.clone(),
+                worker_identity.worker_id.clone(),
+            );
+
             // 启动 runtime janitor：立即跑一次替代旧的 startup 硬重置（worker_id 是新的，
             // 上次进程的 running 全部会被识别为"跨进程残留"回收），随后每 30s 巡检一次。
             spawn_runtime_janitor(handle.clone(), worker_identity.worker_id.clone());

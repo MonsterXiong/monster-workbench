@@ -17,6 +17,11 @@ export async function callTauri<T = unknown>(
 ): Promise<T> {
   if (!isTauriRuntime()) {
     if (import.meta.env.DEV) {
+      const { tryDevBridgeCallTauri } = await import("./tauri.dev-bridge");
+      const bridgeResult = await tryDevBridgeCallTauri<T>(command, args);
+      if (bridgeResult.handled) {
+        return bridgeResult.value;
+      }
       const { mockCallTauri } = await import("./tauri.mock");
       return await mockCallTauri<T>(command, args);
     }

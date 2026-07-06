@@ -1,5 +1,6 @@
 import { ensureBrowserMessage, isTauriRuntime } from "./runtime";
 import { callTauri, convertFileSrc } from "./tauri";
+import { canUseDevBridgeRuntime, resolveDevBridgeAssetSrc } from "./tauri.dev-bridge";
 import { systemService } from "./system.service";
 import {
   buildUrlWithQuery,
@@ -61,8 +62,12 @@ export class NavigationBackupValidationError extends Error {
 
 const NAVIGATION_BACKUP_FILE_NAME = "monster_navigation_backup.json";
 
-function assertDesktopNavigationData() {
-  if (!isTauriRuntime()) {
+function canUseNavigationDataRuntime() {
+  return isTauriRuntime() || canUseDevBridgeRuntime();
+}
+
+function assertNavigationDataRuntime() {
+  if (!canUseNavigationDataRuntime()) {
     throw new Error("[ERR_NAV_BROWSER_UNSUPPORTED] " + ensureBrowserMessage("导航菜单真实数据"));
   }
 }
@@ -261,7 +266,8 @@ async function readNavigationBackupFile(
 function buildNavigationImageUrl(appDataPath: string, relPath: string): string {
   if (!relPath) return "";
   if (!isTauriRuntime()) {
-    return buildUrlWithQuery("https://api.dicebear.com/7.x/identicon/svg", { params: { seed: relPath } });
+    return resolveDevBridgeAssetSrc(joinPathIfPresent(appDataPath, relPath)) ||
+      buildUrlWithQuery("https://api.dicebear.com/7.x/identicon/svg", { params: { seed: relPath } });
   }
   return convertFileSrc(joinPathIfPresent(appDataPath, relPath));
 }
@@ -277,7 +283,7 @@ async function openNavigationUrl(url: string): Promise<void> {
 
 export const navigationService = {
   async getDb(appDataPath: string): Promise<void> {
-    assertDesktopNavigationData();
+    assertNavigationDataRuntime();
     await callTauri<void>("init_navigation_db", { dbPath: appDataPath });
   },
 
@@ -294,7 +300,7 @@ export const navigationService = {
       tag?: string;
     }
   ): Promise<PagedResult<NavigationItem>> {
-    assertDesktopNavigationData();
+    assertNavigationDataRuntime();
     const { page, pageSize, keyword, category, isFeatured, isHot, view = "all", tag } = params;
     return callTauri<PagedResult<NavigationItem>>("get_navigation_list", {
       dbPath: appDataPath,
@@ -310,7 +316,7 @@ export const navigationService = {
   },
 
   async addNavigation(appDataPath: string, item: Omit<NavigationItem, "id" | "clicks">): Promise<void> {
-    assertDesktopNavigationData();
+    assertNavigationDataRuntime();
     await callTauri<void>("add_navigation", {
       dbPath: appDataPath,
       item: {
@@ -326,7 +332,7 @@ export const navigationService = {
   },
 
   async updateNavigation(appDataPath: string, item: NavigationItem): Promise<void> {
-    assertDesktopNavigationData();
+    assertNavigationDataRuntime();
     await callTauri<void>("update_navigation", {
       dbPath: appDataPath,
       item: {
@@ -337,7 +343,7 @@ export const navigationService = {
   },
 
   async batchUpdateNavigation(appDataPath: string, items: NavigationItem[]): Promise<void> {
-    assertDesktopNavigationData();
+    assertNavigationDataRuntime();
     if (items.length === 0) return;
     await callTauri<void>("batch_update_navigation", {
       dbPath: appDataPath,
@@ -349,48 +355,48 @@ export const navigationService = {
   },
 
   async deleteNavigation(appDataPath: string, id: number): Promise<void> {
-    assertDesktopNavigationData();
+    assertNavigationDataRuntime();
     await callTauri<void>("delete_navigation", { dbPath: appDataPath, id });
   },
 
   async batchDeleteNavigation(appDataPath: string, ids: number[]): Promise<void> {
     if (ids.length === 0) return;
-    assertDesktopNavigationData();
+    assertNavigationDataRuntime();
     await callTauri<void>("batch_delete_navigation", { dbPath: appDataPath, ids });
   },
 
   async incrementClicks(appDataPath: string, id: number): Promise<void> {
-    assertDesktopNavigationData();
+    assertNavigationDataRuntime();
     await callTauri<void>("increment_navigation_clicks", { dbPath: appDataPath, id });
   },
 
   async getCategories(appDataPath: string): Promise<string[]> {
-    assertDesktopNavigationData();
+    assertNavigationDataRuntime();
     return callTauri<string[]>("get_navigation_categories", { dbPath: appDataPath });
   },
 
   async migrateCategory(appDataPath: string, fromCat: string, toCat: string): Promise<void> {
-    assertDesktopNavigationData();
+    assertNavigationDataRuntime();
     await callTauri<void>("migrate_navigation_category", { dbPath: appDataPath, fromCat, toCat });
   },
 
   async clearFileReferences(appDataPath: string, relPath: string): Promise<void> {
-    assertDesktopNavigationData();
+    assertNavigationDataRuntime();
     await callTauri<void>("clear_navigation_file_references", { dbPath: appDataPath, relPath });
   },
 
   async saveSortOrder(appDataPath: string, orders: { id: number; sort_order: number }[]): Promise<void> {
-    assertDesktopNavigationData();
+    assertNavigationDataRuntime();
     await callTauri<void>("save_navigation_sort_order", { dbPath: appDataPath, orders });
   },
 
   async getAllNavigationList(appDataPath: string): Promise<NavigationItem[]> {
-    assertDesktopNavigationData();
+    assertNavigationDataRuntime();
     return callTauri<NavigationItem[]>("get_all_navigation_list", { dbPath: appDataPath });
   },
 
   async importNavigationList(appDataPath: string, items: NavigationItem[]): Promise<number> {
-    assertDesktopNavigationData();
+    assertNavigationDataRuntime();
     return callTauri<number>("import_navigation_list", {
       dbPath: appDataPath,
       items: items.map((item) => ({

@@ -14,6 +14,8 @@ pub mod app_service;
 pub mod auth_service;
 pub mod config_service;
 pub mod database_service;
+#[cfg(debug_assertions)]
+pub mod dev_http_bridge;
 pub mod file_service;
 mod image_workbench_asset_policy;
 pub(crate) mod image_workbench_cancel;
