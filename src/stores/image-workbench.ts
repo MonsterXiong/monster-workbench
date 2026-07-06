@@ -2,7 +2,6 @@ import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 import { getTranslation } from "../locales";
 import { imageWorkbenchService } from "../services/image-workbench.service";
-import { imageWorkbenchStoryboardAiService } from "../services/image-workbench-storyboard-ai.service";
 import {
   DEFAULT_IMAGE_WORKBENCH_HISTORY_LIMIT,
   buildImageWorkbenchGenerationOptionsJson,
@@ -41,6 +40,7 @@ import { createImageWorkbenchSnapshotPolling } from "./image-workbench-polling";
 import { createImageWorkbenchQualityState } from "./image-workbench-quality";
 import { createImageWorkbenchReferenceState } from "./image-workbench-reference";
 import { createImageWorkbenchSelectedActions } from "./image-workbench-selected-actions";
+import { createImageWorkbenchStoryboardAiActions } from "./image-workbench-storyboard-ai-actions";
 import {
   parseImageWorkbenchStoryboardPrompt,
   type ImageWorkbenchStoryboardGenerationOptions,
@@ -386,81 +386,17 @@ export const useImageWorkbenchStore = defineStore("image-workbench", () => {
     });
   }
 
-  async function recognizeStoryboardPromptWithAi(rawText = prompt.value) {
-    error.value = "";
-    notice.value = "";
-    try {
-      const cleanPrompt = rawText.trim();
-      if (!cleanPrompt) {
-        throw new Error(t("imageWorkbench.errors.storyboardSmartPromptRequired"));
-      }
-
-      await aiProviderStore.loadConfig();
-      const configId = aiProviderStore.getActiveModelConfigIdForCapability("chat");
-      const modelConfig = aiProviderStore.getModelConfig(configId);
-      if (!aiProviderStore.modelConfigSupportsCapability(configId, "chat")) {
-        throw new Error(t("imageWorkbench.errors.storyboardSmartProviderRequired"));
-      }
-
-      storyboardRecognitionLoading.value = true;
-      notice.value = t("imageWorkbench.storyboardDraft.smartRecognizing");
-      const result = await imageWorkbenchStoryboardAiService.recognizeStoryboard({
-        rawText: cleanPrompt,
-        providerConfigId: modelConfig.id,
-        model: modelConfig.model,
-      });
-      if (!result.scenes.length) {
-        throw new Error(t("imageWorkbench.errors.storyboardSmartNoScenes"));
-      }
-      notice.value = formatTemplate(t("imageWorkbench.storyboardDraft.smartSuccess"), {
-        count: result.scenes.length,
-      });
-      return result;
-    } catch (err) {
-      error.value = err instanceof Error ? err.message : String(err);
-      throw err;
-    } finally {
-      storyboardRecognitionLoading.value = false;
-    }
-  }
-
-  async function generateStoryboardPromptWithAi(directionText = prompt.value) {
-    error.value = "";
-    notice.value = "";
-    try {
-      const cleanDirection = directionText.trim();
-      if (!cleanDirection) {
-        throw new Error(t("imageWorkbench.errors.storyboardGenerateDirectionRequired"));
-      }
-
-      await aiProviderStore.loadConfig();
-      const configId = aiProviderStore.getActiveModelConfigIdForCapability("chat");
-      const modelConfig = aiProviderStore.getModelConfig(configId);
-      if (!aiProviderStore.modelConfigSupportsCapability(configId, "chat")) {
-        throw new Error(t("imageWorkbench.errors.storyboardSmartProviderRequired"));
-      }
-
-      storyboardRecognitionLoading.value = true;
-      notice.value = t("imageWorkbench.storyboardDraft.generatingStory");
-      const result = await imageWorkbenchStoryboardAiService.generateStoryboard({
-        direction: cleanDirection,
-        providerConfigId: modelConfig.id,
-        model: modelConfig.model,
-      });
-      if (!result.scenes.length) {
-        throw new Error(t("imageWorkbench.errors.storyboardSmartNoScenes"));
-      }
-      notice.value = formatTemplate(t("imageWorkbench.storyboardDraft.generateStorySuccess"), {
-        count: result.scenes.length,
-      });
-      return result;
-    } catch (err) {
-      error.value = err instanceof Error ? err.message : String(err);
-      throw err;
-    } finally {
-      storyboardRecognitionLoading.value = false;
-    }
-  }
+  const {
+    generateStoryboardPromptWithAi,
+    recognizeStoryboardPromptWithAi,
+  } = createImageWorkbenchStoryboardAiActions({
+    aiProviderStore,
+    error,
+    notice,
+    prompt,
+    storyboardRecognitionLoading,
+    t,
+  });
 
   async function refreshWorkbenchLists() {
     const [jobResults, , templateResults] = await Promise.all([
