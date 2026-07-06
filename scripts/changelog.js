@@ -105,7 +105,7 @@ const githubDir = path.join(root, ".github");
 if (!fs.existsSync(githubDir)) {
   fs.mkdirSync(githubDir, { recursive: true });
 }
-fs.writeFileSync(path.join(githubDir, "release-notes.md"), logBody, "utf8");
-fs.writeFileSync(path.join(githubDir, "release-notes.zh-CN.md"), logBody, "utf8");
+fs.writeFileSync(path.join(githubDir, "release-notes.md"), `${logBody}\n`, "utf8");
+fs.writeFileSync(path.join(githubDir, "release-notes.zh-CN.md"), `${logBody}\n`, "utf8");
 
 console.log("Changelog auto-generation completed successfully!\n");

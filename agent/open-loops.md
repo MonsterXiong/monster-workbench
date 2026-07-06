@@ -5,6 +5,10 @@
 
 本文只保留当前仍未闭环、且会影响后续推进的事项。已移除的旧独立创作工作台、批量任务、任务队列、资产库、常驻运行时和历史执行包事项不再记录。
 
+## 发布 / CI
+
+- [ ] 2026-07-07 已修复 release workflow 读取 `.github/release-notes.md` 时依赖文件末尾换行的问题：正式发布和 dry-run 都统一走 `scripts/write-release-notes-output.js` 写入 GitHub Actions 输出，`scripts/changelog.js` 生成 release notes 时也会补结尾换行。远端 `v0.0.4` tag 已触发失败且 GitHub Release 目前不存在；修复提交进入 `main` 后，需选择发布 `v0.0.5`，或在确认风险后重打 `v0.0.4` tag。
+
 ## AI 工作台
 
 - [x] 图片工作台 `/image-workbench` 已接入 schema / repo / command / service / store / route，并补齐历史作业、最近资产库、模板 CRUD、收藏、取消 job、重试失败任务、详情审计和浏览器/mock 文生图工作台闭环；资产路径白名单、data URL 禁止入库、任务状态机和 asset/metadata/model_run 事务写入已加固。真实测试已覆盖应用启动、Provider 配置探测、真实 DB 表存在性、取消/失败路径、重启后 running/queued 孤儿任务恢复、失败 model_run 审计，以及真实 Provider 成功生成后经 `ImageWorkbenchService` 复制到 `~/.monster-tools/ai/image-workbench/assets` 并写入真实 DB 的 asset/metadata/model_run 成功链路。

@@ -133,6 +133,9 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci --prefer-offline --no-audit --no-fund
 
+      - name: Validate release notes output
+        run: node scripts/write-release-notes-output.js
+
       - name: Build Tauri app for quick release test
         if: ${{ !inputs.full_bundle }}
         run: npx tauri build --no-bundle ${{ matrix.args }}
@@ -194,15 +197,7 @@ jobs:
 
       - name: Get Release Notes
         id: release_notes
-        shell: bash
-        run: |
-          if [ -f .github/release-notes.md ]; then
-            echo "body<<EOF" >> $GITHUB_OUTPUT
-            cat .github/release-notes.md >> $GITHUB_OUTPUT
-            echo "EOF" >> $GITHUB_OUTPUT
-          else
-            echo "body=Monster Tools native desktop release." >> $GITHUB_OUTPUT
-          fi
+        run: node scripts/write-release-notes-output.js
 
       - name: Build Tauri app and upload release
         uses: tauri-apps/tauri-action@v0
