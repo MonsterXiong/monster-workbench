@@ -29,6 +29,7 @@ const [major, minor, patch] = currentVersion.split(".").map(Number);
 const suggestPatch = `${major}.${minor}.${patch + 1}`;
 const suggestMinor = `${major}.${minor + 1}.0`;
 const suggestMajor = `${major + 1}.0.0`;
+const nonInteractive = process.env.RELEASE_NON_INTERACTIVE === "1";
 
 const rl = readline.createInterface({
   input: process.stdin,
@@ -50,6 +51,10 @@ function getOutput(command) {
 function runCommand(command) {
   console.log(`\n$ ${command}`);
   execSync(command, { stdio: "inherit" });
+}
+
+function isTruthy(value) {
+  return ["1", "true", "yes", "y"].includes(String(value || "").trim().toLowerCase());
 }
 
 function assertMainBranch() {
@@ -113,17 +118,26 @@ async function main() {
     console.log(`3) Major: v${suggestMajor}`);
     console.log("4) 自定义版本号");
 
-    const choice = await askQuestion("\n请选择发布类型 (输入 1/2/3/4, 默认 1): ");
     let newVersion = suggestPatch;
 
-    if (choice === "2") {
-      newVersion = suggestMinor;
-    } else if (choice === "3") {
-      newVersion = suggestMajor;
-    } else if (choice === "4") {
-      const custom = await askQuestion("请输入自定义版本号 (例如 1.2.3): ");
-      if (custom.trim()) {
-        newVersion = custom.trim().replace(/^v/, "");
+    if (nonInteractive) {
+      if (!isTruthy(process.env.RELEASE_CONFIRM)) {
+        throw new Error("非交互发布必须设置 RELEASE_CONFIRM=1。");
+      }
+      newVersion = (process.env.RELEASE_VERSION || suggestPatch).trim().replace(/^v/, "");
+      console.log(`\n非交互发布模式：使用版本 v${newVersion}`);
+    } else {
+      const choice = await askQuestion("\n请选择发布类型 (输入 1/2/3/4, 默认 1): ");
+
+      if (choice === "2") {
+        newVersion = suggestMinor;
+      } else if (choice === "3") {
+        newVersion = suggestMajor;
+      } else if (choice === "4") {
+        const custom = await askQuestion("请输入自定义版本号 (例如 1.2.3): ");
+        if (custom.trim()) {
+          newVersion = custom.trim().replace(/^v/, "");
+        }
       }
     }
 
@@ -131,11 +145,13 @@ async function main() {
     assertTagDoesNotExist(newVersion);
 
     console.log(`\n准备发布版本: v${newVersion}`);
-    const confirm = await askQuestion("确认继续吗？(y/n, 默认 y): ");
-    if (confirm.toLowerCase() === "n") {
-      console.log("发布已取消。");
-      rl.close();
-      process.exit(0);
+    if (!nonInteractive) {
+      const confirm = await askQuestion("确认继续吗？(y/n, 默认 y): ");
+      if (confirm.toLowerCase() === "n") {
+        console.log("发布已取消。");
+        rl.close();
+        process.exit(0);
+      }
     }
 
     runReleasePreflight();
@@ -168,14 +184,24 @@ async function main() {
     console.log(`✓ Git Tag v${newVersion} 创建成功`);
 
     // 5. 提示推送到线上
-    const rlPush = readline.createInterface({
-      input: process.stdin,
-      output: process.stdout
-    });
-    const doPush = await new Promise((resolve) => {
-      rlPush.question("\n是否立即推送到远端仓库 (执行 git push & git push --tags)？(y/n, 默认 y): ", resolve);
-    });
-    rlPush.close();
+    let doPush = "n";
+    if (nonInteractive) {
+      doPush = isTruthy(process.env.RELEASE_PUSH) ? "y" : "n";
+      console.log(
+        doPush === "y"
+          ? "\n非交互发布模式：将推送提交和 Tag。"
+          : "\n非交互发布模式：跳过推送，保留本地发布提交和 Tag。"
+      );
+    } else {
+      const rlPush = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout
+      });
+      doPush = await new Promise((resolve) => {
+        rlPush.question("\n是否立即推送到远端仓库 (执行 git push & git push --tags)？(y/n, 默认 y): ", resolve);
+      });
+      rlPush.close();
+    }
 
     if (doPush.toLowerCase() !== "n") {
       console.log("正在推送到远端仓库...");

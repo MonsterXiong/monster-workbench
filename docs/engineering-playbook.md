@@ -52,7 +52,8 @@
 3. 日常发布前先运行 `npm run release:test`，触发 GitHub Actions 的 quick dry-run，不上传 Release。
 4. 正式发版前至少运行一次 `npm run release:test:full`，验证安装包、更新包和签名链路。
 5. 正式发布只使用 `npm run release`；该脚本会检查 main 分支、干净工作区、版本号、重复 tag，并先执行本地发布门禁。
-6. `SKIP_RELEASE_PREFLIGHT=1` 只允许在已明确说明风险的应急场景使用。
+6. 自动化环境可用 `RELEASE_NON_INTERACTIVE=1 RELEASE_VERSION=0.0.5 RELEASE_CONFIRM=1 RELEASE_PUSH=1 npm run release` 走同一发布脚本；仍不得跳过 main/clean/tag/preflight 检查。
+7. `SKIP_RELEASE_PREFLIGHT=1` 只允许在已明确说明风险的应急场景使用。
 
 ---
 
