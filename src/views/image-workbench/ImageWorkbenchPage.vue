@@ -52,11 +52,8 @@ import {
   type ImageWorkbenchTaskPresetKey,
   usesImageWorkbenchReferenceEntry,
 } from "./imageWorkbenchTaskLauncher";
-import {
-  buildImageWorkbenchJobReferenceViews,
-  type ImageWorkbenchJobReferenceView,
-} from "./imageWorkbenchReferences";
 import { useImageWorkbenchAssetSelection } from "./useImageWorkbenchAssetSelection";
+import { useImageWorkbenchReferenceControls } from "./useImageWorkbenchReferenceControls";
 import { useImageWorkbenchStoryboardDraft } from "./useImageWorkbenchStoryboardDraft";
 import type {
   ImageWorkbenchBackground,
@@ -64,7 +61,6 @@ import type {
   ImageWorkbenchModeration,
   ImageWorkbenchMode,
   ImageWorkbenchOutputFormat,
-  ImageWorkbenchReferenceRole,
   ImageWorkbenchTemplate,
 } from "../../types/image-workbench";
 
@@ -211,13 +207,30 @@ const isInpaintWorkspace = computed(() =>
   imageWorkbenchStore.mode === "inpaint" &&
   Boolean(selectedAsset.value)
 );
-const referenceRoleKeys: ImageWorkbenchReferenceRole[] = ["person", "prop", "scene", "style"];
-const referenceRoleOptions = computed(() =>
-  referenceRoleKeys.map((role) => ({
-    role,
-    label: referenceRoleLabel(role),
-  }))
-);
+const {
+  applyDefaultReferenceRole,
+  applyDefaultReferenceRoles,
+  currentJobReferenceViews,
+  defaultReferenceRoleForTask,
+  handlePickReferenceFromLibrary,
+  handleReferenceRoleChange,
+  handleSelectReferenceImageFromComposer,
+  insertReferencePrompt,
+  normalizeReferenceRole,
+  referenceRoleOptions,
+  selectedAssetIsReference,
+} = useImageWorkbenchReferenceControls({
+  activeTaskEntry,
+  assetShelfDialogOpen,
+  assetShelfView,
+  currentJob,
+  promptTextareaRef,
+  referenceComposerOpen,
+  sceneGuideOpen,
+  selectedAsset,
+  store: imageWorkbenchStore,
+  t,
+});
 const gallerySections = computed(() =>
   buildGallerySections({
     galleryTab: "current",
@@ -268,10 +281,6 @@ const providerQueueStatusTitle = computed(() =>
 const providerQueueNeedsConcurrency = computed(() =>
   imageWorkbenchStore.imageProviderQueueNeedsUpgrade && effectiveGenerationCount.value > 1
 );
-const selectedAssetIsReference = computed(() =>
-  Boolean(selectedAsset.value && imageWorkbenchStore.referenceAssets.some((asset) => asset.id === selectedAsset.value?.id))
-);
-const currentJobReferenceViews = computed(() => buildCurrentJobReferenceViews());
 const selectedAssetUnavailableReason = computed(() =>
   selectedAsset.value?.integrityStatus && selectedAsset.value.integrityStatus !== "ok"
     ? t("imageWorkbench.errors.invalidSelectedAsset")
@@ -643,86 +652,6 @@ function handleTaskPresetApply(key: ImageWorkbenchTaskPresetKey) {
   focusPromptInput();
 }
 
-function referenceRoleKey(index: number): ImageWorkbenchReferenceRole {
-  return referenceRoleKeys[index] || "style";
-}
-
-function normalizeReferenceRole(role: ImageWorkbenchReferenceRole | undefined, index: number) {
-  return role && referenceRoleKeys.includes(role) ? role : referenceRoleKey(index);
-}
-
-function referenceRoleLabel(role: ImageWorkbenchReferenceRole | undefined, index = 0) {
-  return t(`imageWorkbench.reference.roles.${normalizeReferenceRole(role, index)}`);
-}
-
-function defaultReferenceRoleForTask(key = activeTaskEntry.value): ImageWorkbenchReferenceRole {
-  if (key === "person" || key === "storyboard") {
-    return "person";
-  }
-  if (key === "style") {
-    return "style";
-  }
-  return "scene";
-}
-
-function applyDefaultReferenceRole(keys: string | string[], role = defaultReferenceRoleForTask()) {
-  const targetKeys = Array.isArray(keys) ? keys : [keys];
-  targetKeys.forEach((key) => {
-    if (key) {
-      imageWorkbenchStore.setReferenceRole(key, role);
-    }
-  });
-}
-
-function applyDefaultReferenceRoles(role = defaultReferenceRoleForTask()) {
-  imageWorkbenchStore.referenceItems.forEach((item) => {
-    applyDefaultReferenceRole(item.key, role);
-  });
-}
-
-function referencePromptToken(index: number) {
-  const role = normalizeReferenceRole(imageWorkbenchStore.referenceItems[index]?.role, index);
-  return formatTemplate(t("imageWorkbench.reference.promptToken"), {
-    index: index + 1,
-    role: referenceRoleLabel(role, index),
-  });
-}
-
-function buildCurrentJobReferenceViews(): ImageWorkbenchJobReferenceView[] {
-  return buildImageWorkbenchJobReferenceViews({
-    job: currentJob.value,
-    currentAssets: imageWorkbenchStore.currentAssetCards,
-    libraryAssets: imageWorkbenchStore.libraryAssetCards,
-    referenceRoleLabel,
-    resolveDisplayUrl: imageWorkbenchStore.resolveReferenceDisplayUrl,
-  });
-}
-
-function handleReferenceRoleChange(key: string, event: Event) {
-  const role = (event.target as HTMLSelectElement | null)?.value as ImageWorkbenchReferenceRole;
-  imageWorkbenchStore.setReferenceRole(key, role);
-}
-
-function insertReferencePrompt(index: number) {
-  const token = referencePromptToken(index);
-  const textarea = promptTextareaRef.value;
-  const current = imageWorkbenchStore.prompt;
-  const start = textarea?.selectionStart ?? current.length;
-  const end = textarea?.selectionEnd ?? current.length;
-  const before = current.slice(0, start);
-  const after = current.slice(end);
-  const prefix = before && !/[，。；、,.;\s]$/u.test(before) ? `${before}，` : before;
-  const suffix = after && !/^[，。；、,.;\s]/u.test(after) ? `，${after}` : after;
-  const nextPrompt = `${prefix}${token}${suffix}`;
-  const cursor = prefix.length + token.length;
-  imageWorkbenchStore.prompt = nextPrompt;
-  imageWorkbenchStore.notice = formatTemplate(t("imageWorkbench.reference.insertedNotice"), { token });
-  void nextTick(() => {
-    promptTextareaRef.value?.focus();
-    promptTextareaRef.value?.setSelectionRange(cursor, cursor);
-  });
-}
-
 function assetBadges(asset: ImageWorkbenchAssetCard) {
   return buildAssetBadges({
     asset,
@@ -886,28 +815,8 @@ const {
   syncTaskEntryForQualityFix,
 });
 
-async function handleSelectReferenceImageFromComposer() {
-  const selectedPath = await imageWorkbenchStore.selectReferenceImage();
-  if (!selectedPath) {
-    return;
-  }
-  imageWorkbenchStore.mode =
-    activeTaskEntry.value === "person" || activeTaskEntry.value === "storyboard"
-      ? "person_consistency"
-      : "img2img";
-  applyDefaultReferenceRole("uploaded");
-  referenceComposerOpen.value = false;
-}
-
 function handlePrepareTaskEntry(key: ImageWorkbenchTaskEntryKey) {
   handleTaskEntrySelect(key, { useSelectedAsset: true });
-}
-
-function handlePickReferenceFromLibrary() {
-  assetShelfView.value = "library";
-  assetShelfDialogOpen.value = true;
-  sceneGuideOpen.value = false;
-  imageWorkbenchStore.notice = t("imageWorkbench.reference.pickFromLibraryNotice");
 }
 
 async function handleReturnToLatestJob() {
