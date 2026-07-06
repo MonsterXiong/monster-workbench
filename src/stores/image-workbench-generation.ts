@@ -1,5 +1,9 @@
 import { computed, type ComputedRef, type Ref } from "vue";
-import { IMAGE_WORKBENCH_LARGE_BATCH_THRESHOLD, supportsNativeModeForConfig } from "./image-workbench-helpers";
+import {
+  IMAGE_WORKBENCH_LARGE_BATCH_THRESHOLD,
+  supportsModeForConfig,
+  supportsNativeModeForConfig,
+} from "./image-workbench-helpers";
 import type { AiModelConfig } from "../types/ai";
 import type { ImageWorkbenchMode } from "../types/image-workbench";
 
@@ -43,5 +47,46 @@ export function createImageWorkbenchGenerationState(options: {
     generationQuantity,
     shouldConfirmLargeGeneration,
     imageModeProtocolNotice,
+  };
+}
+
+export function createImageWorkbenchModeCapabilityState(options: {
+  activeImageConfig: ComputedRef<AiModelConfig>;
+  hasUsableReferenceImage: ComputedRef<boolean>;
+  loading: Ref<boolean>;
+  selectedAssetUsable: ComputedRef<boolean>;
+}) {
+  const canRunInpaint = computed(() =>
+    options.selectedAssetUsable.value &&
+    supportsModeForConfig(options.activeImageConfig.value, "inpaint") &&
+    !options.loading.value
+  );
+  const canRunStyleContinuation = computed(() =>
+    options.selectedAssetUsable.value &&
+    supportsModeForConfig(options.activeImageConfig.value, "img2img") &&
+    !options.loading.value
+  );
+  const canRunPersonConsistency = computed(() =>
+    (options.selectedAssetUsable.value || options.hasUsableReferenceImage.value) &&
+    supportsModeForConfig(options.activeImageConfig.value, "person_consistency") &&
+    !options.loading.value
+  );
+  const canRunUpscale2x = computed(() =>
+    options.selectedAssetUsable.value &&
+    supportsModeForConfig(options.activeImageConfig.value, "upscale_2x") &&
+    !options.loading.value
+  );
+  const canRunUpscale4x = computed(() =>
+    options.selectedAssetUsable.value &&
+    supportsModeForConfig(options.activeImageConfig.value, "upscale_4x") &&
+    !options.loading.value
+  );
+
+  return {
+    canRunInpaint,
+    canRunPersonConsistency,
+    canRunStyleContinuation,
+    canRunUpscale2x,
+    canRunUpscale4x,
   };
 }
