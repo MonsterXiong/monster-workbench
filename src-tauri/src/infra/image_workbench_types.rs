@@ -163,6 +163,13 @@ pub struct NewImageWorkbenchGroup {
 pub struct ReplanImageWorkbenchStoryboardGroupInput {
     pub group_id: String,
     pub variants_per_scene: Option<u32>,
+    pub provider_config_id: Option<String>,
+    pub model: Option<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct RemoveImageWorkbenchStoryboardGroupInput {
+    pub group_id: String,
 }
 
 #[derive(Debug, Clone, Default)]

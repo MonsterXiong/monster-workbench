@@ -13,10 +13,11 @@ use crate::services::image_workbench_mask::SaveImageWorkbenchMaskRequest;
 use crate::services::image_workbench_service::{
     CreateImageWorkbenchJobRequest, DeleteImageWorkbenchAssetsRequest,
     ExportImageWorkbenchGroupRequest, ImageWorkbenchService, QueryImageWorkbenchAssetsRequest,
-    RecordImageWorkbenchAssetRequest, ReplanImageWorkbenchStoryboardGroupRequest,
-    SaveImageWorkbenchTemplateRequest, SetImageWorkbenchAssetFavoriteRequest,
-    SetImageWorkbenchAssetQualityIssuesRequest, SetImageWorkbenchAssetRatingRequest,
-    TagImageWorkbenchAssetsGroupRequest, UpdateImageWorkbenchTaskStatusRequest,
+    RecordImageWorkbenchAssetRequest, RemoveImageWorkbenchStoryboardGroupRequest,
+    ReplanImageWorkbenchStoryboardGroupRequest, SaveImageWorkbenchTemplateRequest,
+    SetImageWorkbenchAssetFavoriteRequest, SetImageWorkbenchAssetQualityIssuesRequest,
+    SetImageWorkbenchAssetRatingRequest, TagImageWorkbenchAssetsGroupRequest,
+    UpdateImageWorkbenchTaskStatusRequest,
 };
 use crate::services::log_service::LogService;
 use crate::services::navigation_service::{NavigationItem, NavigationService, SortOrderItem};
@@ -593,6 +594,18 @@ fn dispatch_command(
                     context.worker_id.clone(),
                 )
                 .map_err(|error| error.to_json_string())?;
+            serialized_value(snapshot)
+        }
+        "remove_image_workbench_storyboard_group" => {
+            let request = arg::<RemoveImageWorkbenchStoryboardGroupRequest>(args, "request")?;
+            let service = ImageWorkbenchService::new(context.path_provider.clone());
+            let (snapshot, task_ids) = service
+                .remove_storyboard_group(request)
+                .map_err(|error| error.to_json_string())?;
+            let ai_service = AiProviderService::new(context.app_handle.clone());
+            for task_id in task_ids {
+                let _ = ai_service.cancel_generation_task(&task_id);
+            }
             serialized_value(snapshot)
         }
         "delete_image_workbench_job" => {

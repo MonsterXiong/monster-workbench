@@ -4,8 +4,8 @@ use crate::infra::image_workbench_types::{
     ImageWorkbenchJob, ImageWorkbenchSnapshot, ImageWorkbenchTaskStatusPatch,
     ImageWorkbenchTemplate, NewImageWorkbenchAsset, NewImageWorkbenchJob,
     NewImageWorkbenchMetadata, NewImageWorkbenchModelRun, NewImageWorkbenchTemplate,
-    ReplanImageWorkbenchStoryboardGroupInput, TagImageWorkbenchAssetsGroupInput,
-    TagImageWorkbenchAssetsGroupResult,
+    RemoveImageWorkbenchStoryboardGroupInput, ReplanImageWorkbenchStoryboardGroupInput,
+    TagImageWorkbenchAssetsGroupInput, TagImageWorkbenchAssetsGroupResult,
 };
 use crate::infra::path::PathProvider;
 use crate::infra::sensitive::sanitize_sensitive_text;
@@ -65,10 +65,10 @@ pub use crate::services::image_workbench_service_types::{
     ImportImageWorkbenchReferenceRequest, ImportImageWorkbenchReferenceResult,
     QueryImageWorkbenchAssetsRequest, RecordImageWorkbenchAssetRequest,
     RecordImageWorkbenchMetadataInput, RecordImageWorkbenchModelRunInput,
-    ReplanImageWorkbenchStoryboardGroupRequest, SaveImageWorkbenchTemplateRequest,
-    SetImageWorkbenchAssetFavoriteRequest, SetImageWorkbenchAssetQualityIssuesRequest,
-    SetImageWorkbenchAssetRatingRequest, TagImageWorkbenchAssetsGroupRequest,
-    UpdateImageWorkbenchTaskStatusRequest,
+    RemoveImageWorkbenchStoryboardGroupRequest, ReplanImageWorkbenchStoryboardGroupRequest,
+    SaveImageWorkbenchTemplateRequest, SetImageWorkbenchAssetFavoriteRequest,
+    SetImageWorkbenchAssetQualityIssuesRequest, SetImageWorkbenchAssetRatingRequest,
+    TagImageWorkbenchAssetsGroupRequest, UpdateImageWorkbenchTaskStatusRequest,
 };
 
 pub struct ImageWorkbenchService {
@@ -348,7 +348,18 @@ impl ImageWorkbenchService {
             .replan_storyboard_group(ReplanImageWorkbenchStoryboardGroupInput {
                 group_id,
                 variants_per_scene: request.variants_per_scene.map(|value| value.clamp(1, 8)),
+                provider_config_id: normalize_optional_string(request.provider_config_id),
+                model: normalize_optional_string(request.model),
             })
+    }
+
+    pub fn remove_storyboard_group(
+        &self,
+        request: RemoveImageWorkbenchStoryboardGroupRequest,
+    ) -> AppResult<(ImageWorkbenchSnapshot, Vec<String>)> {
+        let group_id = normalize_required_id("图片工作台分镜组 ID", &request.group_id)?;
+        self.repo()?
+            .remove_storyboard_group(RemoveImageWorkbenchStoryboardGroupInput { group_id })
     }
 
     pub fn start_job_runner(

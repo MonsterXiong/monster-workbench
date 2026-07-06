@@ -244,6 +244,7 @@ fn main() {
             commands::image_workbench::cancel_image_workbench_task,
             commands::image_workbench::retry_image_workbench_failed_tasks,
             commands::image_workbench::replan_image_workbench_storyboard_group,
+            commands::image_workbench::remove_image_workbench_storyboard_group,
             commands::image_workbench::recover_image_workbench_interrupted_jobs,
             commands::image_workbench::delete_image_workbench_job,
             commands::image_workbench::export_image_workbench_job,

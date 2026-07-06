@@ -51,8 +51,8 @@ fn image_workbench_create_job_uses_task_prompts() {
                 "雨夜森林小屋，远景".to_string(),
             ],
             quantity: 2,
-            provider_config_id: None,
-            model: None,
+            provider_config_id: Some("old-config".to_string()),
+            model: Some("old-model".to_string()),
             size: None,
             reference_asset_ids_json: None,
             source_asset_id: None,
@@ -245,12 +245,19 @@ fn image_workbench_replan_storyboard_group_appends_fresh_tasks() {
         .replan_storyboard_group(ReplanImageWorkbenchStoryboardGroupInput {
             group_id: group.id.clone(),
             variants_per_scene: None,
+            provider_config_id: Some("new-config".to_string()),
+            model: Some("new-model".to_string()),
         })
         .expect("replan storyboard group");
 
     assert_eq!(replanned.job.id, snapshot.job.id);
     assert_eq!(replanned.job.quantity, 8);
     assert_eq!(replanned.job.status, "queued");
+    assert_eq!(
+        replanned.job.provider_config_id.as_deref(),
+        Some("new-config")
+    );
+    assert_eq!(replanned.job.model.as_deref(), Some("new-model"));
     assert_eq!(replanned.tasks.len(), 8);
     let groups = repo.list_groups(&snapshot.job.id).expect("list groups");
     assert_eq!(groups.len(), 2);
@@ -260,6 +267,10 @@ fn image_workbench_replan_storyboard_group_appends_fresh_tasks() {
         .expect("replan group");
     assert_eq!(replan_group.r#type.as_deref(), Some("storyboard"));
     assert_eq!(replan_group.agent_preset.as_deref(), Some("storyboard"));
+    assert_eq!(
+        replan_group.name.as_deref(),
+        Some("分镜 01｜初见 · 重新规划")
+    );
     assert_eq!(replan_group.count, 4);
     assert!(replan_group
         .source_id
@@ -281,11 +292,18 @@ fn image_workbench_replan_storyboard_group_appends_fresh_tasks() {
         .as_deref()
         .unwrap_or_default()
         .contains("镜头景别、拍摄手法"));
+    assert!(replan_group
+        .base_prompt
+        .as_deref()
+        .unwrap_or_default()
+        .contains("降低上游模型失败概率"));
 
+    let replan_group_id = replan_group.id.clone();
+    let replan_group_name = replan_group.name.clone();
     let fresh_tasks = replanned
         .tasks
         .iter()
-        .filter(|task| task.group_id.as_deref() == Some(replan_group.id.as_str()))
+        .filter(|task| task.group_id.as_deref() == Some(replan_group_id.as_str()))
         .collect::<Vec<_>>();
     assert_eq!(fresh_tasks.len(), 4);
     assert!(fresh_tasks.iter().all(|task| task.status == "queued"));
@@ -307,9 +325,110 @@ fn image_workbench_replan_storyboard_group_appends_fresh_tasks() {
         .as_deref()
         .unwrap_or_default()
         .contains("服装细节、场景道具、景别")));
+    assert!(fresh_tasks.iter().all(|task| task
+        .prompt
+        .as_deref()
+        .unwrap_or_default()
+        .contains("避免过密")));
     for old_task in &snapshot.tasks {
         assert!(fresh_tasks.iter().all(|fresh| fresh.id != old_task.id));
     }
+
+    repo.replan_storyboard_group(ReplanImageWorkbenchStoryboardGroupInput {
+        group_id: replan_group_id.clone(),
+        variants_per_scene: Some(1),
+        provider_config_id: None,
+        model: None,
+    })
+    .expect("replan replanned storyboard group");
+    let groups_after_second = repo.list_groups(&snapshot.job.id).expect("list groups");
+    let second_replan_group = groups_after_second
+        .iter()
+        .find(|item| item.id != group.id && item.id != replan_group_id)
+        .expect("second replan group");
+    assert_eq!(second_replan_group.name, replan_group_name);
+}
+
+#[test]
+fn image_workbench_remove_storyboard_group_hides_scene_tasks() {
+    let repo = test_repo();
+    let task_prompts = vec![
+        "scene one candidate 1".to_string(),
+        "scene one candidate 2".to_string(),
+        "scene two candidate 1".to_string(),
+        "scene two candidate 2".to_string(),
+    ];
+    let generation_options_json = serde_json::json!({
+        "storyboard": {
+            "version": 1,
+            "type": "storyboard",
+            "variantsPerScene": 2,
+            "sceneCount": 2,
+            "scenes": [
+                {
+                    "index": 1,
+                    "title": "初见",
+                    "taskStartIndex": 0,
+                    "taskCount": 2
+                },
+                {
+                    "index": 2,
+                    "title": "追击",
+                    "taskStartIndex": 2,
+                    "taskCount": 2
+                }
+            ]
+        }
+    })
+    .to_string();
+
+    let snapshot = repo
+        .create_job(NewImageWorkbenchJob {
+            mode: "person_consistency".to_string(),
+            prompt: "storyboard batch".to_string(),
+            negative_prompt: None,
+            task_prompts,
+            quantity: 4,
+            provider_config_id: None,
+            model: None,
+            size: None,
+            reference_asset_ids_json: Some("[\"iw-asset-person\"]".to_string()),
+            source_asset_id: None,
+            source_image_path: None,
+            mask_path: None,
+            person_context_json: None,
+            upscale_scale: None,
+            fallback_policy: None,
+            generation_options_json: Some(generation_options_json),
+        })
+        .expect("create storyboard job");
+    let groups = repo.list_groups(&snapshot.job.id).expect("list groups");
+    assert_eq!(groups.len(), 2);
+    let first_group = groups[0].clone();
+    let second_group = groups[1].clone();
+
+    let (removed, task_ids) = repo
+        .remove_storyboard_group(RemoveImageWorkbenchStoryboardGroupInput {
+            group_id: first_group.id.clone(),
+        })
+        .expect("remove storyboard group");
+
+    assert_eq!(task_ids.len(), 2);
+    assert_eq!(removed.job.quantity, 2);
+    assert_eq!(removed.tasks.len(), 2);
+    assert!(removed
+        .tasks
+        .iter()
+        .all(|task| task.group_id.as_deref() == Some(second_group.id.as_str())));
+    let visible_groups = repo.list_groups(&snapshot.job.id).expect("list groups");
+    assert_eq!(visible_groups.len(), 1);
+    assert_eq!(visible_groups[0].id, second_group.id);
+    assert_eq!(
+        repo.get_group_by_id(&first_group.id)
+            .expect("removed group remains auditable")
+            .count,
+        0
+    );
 }
 
 #[test]
@@ -1503,7 +1622,10 @@ fn image_workbench_tag_assets_group_reuses_manual_group_for_batch() {
         .list_groups(&job_id)
         .expect("groups")
         .into_iter()
-        .filter(|group| group.r#type.as_deref() == Some("manual") && group.name.as_deref() == Some("manual-group"))
+        .filter(|group| {
+            group.r#type.as_deref() == Some("manual")
+                && group.name.as_deref() == Some("manual-group")
+        })
         .collect::<Vec<_>>();
     assert_eq!(manual_groups.len(), 1);
 }

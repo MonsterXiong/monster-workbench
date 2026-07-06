@@ -48,6 +48,7 @@ pub fn init_image_workbench_schema(db_path: &Path) -> AppResult<()> {
             started_at_ms INTEGER,
             finished_at_ms INTEGER,
             error TEXT,
+            removed_at_ms INTEGER,
             FOREIGN KEY(job_id) REFERENCES image_workbench_jobs(id) ON DELETE CASCADE
          );
 
@@ -115,6 +116,7 @@ pub fn init_image_workbench_schema(db_path: &Path) -> AppResult<()> {
             count INTEGER NOT NULL DEFAULT 0,
             created_at_ms INTEGER NOT NULL,
             updated_at_ms INTEGER NOT NULL,
+            removed_at_ms INTEGER,
             FOREIGN KEY(job_id) REFERENCES image_workbench_jobs(id) ON DELETE CASCADE
          );
 
@@ -152,6 +154,7 @@ pub fn init_image_workbench_schema(db_path: &Path) -> AppResult<()> {
     )?;
     ensure_image_workbench_job_columns(&conn)?;
     ensure_image_workbench_task_runtime_columns(&conn)?;
+    ensure_image_workbench_group_columns(&conn)?;
     ensure_image_workbench_asset_columns(&conn)?;
 
     Ok(())
@@ -195,6 +198,10 @@ fn ensure_image_workbench_task_runtime_columns(conn: &Connection) -> AppResult<(
             "failure_hint",
             "ALTER TABLE image_workbench_tasks ADD COLUMN failure_hint TEXT",
         ),
+        (
+            "removed_at_ms",
+            "ALTER TABLE image_workbench_tasks ADD COLUMN removed_at_ms INTEGER",
+        ),
     ] {
         if !columns.contains(name) {
             conn.execute(sql, [])?;
@@ -212,6 +219,22 @@ fn ensure_image_workbench_task_runtime_columns(conn: &Connection) -> AppResult<(
             ON image_workbench_tasks(job_id, group_id, variant_index)",
         [],
     )?;
+
+    Ok(())
+}
+
+fn ensure_image_workbench_group_columns(conn: &Connection) -> AppResult<()> {
+    let mut stmt = conn.prepare("PRAGMA table_info(image_workbench_groups)")?;
+    let columns = stmt
+        .query_map([], |row| row.get::<_, String>(1))?
+        .collect::<Result<HashSet<_>, _>>()?;
+
+    if !columns.contains("removed_at_ms") {
+        conn.execute(
+            "ALTER TABLE image_workbench_groups ADD COLUMN removed_at_ms INTEGER",
+            [],
+        )?;
+    }
 
     Ok(())
 }

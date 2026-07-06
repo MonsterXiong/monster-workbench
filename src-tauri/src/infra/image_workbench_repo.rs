@@ -30,7 +30,8 @@ mod image_workbench_repo_templates;
 
 use self::image_workbench_repo_storyboard::{
     build_storyboard_replan_agent_ids_json, build_storyboard_replan_base_prompt,
-    build_storyboard_replan_task_prompt, resolve_task_groups_for_job,
+    build_storyboard_replan_group_name, build_storyboard_replan_task_prompt,
+    resolve_task_groups_for_job,
 };
 
 use crate::infra::image_workbench_types::{
@@ -38,8 +39,9 @@ use crate::infra::image_workbench_types::{
     ImageWorkbenchSnapshot, ImageWorkbenchTask, ImageWorkbenchTaskClaim,
     ImageWorkbenchTaskStatusPatch, ImageWorkbenchTemplate, NewImageWorkbenchAsset,
     NewImageWorkbenchGroup, NewImageWorkbenchJob, NewImageWorkbenchMetadata,
-    NewImageWorkbenchModelRun, NewImageWorkbenchTemplate, ReplanImageWorkbenchStoryboardGroupInput,
-    TagImageWorkbenchAssetsGroupInput, TagImageWorkbenchAssetsGroupResult,
+    NewImageWorkbenchModelRun, NewImageWorkbenchTemplate, RemoveImageWorkbenchStoryboardGroupInput,
+    ReplanImageWorkbenchStoryboardGroupInput, TagImageWorkbenchAssetsGroupInput,
+    TagImageWorkbenchAssetsGroupResult,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -421,11 +423,7 @@ impl ImageWorkbenchRepo {
                 &replan_batch_id,
             );
             let source_id_base = group.source_id.as_deref().unwrap_or(group.id.as_str());
-            let group_name = group
-                .name
-                .clone()
-                .map(|name| format!("{} · 重新规划", name))
-                .or_else(|| Some("分镜 · 重新规划".to_string()));
+            let group_name = build_storyboard_replan_group_name(group.name.as_deref());
             let agent_ids_json = build_storyboard_replan_agent_ids_json(
                 group.agent_ids_json.as_deref(),
                 &group.id,
@@ -442,7 +440,7 @@ impl ImageWorkbenchRepo {
                     replan_group_id.as_str(),
                     job.id.as_str(),
                     format!("{}-replan-{}", source_id_base, replan_batch_id),
-                    group_name.as_deref(),
+                    group_name.as_str(),
                     agent_ids_json.as_deref(),
                     replan_base_prompt.as_str(),
                     variants as i64,
@@ -475,17 +473,157 @@ impl ImageWorkbenchRepo {
             tx.execute(
                 "UPDATE image_workbench_jobs
                  SET quantity = ?,
+                     provider_config_id = ?,
+                     model = ?,
                      queued_at_ms = COALESCE(queued_at_ms, ?),
                      finished_at_ms = NULL,
                      updated_at_ms = ?
                  WHERE id = ?",
-                params![next_quantity as i64, now, now, job.id.as_str()],
+                params![
+                    next_quantity as i64,
+                    input
+                        .provider_config_id
+                        .as_deref()
+                        .or(job.provider_config_id.as_deref()),
+                    input.model.as_deref().or(job.model.as_deref()),
+                    now,
+                    now,
+                    job.id.as_str()
+                ],
             )?;
             tx.commit()?;
             job.id
         };
         self.recalculate_job_status(&conn, &job_id, now)?;
         self.get_snapshot(&job_id)
+    }
+
+    pub fn remove_storyboard_group(
+        &self,
+        input: RemoveImageWorkbenchStoryboardGroupInput,
+    ) -> AppResult<(ImageWorkbenchSnapshot, Vec<String>)> {
+        let mut conn = self.connect()?;
+        let now = now_ms();
+        let (job_id, active_task_ids, remaining_count) = {
+            let tx = conn.transaction()?;
+            let group = image_workbench_query::get_group(&tx, &input.group_id)?;
+            let job = image_workbench_query::get_job(&tx, &group.job_id)?;
+            if job.deleted_at_ms.is_some() || job.archived_at_ms.is_some() {
+                return Err(AppError::Config(
+                    "图片工作台作业已移除，不能移除分镜".to_string(),
+                ));
+            }
+            let is_storyboard_group = group.r#type.as_deref() == Some("storyboard")
+                || group.agent_preset.as_deref() == Some("storyboard");
+            if !is_storyboard_group {
+                return Err(AppError::Config("只能移除分镜任务组".to_string()));
+            }
+
+            let tasks = image_workbench_query::list_tasks(&tx, &job.id)?;
+            let source_tasks = tasks
+                .iter()
+                .filter(|task| task.group_id.as_deref() == Some(group.id.as_str()))
+                .collect::<Vec<_>>();
+            let active_task_ids = source_tasks
+                .iter()
+                .filter(|task| {
+                    matches!(
+                        task.status.as_str(),
+                        "queued" | "running" | "validating" | "retrying"
+                    )
+                })
+                .map(|task| task.id.clone())
+                .collect::<Vec<_>>();
+
+            tx.execute(
+                "UPDATE image_workbench_tasks
+                 SET status = CASE
+                         WHEN status IN ('queued', 'running', 'validating', 'retrying') THEN 'cancelled'
+                         ELSE status
+                     END,
+                     error = CASE
+                         WHEN status IN ('queued', 'running', 'validating', 'retrying')
+                         THEN COALESCE(error, '分镜已移除')
+                         ELSE error
+                     END,
+                     failure_type = CASE
+                         WHEN status IN ('queued', 'running', 'validating', 'retrying')
+                         THEN 'cancelled'
+                         ELSE failure_type
+                     END,
+                     failure_hint = CASE
+                         WHEN status IN ('queued', 'running', 'validating', 'retrying')
+                         THEN '分镜已移除'
+                         ELSE failure_hint
+                     END,
+                     claim_token = NULL,
+                     leased_until_ms = NULL,
+                     finished_at_ms = CASE
+                         WHEN status IN ('queued', 'running', 'validating', 'retrying')
+                         THEN COALESCE(finished_at_ms, ?)
+                         ELSE finished_at_ms
+                     END,
+                     removed_at_ms = COALESCE(removed_at_ms, ?),
+                     updated_at_ms = ?
+                 WHERE job_id = ?
+                   AND group_id = ?
+                   AND removed_at_ms IS NULL",
+                params![now, now, now, job.id.as_str(), group.id.as_str()],
+            )?;
+
+            tx.execute(
+                "UPDATE image_workbench_assets
+                 SET group_id = NULL
+                 WHERE group_id = ?",
+                params![group.id.as_str()],
+            )?;
+
+            tx.execute(
+                "UPDATE image_workbench_groups
+                 SET count = 0,
+                     removed_at_ms = COALESCE(removed_at_ms, ?),
+                     updated_at_ms = ?
+                 WHERE id = ?",
+                params![now, now, group.id.as_str()],
+            )?;
+
+            let remaining_count = tx.query_row(
+                "SELECT COUNT(*)
+                 FROM image_workbench_tasks
+                 WHERE job_id = ?
+                   AND removed_at_ms IS NULL",
+                params![job.id.as_str()],
+                |row| row.get::<_, i64>(0),
+            )?;
+            if remaining_count == 0 {
+                tx.execute(
+                    "UPDATE image_workbench_jobs
+                     SET status = 'cancelled',
+                         quantity = 0,
+                         error = NULL,
+                         finished_at_ms = COALESCE(finished_at_ms, ?),
+                         updated_at_ms = ?
+                     WHERE id = ?",
+                    params![now, now, job.id.as_str()],
+                )?;
+            } else {
+                tx.execute(
+                    "UPDATE image_workbench_jobs
+                     SET quantity = ?,
+                         error = NULL,
+                         updated_at_ms = ?
+                     WHERE id = ?",
+                    params![remaining_count, now, job.id.as_str()],
+                )?;
+            }
+
+            tx.commit()?;
+            (job.id, active_task_ids, remaining_count)
+        };
+        if remaining_count > 0 {
+            self.recalculate_job_status(&conn, &job_id, now)?;
+        }
+        Ok((self.get_snapshot(&job_id)?, active_task_ids))
     }
 
     pub fn recover_interrupted_jobs(&self, _reason: &str) -> AppResult<u32> {
@@ -496,6 +634,7 @@ impl ImageWorkbenchRepo {
              FROM image_workbench_tasks t
              INNER JOIN image_workbench_jobs j ON j.id = t.job_id
              WHERE t.status IN ('queued', 'running', 'validating', 'retrying')
+               AND t.removed_at_ms IS NULL
                AND j.deleted_at_ms IS NULL
                AND j.archived_at_ms IS NULL",
         )?;
@@ -516,7 +655,8 @@ impl ImageWorkbenchRepo {
                      finished_at_ms = NULL,
                      updated_at_ms = ?
                  WHERE job_id = ?
-                   AND status IN ('queued', 'running', 'validating', 'retrying')",
+                   AND status IN ('queued', 'running', 'validating', 'retrying')
+                   AND removed_at_ms IS NULL",
                 params![now, job_id],
             )?;
             self.recalculate_job_status(&conn, job_id, now)?;

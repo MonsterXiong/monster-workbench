@@ -39,7 +39,8 @@ pub(crate) fn get_task(conn: &Connection, task_id: &str) -> AppResult<ImageWorkb
                 prompt, created_at_ms, updated_at_ms, started_at_ms, finished_at_ms, error,
                 group_id, variant_index, failure_type, failure_hint
          FROM image_workbench_tasks
-         WHERE id = ?",
+         WHERE id = ?
+           AND removed_at_ms IS NULL",
         params![task_id],
         map_task,
     )
@@ -108,6 +109,7 @@ pub(crate) fn list_tasks(conn: &Connection, job_id: &str) -> AppResult<Vec<Image
                 group_id, variant_index, failure_type, failure_hint
          FROM image_workbench_tasks
          WHERE job_id = ?
+           AND removed_at_ms IS NULL
          ORDER BY queue_index ASC",
     )?;
     let rows = stmt.query_map(params![job_id], map_task)?;
@@ -240,6 +242,7 @@ pub(crate) fn list_groups(conn: &Connection, job_id: &str) -> AppResult<Vec<Imag
                 count, created_at_ms, updated_at_ms
          FROM image_workbench_groups
          WHERE job_id = ?
+           AND removed_at_ms IS NULL
          ORDER BY created_at_ms ASC",
     )?;
     let rows = stmt.query_map(params![job_id], map_group)?;
@@ -260,7 +263,8 @@ pub(crate) fn list_assets_by_group_marker(
          FROM image_workbench_assets a
          INNER JOIN image_workbench_groups g ON g.id = a.group_id
          INNER JOIN image_workbench_jobs j ON j.id = a.job_id
-         WHERE j.deleted_at_ms IS NULL",
+         WHERE j.deleted_at_ms IS NULL
+           AND g.removed_at_ms IS NULL",
     );
     let mut binds: Vec<Value> = Vec::new();
     if let Some(group_id) = group_id.map(str::trim).filter(|value| !value.is_empty()) {
@@ -288,7 +292,8 @@ pub(crate) fn list_groups_by_marker(
                 g.base_prompt, g.count, g.created_at_ms, g.updated_at_ms
          FROM image_workbench_groups g
          INNER JOIN image_workbench_jobs j ON j.id = g.job_id
-         WHERE j.deleted_at_ms IS NULL",
+         WHERE j.deleted_at_ms IS NULL
+           AND g.removed_at_ms IS NULL",
     );
     let mut binds: Vec<Value> = Vec::new();
     if let Some(group_id) = group_id.map(str::trim).filter(|value| !value.is_empty()) {

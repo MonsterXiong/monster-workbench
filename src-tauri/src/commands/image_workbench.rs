@@ -18,10 +18,10 @@ use crate::services::image_workbench_service::{
     ExportImageWorkbenchGroupRequest, ImageWorkbenchContractSummary, ImageWorkbenchService,
     ImportImageWorkbenchReferenceRequest, ImportImageWorkbenchReferenceResult,
     QueryImageWorkbenchAssetsRequest, RecordImageWorkbenchAssetRequest,
-    ReplanImageWorkbenchStoryboardGroupRequest, SaveImageWorkbenchTemplateRequest,
-    SetImageWorkbenchAssetFavoriteRequest, SetImageWorkbenchAssetQualityIssuesRequest,
-    SetImageWorkbenchAssetRatingRequest, TagImageWorkbenchAssetsGroupRequest,
-    UpdateImageWorkbenchTaskStatusRequest,
+    RemoveImageWorkbenchStoryboardGroupRequest, ReplanImageWorkbenchStoryboardGroupRequest,
+    SaveImageWorkbenchTemplateRequest, SetImageWorkbenchAssetFavoriteRequest,
+    SetImageWorkbenchAssetQualityIssuesRequest, SetImageWorkbenchAssetRatingRequest,
+    TagImageWorkbenchAssetsGroupRequest, UpdateImageWorkbenchTaskStatusRequest,
 };
 use crate::services::runtime_janitor::WorkerIdentity;
 use std::sync::Mutex;
@@ -214,6 +214,25 @@ pub fn replan_image_workbench_storyboard_group(
     service
         .start_job_runner(app_handle, &job_id, worker_id)
         .map_err(|e| e.to_json_string())?;
+    Ok(snapshot)
+}
+
+#[tauri::command]
+pub fn remove_image_workbench_storyboard_group(
+    request: RemoveImageWorkbenchStoryboardGroupRequest,
+    state: ImageWorkbenchState<'_>,
+    ai_state: AiProviderState<'_>,
+) -> Result<ImageWorkbenchSnapshot, String> {
+    let (snapshot, task_ids) = {
+        let service = state.lock().unwrap_or_else(|e| e.into_inner());
+        service
+            .remove_storyboard_group(request)
+            .map_err(|e| e.to_json_string())?
+    };
+    let ai_service = ai_state.lock().unwrap_or_else(|e| e.into_inner());
+    for task_id in task_ids {
+        let _ = ai_service.cancel_generation_task(&task_id);
+    }
     Ok(snapshot)
 }
 
