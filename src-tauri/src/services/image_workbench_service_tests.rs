@@ -1,4 +1,5 @@
 use super::*;
+use crate::services::ai_provider_types::AiGenerationArtifact;
 use crate::services::image_workbench_mask::{
     ImageWorkbenchMaskPointInput, ImageWorkbenchMaskStrokeInput,
 };
