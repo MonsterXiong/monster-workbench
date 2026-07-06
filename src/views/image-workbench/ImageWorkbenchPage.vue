@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import {
   Ban,
@@ -47,19 +47,17 @@ import {
   buildImageWorkbenchTaskEntries,
   buildImageWorkbenchTaskGuidance,
   buildImageWorkbenchTaskPresets,
-  getImageWorkbenchTaskPresetConfig,
   type ImageWorkbenchTaskEntryKey,
   type ImageWorkbenchTaskPresetKey,
-  usesImageWorkbenchReferenceEntry,
 } from "./imageWorkbenchTaskLauncher";
 import { useImageWorkbenchAssetSelection } from "./useImageWorkbenchAssetSelection";
 import { useImageWorkbenchReferenceControls } from "./useImageWorkbenchReferenceControls";
 import { useImageWorkbenchStoryboardDraft } from "./useImageWorkbenchStoryboardDraft";
+import { useImageWorkbenchTaskFlow } from "./useImageWorkbenchTaskFlow";
 import type {
   ImageWorkbenchBackground,
   ImageWorkbenchGenerationQuality,
   ImageWorkbenchModeration,
-  ImageWorkbenchMode,
   ImageWorkbenchOutputFormat,
   ImageWorkbenchTemplate,
 } from "../../types/image-workbench";
@@ -384,77 +382,6 @@ const shouldShowReferenceComposer = computed(() =>
   showsReferenceInput.value && referenceComposerOpen.value
 );
 
-interface ImageWorkbenchTaskEntrySelectOptions {
-  useSelectedAsset?: boolean;
-}
-
-function ensureReferenceTaskContext() {
-  if (showsReferenceInput.value) {
-    return;
-  }
-  activeTaskEntry.value = "reference";
-  activeScenePreset.value = null;
-  imageWorkbenchStore.mode = "img2img";
-}
-
-function handleToggleReferenceComposer() {
-  ensureReferenceTaskContext();
-  referenceComposerOpen.value = !referenceComposerOpen.value;
-  if (referenceComposerOpen.value) {
-    commandSettingsOpen.value = false;
-  }
-}
-
-function handleOpenReferenceComposer() {
-  ensureReferenceTaskContext();
-  referenceComposerOpen.value = true;
-  commandSettingsOpen.value = false;
-}
-
-function handleToggleCommandSettings() {
-  commandSettingsOpen.value = !commandSettingsOpen.value;
-  if (commandSettingsOpen.value) {
-    referenceComposerOpen.value = false;
-  }
-}
-
-function handleOpenCommandSettings() {
-  commandSettingsOpen.value = true;
-  referenceComposerOpen.value = false;
-}
-
-async function handleEnableImageProviderConcurrency() {
-  await imageWorkbenchStore.enableImageProviderConcurrency();
-}
-
-function modeLabel(mode: ImageWorkbenchMode | string) {
-  return t(`imageWorkbench.modes.${mode}`);
-}
-
-function syncTaskEntryFromMode() {
-  if (imageWorkbenchStore.mode === "txt2img") {
-    activeTaskEntry.value = "create";
-    return;
-  }
-  if (imageWorkbenchStore.mode === "inpaint") {
-    activeTaskEntry.value = "edit";
-    return;
-  }
-  if (imageWorkbenchStore.mode === "person_consistency") {
-    activeTaskEntry.value = "person";
-    return;
-  }
-  if (imageWorkbenchStore.mode.startsWith("upscale_")) {
-    activeTaskEntry.value = "upscale";
-    return;
-  }
-  activeTaskEntry.value = imageWorkbenchStore.hasReferenceImage ? "reference" : "style";
-}
-
-function focusPromptInput() {
-  void nextTick(() => promptTextareaRef.value?.focus());
-}
-
 function consumeRouteDraftPrompt() {
   const rawPrompt = route.query.prompt;
   const routePrompt = Array.isArray(rawPrompt) ? rawPrompt[0] : rawPrompt;
@@ -469,186 +396,6 @@ function consumeRouteDraftPrompt() {
   const nextQuery = { ...route.query };
   delete nextQuery.prompt;
   void router.replace({ path: route.path, query: nextQuery });
-  focusPromptInput();
-}
-
-function handleUpscaleScaleSelect(scale: 2 | 4) {
-  upscaleScale.value = scale;
-  const targetMode: ImageWorkbenchMode = scale === 4 ? "upscale_4x" : "upscale_2x";
-  imageWorkbenchStore.mode = targetMode;
-  imageWorkbenchStore.quantity = 1;
-  imageWorkbenchStore.prompt = t("imageWorkbench.asset.upscaleDefaultPrompt");
-}
-
-function prepareSourceAssetShelf() {
-  assetShelfView.value = "library";
-  if (
-    !sourceAssetShelfPreloaded.value &&
-    imageWorkbenchStore.assetLibraryHasMore &&
-    !imageWorkbenchStore.assetLibraryLoadingMore
-  ) {
-    sourceAssetShelfPreloaded.value = true;
-    void imageWorkbenchStore.loadMoreAssetLibrary().catch(() => {
-      sourceAssetShelfPreloaded.value = false;
-    });
-  }
-}
-
-function handleNewWorkbenchTask() {
-  activeTaskEntry.value = "create";
-  activeScenePreset.value = null;
-  imageWorkbenchStore.mode = "txt2img";
-  imageWorkbenchStore.clearSelectedAsset();
-  sceneGuideOpen.value = true;
-  referenceComposerOpen.value = false;
-  commandSettingsOpen.value = false;
-  void nextTick(() => {
-    if (!showWorkspaceStart.value) {
-      focusPromptInput();
-    }
-  });
-}
-
-function handleSceneTaskSelect(key: ImageWorkbenchTaskEntryKey) {
-  handleTaskEntrySelect(key);
-  sceneGuideOpen.value = true;
-}
-
-function handleToggleSceneGuide() {
-  sceneGuideOpen.value = !sceneGuideOpen.value;
-  if (sceneGuideOpen.value && isStoryboardTask.value) {
-    syncStoryboardDraftFromPrompt();
-  }
-}
-
-function handleTaskEntrySelect(
-  key: ImageWorkbenchTaskEntryKey,
-  options: ImageWorkbenchTaskEntrySelectOptions = {}
-) {
-  activeTaskEntry.value = key;
-  activeScenePreset.value = null;
-  referenceComposerOpen.value = usesImageWorkbenchReferenceEntry(key) && !imageWorkbenchStore.hasReferenceImage;
-  if (key !== "edit") {
-    imageWorkbenchStore.closeInpaintEditor();
-  }
-  if (key === "create") {
-    imageWorkbenchStore.mode = "txt2img";
-    focusPromptInput();
-    return;
-  }
-  if (key === "reference") {
-    imageWorkbenchStore.mode = "img2img";
-    const usedSelectedReference = ensureSelectedAssetReference();
-    applyDefaultReferenceRoles(defaultReferenceRoleForTask(key));
-    if (usedSelectedReference) {
-      referenceComposerOpen.value = false;
-    }
-    if (!usedSelectedReference) {
-      imageWorkbenchStore.notice = t("imageWorkbench.tasks.referenceNotice");
-    }
-    focusPromptInput();
-    return;
-  }
-  if (key === "edit") {
-    imageWorkbenchStore.mode = "inpaint";
-    imageWorkbenchStore.quantity = 1;
-    imageWorkbenchStore.closeInpaintEditor();
-    referenceComposerOpen.value = false;
-    commandSettingsOpen.value = false;
-    prepareSourceAssetShelf();
-    if (options.useSelectedAsset) {
-      prepareInpaintForSelectedAsset();
-      return;
-    }
-    imageWorkbenchStore.clearSelectedAsset();
-    imageWorkbenchStore.notice = t("imageWorkbench.input.guidance.editNeedImage");
-    return;
-  }
-  if (key === "upscale") {
-    handleUpscaleScaleSelect(2);
-    prepareSourceAssetShelf();
-    if (!options.useSelectedAsset) {
-      imageWorkbenchStore.clearSelectedAsset();
-    }
-    imageWorkbenchStore.notice = selectedAssetUnavailableReason.value ||
-      (options.useSelectedAsset && selectedAsset.value
-      ? t("imageWorkbench.tasks.upscaleNotice")
-      : t("imageWorkbench.tasks.needImageNotice"));
-    return;
-  }
-  if (key === "person" || key === "storyboard") {
-    imageWorkbenchStore.mode = "person_consistency";
-    const usedSelectedReference = ensureSelectedAssetReference();
-    applyDefaultReferenceRoles(defaultReferenceRoleForTask(key));
-    if (usedSelectedReference) {
-      referenceComposerOpen.value = false;
-    }
-    if (key === "person") {
-      imageWorkbenchStore.prompt = imageWorkbenchStore.prompt.trim() || t("imageWorkbench.asset.personDefaultPrompt");
-    }
-    if (key === "storyboard") {
-      syncStoryboardDraftFromPrompt();
-      sceneGuideOpen.value = true;
-    }
-    imageWorkbenchStore.notice = selectedAssetUnavailableReason.value ||
-      (usedSelectedReference || imageWorkbenchStore.hasReferenceImage
-      ? t(key === "storyboard" ? "imageWorkbench.tasks.storyboardNotice" : "imageWorkbench.tasks.personNotice")
-      : t("imageWorkbench.tasks.needReferenceNotice"));
-    focusPromptInput();
-    return;
-  }
-  imageWorkbenchStore.mode = "img2img";
-  if (imageWorkbenchStore.canUseSelectedAssetAsReference) {
-    if (handleUseSelectedAssetAsReference()) {
-      applyDefaultReferenceRoles(defaultReferenceRoleForTask(key));
-      referenceComposerOpen.value = false;
-    }
-  }
-  imageWorkbenchStore.prompt = imageWorkbenchStore.prompt.trim() || t("imageWorkbench.asset.styleDefaultPrompt");
-  applyDefaultReferenceRoles(defaultReferenceRoleForTask(key));
-  imageWorkbenchStore.notice = selectedAssetUnavailableReason.value ||
-    (imageWorkbenchStore.hasReferenceImage
-    ? t("imageWorkbench.tasks.styleNotice")
-    : t("imageWorkbench.tasks.needReferenceNotice"));
-  focusPromptInput();
-}
-
-function prepareInpaintForSelectedAsset() {
-  imageWorkbenchStore.mode = "inpaint";
-  imageWorkbenchStore.quantity = 1;
-  referenceComposerOpen.value = false;
-  if (imageWorkbenchStore.canRunInpaint) {
-    sceneGuideOpen.value = false;
-    commandSettingsOpen.value = false;
-    imageWorkbenchStore.startInpaintSelectedAsset();
-    return true;
-  }
-  if (selectedAssetUnavailableReason.value) {
-    imageWorkbenchStore.notice = selectedAssetUnavailableReason.value;
-  } else if (selectedAsset.value) {
-    imageWorkbenchStore.notice = t("imageWorkbench.errors.inpaintDeferred");
-  } else {
-    imageWorkbenchStore.notice = t("imageWorkbench.tasks.needImageNotice");
-  }
-  return false;
-}
-
-function ensureSelectedAssetReference() {
-  return !imageWorkbenchStore.hasReferenceImage &&
-    imageWorkbenchStore.canUseSelectedAssetAsReference &&
-    handleUseSelectedAssetAsReference();
-}
-
-function handleTaskPresetApply(key: ImageWorkbenchTaskPresetKey) {
-  const preset = getImageWorkbenchTaskPresetConfig(key);
-  if (!preset) {
-    return;
-  }
-  handleTaskEntrySelect(preset.entryKey);
-  activeScenePreset.value = key;
-  sceneGuideOpen.value = preset.entryKey === "edit" || preset.entryKey === "upscale";
-  imageWorkbenchStore.prompt = t(preset.promptKey);
-  imageWorkbenchStore.outputQuality = "high";
   focusPromptInput();
 }
 
@@ -671,34 +418,6 @@ function handleApplyTemplateFromPicker(template: ImageWorkbenchTemplate) {
     imageWorkbenchStore.closeInpaintEditor();
   }
   templatePickerOpen.value = false;
-}
-
-function handleInspectorTaskEntryChange(key: ImageWorkbenchTaskEntryKey) {
-  activeTaskEntry.value = key;
-  activeScenePreset.value = null;
-  sceneGuideOpen.value = false;
-  if (key === "upscale") {
-    upscaleScale.value = imageWorkbenchStore.mode === "upscale_4x" ? 4 : 2;
-  }
-  if (key === "storyboard") {
-    imageWorkbenchStore.mode = "person_consistency";
-    syncStoryboardDraftFromPrompt();
-    sceneGuideOpen.value = true;
-  }
-  if (key === "reference" || key === "style" || key === "person" || key === "storyboard") {
-    focusPromptInput();
-  }
-}
-
-function handleInspectorTaskEntrySync() {
-  syncTaskEntryFromMode();
-  if (activeTaskEntry.value === "upscale") {
-    upscaleScale.value = imageWorkbenchStore.mode === "upscale_4x" ? 4 : 2;
-  }
-}
-
-function syncTaskEntryForQualityFix(issue: string) {
-  handleInspectorTaskEntryChange(issue === "identity" ? "person" : "edit");
 }
 
 async function handleSaveTemplateFromPicker() {
@@ -779,6 +498,48 @@ const {
   handleExportJob,
   handleModelConfigChange,
 } = buildImageWorkbenchHandlers(imageWorkbenchStore);
+
+const {
+  focusPromptInput,
+  handleEnableImageProviderConcurrency,
+  handleInspectorTaskEntryChange,
+  handleInspectorTaskEntrySync,
+  handleNewWorkbenchTask,
+  handleOpenCommandSettings,
+  handleOpenReferenceComposer,
+  handleSceneTaskSelect,
+  handleTaskEntrySelect,
+  handleTaskPresetApply,
+  handleToggleCommandSettings,
+  handleToggleReferenceComposer,
+  handleToggleSceneGuide,
+  handleUpscaleScaleSelect,
+  modeLabel,
+  prepareInpaintForSelectedAsset,
+  syncTaskEntryForQualityFix,
+  syncTaskEntryFromMode,
+} = useImageWorkbenchTaskFlow({
+  activeScenePreset,
+  activeTaskEntry,
+  assetShelfView,
+  commandSettingsOpen,
+  isStoryboardTask,
+  promptTextareaRef,
+  referenceComposerOpen,
+  sceneGuideOpen,
+  selectedAsset,
+  selectedAssetUnavailableReason,
+  showWorkspaceStart,
+  showsReferenceInput,
+  sourceAssetShelfPreloaded,
+  store: imageWorkbenchStore,
+  t,
+  upscaleScale,
+  applyDefaultReferenceRoles,
+  defaultReferenceRoleForTask,
+  handleUseSelectedAssetAsReference,
+  syncStoryboardDraftFromPrompt,
+});
 
 const {
   handleCanvasBackgroundClick,
