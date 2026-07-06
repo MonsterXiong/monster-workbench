@@ -122,7 +122,7 @@ function getMockImageWorkbenchSnapshot(jobId: string) {
   }
 
   const tasks = sortByMany(
-    mapValuesToArray(mockImageWorkbenchTasks).filter((task) => task.jobId === jobId),
+    mapValuesToArray(mockImageWorkbenchTasks).filter((task) => task.jobId === jobId && !task.removedAtMs),
     [{ getValue: (task) => task.queueIndex }]
   );
   const assets = sortByMany(
@@ -455,7 +455,7 @@ function cancelImageWorkbenchJob(args: Record<string, unknown>) {
   }
   const now = getCurrentTimestampMs();
   mapValuesToArray(mockImageWorkbenchTasks)
-    .filter((task) => task.jobId === jobId && ["queued", "running", "validating", "retrying"].includes(task.status))
+    .filter((task) => task.jobId === jobId && !task.removedAtMs && ["queued", "running", "validating", "retrying"].includes(task.status))
     .forEach((task) => cancelMockImageWorkbenchTaskRecord(task, job, now));
   recalculateMockImageWorkbenchJob(jobId);
   void runMockImageWorkbenchJob(jobId);
@@ -508,7 +508,7 @@ function retryImageWorkbenchFailedTasks(args: Record<string, unknown>) {
   const now = getCurrentTimestampMs();
   let updated = 0;
   mapValuesToArray(mockImageWorkbenchTasks)
-    .filter((task) => task.jobId === jobId && task.status === "failed")
+    .filter((task) => task.jobId === jobId && !task.removedAtMs && task.status === "failed")
     .forEach((task) => {
       updated += 1;
       mockImageWorkbenchTasks.set(task.id, {
@@ -547,7 +547,7 @@ function replanImageWorkbenchStoryboardGroup(args: Record<string, unknown>) {
 
   const now = getCurrentTimestampMs();
   const groupTasks = sortByMany(
-    mapValuesToArray(mockImageWorkbenchTasks).filter((task) => task.groupId === groupId),
+    mapValuesToArray(mockImageWorkbenchTasks).filter((task) => task.groupId === groupId && !task.removedAtMs),
     [{ getValue: (task) => task.queueIndex }]
   );
   const rawCount = Number(request?.variantsPerScene || group.count || groupTasks.length || 4);
@@ -555,7 +555,7 @@ function replanImageWorkbenchStoryboardGroup(args: Record<string, unknown>) {
   const batchId = createMockImageWorkbenchId("iw-replan");
   const newGroupId = createMockImageWorkbenchId("iw-group");
   const basePrompt = String(group.basePrompt || groupTasks[0]?.prompt || job.prompt || "").trim();
-  const replanBasePrompt = `${basePrompt} 分镜重规划批次：${batchId}。参考图只用于主角身份识别，脸型、五官比例、发型、年龄感和整体气质保持一致，但不要复制参考图或上一轮固定表情；重新规划表情神情、服装纹理、动作姿态、镜头景别、拍摄手法、光影层次和场景细节，不复用上一轮失败的构图。`;
+  const replanBasePrompt = `${basePrompt} 分镜重规划批次：${batchId}。参考图只用于主角身份识别，脸型、五官比例、发型、年龄感和整体气质保持一致，但不要复制参考图或上一轮固定表情；重新规划表情神情、服装纹理、动作姿态、镜头景别、拍摄手法、光影层次和场景细节，不复用上一轮失败的构图；降低上游模型失败概率，避免过多主体、密集小物或互相冲突的动作。`;
   const sourceId = String(group.sourceId || group.id);
   const agentIds = parseMockGroupAgentIds(group.agentIdsJson);
   agentIds.sourceGroupId = group.id;
@@ -565,7 +565,7 @@ function replanImageWorkbenchStoryboardGroup(args: Record<string, unknown>) {
     id: newGroupId,
     jobId: job.id,
     sourceId: `${sourceId}-replan-${batchId}`,
-    name: `${group.name || "分镜"} · 重新规划`,
+    name: buildMockStoryboardReplanGroupName(group.name),
     type: "storyboard",
     agentPreset: "storyboard",
     agentIdsJson: JSON.stringify(agentIds),
@@ -589,7 +589,7 @@ function replanImageWorkbenchStoryboardGroup(args: Record<string, unknown>) {
       maxRetries: 1,
       claimToken: null,
       leasedUntilMs: null,
-      prompt: `${replanBasePrompt} 新候选图 ${index + 1}/${count}：主角身份一致，但表情、眼神、姿态、服装、场景道具和镜头语言随当前分镜自然变化。`,
+      prompt: `${replanBasePrompt} 新候选图 ${index + 1}/${count}：主角身份一致，但表情、眼神、姿态、服装、场景道具和镜头语言随当前分镜自然变化；避免过密、矛盾或模型难以解析的画面。`,
       createdAtMs: now,
       updatedAtMs: now,
       startedAtMs: null,
@@ -604,11 +604,91 @@ function replanImageWorkbenchStoryboardGroup(args: Record<string, unknown>) {
   mockImageWorkbenchJobs.set(job.id, {
     ...job,
     quantity: Number(job.quantity || 0) + count,
+    providerConfigId: String(request?.providerConfigId || "").trim() || job.providerConfigId || null,
+    model: String(request?.model || "").trim() || job.model || null,
     finishedAtMs: null,
     updatedAtMs: now,
   });
   recalculateMockImageWorkbenchJob(job.id);
   void runMockImageWorkbenchJob(job.id);
+  return getMockImageWorkbenchSnapshot(job.id);
+}
+
+function buildMockStoryboardReplanGroupName(name: unknown) {
+  let base = String(name || "分镜").trim() || "分镜";
+  for (;;) {
+    const next = base
+      .replace(/\s*·\s*重新规划$/u, "")
+      .replace(/\s*-\s*Replan$/iu, "")
+      .replace(/\s*·\s*Replan$/iu, "")
+      .trim();
+    if (next === base) {
+      break;
+    }
+    base = next || "分镜";
+  }
+  return `${base} · 重新规划`;
+}
+
+function removeImageWorkbenchStoryboardGroup(args: Record<string, unknown>) {
+  const request = args.request as any;
+  const groupId = String(request?.groupId || "").trim();
+  const group = mockImageWorkbenchGroups.get(groupId);
+  if (!group) {
+    throw new Error("[ERR_IPC_BROWSER] 浏览器 Mock 未找到分镜任务组");
+  }
+  const job = mockImageWorkbenchJobs.get(group.jobId);
+  if (!job || !isActiveMockImageWorkbenchJob(job)) {
+    throw new Error("[ERR_IPC_BROWSER] 浏览器 Mock 分镜所属作业不可用");
+  }
+  if (group.type !== "storyboard" && group.agentPreset !== "storyboard") {
+    throw new Error("[ERR_IPC_BROWSER] 只能移除分镜任务组");
+  }
+
+  const now = getCurrentTimestampMs();
+  mapValuesToArray(mockImageWorkbenchTasks)
+    .filter((task) => task.jobId === job.id && task.groupId === group.id && !task.removedAtMs)
+    .forEach((task) => {
+      const active = ["queued", "running", "validating", "retrying"].includes(task.status);
+      mockImageWorkbenchTasks.set(task.id, {
+        ...task,
+        status: active ? "cancelled" : task.status,
+        error: active ? task.error || "分镜已移除" : task.error,
+        failureType: active ? "cancelled" : task.failureType,
+        failureHint: active ? "分镜已移除" : task.failureHint,
+        claimToken: null,
+        leasedUntilMs: null,
+        finishedAtMs: active ? task.finishedAtMs || now : task.finishedAtMs,
+        removedAtMs: task.removedAtMs || now,
+        updatedAtMs: now,
+      });
+    });
+  mapValuesToArray(mockImageWorkbenchAssets)
+    .filter((asset) => asset.groupId === group.id)
+    .forEach((asset) => {
+      mockImageWorkbenchAssets.set(asset.id, { ...asset, groupId: null });
+    });
+  mockImageWorkbenchGroups.set(group.id, {
+    ...group,
+    count: 0,
+    removedAtMs: group.removedAtMs || now,
+    updatedAtMs: now,
+  });
+
+  const remainingCount = mapValuesToArray(mockImageWorkbenchTasks)
+    .filter((task) => task.jobId === job.id && !task.removedAtMs)
+    .length;
+  mockImageWorkbenchJobs.set(job.id, {
+    ...job,
+    quantity: remainingCount,
+    status: remainingCount ? job.status : "cancelled",
+    error: null,
+    finishedAtMs: remainingCount ? job.finishedAtMs : job.finishedAtMs || now,
+    updatedAtMs: now,
+  });
+  if (remainingCount) {
+    recalculateMockImageWorkbenchJob(job.id);
+  }
   return getMockImageWorkbenchSnapshot(job.id);
 }
 
@@ -800,6 +880,8 @@ export function handleImageWorkbenchMock(command: string, args: Record<string, u
       return { handled: true, value: retryImageWorkbenchFailedTasks(args) };
     case "replan_image_workbench_storyboard_group":
       return { handled: true, value: replanImageWorkbenchStoryboardGroup(args) };
+    case "remove_image_workbench_storyboard_group":
+      return { handled: true, value: removeImageWorkbenchStoryboardGroup(args) };
     case "recover_image_workbench_interrupted_jobs":
       return { handled: true, value: recoverImageWorkbenchInterruptedJobs() };
     case "delete_image_workbench_job":

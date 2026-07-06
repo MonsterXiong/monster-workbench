@@ -6,6 +6,7 @@ import { useI18n } from "../../composables/useI18n";
 import { useImageWorkbenchStore } from "../../stores/image-workbench";
 import { addDomEventListener, formatTemplate, isEscapeKey, type DomEventCleanup } from "../../utils";
 import type { ImageWorkbenchJob, ImageWorkbenchTask } from "../../types/image-workbench";
+import ImageWorkbenchStoryboardReplanDialog from "./ImageWorkbenchStoryboardReplanDialog.vue";
 
 const { t } = useI18n();
 const { confirm } = useConfirm();
@@ -26,6 +27,13 @@ type StoryboardTaskGroupView = {
   variants: number;
   tone: "queued" | "running" | "failed" | "done";
 };
+
+type ReplanDialogState = {
+  group: StoryboardTaskGroupView;
+  modelConfigId: string;
+};
+
+const replanDialog = ref<ReplanDialogState | null>(null);
 
 const jobQueueItems = computed(() => {
   const activeIds = new Set(imageWorkbenchStore.activeJobIds);
@@ -85,6 +93,19 @@ const storyboardTaskGroups = computed<StoryboardTaskGroupView[]>(() =>
 const storyboardTaskGroupsTitle = computed(() =>
   storyboardTaskGroups.value.map((group) => group.title).join("\n")
 );
+const firstAvailableReplanModelConfigId = computed(() =>
+  imageWorkbenchStore.imageModelConfigOptions.find((item) => !item.disabled)?.value ||
+  imageWorkbenchStore.imageModelConfigOptions[0]?.value ||
+  ""
+);
+const canConfirmReplanDialog = computed(() => {
+  const modelConfigId = replanDialog.value?.modelConfigId || "";
+  return Boolean(
+    modelConfigId &&
+    !imageWorkbenchStore.loading &&
+    imageWorkbenchStore.imageModelConfigOptions.some((item) => item.value === modelConfigId && !item.disabled)
+  );
+});
 const selectedCancelableTask = computed(() =>
   [...imageWorkbenchStore.tasks]
     .filter((task) => isCancellableTask(task))
@@ -304,6 +325,30 @@ function closeTaskContextMenu() {
   taskContextMenu.value = null;
 }
 
+function resolveInitialReplanModelConfigId() {
+  const currentModelConfigId = imageWorkbenchStore.imageModelConfigId;
+  const currentModelConfig = imageWorkbenchStore.imageModelConfigOptions.find((item) => item.value === currentModelConfigId);
+  return currentModelConfig && !currentModelConfig.disabled
+    ? currentModelConfig.value
+    : firstAvailableReplanModelConfigId.value;
+}
+
+function closeReplanDialog() {
+  if (!imageWorkbenchStore.loading) {
+    replanDialog.value = null;
+  }
+}
+
+function updateReplanModelConfigId(modelConfigId: string) {
+  if (!replanDialog.value) {
+    return;
+  }
+  replanDialog.value = {
+    ...replanDialog.value,
+    modelConfigId,
+  };
+}
+
 async function positionTaskContextMenu() {
   await nextTick();
   const menu = taskContextMenuRef.value;
@@ -416,18 +461,37 @@ async function cancelSelectedTask() {
   }
 }
 
-async function handleReplanStoryboardGroup(group: StoryboardTaskGroupView) {
+function handleReplanStoryboardGroup(group: StoryboardTaskGroupView) {
+  replanDialog.value = {
+    group,
+    modelConfigId: resolveInitialReplanModelConfigId(),
+  };
+}
+
+async function confirmReplanStoryboardGroup() {
+  const state = replanDialog.value;
+  if (!state || !canConfirmReplanDialog.value) {
+    return;
+  }
+  if (!imageWorkbenchStore.selectImageModelConfig(state.modelConfigId)) {
+    return;
+  }
+  replanDialog.value = null;
+  await imageWorkbenchStore.replanStoryboardGroup(state.group.id, state.group.variants);
+}
+
+async function handleRemoveStoryboardGroup(group: StoryboardTaskGroupView) {
   const ok = await confirm({
-    title: t("imageWorkbench.taskbar.storyboardReplanTitle"),
-    message: formatTemplate(t("imageWorkbench.taskbar.storyboardReplanConfirm"), {
+    title: t("imageWorkbench.taskbar.storyboardRemoveTitle"),
+    message: formatTemplate(t("imageWorkbench.taskbar.storyboardRemoveConfirm"), {
       title: group.title,
-      count: group.variants,
     }),
-    confirmText: t("imageWorkbench.taskbar.storyboardReplan"),
+    confirmText: t("imageWorkbench.taskbar.storyboardRemove"),
     cancelText: t("common.cancel"),
+    danger: true,
   });
   if (ok) {
-    await imageWorkbenchStore.replanStoryboardGroup(group.id, group.variants);
+    await imageWorkbenchStore.removeStoryboardGroup(group.id);
   }
 }
 
@@ -436,6 +500,7 @@ onMounted(() => {
   const stopKeydown = addDomEventListener(document, "keydown", (event) => {
     if (isEscapeKey(event)) {
       closeTaskContextMenu();
+      closeReplanDialog();
     }
   });
   const stopResize = addDomEventListener(window, "resize", closeTaskContextMenu);
@@ -527,17 +592,29 @@ onBeforeUnmount(() => {
                     :title="group.title"
                   >
                     <span class="image-workbench-storyboard-task-group__title">{{ group.title }}</span>
-                    <button
-                      v-if="group.tone === 'failed'"
-                      type="button"
-                      class="image-workbench-storyboard-task-group__replan"
-                      :disabled="imageWorkbenchStore.loading"
-                      :title="t('imageWorkbench.taskbar.storyboardReplan')"
-                      @click.stop="handleReplanStoryboardGroup(group)"
-                    >
-                      <RotateCcw class="h-3 w-3" />
-                      <span>{{ t("imageWorkbench.taskbar.storyboardReplan") }}</span>
-                    </button>
+                    <div class="image-workbench-storyboard-task-group__actions">
+                      <button
+                        v-if="group.tone === 'failed'"
+                        type="button"
+                        class="image-workbench-storyboard-task-group__replan"
+                        :disabled="imageWorkbenchStore.loading"
+                        :title="t('imageWorkbench.taskbar.storyboardReplan')"
+                        :aria-label="t('imageWorkbench.taskbar.storyboardReplan')"
+                        @click.stop="handleReplanStoryboardGroup(group)"
+                      >
+                        <RotateCcw class="h-3 w-3" />
+                      </button>
+                      <button
+                        type="button"
+                        class="image-workbench-storyboard-task-group__remove"
+                        :disabled="imageWorkbenchStore.loading"
+                        :title="t('imageWorkbench.taskbar.storyboardRemove')"
+                        :aria-label="t('imageWorkbench.taskbar.storyboardRemove')"
+                        @click.stop="handleRemoveStoryboardGroup(group)"
+                      >
+                        <Trash2 class="h-3 w-3" />
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -616,4 +693,16 @@ onBeforeUnmount(() => {
       </div>
     </div>
   </section>
+  <ImageWorkbenchStoryboardReplanDialog
+    :open="Boolean(replanDialog)"
+    :group-title="replanDialog?.group.title || ''"
+    :count="replanDialog?.group.variants || 0"
+    :model-config-id="replanDialog?.modelConfigId || ''"
+    :model-options="imageWorkbenchStore.imageModelConfigOptions"
+    :loading="imageWorkbenchStore.loading"
+    :can-confirm="canConfirmReplanDialog"
+    @update:model-config-id="updateReplanModelConfigId"
+    @close="closeReplanDialog"
+    @confirm="confirmReplanStoryboardGroup"
+  />
 </template>

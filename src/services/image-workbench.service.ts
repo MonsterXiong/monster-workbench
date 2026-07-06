@@ -21,6 +21,7 @@ import type {
   ImageWorkbenchSnapshot,
   ImageWorkbenchTemplate,
   RecordImageWorkbenchAssetRequest,
+  RemoveImageWorkbenchStoryboardGroupRequest,
   ReplanImageWorkbenchStoryboardGroupRequest,
   SaveImageWorkbenchTemplateRequest,
   SetImageWorkbenchAssetFavoriteRequest,
@@ -108,6 +109,12 @@ export const imageWorkbenchService = {
     request: ReplanImageWorkbenchStoryboardGroupRequest
   ): Promise<ImageWorkbenchSnapshot> {
     return callTauri<ImageWorkbenchSnapshot>("replan_image_workbench_storyboard_group", { request });
+  },
+
+  async removeStoryboardGroup(
+    request: RemoveImageWorkbenchStoryboardGroupRequest
+  ): Promise<ImageWorkbenchSnapshot> {
+    return callTauri<ImageWorkbenchSnapshot>("remove_image_workbench_storyboard_group", { request });
   },
 
   async deleteJob(jobId: string, deleteAssets = false): Promise<DeleteImageWorkbenchJobResult> {

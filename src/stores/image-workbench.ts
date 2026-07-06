@@ -551,6 +551,7 @@ export const useImageWorkbenchStore = defineStore("image-workbench", () => {
     getGenerationFailedMessage: () => t("imageWorkbench.errors.generationFailed"),
   });
   const {
+    removeStoryboardGroup,
     replanStoryboardGroup,
     resumeRunnableJobs,
     retryFailedTasks,
@@ -774,6 +775,7 @@ export const useImageWorkbenchStore = defineStore("image-workbench", () => {
     runTxt2imgBatch,
     runStoryboardPromptBatch,
     retryFailedTasks,
+    removeStoryboardGroup,
     replanStoryboardGroup,
     cancelJob,
     cancelTask,

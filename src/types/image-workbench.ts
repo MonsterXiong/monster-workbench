@@ -327,6 +327,12 @@ export interface UpdateImageWorkbenchTaskStatusRequest {
 export interface ReplanImageWorkbenchStoryboardGroupRequest {
   groupId: string;
   variantsPerScene?: number | null;
+  providerConfigId?: string | null;
+  model?: string | null;
+}
+
+export interface RemoveImageWorkbenchStoryboardGroupRequest {
+  groupId: string;
 }
 
 export interface RecordImageWorkbenchMetadataInput {

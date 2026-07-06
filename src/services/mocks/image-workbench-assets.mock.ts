@@ -60,7 +60,7 @@ export function listMockImageWorkbenchGroups(
     throw new Error("[ERR_IPC_BROWSER] 浏览器 Mock 未找到图片工作台作业");
   }
   return sortByMany(
-    mapValuesToArray(context.groups).filter((group) => group.jobId === jobId),
+    mapValuesToArray(context.groups).filter((group) => group.jobId === jobId && !group.removedAtMs),
     [{ getValue: (group) => Number(group.createdAtMs || 0) }]
   );
 }

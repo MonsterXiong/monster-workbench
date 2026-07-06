@@ -304,9 +304,18 @@ export function createImageWorkbenchRunActions(options: CreateImageWorkbenchRunA
     options.cancelRequested.value = false;
     let startedJobId = "";
     try {
+      await options.aiProviderStore.loadConfig();
+      options.syncImageModelConfig();
+      if (!supportsModeForConfig(options.activeImageConfig.value, "person_consistency")) {
+        throw new Error(options.t("imageWorkbench.errors.modeUnsupportedByProvider"));
+      }
+      const config = options.activeImageConfig.value;
+      const targetModel = options.model.value.trim() || getImageModelName(config);
       const snapshot = await imageWorkbenchService.replanStoryboardGroup({
         groupId: cleanGroupId,
         variantsPerScene: variantsPerScene ?? null,
+        providerConfigId: config.id,
+        model: targetModel,
       });
       options.currentSnapshot.value = snapshot;
       options.selectedJobId.value = snapshot.job.id;
@@ -332,6 +341,35 @@ export function createImageWorkbenchRunActions(options: CreateImageWorkbenchRunA
     }
   }
 
+  async function removeStoryboardGroup(groupId: string) {
+    const cleanGroupId = groupId.trim();
+    if (!cleanGroupId) {
+      return null;
+    }
+    options.loading.value = true;
+    options.error.value = "";
+    options.notice.value = "";
+    try {
+      const snapshot = await imageWorkbenchService.removeStoryboardGroup({
+        groupId: cleanGroupId,
+      });
+      options.currentSnapshot.value = snapshot;
+      options.selectedJobId.value = snapshot.job.id;
+      await options.syncCurrentGroups(snapshot.job.id);
+      await options.refreshWorkbenchLists().catch((err) => {
+        options.error.value = err instanceof Error ? err.message : String(err);
+      });
+      options.notice.value = options.t("imageWorkbench.taskbar.storyboardRemoveNotice");
+      return snapshot;
+    } catch (err) {
+      options.error.value = err instanceof Error ? err.message : String(err);
+      await options.refreshWorkbenchLists();
+      throw err;
+    } finally {
+      options.loading.value = false;
+    }
+  }
+
   async function resumeRunnableJobs(jobIds: string[]) {
     const startedJobIds: string[] = [];
     for (const jobId of jobIds) {
@@ -349,6 +387,7 @@ export function createImageWorkbenchRunActions(options: CreateImageWorkbenchRunA
   }
 
   return {
+    removeStoryboardGroup,
     replanStoryboardGroup,
     resumeRunnableJobs,
     retryFailedTasks,
